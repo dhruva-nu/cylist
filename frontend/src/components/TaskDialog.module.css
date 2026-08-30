@@ -1,0 +1,179 @@
+.segmented {
+  display: flex;
+  width: fit-content;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.segmented button {
+  padding: 7px 16px;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--line-2);
+}
+
+.on.active {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.on.hold {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.on.blocked {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+/* The reason panel takes the colour of the status being chosen, so the tint
+   confirms the choice before the text is read. */
+.why {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: -6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--hold-soft);
+}
+
+.why.blocked {
+  background: var(--blocked-soft);
+}
+
+.why small {
+  color: var(--ink-2);
+}
+
+.reason {
+  min-height: 60px;
+  background: var(--paper);
+}
+
+.tagPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tagPicker button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tagPicker button span:first-child {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.tagged {
+  border-color: var(--ink) !important;
+  background: var(--ink) !important;
+  color: var(--paper) !important;
+}
+
+.role {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.entry {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.bubble {
+  flex: 1;
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+
+.who {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.who span {
+  color: var(--ink-3);
+  font-family: var(--font-body);
+  font-weight: 400;
+}
+
+.when {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+/* Dashed and untinted: Cylist wrote this, not a person. */
+.system .bubble {
+  border: 1px dashed var(--line-2);
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.system.hold .bubble {
+  border-color: var(--hold);
+}
+
+.system.blocked .bubble {
+  border-color: var(--blocked);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.composer select {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 40%;
+}
+
+.composer input {
+  flex: 1;
+}
+
+.spacer {
+  margin-right: auto;
+}

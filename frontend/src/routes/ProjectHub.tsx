@@ -1,7 +1,7 @@
 /**
  * A project's four areas.
  *
- * Board and Vault are shown but not yet wired: they are Phases 2 and 4.
+ * Vault is shown but not yet wired: it is Phase 4.
  * Showing them greyed with the phase they arrive in is more honest than hiding
  * them, and keeps the shape of the finished product visible.
  */
@@ -80,7 +80,25 @@ export function ProjectHub() {
           Who is on the team, who the clients are, and what each person is responsible for.
         </Tool>
 
-        <Tool icon={ICONS.board} title="Kanban board" phase="Phase 2">
+        <Tool
+          icon={ICONS.board}
+          title="Kanban board"
+          to="/p/$projectKey/board"
+          projectKey={projectKey}
+          meta={
+            <>
+              <span>
+                {project.task_count} {project.task_count === 1 ? 'task' : 'tasks'}
+              </span>
+              {project.on_hold_count ? (
+                <span className={styles.hold}>{project.on_hold_count} on hold</span>
+              ) : null}
+              {project.blocked_count ? (
+                <span className={styles.blocked}>{project.blocked_count} blocked</span>
+              ) : null}
+            </>
+          }
+        >
           Tasks as cards across up to 8 columns. Colour flags anything on hold or blocked.
         </Tool>
 
@@ -124,7 +142,7 @@ function Tool({
   title: string
   children: ReactNode
   meta?: ReactNode
-  to?: '/p/$projectKey/people' | '/p/$projectKey/files'
+  to?: '/p/$projectKey/board' | '/p/$projectKey/files' | '/p/$projectKey/people'
   projectKey?: string
   phase?: string
 }) {

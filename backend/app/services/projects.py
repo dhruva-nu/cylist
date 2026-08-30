@@ -18,10 +18,15 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
+from app.services import columns
 
 
 async def create(session: AsyncSession, data: ProjectCreate) -> Project:
-    """Start a new project.
+    """Start a new project, board included.
+
+    The starter columns are part of creating a project rather than a separate
+    step: a board with no columns cannot hold a task, so there would be nothing
+    useful to do with the project until someone made one.
 
     Raises:
         ConflictError: if the key is already taken.
@@ -40,6 +45,8 @@ async def create(session: AsyncSession, data: ProjectCreate) -> Project:
             f"The key {data.key} is already used by another project.",
             details={"key": data.key},
         ) from exc
+
+    await columns.seed(session, project)
 
     # `members` is only populated by a SELECT, and a just-inserted row has not
     # had one. Load it now so callers can read it without lazy IO.
@@ -148,6 +155,40 @@ async def _load_people(session: AsyncSession, person_ids: list[UUID]) -> list[Pe
         raise UnprocessableRequestError(
             "Archived people cannot be added to a project.",
             details={"archived_person_ids": archived},
+        )
+
+    return [found[person_id] for person_id in person_ids]
+
+
+async def require_members(
+    session: AsyncSession, project_id: UUID, person_ids: list[UUID]
+) -> list[Person]:
+    """Check that every id names someone on this project, and return them.
+
+    Assignees and "waiting on" tags both go through here. Membership is the
+    line: naming someone who is not on the project produces a board that
+    claims a person is involved when nobody has agreed that they are.
+
+    Raises:
+        UnprocessableRequestError: if any id is not a member.
+    """
+    if not person_ids:
+        return []
+
+    found = {
+        person.id: person
+        for person in await session.scalars(
+            select(Person)
+            .join(ProjectMember, ProjectMember.person_id == Person.id)
+            .where(ProjectMember.project_id == project_id, Person.id.in_(person_ids))
+        )
+    }
+
+    missing = [str(person_id) for person_id in person_ids if person_id not in found]
+    if missing:
+        raise UnprocessableRequestError(
+            "Those people are not on this project. Add them under People first.",
+            details={"non_member_person_ids": missing},
         )
 
     return [found[person_id] for person_id in person_ids]

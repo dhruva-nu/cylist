@@ -15,6 +15,7 @@ from app.auth.scopes import Scope
 from app.db import get_session
 from app.models.person import PersonKind
 from app.models.project import Project
+from app.models.task import TaskStatus
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
@@ -25,7 +26,7 @@ from app.schemas.projects import (
     ProjectSummary,
     ProjectUpdate,
 )
-from app.services import activity, files, projects
+from app.services import activity, columns, files, projects, tasks
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -117,14 +118,19 @@ async def get_summary(
 ) -> ProjectSummary:
     """The counts behind the project hub's cards.
 
-    Board and vault figures join this response as those features land.
+    Vault figures join this response as that feature lands.
     """
-    counts = await projects.member_counts(session, project)
+    people_counts = await projects.member_counts(session, project)
+    task_counts = await tasks.status_counts(session, project)
     contents = await files.counts(session, project)
     return ProjectSummary(
         **_read(project).model_dump(),
-        team_count=counts[PersonKind.TEAM],
-        client_count=counts[PersonKind.CLIENT],
+        team_count=people_counts[PersonKind.TEAM],
+        client_count=people_counts[PersonKind.CLIENT],
+        task_count=sum(task_counts.values()),
+        column_count=await columns.count(session, project.id),
+        blocked_count=task_counts[TaskStatus.BLOCKED],
+        on_hold_count=task_counts[TaskStatus.HOLD],
         folder_count=contents.folders,
         file_count=contents.items,
     )

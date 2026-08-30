@@ -106,6 +106,10 @@
   padding: 22px 24px 60px;
 }
 
+.wide {
+  max-width: none;
+}
+
 .head {
   display: flex;
   flex-direction: column;

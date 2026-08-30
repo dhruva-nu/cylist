@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +38,16 @@ class Project(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Archiving hides a project without touching its board, files or vault.
     There is deliberately no hard delete: a project holds credentials and
     uploads that no confirmation dialog is worth risking."""
+
+    task_counter: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    """Highest task number ever handed out on this board.
+
+    A counter rather than ``MAX(task.number) + 1`` because deleting the newest
+    task must not put its number back in circulation: ``ATL-41`` appears in
+    commit messages and Jira long after the card it named is gone.
+    """
 
     members: Mapped[list[Person]] = relationship(
         secondary="project_member",

@@ -73,12 +73,17 @@ class ProjectRead(Schema):
 class ProjectSummary(ProjectRead):
     """The numbers behind a project's hub cards.
 
-    Grows as later phases land: the board and vault counts join it when those
+    Grows as later phases land: the vault counts join it when those
     tables exist.
     """
 
     team_count: int
     client_count: int
+    task_count: int
+    column_count: int
+    blocked_count: int = Field(description="Tasks that cannot proceed. Flagged red on the hub.")
+    on_hold_count: int = Field(description="Tasks deliberately paused.")
+
     folder_count: int
     file_count: int = Field(
         description="Everything in the project's folders — uploads and links alike."

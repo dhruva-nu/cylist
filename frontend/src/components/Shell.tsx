@@ -8,6 +8,11 @@ import { Avatar } from './ui'
 import styles from './Shell.module.css'
 
 export function Shell() {
+  const matchRoute = useMatchRoute()
+  // The board scrolls sideways, so it gets the full window rather than the
+  // reading-width column every other screen sits in.
+  const wide = Boolean(matchRoute({ to: '/p/$projectKey/board' }))
+
   return (
     <>
       <div className={styles.top}>
@@ -20,7 +25,7 @@ export function Shell() {
         </div>
         <Breadcrumbs />
       </div>
-      <div className={styles.wrap}>
+      <div className={`${styles.wrap} ${wide ? styles.wide : ''}`}>
         <Outlet />
       </div>
     </>
@@ -40,6 +45,9 @@ function ProjectTabs() {
       <Link to="/p/$projectKey" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Overview
       </Link>
+      <Link to="/p/$projectKey/board" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Board
+      </Link>
       <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Files
       </Link>
@@ -57,9 +65,10 @@ function ProjectTabs() {
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+  const onBoard = matchRoute({ to: '/p/$projectKey/board' })
   const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
-  const area = onFiles ? 'Files' : onPeople ? 'People' : null
+  const area = onBoard ? 'Board' : onFiles ? 'Files' : onPeople ? 'People' : null
 
   if (!inProject) {
     return (

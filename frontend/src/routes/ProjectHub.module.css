@@ -49,6 +49,16 @@
   font-size: 13px;
 }
 
+.hold {
+  color: var(--hold);
+  font-weight: 600;
+}
+
+.blocked {
+  color: var(--blocked);
+  font-weight: 600;
+}
+
 .soon {
   opacity: 0.55;
   cursor: default;
