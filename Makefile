@@ -56,14 +56,19 @@ image: ## Build the production image: API and built SPA in one container
 # dnu-home-1. CI runs `deploy` for you on every push to main; run it by hand
 # when you want to ship without waiting, or to see why a deploy failed.
 
+# Where the secrets that must not be in the repository live. deploy.sh defaults
+# to the same path; both are overridable for a server that keeps them elsewhere.
+CYLIST_PROD_DIR ?= $(HOME)/cylist-prod
+PROD := CYLIST_PROD_DIR=$(CYLIST_PROD_DIR) docker compose -f docker-compose.prod.yml
+
 deploy: ## Build, migrate and restart the production stack on this machine
 	scripts/deploy.sh
 
 prod-logs: ## Follow the production app's logs
-	docker compose -f docker-compose.prod.yml logs -f app
+	$(PROD) logs -f app
 
 prod-ps: ## Show what the production stack is running
-	docker compose -f docker-compose.prod.yml ps
+	$(PROD) ps
 
 migrate-check: ## Prove migrations match the models and reverse cleanly
 	cd $(BACKEND) && CYLIST_DATABASE_URL=$(TEST_DATABASE_URL) \
