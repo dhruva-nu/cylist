@@ -121,19 +121,44 @@ cd ~/actions-runner && ./config.sh --unattended --replace \
 ### Serving it
 
 ```bash
-sudo tailscale serve --bg --https 443 http://127.0.0.1:8000
-sudo tailscale funnel --bg 443
+sudo tailscale funnel --bg --https 443 http://127.0.0.1:8000
 ```
 
-`serve` terminates HTTPS and proxies to the app on loopback, which is the only
-thing that reaches it. `funnel` then puts that same URL on the public internet,
-with the app's own password login as the only gate — which is why production
-sets `CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
+Note the shape of that. `tailscale funnel --bg 443` looks like it means "turn
+Funnel on for port 443" and does not: the argument is the *target*, so it
+quietly repoints the proxy at `127.0.0.1:443`, where nothing is listening — and
+the site answers 502 while `funnel status` cheerfully reports Funnel on.
 
-Both need root unless you run `sudo tailscale set --operator=$USER` once, after
-which they do not. `tailscale serve status` shows where it currently points, and
-`sudo tailscale funnel --bg off` takes it back off the public internet without
-disturbing the tailnet.
+That terminates HTTPS, proxies to the app on loopback — the only thing that
+reaches it — and puts the URL on the public internet, with the app's own
+password login as the only gate. Which is why production sets
+`CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
+
+It needs root unless you run `sudo tailscale set --operator=$USER` once, after
+which it does not. `tailscale serve status` shows where it currently points, and
+`sudo tailscale funnel --https=443 off` takes it back off the public internet.
+
+## When a deploy fails
+
+**`permission denied ... /var/run/docker.sock`,** from a user who is in the
+`docker` group — the runner's groups, not the user's. See the note above, and
+check the process itself:
+
+```bash
+grep ^Groups: /proc/$(systemctl show -p MainPID --value github-runner-cylist)/status
+getent group docker        # the gid to look for
+```
+
+**That fixed nothing, and the journal says `A session for this runner already
+exists`** — an older `Runner.Listener` survived a stop and still holds the
+session, so it, and not the service you just repaired, is taking the jobs.
+`pgrep -af Runner.Listener` lists them; `ps -o lstart= -p <pid>` tells you which
+is the stale one. Kill it. `KillMode=mixed` in the unit is what stops this
+happening again.
+
+**A migration failed** — nothing was restarted, so the previous container is
+still serving. Fix the migration and deploy again, or restore the dump
+`deploy.sh` took moments earlier; see *Rolling back*.
 
 ## Deploying by hand
 

@@ -21,9 +21,14 @@ WorkingDirectory=/home/dnu2/actions-runner
 ExecStart=/home/dnu2/actions-runner/run.sh
 Restart=always
 RestartSec=5
-# The runner reaps its own job processes; systemd must not kill a running
-# deploy out from under it when the service is restarted.
-KillMode=process
+# `mixed`, not the `process` that GitHub's own svc.sh ships. Both send SIGTERM
+# to run.sh alone, so a deploy in flight gets to finish — but `process` stops
+# there, and a Runner.Listener that does not take the hint is left orphaned,
+# still holding the runner's session. The next service to start then loops on
+# "A session for this runner already exists" while the stale process quietly
+# goes on taking jobs. `mixed` gives it TimeoutStopSec to leave, then kills
+# whatever is still in the cgroup.
+KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=5min
 
