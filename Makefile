@@ -11,7 +11,7 @@ UV       := uv --project $(BACKEND)
 
 .DEFAULT_GOAL := help
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
-        migrate-check test lint format typecheck check backup hash-password vault-key clean
+        migrate-check test lint format typecheck check seed backup hash-password vault-key clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -66,6 +66,9 @@ typecheck: ## Type-check both sides
 	npm --prefix $(FRONTEND) run typecheck
 
 check: lint typecheck test migrate-check ## Everything CI runs
+
+seed: ## Fill an empty database with the three worked-through projects
+	cd $(BACKEND) && uv run python -m scripts.seed
 
 backup: ## Back up the database and uploaded files into ./backups
 	scripts/backup.sh backups

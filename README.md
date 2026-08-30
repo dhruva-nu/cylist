@@ -105,7 +105,42 @@ pg_dump "$CYLIST_DATABASE_URL" > cylist.sql   # the data
 rsync -a "$CYLIST_DATA_DIR"/ backup/data/     # the uploaded files
 ```
 
+## The CLI and the MCP server
+
+Everything the web app does is an HTTP call, so two other clients ship with it.
+
+```bash
+cd cli && uv sync && uv run cylist --help
+```
+
+```
+cylist projects                       cylist board ATL
+cylist task new ATL --title "…" --type bug --due 2026-09-05 --assignee "Aditi K"
+cylist task status ATL-41 blocked --reason "…" --waiting-on "Lena W"
+cylist files ls ATL                   cylist vault reveal ATL Logins/Stripe --show
+```
+
+Names work where a human would use one — `--assignee "Aditi K"`, `--column "In progress"`
+— and an ambiguous name is an error rather than a guess. Every command takes `--json`.
+
+The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
+It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an
+agent is never offered a tool that will always fail. See `mcp/README.md` for the
+`claude mcp add` line.
+
+Mint a token scoped to what the agent actually needs:
+
+```bash
+curl -X POST localhost:8000/api/v1/tokens -b cookies \
+  -d '{"name":"board agent","scopes":["read","write"]}'
+```
+
 ## Status
 
-Phase 0 of the [plan](PLAN.md) — scaffold, authentication, audit log, CI.
-Projects and people are next.
+All six phases of the [plan](PLAN.md) are built: authentication and the audit
+trail, projects and people, the Kanban board, files, the vault, polish, and the
+agent tooling.
+
+```bash
+make seed    # fills an empty database with three worked-through projects
+```

@@ -171,9 +171,11 @@ Each phase ends with something usable end-to-end.
 | 3 | Files | folders, uploads to blob store, links, download, tree UI |
 | 4 | Vault | trees/nodes, encrypted secrets, reveal with scope + audit |
 | 5 | Polish | dark theme pass, keyboard access, seed data, backup script, README |
-| 6 | Agents (later) | `cylist` CLI generated from OpenAPI; MCP server exposing tools: `list_projects`, `list_tasks`, `create_task`, `move_task`, `set_task_status`, `add_comment`, `list_files`, `add_link`, `vault_list` (+ `vault_reveal` only with explicit scope) |
+| 6 | Agents | `cylist` CLI over the HTTP API; MCP server exposing 14 tools, with `reveal_secret` registered only when the token carries `vault:reveal` |
 
-## 9. Decisions taken (change any of these before phase 0)
+**All six phases are built.** See the README for what exists and how to run it.
+
+## 9. Decisions taken
 
 1. **People are a global directory** with per-project membership (not per-project copies).
 2. **Status-change reason is required** for On hold / Blocked, enforced by the API, stored as a comment.
@@ -182,3 +184,14 @@ Each phase ends with something usable end-to-end.
 5. **Vault**: only the secret value is encrypted; reveal is a distinct, logged, scoped action.
 6. **Uploads are content-addressed** (sha256) with a configurable size cap (default 200 MB).
 7. **No Tailwind / component library** — the mock's design system is ported as CSS variables + modules.
+
+## 10. Decisions taken during the build
+
+These came up while implementing and are worth knowing:
+
+8. **Every project owns a real root folder row.** Files sit at a project's root as the mock showed; `parent_id IS NULL` plus a partial unique index makes "one root per project" a schema fact. The root is named after its project and cannot be renamed or deleted.
+9. **Tasks are created only in the first column**, and can then be moved anywhere.
+10. **A task's number comes from a counter on the project**, taken under `SELECT … FOR UPDATE`, so a deleted `ATL-1` is never reissued.
+11. **Only the vault's secret *value* is encrypted** (AES-256-GCM, fresh nonce per write, bound to its node with GCM associated data). Username, URL and notes stay searchable.
+12. **Blobs are content-addressed by SHA-256**, so two uploads of identical bytes share one file on disk.
+13. **`/activity` takes a project key**, like every other project-scoped path — added after the CLI and MCP server both had to resolve a key to an id first.
