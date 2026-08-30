@@ -8,6 +8,7 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { Shell } from './components/Shell'
 import { Home } from './routes/Home'
+import { ProjectBoard } from './routes/ProjectBoard'
 import { ProjectHub } from './routes/ProjectHub'
 import { ProjectPeople } from './routes/ProjectPeople'
 
@@ -25,13 +26,24 @@ const projectRoute = createRoute({
   component: ProjectHub,
 })
 
+const projectBoardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/p/$projectKey/board',
+  component: ProjectBoard,
+})
+
 const projectPeopleRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/p/$projectKey/people',
   component: ProjectPeople,
 })
 
-const routeTree = rootRoute.addChildren([homeRoute, projectRoute, projectPeopleRoute])
+const routeTree = rootRoute.addChildren([
+  homeRoute,
+  projectRoute,
+  projectBoardRoute,
+  projectPeopleRoute,
+])
 
 export const router = createRouter({ routeTree })
 

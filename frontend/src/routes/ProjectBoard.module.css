@@ -1,0 +1,296 @@
+.board {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  min-height: 60vh;
+  padding: 4px 4px 20px;
+  overflow-x: auto;
+}
+
+.column {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  max-height: calc(100vh - 260px);
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.over {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.head {
+  padding: 16px 18px 10px;
+}
+
+.headRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.headRow h3 {
+  font-size: 17px;
+}
+
+.headActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.count {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.head p {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.cards {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 60px;
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+}
+
+.task {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-2);
+  cursor: grab;
+  touch-action: none;
+}
+
+/* A colour bar rather than a tinted card alone: the status has to survive
+   being glanced at from across the room. */
+.task::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+  background: var(--ok);
+}
+
+.task:hover {
+  border-color: var(--line-2);
+}
+
+.task:active {
+  cursor: grabbing;
+}
+
+.dragging {
+  opacity: 0.4;
+}
+
+.hold {
+  border-color: transparent;
+  background: var(--hold-soft);
+}
+
+.hold::before {
+  background: var(--hold);
+}
+
+.blocked {
+  border-color: transparent;
+  background: var(--blocked-soft);
+}
+
+.blocked::before {
+  background: var(--blocked);
+}
+
+.taskRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.reference {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.title {
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.type_feature {
+  color: var(--go);
+}
+
+.type_bug {
+  color: var(--blocked);
+}
+
+.type_chore {
+  color: var(--ink-2);
+}
+
+/* Deliberately paper-backed rather than tinted: the card behind it is already
+   carrying the colour, and two washes of the same hue muddy both. */
+.pill {
+  padding: 1px 9px;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pill_hold {
+  color: var(--hold);
+}
+
+.pill_blocked {
+  color: var(--blocked);
+}
+
+.waiting {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.at {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.links {
+  display: flex;
+  gap: 8px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.trailing {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.due {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.late {
+  color: var(--blocked);
+  font-weight: 600;
+}
+
+.addTask {
+  padding: 8px 18px 14px;
+  border: 0;
+  border-radius: 0 0 16px 16px;
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.addTask:hover {
+  color: var(--go);
+}
+
+.foot {
+  height: 10px;
+}
+
+.addColumn {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  min-height: 130px;
+  padding: 24px;
+  border: 2px dashed var(--line-2);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addColumn:hover:not(:disabled) {
+  border-color: var(--brand-ink);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.addColumn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.hint {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.note {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.spacer {
+  margin-right: auto;
+}

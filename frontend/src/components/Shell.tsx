@@ -8,6 +8,11 @@ import { Avatar } from './ui'
 import styles from './Shell.module.css'
 
 export function Shell() {
+  const matchRoute = useMatchRoute()
+  // The board scrolls sideways, so it gets the full window rather than the
+  // reading-width column every other screen sits in.
+  const wide = Boolean(matchRoute({ to: '/p/$projectKey/board' }))
+
   return (
     <>
       <div className={styles.top}>
@@ -20,7 +25,7 @@ export function Shell() {
         </div>
         <Breadcrumbs />
       </div>
-      <div className={styles.wrap}>
+      <div className={`${styles.wrap} ${wide ? styles.wide : ''}`}>
         <Outlet />
       </div>
     </>
@@ -40,6 +45,9 @@ function ProjectTabs() {
       <Link to="/p/$projectKey" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Overview
       </Link>
+      <Link to="/p/$projectKey/board" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Board
+      </Link>
       <Link
         to="/p/$projectKey/people"
         params={{ projectKey }}
@@ -54,6 +62,7 @@ function ProjectTabs() {
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+  const onBoard = matchRoute({ to: '/p/$projectKey/board' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
 
   if (!inProject) {
@@ -65,16 +74,17 @@ function Breadcrumbs() {
   }
 
   const { projectKey } = inProject
+  const area = onBoard ? 'Board' : onPeople ? 'People' : null
 
   return (
     <div className={styles.crumbs}>
       <Link to="/">All projects</Link>
       <span className={styles.separator}>›</span>
-      {onPeople ? (
+      {area ? (
         <>
           <ProjectCrumbLink projectKey={projectKey} />
           <span className={styles.separator}>›</span>
-          <b>People</b>
+          <b>{area}</b>
         </>
       ) : (
         <ProjectName projectKey={projectKey} />
