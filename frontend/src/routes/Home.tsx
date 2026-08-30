@@ -6,11 +6,21 @@ import { useState } from 'react'
 import { ApiError, api, type ProjectInput } from '../api/client'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
-import { Button, EmptyState, ErrorBanner, Eyebrow, cardStyles } from '../components/ui'
+import {
+  Button,
+  EmptyState,
+  ErrorBanner,
+  Eyebrow,
+  LiveRegion,
+  cardStyles,
+  readableInkOn,
+  useAnnouncer,
+} from '../components/ui'
 import styles from './Home.module.css'
 
 export function Home() {
   const [creating, setCreating] = useState(false)
+  const { message, announce } = useAnnouncer()
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
 
   return (
@@ -30,6 +40,7 @@ export function Home() {
       {projects.isPending ? <EmptyState>Loading projects…</EmptyState> : null}
 
       {projects.error ? <ErrorBanner>{projects.error.message}</ErrorBanner> : null}
+      <LiveRegion message={message} />
 
       {projects.data?.length === 0 ? (
         <EmptyState>
@@ -48,7 +59,10 @@ export function Home() {
               params={{ projectKey: project.key }}
               className={`${cardStyles.card} ${cardStyles.clickable} ${styles.project}`}
             >
-              <span className={styles.mark} style={{ background: project.colour }}>
+              <span
+                className={styles.mark}
+                style={{ background: project.colour, color: readableInkOn(project.colour) }}
+              >
                 {project.key[0]}
               </span>
               <h3>{project.name}</h3>
@@ -67,19 +81,31 @@ export function Home() {
         </div>
       ) : null}
 
-      {creating ? <NewProjectDialog onClose={() => setCreating(false)} /> : null}
+      {creating ? (
+        <NewProjectDialog
+          onCreated={(name) => announce(`${name} created. It is now in your project list.`)}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
     </>
   )
 }
 
-function NewProjectDialog({ onClose }: { onClose: () => void }) {
+function NewProjectDialog({
+  onCreated,
+  onClose,
+}: {
+  onCreated: (name: string) => void
+  onClose: () => void
+}) {
   const queryClient = useQueryClient()
   const [form, setForm] = useState<ProjectInput>({ key: '', name: '', description: '' })
 
   const create = useMutation({
     mutationFn: (input: ProjectInput) => api.createProject(input),
-    onSuccess: async () => {
+    onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
+      onCreated(project.name)
       onClose()
     },
   })

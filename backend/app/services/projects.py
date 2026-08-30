@@ -18,15 +18,17 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns
+from app.services import columns, files
 
 
 async def create(session: AsyncSession, data: ProjectCreate) -> Project:
-    """Start a new project, board included.
+    """Start a new project, board and file tree included.
 
-    The starter columns are part of creating a project rather than a separate
-    step: a board with no columns cannot hold a task, so there would be nothing
-    useful to do with the project until someone made one.
+    The starter columns and the root folder are part of creating a project
+    rather than separate steps. A board with no columns cannot hold a task and
+    a tree with no root cannot hold a file, so in both cases there would be
+    nothing useful to do with the project until someone had run a setup step
+    whose outcome was never in doubt.
 
     Raises:
         ConflictError: if the key is already taken.
@@ -47,6 +49,7 @@ async def create(session: AsyncSession, data: ProjectCreate) -> Project:
         ) from exc
 
     await columns.seed(session, project)
+    await files.seed_root(session, project)
 
     # `members` is only populated by a SELECT, and a just-inserted row has not
     # had one. Load it now so callers can read it without lazy IO.
@@ -83,7 +86,12 @@ async def list_projects(session: AsyncSession, *, include_archived: bool = False
 
 
 async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -> Project:
-    """Apply a partial update."""
+    """Apply a partial update.
+
+    A new name reaches the root folder too — it stands for the project, so a
+    tree headed by the old name would be describing something that no longer
+    exists.
+    """
     fields = data.model_dump(exclude_unset=True, exclude={"archived"})
     for field, value in fields.items():
         setattr(project, field, value)
@@ -98,6 +106,9 @@ async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -
             f"The key {data.key} is already used by another project.",
             details={"key": data.key},
         ) from exc
+
+    if fields.get("name") is not None:
+        await files.rename_root(session, project)
 
     # `members` is only populated by a SELECT, and a just-inserted row has not
     # had one. Load it now so callers can read it without lazy IO.

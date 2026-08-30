@@ -9,16 +9,28 @@
  * Dragging updates the cache before the request goes out. A card that snaps
  * back is how you find out the move failed — waiting for a round trip to see a
  * card move makes the board feel broken even when it is working.
+ *
+ * Dragging is not only a pointer gesture. A focused card is picked up with
+ * space and walked between columns with the arrow keys, which is the same
+ * operation through the same code path — see `DRAG_KEYS` and `moveByColumn`.
  */
 
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
+  closestCenter,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
+  type Announcements,
+  type ClientRect,
   type DragEndEvent,
+  type KeyboardCodes,
+  type KeyboardCoordinateGetter,
+  type ScreenReaderInstructions,
+  type UniqueIdentifier,
 } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
@@ -27,8 +39,86 @@ import { api, type Board, type BoardColumn, type ColumnInput, type Task } from '
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
-import { Avatar, Button, EmptyState, ErrorBanner } from '../components/ui'
+import { Avatar, Button, EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../components/ui'
 import styles from './ProjectBoard.module.css'
+
+/**
+ * Which keys drive a keyboard drag.
+ *
+ * Enter is deliberately not among them, though dnd-kit offers it by default:
+ * Enter is what opens a card, and a card that cannot be opened from the
+ * keyboard is a worse trade than one that cannot be dragged. Space does both
+ * ends of the drag instead.
+ *
+ * Tab cancels rather than finishes. dnd-kit's default is to drop on Tab, which
+ * means leaving the board mid-drag quietly commits a move nobody asked for;
+ * cancelling still rules out the other failure, a drag left running after
+ * focus has gone somewhere else.
+ */
+const DRAG_KEYS: KeyboardCodes = {
+  start: ['Space'],
+  cancel: ['Escape', 'Tab'],
+  end: ['Space'],
+}
+
+const SCREEN_READER_INSTRUCTIONS: ScreenReaderInstructions = {
+  draggable:
+    'Press enter to open this card. Press space to pick it up, then use the left and right ' +
+    'arrow keys to move it between columns. Press space again to drop it, or escape to leave ' +
+    'it where it was.',
+}
+
+/** The column nearest a point, for when nothing is being hovered yet. */
+function nearestColumn(columns: [UniqueIdentifier, ClientRect][], centre: number): number {
+  let best = 0
+  let bestDistance = Number.POSITIVE_INFINITY
+
+  columns.forEach(([, rect], index) => {
+    const distance = Math.abs(rect.left + rect.width / 2 - centre)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = index
+    }
+  })
+
+  return best
+}
+
+/**
+ * Move a picked-up card one whole column per key press.
+ *
+ * dnd-kit's stock getter nudges 25 pixels an arrow, which is a dozen presses
+ * to cross a 300-pixel column and leaves the card wherever the twelfth one
+ * happened to land. A board has one axis worth travelling and a small number
+ * of places to stop on it, so left and right jump to the next column's centre
+ * and up and down do nothing at all.
+ */
+const moveByColumn: KeyboardCoordinateGetter = (event, { context, currentCoordinates }) => {
+  const step = event.code === 'ArrowRight' ? 1 : event.code === 'ArrowLeft' ? -1 : 0
+  if (step === 0) return
+
+  const { collisionRect, droppableContainers, droppableRects, over } = context
+  if (!collisionRect) return
+
+  const columns = [...droppableRects]
+    .filter(([id]) => droppableContainers.get(id)?.disabled !== true)
+    .sort(([, left], [, right]) => left.left - right.left)
+  if (columns.length === 0) return
+
+  const hovered = columns.findIndex(([id]) => id === over?.id)
+  const from =
+    hovered >= 0 ? hovered : nearestColumn(columns, collisionRect.left + collisionRect.width / 2)
+  const to = Math.min(columns.length - 1, Math.max(0, from + step))
+  if (to === from) return
+
+  const target = columns[to]
+  if (!target) return
+
+  const [, rect] = target
+  // Centred on the target, so the collision detection below has an unambiguous
+  // winner however wide the card happens to be.
+  return { x: rect.left + (rect.width - collisionRect.width) / 2, y: currentCoordinates.y }
+}
 
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
@@ -37,6 +127,7 @@ export function ProjectBoard() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [creatingTask, setCreatingTask] = useState(false)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
+  const { message, announce } = useAnnouncer()
 
   const board = useQuery({
     queryKey: ['board', projectKey],
@@ -78,7 +169,10 @@ export function ProjectBoard() {
 
   // A short drag threshold so a card can still be clicked open: without it
   // every press would start a drag and no click would ever land.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { keyboardCodes: DRAG_KEYS, coordinateGetter: moveByColumn }),
+  )
 
   if (board.isPending || tasks.isPending) return <EmptyState>Loading the board…</EmptyState>
   if (board.error) return <ErrorBanner>{board.error.message}</ErrorBanner>
@@ -88,6 +182,25 @@ export function ProjectBoard() {
   const firstColumn = columns[0]
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
   for (const task of tasks.data) byColumn.get(task.column_id)?.push(task)
+
+  const nameOfTask = (id: UniqueIdentifier) =>
+    tasks.data?.find((task) => task.id === id)?.title ?? 'the card'
+  const nameOfColumn = (id: UniqueIdentifier | undefined) =>
+    columns.find((column) => column.id === id)?.name ?? 'nowhere'
+
+  // Spoken by dnd-kit's own live region, so a keyboard drag is followed rather
+  // than merely performed.
+  const announcements: Announcements = {
+    onDragStart: ({ active }) =>
+      `Picked up ${nameOfTask(active.id)}. Use the left and right arrow keys to choose a column.`,
+    onDragOver: ({ active, over }) =>
+      over ? `${nameOfTask(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `Dropped ${nameOfTask(active.id)} into ${nameOfColumn(over.id)}.`
+        : `${nameOfTask(active.id)} was left where it was.`,
+    onDragCancel: ({ active }) => `Cancelled. ${nameOfTask(active.id)} is back where it was.`,
+  }
 
   function onDragEnd(event: DragEndEvent) {
     const columnId = event.over?.id
@@ -103,12 +216,21 @@ export function ProjectBoard() {
     <>
       <PageHead title="Kanban board">
         Cards enter at the first column and move wherever the work does. Colour flags anything on
-        hold or blocked.
+        hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys.
       </PageHead>
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
+      <LiveRegion message={message} />
 
-      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        // Columns are the only drop targets and they never overlap, so nearest
+        // centre is both the obvious answer and the one a keyboard drag — which
+        // lands the card dead centre — can rely on.
+        collisionDetection={closestCenter}
+        accessibility={{ announcements, screenReaderInstructions: SCREEN_READER_INSTRUCTIONS }}
+        onDragEnd={onDragEnd}
+      >
         <div className={styles.board}>
           {columns.map((column) => (
             <Column
@@ -130,6 +252,7 @@ export function ProjectBoard() {
           projectKey={projectKey}
           column={columnDialog === 'new' ? null : columnDialog}
           canDelete={columns.length > board.data.min_columns}
+          announce={announce}
           onDone={refresh}
           onClose={() => setColumnDialog(null)}
         />
@@ -141,6 +264,7 @@ export function ProjectBoard() {
           taskId={null}
           columns={columns}
           firstColumn={firstColumn}
+          announce={announce}
           onDone={refresh}
           onClose={() => setCreatingTask(false)}
         />
@@ -152,6 +276,7 @@ export function ProjectBoard() {
           taskId={openTaskId}
           columns={columns}
           firstColumn={firstColumn}
+          announce={announce}
           onDone={refresh}
           onClose={() => setOpenTaskId(null)}
         />
@@ -184,7 +309,11 @@ function Column({
   const { setNodeRef, isOver } = useDroppable({ id: column.id })
 
   return (
-    <section ref={setNodeRef} className={`${styles.column} ${isOver ? styles.over : ''}`}>
+    <section
+      ref={setNodeRef}
+      className={`${styles.column} ${isOver ? styles.over : ''}`}
+      aria-label={`${column.name}, ${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`}
+    >
       <div className={styles.head}>
         <div className={styles.headRow}>
           <h3>{column.name}</h3>
@@ -228,8 +357,18 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
       {...listeners}
       onClick={onOpen}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') onOpen()
+        // Enter belongs to the card, every other key to the drag sensor —
+        // whose own onKeyDown this handler has just replaced, so it has to be
+        // called on rather than dropped. Not while the card is in the air,
+        // though: opening a dialog over a drag in progress strands the drag.
+        if (event.key === 'Enter' && !isDragging) {
+          event.preventDefault()
+          onOpen()
+          return
+        }
+        listeners?.onKeyDown?.(event)
       }}
+      aria-label={`${task.reference}: ${task.title}`}
       style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : {}}
       className={[styles.task, styles[task.status], isDragging && styles.dragging]
         .filter(Boolean)
@@ -281,7 +420,15 @@ function AddColumnTile({ board, onClick }: { board: Board; onClick: () => void }
   const full = board.columns.length >= board.max_columns
 
   return (
-    <button className={styles.addColumn} disabled={full} onClick={onClick}>
+    <button
+      className={styles.addColumn}
+      // aria-disabled rather than disabled: the tile is where the limit is
+      // explained, and a disabled button cannot be focused to read it.
+      aria-disabled={full}
+      onClick={() => {
+        if (!full) onClick()
+      }}
+    >
       {full ? (
         `Column limit reached (${board.max_columns} of ${board.max_columns})`
       ) : (
@@ -301,12 +448,14 @@ function ColumnDialog({
   projectKey,
   column,
   canDelete,
+  announce,
   onDone,
   onClose,
 }: {
   projectKey: string
   column: BoardColumn | null
   canDelete: boolean
+  announce: (message: string) => void
   onDone: () => Promise<void>
   onClose: () => void
 }) {
@@ -318,7 +467,8 @@ function ColumnDialog({
   const save = useMutation({
     mutationFn: (input: ColumnInput) =>
       column ? api.updateColumn(column.id, input) : api.createColumn(projectKey, input),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      announce(column ? `Column renamed to ${saved.name}.` : `Column ${saved.name} added.`)
       await onDone()
       onClose()
     },
@@ -327,6 +477,7 @@ function ColumnDialog({
   const remove = useMutation({
     mutationFn: () => api.deleteColumn(column?.id ?? ''),
     onSuccess: async () => {
+      announce(`Column ${column?.name ?? ''} deleted.`)
       await onDone()
       onClose()
     },

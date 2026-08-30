@@ -3,7 +3,17 @@
   width: fit-content;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
-  overflow: hidden;
+}
+
+/* The ends are rounded one option at a time rather than with `overflow:
+   hidden` on the group: hiding the overflow would crop the focus ring off the
+   first and last option, which are exactly the two a keyboard arrives at. */
+.segmented button:first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.segmented button:last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
 .segmented button {

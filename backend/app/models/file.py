@@ -79,23 +79,30 @@ class Blob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class Folder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """A node in a project's file tree.
 
-    An adjacency list: ``parent_id IS NULL`` means top level. A project's root
-    is implicit — no row stands for it — so a new project has an empty tree
-    rather than one folder it can never delete.
+    An adjacency list, with one row per project reserved: ``parent_id IS NULL``
+    is the project's **root**, and everything else hangs beneath it. The root
+    is a real row rather than an implicit "no parent" so that a file can sit at
+    the top of a project — a README belongs beside the tree, not inside a
+    folder somebody had to invent for it.
+
+    "Exactly one root" is a fact of the schema, not a convention the service
+    remembers: :data:`ix_folder_project_id_root` is unique on ``project_id``
+    over precisely the parentless rows. An ``is_root`` flag would have said the
+    same thing twice and left room for the two answers to disagree.
     """
 
     __tablename__ = "folder"
     __table_args__ = (
-        # Two partial indexes rather than one on (parent_id, name): Postgres
-        # treats NULLs as distinct, so a plain unique index would happily allow
-        # a project two top-level folders called "Exports".
+        # One parentless folder per project. This subsumes the uniqueness of
+        # top-level names, because there is now only one top-level folder.
         Index(
-            "ix_folder_project_id_name",
+            "ix_folder_project_id_root",
             "project_id",
-            "name",
             unique=True,
             postgresql_where=text("parent_id IS NULL"),
         ),
+        # Partial, because Postgres treats NULLs as distinct: a plain unique
+        # index on (parent_id, name) would not constrain the roots at all.
         Index(
             "ix_folder_parent_id_name",
             "parent_id",
@@ -120,6 +127,15 @@ class Folder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     in Python, so an interrupted delete cannot strand a branch."""
 
     name: Mapped[str] = mapped_column(String(NAME_MAX_LENGTH), nullable=False)
+    """What the tree shows. A root's name is its project's, kept in step by
+    :mod:`app.services.projects` — the root *is* the project, so a listing that
+    called it anything else would be describing something that does not
+    exist."""
+
+    @property
+    def is_root(self) -> bool:
+        """Whether this is the project's root, which cannot move or go."""
+        return self.parent_id is None
 
 
 class FileItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):

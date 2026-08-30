@@ -65,6 +65,7 @@ def _folder(folder: Folder) -> FolderRead:
         project_id=folder.project_id,
         parent_id=folder.parent_id,
         name=folder.name,
+        is_root=folder.is_root,
         created_at=folder.created_at,
     )
 
@@ -97,6 +98,7 @@ def _nest(folders: list[Folder]) -> list[FolderNode]:
                 id=folder.id,
                 name=folder.name,
                 parent_id=folder.parent_id,
+                is_root=folder.is_root,
                 children=branch(folder.id),
             )
             for folder in by_parent[parent_id]
@@ -138,10 +140,11 @@ async def create_folder(
     principal: Principal = Depends(require(Scope.WRITE)),
     session: AsyncSession = Depends(get_session),
 ) -> FolderRead:
-    """Add a folder. Omit `parent_id` to put it at the top level.
+    """Add a folder. Omit `parent_id` to put it in the project's root folder.
 
-    A project's root is implicit — there is no folder standing for the project
-    itself, so a top-level folder is simply one with no parent.
+    Every project has exactly one root folder, created with it and named after
+    it. Nothing sits outside the root, so a folder with no parent named is a
+    folder in the root rather than a folder nowhere.
     """
     folder = await files.create_folder(session, project, body)
     await activity.record(
@@ -161,21 +164,30 @@ async def create_folder(
 
 @router.get(
     "/projects/{project_ref}/tree",
-    response_model=list[FolderNode],
+    response_model=FolderNode,
     summary="Get the whole folder tree",
 )
 async def get_tree(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = Depends(get_session),
-) -> list[FolderNode]:
-    """The project's folders as nested nodes, top-level folders first.
+) -> FolderNode:
+    """The project's root folder, with every folder beneath it nested inside.
+
+    One node rather than a list, because a project has exactly one root and
+    saying so in the response type spares every client the question of what a
+    second entry would have meant.
 
     One call for the entire tree: the files screen needs all of it to draw its
     left-hand pane, and a request per expanded node would make every click wait
     on the network.
     """
-    return _nest(await files.list_folders(session, project))
+    tree = _nest(await files.list_folders(session, project))
+    if not tree:
+        raise UnprocessableRequestError(
+            "This project has no root folder.", details={"project_id": str(project.id)}
+        )
+    return tree[0]
 
 
 @router.get(
@@ -205,7 +217,11 @@ async def get_children(
     summary="Rename or move a folder",
     responses={
         409: {"description": "The destination already has a folder with that name."},
-        422: {"description": "The move would put the folder inside its own subtree."},
+        422: {
+            "description": (
+                "The folder is the project's root, or the move would put it inside its own subtree."
+            )
+        },
     },
 )
 async def update_folder(
@@ -216,8 +232,9 @@ async def update_folder(
 ) -> FolderRead:
     """Change a folder's name, its parent, or both.
 
-    Send `parent_id: null` to move it to the top level; omit `parent_id`
-    entirely to leave it where it is.
+    Send `parent_id: null` to move it into the project's root; omit `parent_id`
+    entirely to leave it where it is. The root folder itself is refused with a
+    422: it is named after the project and goes when the project goes.
     """
     updated = await files.update_folder(session, folder, body)
     await activity.record(
@@ -232,7 +249,12 @@ async def update_folder(
     return _folder(updated)
 
 
-@router.delete("/folders/{folder_id}", response_model=Acknowledged, summary="Delete a folder")
+@router.delete(
+    "/folders/{folder_id}",
+    response_model=Acknowledged,
+    summary="Delete a folder",
+    responses={422: {"description": "The folder is the project's root."}},
+)
 async def delete_folder(
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(require(Scope.WRITE)),
@@ -242,7 +264,8 @@ async def delete_folder(
     """Delete a folder and everything inside it, subfolders included.
 
     Uploaded content is deleted from disk too, but only where no file outside
-    this folder shares it.
+    this folder shares it. The project's root folder cannot be deleted; archive
+    the project instead.
     """
     name, project_id = folder.name, folder.project_id
     await files.delete_folder(session, store, folder)

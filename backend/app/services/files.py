@@ -10,6 +10,11 @@ integrity error, and — for uploads — so the bytes are never written at all.
 *Bytes are shared, rows are not.* Two items pointing at the same content share
 one :class:`~app.models.file.Blob`, so deleting an item deletes the content
 only once nothing else refers to it.
+
+*Every project has a root folder, and it is the project.* Omitting ``parent_id``
+means "in the root" rather than "nowhere", so a file can sit at the top of a
+project without anybody inventing a folder for it. The root itself cannot be
+renamed, moved or deleted — see :func:`_ensure_not_the_root`.
 """
 
 from __future__ import annotations
@@ -41,9 +46,9 @@ spooled anything past its own megabyte to a temporary file, so this bounds the
 copy from there into the blob store rather than the receive itself."""
 
 MAX_DEPTH = 32
-"""How deep a folder may sit. A cap rather than a guess: it makes every walk up
-the tree terminate, so a cycle that somehow reached the database surfaces as a
-422 instead of a hung request."""
+"""How deep a folder may sit, the root counting as the first level. A cap
+rather than a guess: it makes every walk up the tree terminate, so a cycle that
+somehow reached the database surfaces as a 422 instead of a hung request."""
 
 DEFAULT_MIME = "application/octet-stream"
 
@@ -55,11 +60,58 @@ class Counts(NamedTuple):
     items: int
 
 
+# --- The root --------------------------------------------------------------
+
+
+async def seed_root(session: AsyncSession, project: Project) -> Folder:
+    """Give a new project the one folder it will never be without.
+
+    Created with the project, the way its starter columns are: a project whose
+    tree begins empty has nowhere to put a README, and asking someone to make a
+    folder before they can upload anything is a step with no purpose.
+    """
+    root = Folder(project_id=project.id, parent_id=None, name=project.name)
+    session.add(root)
+    await session.flush()
+    return root
+
+
+async def root_of(session: AsyncSession, project_id: UUID) -> Folder:
+    """The project's root folder.
+
+    Raises:
+        UnprocessableRequestError: if the project has none, which only a
+            database edited by hand can produce.
+    """
+    root = await session.scalar(
+        select(Folder).where(Folder.project_id == project_id, Folder.parent_id.is_(None))
+    )
+    if root is None:
+        raise UnprocessableRequestError(
+            "This project has no root folder to file anything under.",
+            details={"project_id": str(project_id)},
+        )
+    return root
+
+
+async def rename_root(session: AsyncSession, project: Project) -> None:
+    """Point the root at the project's current name.
+
+    The root row carries the name rather than deriving it, so that a folder
+    always describes itself — the tree, the breadcrumb and any future export
+    need no join. Renaming it here, in the same transaction as the project, is
+    what stops the copy drifting.
+    """
+    root = await root_of(session, project.id)
+    root.name = project.name
+    await session.flush()
+
+
 # --- Folders ---------------------------------------------------------------
 
 
 async def create_folder(session: AsyncSession, project: Project, data: FolderCreate) -> Folder:
-    """Add a folder, at the top level or inside another.
+    """Add a folder, in the project's root or inside another.
 
     Raises:
         ConflictError: if the parent already has a folder with this name.
@@ -67,11 +119,10 @@ async def create_folder(session: AsyncSession, project: Project, data: FolderCre
         UnprocessableRequestError: if the parent is in a different project, or
             is already as deep as folders may go.
     """
-    parent = await _resolve_parent(session, project, data.parent_id)
-    if parent is not None:
-        await _ensure_depth_allows_a_child(session, parent)
+    parent = await _destination(session, project.id, data.parent_id)
+    await _ensure_depth_allows_a_child(session, parent)
 
-    folder = Folder(project_id=project.id, parent_id=data.parent_id, name=data.name)
+    folder = Folder(project_id=project.id, parent_id=parent.id, name=data.name)
     session.add(folder)
     try:
         await session.flush()
@@ -127,17 +178,18 @@ async def update_folder(session: AsyncSession, folder: Folder, data: FolderUpdat
 
     Raises:
         ConflictError: if the destination already has a folder with this name.
-        UnprocessableRequestError: if the move would put the folder inside its
-            own subtree, or past the depth limit.
+        UnprocessableRequestError: if the folder is the project's root, or if
+            the move would put the folder inside its own subtree or past the
+            depth limit.
     """
+    _ensure_not_the_root(folder, "renamed or moved")
     fields = data.model_dump(exclude_unset=True)
 
     if "parent_id" in fields:
-        parent = await _resolve_parent(session, folder, fields["parent_id"])
-        if parent is not None:
-            await _ensure_not_inside_itself(session, folder, parent)
-            await _ensure_depth_allows_a_child(session, parent)
-        folder.parent_id = fields["parent_id"]
+        parent = await _destination(session, folder.project_id, fields["parent_id"])
+        await _ensure_not_inside_itself(session, folder, parent)
+        await _ensure_depth_allows_a_child(session, parent)
+        folder.parent_id = parent.id
 
     if fields.get("name") is not None:
         folder.name = fields["name"]
@@ -158,7 +210,11 @@ async def delete_folder(session: AsyncSession, store: BlobStore, folder: Folder)
     The subtree goes by database cascade rather than by a walk in Python, so an
     interrupted delete cannot leave a branch pointing at a parent that is gone.
     What Python still has to do is decide which blobs that orphaned.
+
+    Raises:
+        UnprocessableRequestError: if the folder is the project's root.
     """
+    _ensure_not_the_root(folder, "deleted")
     blob_ids = await _blob_ids_under(session, folder)
     await session.execute(delete(Folder).where(Folder.id == folder.id))
     await session.flush()
@@ -314,10 +370,17 @@ async def delete_item(session: AsyncSession, store: BlobStore, item: FileItem) -
 
 
 async def counts(session: AsyncSession, project: Project) -> Counts:
-    """How many folders and items the project holds, for its hub card."""
+    """How many folders and items the project holds, for its hub card.
+
+    The root is not counted. Every project has one and nobody can remove it, so
+    counting it would report "1 folder" for a project nothing has been filed in
+    yet.
+    """
     in_project = select(Folder.id).where(Folder.project_id == project.id)
     folders = await session.scalar(
-        select(func.count()).select_from(Folder).where(Folder.project_id == project.id)
+        select(func.count())
+        .select_from(Folder)
+        .where(Folder.project_id == project.id, Folder.parent_id.is_not(None))
     )
     items = await session.scalar(
         select(func.count()).select_from(FileItem).where(FileItem.folder_id.in_(in_project))
@@ -390,15 +453,33 @@ async def _ensure_person_exists(session: AsyncSession, person_id: UUID | None) -
         )
 
 
-async def _resolve_parent(
-    session: AsyncSession, within: Project | Folder, parent_id: UUID | None
-) -> Folder | None:
-    """Look up a prospective parent folder and check it is in the same project."""
+def _ensure_not_the_root(folder: Folder, attempted: str) -> None:
+    """Refuse a change that would unmake a project's root.
+
+    Phrased as an explanation rather than a refusal: the root was not created
+    by mistake and there is nothing wrong with wanting to rename it, so the
+    useful thing to say is where the name actually comes from.
+    """
+    if folder.is_root:
+        raise UnprocessableRequestError(
+            f"The root folder stands for the project itself, so it cannot be {attempted}. "
+            "Rename the project to change what it is called, or delete the folders "
+            "inside it to empty it.",
+            details={"folder_id": str(folder.id), "project_id": str(folder.project_id)},
+        )
+
+
+async def _destination(session: AsyncSession, project_id: UUID, parent_id: UUID | None) -> Folder:
+    """The folder something is going into — the project's root when none is named.
+
+    No caller may end up with ``None`` here. A second parentless folder would
+    be a second root, and while the unique index refuses that, it refuses it as
+    an integrity error rather than as an answer.
+    """
     if parent_id is None:
-        return None
+        return await root_of(session, project_id)
 
     parent = await get_folder(session, parent_id)
-    project_id = within.id if isinstance(within, Project) else within.project_id
     if parent.project_id != project_id:
         raise UnprocessableRequestError(
             "That folder belongs to a different project.",

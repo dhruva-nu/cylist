@@ -27,7 +27,7 @@
 .go {
   border-color: var(--go);
   background: var(--go);
-  color: #fff;
+  color: var(--go-ink);
 }
 
 .go:hover:not(:disabled) {
@@ -86,7 +86,8 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  color: #fff;
+
+  /* The ink is set inline: it depends on the identity colour behind it. */
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 700;
