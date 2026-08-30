@@ -10,6 +10,7 @@ from app.models.api_token import ApiToken, TokenKind
 from app.models.base import Base
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
+from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 
 __all__ = [
     "Activity",
@@ -21,4 +22,8 @@ __all__ = [
     "Project",
     "ProjectMember",
     "TokenKind",
+    "VaultNode",
+    "VaultNodeKind",
+    "VaultSecret",
+    "VaultTree",
 ]

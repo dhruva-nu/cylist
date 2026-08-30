@@ -10,6 +10,7 @@ import { Shell } from './components/Shell'
 import { Home } from './routes/Home'
 import { ProjectHub } from './routes/ProjectHub'
 import { ProjectPeople } from './routes/ProjectPeople'
+import { ProjectVault } from './routes/ProjectVault'
 
 const rootRoute = createRootRoute({ component: Shell })
 
@@ -31,7 +32,18 @@ const projectPeopleRoute = createRoute({
   component: ProjectPeople,
 })
 
-const routeTree = rootRoute.addChildren([homeRoute, projectRoute, projectPeopleRoute])
+const projectVaultRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/p/$projectKey/vault',
+  component: ProjectVault,
+})
+
+const routeTree = rootRoute.addChildren([
+  homeRoute,
+  projectRoute,
+  projectPeopleRoute,
+  projectVaultRoute,
+])
 
 export const router = createRouter({ routeTree })
 

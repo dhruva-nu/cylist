@@ -56,6 +56,70 @@ export interface Project {
 export interface ProjectSummary extends Project {
   team_count: number
   client_count: number
+  vault_tree_count: number
+  vault_secret_count: number
+}
+
+export type VaultNodeKind = 'branch' | 'secret'
+
+export interface VaultTree {
+  id: string
+  project_id: string
+  name: string
+  position: number
+  node_count: number
+  secret_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface VaultTreeDetail extends VaultTree {
+  nodes: VaultNode[]
+}
+
+/** A secret's metadata. There is deliberately no `value` here — only
+ * `revealSecret` returns one, and only with the `vault:reveal` scope. */
+export interface VaultSecretMeta {
+  username: string | null
+  url: string | null
+  notes: string
+  key_version: number
+  updated_at: string
+}
+
+export interface VaultNode {
+  id: string
+  tree_id: string
+  parent_id: string | null
+  name: string
+  kind: VaultNodeKind
+  position: number
+  created_at: string
+  updated_at: string
+  secret: VaultSecretMeta | null
+  children: VaultNode[]
+}
+
+export interface SecretInput {
+  value?: string
+  username?: string | null
+  url?: string | null
+  notes?: string
+}
+
+export interface VaultNodeInput {
+  tree_id: string
+  parent_id?: string | null
+  name: string
+  kind: VaultNodeKind
+  secret?: SecretInput
+}
+
+export interface RevealedSecret {
+  node_id: string
+  name: string
+  value: string
+  revealed_at: string
 }
 
 export interface ProjectInput {
@@ -159,4 +223,35 @@ export const api = {
   updatePerson: (id: string, input: Partial<PersonInput>) =>
     request<Person>(`/people/${id}`, { method: 'PATCH', body: body(input) }),
   archivePerson: (id: string) => request<{ ok: boolean }>(`/people/${id}`, { method: 'DELETE' }),
+
+  listVaultTrees: (ref: string) => request<VaultTree[]>(`/projects/${ref}/vault/trees`),
+  createVaultTree: (ref: string, name: string) =>
+    request<VaultTree>(`/projects/${ref}/vault/trees`, { method: 'POST', body: body({ name }) }),
+  getVaultTree: (treeId: string) => request<VaultTreeDetail>(`/vault/trees/${treeId}`),
+  renameVaultTree: (treeId: string, name: string) =>
+    request<VaultTree>(`/vault/trees/${treeId}`, { method: 'PATCH', body: body({ name }) }),
+  deleteVaultTree: (treeId: string) =>
+    request<{ ok: boolean }>(`/vault/trees/${treeId}`, { method: 'DELETE' }),
+
+  createVaultNode: (input: VaultNodeInput) =>
+    request<VaultNode>('/vault/nodes', { method: 'POST', body: body(input) }),
+  updateVaultNode: (nodeId: string, input: { name?: string; secret?: SecretInput }) =>
+    request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: body(input) }),
+  deleteVaultNode: (nodeId: string) =>
+    request<{ ok: boolean }>(`/vault/nodes/${nodeId}`, { method: 'DELETE' }),
+  moveVaultNode: (nodeId: string, parentId: string | null, position: number) =>
+    request<VaultNode>(`/vault/nodes/${nodeId}/move`, {
+      method: 'POST',
+      body: body({ parent_id: parentId, position }),
+    }),
+
+  /**
+   * Decrypt one stored secret.
+   *
+   * The only call in this client that returns a credential, and the only one
+   * the server writes to the audit trail on sight. Never cache what it
+   * returns beyond the moment it is shown.
+   */
+  revealSecret: (nodeId: string) =>
+    request<RevealedSecret>(`/vault/nodes/${nodeId}/reveal`, { method: 'POST' }),
 }
