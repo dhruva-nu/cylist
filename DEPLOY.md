@@ -80,19 +80,36 @@ Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
 ### The runner
 
 A self-hosted GitHub Actions runner, labelled `cylist`, lives in
-`~/actions-runner` and is run by systemd — as a **user** service rather than a
-system one, so nothing about it needs root:
+`~/actions-runner` and is run by systemd as `dnu2`:
 
 ```bash
-systemctl --user status github-runner-cylist
-journalctl --user -u github-runner-cylist -f
+systemctl status github-runner-cylist
+journalctl -u github-runner-cylist -f
 ```
 
-`loginctl enable-linger dnu2` is what keeps it running when nobody is logged in,
-and across reboots. The runner works as `dnu2`, who is in the `docker` group —
-which is what lets it build without privilege.
+It is a **system** unit, and the reason is worth knowing, because the symptom is
+baffling on its own:
 
-To re-register it (a new repository, or a revoked token):
+> `permission denied while trying to connect to the Docker daemon socket`
+> — from a user who is plainly in the `docker` group.
+
+A systemd *user* manager fixes its supplementary groups once, when it starts. If
+`dnu2` joined `docker` after that — which is to say, at any point after the last
+login — then every `systemctl --user` service keeps the older group set for as
+long as that manager lives, however many times the service itself is restarted.
+An SSH login gets fresh groups and works fine, so deploying by hand succeeds
+while the identical deploy from CI fails. Restarting the user manager would fix
+it and would also kill the desktop session, since `dnu2` is the machine's
+logged-in user.
+
+`SupplementaryGroups=docker` in a system unit sidesteps all of it: the group is
+granted at exec, every time. It also means the runner comes up at boot rather
+than at login, which is what you want on a server.
+
+The unit is [`scripts/github-runner-cylist.service`](scripts/github-runner-cylist.service);
+installing it is a copy into `/etc/systemd/system` and an `enable --now`.
+
+To re-register the runner (a new repository, or a revoked token):
 
 ```bash
 gh api repos/dhruva-nu/cylist/actions/runners/registration-token -q .token
