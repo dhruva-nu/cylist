@@ -79,17 +79,27 @@ Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
 
 ### The runner
 
-A self-hosted GitHub Actions runner, labelled `cylist`, installed under
-`~/actions-runner` and run by systemd as the `dnu2` user (who is in the `docker`
-group, which is what lets it build):
+A self-hosted GitHub Actions runner, labelled `cylist`, lives in
+`~/actions-runner` and is run by systemd — as a **user** service rather than a
+system one, so nothing about it needs root:
 
 ```bash
-sudo ~/actions-runner/svc.sh install dnu2
-sudo ~/actions-runner/svc.sh start
+systemctl --user status github-runner-cylist
+journalctl --user -u github-runner-cylist -f
 ```
 
-If it ever stops picking up jobs, `sudo ~/actions-runner/svc.sh status` and
-`journalctl -u actions.runner.* -f` are the two things to look at.
+`loginctl enable-linger dnu2` is what keeps it running when nobody is logged in,
+and across reboots. The runner works as `dnu2`, who is in the `docker` group —
+which is what lets it build without privilege.
+
+To re-register it (a new repository, or a revoked token):
+
+```bash
+gh api repos/dhruva-nu/cylist/actions/runners/registration-token -q .token
+cd ~/actions-runner && ./config.sh --unattended --replace \
+  --url https://github.com/dhruva-nu/cylist --token <token> \
+  --name dnu-home-1 --labels cylist --work _work
+```
 
 ### Serving it
 
@@ -98,9 +108,15 @@ sudo tailscale serve --bg --https 443 http://127.0.0.1:8000
 sudo tailscale funnel --bg 443
 ```
 
-`serve` puts it on the tailnet; `funnel` puts it on the public internet, with
-the app's own password login as the only gate — which is why production sets
-`CYLIST_ENVIRONMENT=prod` and the session cookie is issued `Secure`.
+`serve` terminates HTTPS and proxies to the app on loopback, which is the only
+thing that reaches it. `funnel` then puts that same URL on the public internet,
+with the app's own password login as the only gate — which is why production
+sets `CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
+
+Both need root unless you run `sudo tailscale set --operator=$USER` once, after
+which they do not. `tailscale serve status` shows where it currently points, and
+`sudo tailscale funnel --bg off` takes it back off the public internet without
+disturbing the tailnet.
 
 ## Deploying by hand
 

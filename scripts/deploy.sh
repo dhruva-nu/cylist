@@ -92,5 +92,5 @@ step "Tidying up"
 # Only the layers nothing references. Named images and volumes are untouched.
 docker image prune --force > /dev/null
 
-printf '\n\033[1mDeployed\033[0m %s\n' "$(git rev-parse --short HEAD)"
+printf '\n\033[1mDeployed\033[0m %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo "working tree")"
 compose ps
