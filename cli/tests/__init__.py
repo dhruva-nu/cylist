@@ -1,0 +1,1 @@
+"""The CLI test suite."""

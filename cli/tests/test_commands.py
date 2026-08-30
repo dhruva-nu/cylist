@@ -1,0 +1,462 @@
+"""Every command, driven end to end against the fake API."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from tests import fake_api
+from tests.conftest import Runner
+
+# --- Projects --------------------------------------------------------------
+
+
+def test_projects_defaults_to_listing(run: Runner) -> None:
+    result = run("projects")
+    assert result.code == 0
+    assert "ATL" in result.out
+    assert "Atlas migration" in result.out
+
+
+def test_projects_json_is_the_api_response_verbatim(run: Runner) -> None:
+    result = run("--json", "projects")
+    assert result.code == 0
+    assert json.loads(result.out) == [fake_api.PROJECT]
+
+
+def test_project_show_uses_the_summary_endpoint(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("project", "show", "ATL")
+    assert result.code == 0
+    assert "GET /api/v1/projects/ATL/summary" in recorder.paths()
+    assert "2 tasks in 3 columns" in result.out
+    assert "1 blocked" in result.out
+
+
+def test_project_new_posts_the_key_and_name(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("project", "new", "--key", "HER", "--name", "Hermes")
+    assert result.code == 0
+    assert recorder.body("POST", "/projects") == {
+        "key": "HER",
+        "name": "Hermes",
+        "description": "",
+    }
+
+
+def test_project_members_add_sends_the_whole_list(run: Runner, recorder: fake_api.Recorder) -> None:
+    """The API replaces membership, so an --add has to resend everyone."""
+    result = run("project", "members", "ATL", "--remove", "Leo Wren")
+    assert result.code == 0
+    body = recorder.body("PUT", "/members")
+    assert body["person_ids"] == [fake_api.ADITI_ID, fake_api.LENA_ID]
+
+
+# --- Board -----------------------------------------------------------------
+
+
+def test_board_renders_columns_side_by_side(run: Runner) -> None:
+    result = run("board", "ATL")
+    assert result.code == 0
+    header = result.lines[0]
+    # One line carrying every column name is the definition of "side by side".
+    assert "BACKLOG" in header
+    assert "IN PROGRESS" in header
+    assert "DONE" in header
+    assert header.index("BACKLOG") < header.index("IN PROGRESS") < header.index("DONE")
+
+
+def test_board_marks_a_blocked_card_in_words(run: Runner) -> None:
+    result = run("board", "ATL")
+    assert "[blocked] ATL-2" in result.out
+
+
+def test_board_stacks_when_the_terminal_is_narrow(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cylist_cli import output
+
+    monkeypatch.setattr(output, "terminal_width", lambda: 60)
+    result = run("board", "ATL")
+    assert result.code == 0
+    assert result.lines[0] == "BACKLOG (1)"
+
+
+# --- Tasks -----------------------------------------------------------------
+
+
+def test_tasks_ls_lists_every_card(run: Runner) -> None:
+    result = run("tasks", "ls", "ATL")
+    assert result.code == 0
+    assert "ATL-1" in result.out
+    assert "ATL-2" in result.out
+    assert "In progress" in result.out
+
+
+def test_tasks_ls_filters_by_status_client_side(run: Runner) -> None:
+    result = run("tasks", "ls", "ATL", "--status", "blocked")
+    assert result.code == 0
+    assert "ATL-2" in result.out
+    assert "ATL-1" not in result.out
+
+
+def test_tasks_ls_filters_by_assignee_name(run: Runner) -> None:
+    result = run("tasks", "ls", "ATL", "--assignee", "Aditi K")
+    assert result.code == 0
+    assert "ATL-1" in result.out
+
+
+def test_tasks_ls_rejects_an_unknown_status_before_any_request(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        run("tasks", "ls", "ATL", "--status", "sleeping")
+    assert exit_info.value.code == 2
+    assert recorder.paths() == []
+
+
+def test_task_show_renders_the_timeline_with_names_not_ids(run: Runner) -> None:
+    result = run("task", "show", "ATL-2")
+    assert result.code == 0
+    assert "Timeline" in result.out
+    assert "active -> blocked" in result.out
+    # meta.tagged holds ids; a person's name is what belongs on screen.
+    assert "waiting on: Lena W" in result.out
+    assert fake_api.LENA_ID not in result.out
+
+
+def test_task_new_resolves_the_assignee_and_normalises_the_date(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "Draft the cutover plan",
+        "--description",
+        "A written plan with dates.",
+        "--type",
+        "chore",
+        "--due",
+        "2026-04-01",
+        "--assignee",
+        "Aditi K",
+    )
+    assert result.code == 0
+    body = recorder.body("POST", "/tasks")
+    assert body["assignee_id"] == fake_api.ADITI_ID
+    assert body["due_date"] == "2026-04-01"
+    assert body["type"] == "chore"
+
+
+def test_task_new_rejects_a_date_that_is_not_a_date(run: Runner) -> None:
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "x",
+        "--description",
+        "y",
+        "--type",
+        "bug",
+        "--due",
+        "next tuesday",
+        "--assignee",
+        "Aditi K",
+    )
+    assert result.code == 1
+    assert "--due wants a date like 2026-03-31" in result.err
+
+
+def test_task_move_resolves_a_column_name(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("task", "move", "ATL-2", "--column", "In progress")
+    assert result.code == 0
+    assert recorder.body("POST", "/move") == {"column_id": fake_api.DOING_ID, "position": 0}
+
+
+def test_task_move_is_case_insensitive_about_the_column(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    assert run("task", "move", "ATL-2", "--column", "in PROGRESS").code == 0
+    assert recorder.body("POST", "/move")["column_id"] == fake_api.DOING_ID
+
+
+def test_task_move_refuses_an_unknown_column_and_says_what_exists(run: Runner) -> None:
+    result = run("task", "move", "ATL-2", "--column", "Shipped")
+    assert result.code == 1
+    assert "No column called 'Shipped'" in result.err
+    assert "Backlog, In progress, Done" in result.err
+
+
+def test_task_status_requires_a_reason_for_blocked(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    """Caught locally, so the round trip is not spent to learn it."""
+    result = run("task", "status", "ATL-2", "blocked")
+    assert result.code == 1
+    assert "--reason is required" in result.err
+    assert not any(path.endswith("/status") for path in recorder.paths())
+
+
+def test_task_status_sends_the_reason_and_the_tagged_person(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    result = run(
+        "task",
+        "status",
+        "ATL-2",
+        "blocked",
+        "--reason",
+        "waiting for the finance sign-off",
+        "--waiting-on",
+        "Lena W",
+    )
+    assert result.code == 0
+    assert recorder.body("POST", "/status") == {
+        "status": "blocked",
+        "waiting_on": [fake_api.LENA_ID],
+        "reason": "waiting for the finance sign-off",
+    }
+    assert "Waiting on Lena W." in result.out
+
+
+def test_task_status_back_to_active_needs_no_reason(run: Runner) -> None:
+    assert run("task", "status", "ATL-2", "active").code == 0
+
+
+def test_task_comment_posts_the_body(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("task", "comment", "ATL-2", "Chased finance again.")
+    assert result.code == 0
+    assert recorder.body("POST", "/comments") == {"body": "Chased finance again."}
+
+
+# --- Name resolution -------------------------------------------------------
+
+
+def test_an_ambiguous_person_is_an_error_not_a_guess(run: Runner) -> None:
+    """'Le' matches both Lena W and Leo Wren. Picking one would be worse."""
+    result = run("task", "status", "ATL-2", "blocked", "--reason", "x", "--waiting-on", "Le")
+    assert result.code == 1
+    assert "matches more than one person" in result.err
+    assert "Lena W" in result.err
+    assert "Leo Wren" in result.err
+
+
+def test_an_exact_match_wins_over_a_longer_one(run: Runner, recorder: fake_api.Recorder) -> None:
+    """'Lena W' is a prefix of nothing else, but the exact pass must run first."""
+    result = run("task", "status", "ATL-2", "blocked", "--reason", "x", "--waiting-on", "Lena W")
+    assert result.code == 0
+    assert recorder.body("POST", "/status")["waiting_on"] == [fake_api.LENA_ID]
+
+
+def test_a_uuid_is_passed_through_without_a_lookup(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    result = run(
+        "task", "status", "ATL-2", "blocked", "--reason", "x", "--waiting-on", fake_api.LENA_ID
+    )
+    assert result.code == 0
+    assert not any(path == "GET /api/v1/projects/ATL/members" for path in recorder.paths())
+
+
+def test_an_unknown_person_lists_the_ones_that_exist(run: Runner) -> None:
+    result = run("task", "status", "ATL-2", "blocked", "--reason", "x", "--waiting-on", "Nobody")
+    assert result.code == 1
+    assert "No person called 'Nobody'" in result.err
+    assert "Aditi K" in result.err
+
+
+# --- People ----------------------------------------------------------------
+
+
+def test_people_ls_lists_the_directory(run: Runner) -> None:
+    result = run("people", "ls")
+    assert result.code == 0
+    assert "Aditi K" in result.out
+    assert "Leo Wren" in result.out
+
+
+def test_people_ls_passes_the_kind_filter_to_the_api(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    result = run("people", "ls", "--kind", "client")
+    assert result.code == 0
+    assert recorder.sent("GET", "/people").url.params["kind"] == "client"
+    assert "Aditi K" not in result.out
+
+
+def test_people_new_posts_the_required_fields(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run(
+        "people",
+        "new",
+        "--name",
+        "Ravi S",
+        "--kind",
+        "team",
+        "--role",
+        "Data engineer",
+        "--responsibilities",
+        "Owns the export pipeline.",
+    )
+    assert result.code == 0
+    assert recorder.body("POST", "/people")["name"] == "Ravi S"
+
+
+# --- Files -----------------------------------------------------------------
+
+
+def test_files_ls_with_no_path_shows_top_level_folders(run: Runner) -> None:
+    result = run("files", "ls", "ATL")
+    assert result.code == 0
+    assert "Contracts" in result.out
+
+
+def test_files_ls_walks_a_path(run: Runner) -> None:
+    result = run("files", "ls", "ATL", "Contracts/2026")
+    assert result.code == 0
+    assert "msa.txt" in result.out
+    assert "portal" in result.out
+
+
+def test_files_get_writes_the_bytes(run: Runner, tmp_path: Path) -> None:
+    target = tmp_path / "downloaded.txt"
+    result = run("files", "get", "ATL", "Contracts/2026/msa.txt", "-o", str(target))
+    assert result.code == 0
+    assert target.read_bytes() == fake_api.MSA_BYTES
+
+
+def test_files_get_refuses_a_link_and_gives_its_url(run: Runner) -> None:
+    result = run("files", "get", "ATL", "Contracts/2026/portal")
+    assert result.code == 1
+    assert "is a link" in result.err
+    assert "https://example.invalid/portal" in result.err
+
+
+def test_files_get_explains_a_path_with_no_folder(run: Runner) -> None:
+    result = run("files", "get", "ATL", "msa.txt")
+    assert result.code == 1
+    assert "Files live in folders" in result.err
+
+
+# --- Vault -----------------------------------------------------------------
+
+
+def test_vault_ls_lists_trees_with_counts(run: Runner) -> None:
+    result = run("vault", "ls", "ATL")
+    assert result.code == 0
+    assert "Logins" in result.out
+
+
+def test_vault_ls_renders_a_tree_without_any_value(run: Runner) -> None:
+    result = run("vault", "ls", "ATL", "Logins")
+    assert result.code == 0
+    assert "Billing" in result.out
+    assert "Stripe" in result.out
+    assert "(secret, billing@example.com)" in result.out
+    assert fake_api.STRIPE_SECRET not in result.out
+
+
+def test_vault_reveal_without_a_flag_shows_metadata_and_fetches_nothing(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    """The safety property this module exists for."""
+    result = run("vault", "reveal", "ATL", "Logins/Billing/Stripe")
+    assert result.code == 0
+    assert fake_api.STRIPE_SECRET not in result.out
+    assert fake_api.STRIPE_SECRET not in result.err
+    assert "billing@example.com" in result.out
+    assert "Add --show to print it" in result.out
+    assert not any(path.endswith("/reveal") for path in recorder.paths())
+
+
+def test_vault_reveal_with_show_prints_the_value_and_warns(run: Runner) -> None:
+    result = run("vault", "reveal", "ATL", "Logins/Billing/Stripe", "--show")
+    assert result.code == 0
+    assert result.out.strip() == fake_api.STRIPE_SECRET
+    assert "scrollback" in result.err
+
+
+def test_vault_reveal_to_a_file_keeps_it_off_the_screen(run: Runner, tmp_path: Path) -> None:
+    target = tmp_path / "stripe.txt"
+    result = run("vault", "reveal", "ATL", "Logins/Billing/Stripe", "-o", str(target))
+    assert result.code == 0
+    assert target.read_text() == fake_api.STRIPE_SECRET
+    assert oct(target.stat().st_mode)[-4:] == "0600"
+    assert fake_api.STRIPE_SECRET not in result.out
+    assert fake_api.STRIPE_SECRET not in result.err
+
+
+def test_vault_reveal_json_omits_the_value_unless_asked(run: Runner, tmp_path: Path) -> None:
+    target = tmp_path / "stripe.txt"
+    result = run("--json", "vault", "reveal", "ATL", "Logins/Billing/Stripe", "-o", str(target))
+    assert result.code == 0
+    assert "value" not in json.loads(result.out)
+
+
+def test_vault_reveal_refuses_a_branch(run: Runner) -> None:
+    result = run("vault", "reveal", "ATL", "Logins/Billing", "--show")
+    assert result.code == 1
+    assert "is a branch" in result.err
+
+
+def test_vault_add_reads_the_value_from_stdin_not_an_argument(
+    run: Runner, recorder: fake_api.Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("sk_live_new_key\n"))
+    result = run("vault", "add", "ATL", "Logins/Billing/Twilio", "--value-stdin")
+    assert result.code == 0
+    body = recorder.body("POST", "/vault/nodes")
+    assert body["name"] == "Twilio"
+    assert body["parent_id"] == fake_api.BILLING_ID
+    assert body["secret"]["value"] == "sk_live_new_key"
+
+
+# --- Activity --------------------------------------------------------------
+
+
+def test_activity_resolves_a_project_key_to_an_id(run: Runner, recorder: fake_api.Recorder) -> None:
+    """The one endpoint that takes project_id rather than {project_ref}."""
+    result = run("activity", "--project", "ATL")
+    assert result.code == 0
+    assert recorder.sent("GET", "/activity").url.params["project_id"] == fake_api.PROJECT_ID
+    assert "board-tidy agent" in result.out
+    assert "task.status_changed" in result.out
+
+
+def test_vault_add_url_is_not_the_server_url(
+    run: Runner, recorder: fake_api.Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`vault add --url` is the login page, not where Cylist lives.
+
+    Regression: the global --url and this one shared argparse's single
+    namespace, so naming a credential's URL silently repointed the CLI at it.
+    """
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("sk_live_key\n"))
+    result = run(
+        "vault",
+        "add",
+        "ATL",
+        "Logins/Billing/Twilio",
+        "--url",
+        "https://dashboard.stripe.com",
+        "--value-stdin",
+    )
+    assert result.code == 0
+    assert recorder.body("POST", "/vault/nodes")["secret"]["url"] == "https://dashboard.stripe.com"
+    # Every request still went to the configured server, not to Stripe.
+    for request in recorder.requests:
+        assert request.url.host == "cylist.test"
+
+
+def test_a_name_error_quotes_the_project_key_not_a_uuid(run: Runner) -> None:
+    """The project is only known by id at that point; the key is what helps."""
+    result = run("task", "move", "ATL-2", "--column", "Shipped")
+    assert result.code == 1
+    assert "ATL's board" in result.err
+    assert fake_api.PROJECT_ID not in result.err
