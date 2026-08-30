@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Case, DateTime, Enum, Index, String, Text, case
+from sqlalchemy import Boolean, Case, DateTime, Enum, Index, String, Text, case, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -28,7 +28,12 @@ class PersonKind(StrEnum):
 
 class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "person"
-    __table_args__ = (Index("ix_person_kind_archived_at", "kind", "archived_at"),)
+    __table_args__ = (
+        Index("ix_person_kind_archived_at", "kind", "archived_at"),
+        # Unique over the true rows alone, so "there is at most one you" is a
+        # fact of the schema rather than a rule the service has to remember.
+        Index("ix_person_is_me", "is_me", unique=True, postgresql_where=text("is_me")),
+    )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
 
@@ -54,6 +59,16 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     """People are archived, never deleted: tasks and files keep pointing at
     whoever created them long after they leave the project."""
+
+    is_me: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    """Whether this row is the owner — you.
+
+    At most one person carries it (see ``ix_person_is_me``). Creating a project
+    puts whoever it is on that project, since the answer to "who is involved?"
+    always starts with the person who started it.
+    """
 
     @property
     def is_archived(self) -> bool:

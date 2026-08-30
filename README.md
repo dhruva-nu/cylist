@@ -6,10 +6,10 @@ agents can use it as readily as you can.
 
 | Area | What it holds |
 | --- | --- |
-| **Kanban board** | Tasks as cards across 2–8 named columns. A card that goes *on hold* or *blocked* must say why, and can name the person it is waiting on. |
+| **Kanban board** | Tasks as cards across 2–8 named columns, each of which folds down to a rail when you would rather not look at it. A card that goes *on hold* or *blocked* must say why, and can name the person it is waiting on. |
 | **Files** | Folders of uploaded files, with SharePoint and Google Drive links sitting alongside them. |
 | **Vault** | Logins, keys and links in trees you shape yourself. Secrets are encrypted at rest and revealed only on request. |
-| **People** | Team members and clients, what each is responsible for, and who to tag when work stalls. |
+| **People** | Team members and clients, what each is responsible for, and who to tag when work stalls. One of them is **you**, and joins every project you start. |
 
 React · FastAPI · PostgreSQL. See [PLAN.md](PLAN.md) for the full design and
 build order, and the [approved mock](https://claude.ai/code/artifact/27e0344e-ef48-4e2a-a592-5e5c53c1f935)

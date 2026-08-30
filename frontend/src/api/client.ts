@@ -20,6 +20,8 @@ export interface Identity {
   label: string
   channel: 'web' | 'api'
   scopes: Scope[]
+  /** The directory entry marked as you, if one has been named yet. */
+  person: Person | null
 }
 
 export interface Person {
@@ -32,6 +34,8 @@ export interface Person {
   colour: string
   archived_at: string | null
   created_at: string
+  /** Whether this is you. At most one person in the directory is. */
+  is_me: boolean
 }
 
 export interface PersonInput {
@@ -40,6 +44,8 @@ export interface PersonInput {
   role: string
   responsibilities: string
   email?: string | null
+  /** Claim the directory's one "this is me" slot, taking it off whoever held it. */
+  is_me?: boolean
 }
 
 export interface Project {

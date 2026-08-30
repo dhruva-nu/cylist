@@ -20,7 +20,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.core.errors import NotFoundError, UnprocessableRequestError
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
 from app.routers.projects import resolved_project
@@ -45,7 +45,7 @@ router = APIRouter(tags=["files"])
 
 async def resolved_folder(
     folder_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Folder:
     """Turn the path segment into a folder, 404-ing if nothing matches."""
     return await files.get_folder(session, folder_id)
@@ -53,7 +53,7 @@ async def resolved_folder(
 
 async def resolved_item(
     item_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> FileItem:
     """Turn the path segment into a file or link, 404-ing if nothing matches."""
     return await files.get_item(session, item_id)
@@ -118,7 +118,7 @@ def _nest(folders: list[Folder]) -> list[FolderNode]:
 async def list_folders(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> list[FolderRead]:
     """Every folder in the project, flat and alphabetical.
 
@@ -138,7 +138,7 @@ async def create_folder(
     body: FolderCreate,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> FolderRead:
     """Add a folder. Omit `parent_id` to put it in the project's root folder.
 
@@ -170,7 +170,7 @@ async def create_folder(
 async def get_tree(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> FolderNode:
     """The project's root folder, with every folder beneath it nested inside.
 
@@ -198,7 +198,7 @@ async def get_tree(
 async def get_children(
     folder: Folder = Depends(resolved_folder),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> FolderChildren:
     """The subfolders and items directly inside a folder, plus its breadcrumb."""
     subfolders, items = await files.children(session, folder)
@@ -228,7 +228,7 @@ async def update_folder(
     body: FolderUpdate,
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> FolderRead:
     """Change a folder's name, its parent, or both.
 
@@ -258,7 +258,7 @@ async def update_folder(
 async def delete_folder(
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Delete a folder and everything inside it, subfolders included.
@@ -296,7 +296,7 @@ async def delete_folder(
 async def upload_file(
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
     file: UploadFile = File(description="The file itself."),
@@ -339,7 +339,7 @@ async def add_link(
     body: LinkCreate,
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ItemRead:
     """Put a link to a SharePoint or Drive document in this folder.
 
@@ -378,7 +378,7 @@ async def update_item(
     body: ItemUpdate,
     item: FileItem = Depends(resolved_item),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ItemRead:
     """Rename an item, correct a link's target, or change who added it."""
     updated = await files.update_item(session, item, body)
@@ -399,7 +399,7 @@ async def update_item(
 async def delete_item(
     item: FileItem = Depends(resolved_item),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Remove a file or link.

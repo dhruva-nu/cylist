@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.person import PersonKind
 from app.models.project import Project
 from app.models.task import TaskStatus
@@ -38,7 +38,7 @@ ProjectRef = Path(
 
 async def resolved_project(
     project_ref: str = ProjectRef,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Project:
     """Turn the path segment into a project, 404-ing if nothing matches."""
     return await projects.resolve(session, project_ref)
@@ -60,7 +60,7 @@ def _read(project: Project) -> ProjectRead:
 @router.get("", response_model=list[ProjectRead], summary="List projects")
 async def list_projects(
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     include_archived: bool = Query(default=False),
 ) -> list[ProjectRead]:
     """Return every project, newest first — the home screen's grid."""
@@ -78,7 +78,7 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ProjectRead:
     """Create a project.
 
@@ -114,7 +114,7 @@ async def get_project(
 async def get_summary(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ProjectSummary:
     """The counts behind the project hub's cards.
 
@@ -149,7 +149,7 @@ async def update_project(
     body: ProjectUpdate,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ProjectRead:
     """Change any subset of a project's details. Omitted fields are left alone."""
     updated = await projects.update(session, project, body)
@@ -169,7 +169,7 @@ async def update_project(
 async def archive_project(
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Archive a project, hiding it from the grid.
 
@@ -209,7 +209,7 @@ async def set_members(
     body: MembershipUpdate,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Membership:
     """Set the project's membership to exactly these people.
 

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import Task, TaskComment
 from app.routers.projects import resolved_project
@@ -40,7 +40,7 @@ TaskRef = Path(
 
 async def resolved_task(
     task_ref: str = TaskRef,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Task:
     """Turn the path segment into a task, 404-ing if nothing matches."""
     return await tasks.resolve(session, task_ref)
@@ -94,7 +94,7 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
 async def list_tasks(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> list[TaskRead]:
     """Every card on the board, in the order they are stacked.
 
@@ -117,7 +117,7 @@ async def create_task(
     body: TaskCreate,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Create a task at the bottom of the board's **first** column.
 
@@ -142,7 +142,7 @@ async def create_task(
 async def get_task(
     task: Task = Depends(resolved_task),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """One card and its whole timeline."""
     return await _detail(session, task)
@@ -158,7 +158,7 @@ async def update_task(
     body: TaskUpdate,
     task: Task = Depends(resolved_task),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Change any subset of a task's details. Omitted fields are left alone.
 
@@ -185,7 +185,7 @@ async def update_task(
 async def delete_task(
     task: Task = Depends(resolved_task),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a task and its comments.
 
@@ -215,7 +215,7 @@ async def move_task(
     body: TaskMove,
     task: Task = Depends(resolved_task),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Put a card in a column, at a position counted from the top.
 
@@ -251,7 +251,7 @@ async def change_status(
     body: TaskStatusChange,
     task: Task = Depends(resolved_task),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Move a task between `active`, `hold` and `blocked`.
 
@@ -279,7 +279,7 @@ async def change_status(
 async def list_comments(
     task: Task = Depends(resolved_task),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> list[CommentRead]:
     """Comments and status changes together, oldest first."""
     return [_comment(entry) for entry in await tasks.comments(session, task)]
@@ -296,7 +296,7 @@ async def add_comment(
     body: CommentCreate,
     task: Task = Depends(resolved_task),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> CommentRead:
     """Add a comment to a task.
 

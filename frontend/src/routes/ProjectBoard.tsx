@@ -13,6 +13,11 @@
  * Dragging is not only a pointer gesture. A focused card is picked up with
  * space and walked between columns with the arrow keys, which is the same
  * operation through the same code path — see `DRAG_KEYS` and `moveByColumn`.
+ *
+ * Any column folds down to a rail, and which ones are folded is remembered per
+ * project. A folded column is still a drop target: "Done" is exactly the
+ * column you stop looking at and keep moving cards into, and a board that made
+ * you unfold it first would be asking you to undo the tidying to use it.
  */
 
 import {
@@ -34,7 +39,7 @@ import {
 } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, type Board, type BoardColumn, type ColumnInput, type Task } from '../api/client'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
@@ -120,6 +125,51 @@ const moveByColumn: KeyboardCoordinateGetter = (event, { context, currentCoordin
   return { x: rect.left + (rect.width - collisionRect.width) / 2, y: currentCoordinates.y }
 }
 
+/**
+ * Which columns are folded, remembered per project.
+ *
+ * Per project rather than per board-wide: folding "Done" away on one project
+ * says nothing about what you want to see on another. localStorage is wrapped
+ * because reading it throws outright in a private window, and a board that
+ * will not render is a worse outcome than one that forgets a preference.
+ */
+function collapsedKey(projectKey: string): string {
+  return `cylist.board.collapsed.${projectKey}`
+}
+
+function readCollapsed(projectKey: string): string[] {
+  try {
+    const stored: unknown = JSON.parse(window.localStorage.getItem(collapsedKey(projectKey)) ?? '')
+    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function useCollapsedColumns(projectKey: string) {
+  const [collapsed, setCollapsed] = useState<string[]>(() => readCollapsed(projectKey))
+
+  // Keyed on the project, so walking from one board to another picks up that
+  // board's folds instead of carrying the last one's across.
+  useEffect(() => setCollapsed(readCollapsed(projectKey)), [projectKey])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(collapsedKey(projectKey), JSON.stringify(collapsed))
+    } catch {
+      // The fold still holds for this visit; it just will not be remembered.
+    }
+  }, [projectKey, collapsed])
+
+  const toggle = useCallback((columnId: string) => {
+    setCollapsed((current) =>
+      current.includes(columnId) ? current.filter((id) => id !== columnId) : [...current, columnId],
+    )
+  }, [])
+
+  return { collapsed, toggle }
+}
+
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
   const queryClient = useQueryClient()
@@ -127,6 +177,7 @@ export function ProjectBoard() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [creatingTask, setCreatingTask] = useState(false)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
+  const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
 
   const board = useQuery({
@@ -238,6 +289,15 @@ export function ProjectBoard() {
               column={column}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
+              collapsed={collapsed.includes(column.id)}
+              onToggleCollapse={() => {
+                toggle(column.id)
+                announce(
+                  collapsed.includes(column.id)
+                    ? `${column.name} expanded.`
+                    : `${column.name} collapsed.`,
+                )
+              }}
               onOpenTask={setOpenTaskId}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
@@ -295,6 +355,8 @@ function Column({
   column,
   tasks,
   isFirst,
+  collapsed,
+  onToggleCollapse,
   onOpenTask,
   onAddTask,
   onEdit,
@@ -302,23 +364,65 @@ function Column({
   column: BoardColumn
   tasks: Task[]
   isFirst: boolean
+  collapsed: boolean
+  onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onAddTask: () => void
   onEdit: () => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id })
+  const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
+
+  if (collapsed) {
+    return (
+      <section
+        ref={setNodeRef}
+        className={`${styles.rail} ${isOver ? styles.over : ''}`}
+        aria-label={`${column.name}, ${counted}, collapsed`}
+      >
+        <button
+          type="button"
+          className={styles.railBody}
+          aria-expanded={false}
+          aria-label={`Expand ${column.name}`}
+          onClick={onToggleCollapse}
+        >
+          <span aria-hidden="true">›</span>
+          <span className={styles.count}>{tasks.length}</span>
+          <span className={styles.railName}>{column.name}</span>
+        </button>
+        {/* The first column is where new work lands, so its "+" survives the
+            fold: otherwise tidying the board away takes the add button with
+            it. */}
+        {isFirst ? (
+          <button className={styles.railAdd} onClick={onAddTask} aria-label="Add a task">
+            +
+          </button>
+        ) : null}
+      </section>
+    )
+  }
 
   return (
     <section
       ref={setNodeRef}
       className={`${styles.column} ${isOver ? styles.over : ''}`}
-      aria-label={`${column.name}, ${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`}
+      aria-label={`${column.name}, ${counted}`}
     >
       <div className={styles.head}>
         <div className={styles.headRow}>
           <h3>{column.name}</h3>
           <span className={styles.headActions}>
             <span className={styles.count}>{tasks.length}</span>
+            <Button
+              variant="ghost"
+              small
+              aria-expanded
+              aria-label={`Collapse ${column.name}`}
+              onClick={onToggleCollapse}
+            >
+              ‹
+            </Button>
             <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
               ···
             </Button>

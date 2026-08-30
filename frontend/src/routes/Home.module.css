@@ -1,3 +1,84 @@
+/* Who you are, above the projects you start. A row rather than a tile: it is
+   one fact about the whole screen, not another thing in the grid. */
+.me {
+  display: flex;
+
+  /* The shared card lays its children out in a column; this one is a row. */
+  flex-direction: row;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  text-align: left;
+}
+
+.meEmpty {
+  justify-content: space-between;
+  border: 2px dashed var(--line-2);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.meEmpty:hover {
+  border-color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+.meText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meText b {
+  font-family: var(--font-ui);
+  font-size: 16px;
+}
+
+.meName {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.youTag {
+  padding: 2px 8px;
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--radius-control);
+  color: var(--brand-ink);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.meRole {
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.meNote {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.meAdd {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.meEmpty:hover .meAdd {
+  color: var(--brand-ink);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

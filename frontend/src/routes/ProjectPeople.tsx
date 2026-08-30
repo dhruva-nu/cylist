@@ -9,8 +9,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, type Person, type PersonInput, type PersonKind } from '../api/client'
-import { Field, FieldPair, Modal, ModalBody } from '../components/Modal'
+import { api, type Person } from '../api/client'
+import { Modal, ModalBody } from '../components/Modal'
+import { PersonDialog } from '../components/PersonDialog'
 import { PageHead } from '../components/Shell'
 import {
   Avatar,
@@ -157,6 +158,7 @@ function Group({
                 <div className={styles.nameRow}>
                   <b>{person.name}</b>
                   <KindTag kind={person.kind} />
+                  {person.is_me ? <span className={styles.you}>you</span> : null}
                 </div>
                 <span className={styles.role}>{person.role}</span>
                 <div className={styles.responsibilities}>{person.responsibilities}</div>
@@ -175,136 +177,6 @@ function Group({
         </div>
       )}
     </>
-  )
-}
-
-const EMPTY: PersonInput = {
-  name: '',
-  kind: 'team',
-  role: '',
-  responsibilities: '',
-  email: '',
-}
-
-/**
- * Creates a person, or edits one.
- *
- * When creating from inside a project, the new person is put on that project
- * straight away — being asked to then go and add them would be silly.
- */
-function PersonDialog({
-  title,
-  person,
-  projectKey,
-  currentMemberIds,
-  onSaved,
-  onDone,
-  onClose,
-}: {
-  title: string
-  person?: Person
-  projectKey?: string
-  currentMemberIds?: string[]
-  onSaved: (name: string) => void
-  onDone: () => Promise<void>
-  onClose: () => void
-}) {
-  const [form, setForm] = useState<PersonInput>(
-    person
-      ? {
-          name: person.name,
-          kind: person.kind,
-          role: person.role,
-          responsibilities: person.responsibilities,
-          email: person.email ?? '',
-        }
-      : EMPTY,
-  )
-
-  const save = useMutation({
-    mutationFn: async (input: PersonInput) => {
-      const payload = { ...input, email: input.email?.trim() ? input.email.trim() : null }
-      if (person) {
-        await api.updatePerson(person.id, payload)
-        return payload.name
-      }
-      const created = await api.createPerson(payload)
-      if (projectKey) {
-        await api.setMembers(projectKey, [...(currentMemberIds ?? []), created.id])
-      }
-      return created.name
-    },
-    onSuccess: async (name) => {
-      await onDone()
-      onSaved(name)
-      onClose()
-    },
-  })
-
-  const complete = form.name.trim() && form.role.trim() && form.responsibilities.trim()
-
-  return (
-    <Modal
-      title={title}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="go"
-            disabled={save.isPending || !complete}
-            onClick={() => save.mutate(form)}
-          >
-            {save.isPending ? 'Saving…' : person ? 'Save' : 'Add person'}
-          </Button>
-        </>
-      }
-    >
-      <ModalBody>
-        {save.error ? <ErrorBanner>{save.error.message}</ErrorBanner> : null}
-        <FieldPair>
-          <Field label="Name" required>
-            <input
-              value={form.name}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-            />
-          </Field>
-          <Field label="Kind" required>
-            <select
-              value={form.kind}
-              onChange={(event) => setForm({ ...form, kind: event.target.value as PersonKind })}
-            >
-              <option value="team">Team member</option>
-              <option value="client">Client</option>
-            </select>
-          </Field>
-        </FieldPair>
-        <Field label="Who is this?" required>
-          <input
-            value={form.role}
-            onChange={(event) => setForm({ ...form, role: event.target.value })}
-            placeholder="Finance controller, Atlas"
-          />
-        </Field>
-        <Field
-          label="What do they do?"
-          required
-          hint="What you would tag them about when a task is waiting on somebody."
-        >
-          <textarea
-            value={form.responsibilities}
-            onChange={(event) => setForm({ ...form, responsibilities: event.target.value })}
-          />
-        </Field>
-        <Field label="Email">
-          <input
-            type="email"
-            value={form.email ?? ''}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
-          />
-        </Field>
-      </ModalBody>
-    </Modal>
   )
 }
 

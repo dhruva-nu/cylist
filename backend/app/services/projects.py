@@ -18,7 +18,7 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns, files
+from app.services import columns, files, people
 
 
 async def create(session: AsyncSession, data: ProjectCreate) -> Project:
@@ -29,6 +29,10 @@ async def create(session: AsyncSession, data: ProjectCreate) -> Project:
     a tree with no root cannot hold a file, so in both cases there would be
     nothing useful to do with the project until someone had run a setup step
     whose outcome was never in doubt.
+
+    Whoever is marked as you (:func:`app.services.people.get_me`) joins the
+    project for the same reason: the first task needs an assignee, and it is
+    never a surprise that the person who started the project is on it.
 
     Raises:
         ConflictError: if the key is already taken.
@@ -50,6 +54,11 @@ async def create(session: AsyncSession, data: ProjectCreate) -> Project:
 
     await columns.seed(session, project)
     await files.seed_root(session, project)
+
+    me = await people.get_me(session)
+    if me is not None and not me.is_archived:
+        session.add(ProjectMember(project_id=project.id, person_id=me.id))
+        await session.flush()
 
     # `members` is only populated by a SELECT, and a just-inserted row has not
     # had one. Load it now so callers can read it without lazy IO.

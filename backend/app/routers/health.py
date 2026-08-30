@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session
+from app.db import SessionDependency
 from app.schemas.common import Schema
 
 router = APIRouter(tags=["health"])
@@ -28,7 +28,7 @@ class Health(Schema):
 @router.get("/health", response_model=Health, summary="Service health")
 async def health(
     response: Response,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Health:
     """Report whether the API can serve requests.
 

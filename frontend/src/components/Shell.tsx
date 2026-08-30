@@ -14,7 +14,8 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
   system: 'System',
 }
 
-/** The owner's mark in the bar. A fixed accent, not a token that flips. */
+/** The mark in the bar before anyone has said who they are. A fixed accent,
+ * not a token that flips. */
 const OWNER_COLOUR = '#4a7b8c'
 
 export function Shell() {
@@ -42,7 +43,7 @@ export function Shell() {
           <ProjectTabs />
           <div className={styles.right}>
             <ThemeToggle />
-            <Avatar name="You" colour={OWNER_COLOUR} />
+            <You />
           </div>
         </div>
         <Breadcrumbs />
@@ -104,6 +105,24 @@ function ThemeToggle() {
         </button>
       ))}
     </div>
+  )
+}
+
+/**
+ * Your own mark in the bar.
+ *
+ * `/me` is fetched once by the authentication gate and read from the cache
+ * here, so this costs nothing. Until somebody is marked as you in the
+ * directory it is the plain accent — there is nobody to name yet.
+ */
+function You() {
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const person = identity.data?.person ?? null
+
+  return person ? (
+    <Avatar name={person.name} colour={person.colour} />
+  ) : (
+    <Avatar name="You" colour={OWNER_COLOUR} />
   )
 }
 

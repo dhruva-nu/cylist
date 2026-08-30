@@ -102,6 +102,8 @@ class PersonSpec:
     responsibilities: str
     email: str
     colour: str
+    is_me: bool = False
+    """Whether this is the directory's "you". Exactly one spec sets it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +209,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
     PersonSpec(
         handle="dn",
         name="Dhruva N",
+        is_me=True,
         kind=PersonKind.TEAM,
         role="Tech lead",
         responsibilities=(
@@ -909,6 +912,7 @@ async def _write_directory(session: AsyncSession, summary: Summary) -> dict[str,
                 responsibilities=spec.responsibilities,
                 email=spec.email,
                 colour=spec.colour,
+                is_me=spec.is_me,
             ),
         )
         directory[spec.handle] = person.id
