@@ -25,7 +25,7 @@ from app.schemas.projects import (
     ProjectSummary,
     ProjectUpdate,
 )
-from app.services import activity, projects
+from app.services import activity, files, projects
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -117,13 +117,16 @@ async def get_summary(
 ) -> ProjectSummary:
     """The counts behind the project hub's cards.
 
-    Board, file and vault figures join this response as those features land.
+    Board and vault figures join this response as those features land.
     """
     counts = await projects.member_counts(session, project)
+    contents = await files.counts(session, project)
     return ProjectSummary(
         **_read(project).model_dump(),
         team_count=counts[PersonKind.TEAM],
         client_count=counts[PersonKind.CLIENT],
+        folder_count=contents.folders,
+        file_count=contents.items,
     )
 
 

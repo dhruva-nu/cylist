@@ -56,12 +56,67 @@ export interface Project {
 export interface ProjectSummary extends Project {
   team_count: number
   client_count: number
+  folder_count: number
+  /** Everything in the project's folders — uploads and links alike. */
+  file_count: number
 }
 
 export interface ProjectInput {
   key: string
   name: string
   description?: string
+}
+
+export type ItemKind = 'file' | 'link'
+export type ItemSource = 'upload' | 'sharepoint' | 'gdrive' | 'other'
+
+export interface Folder {
+  id: string
+  project_id: string
+  parent_id: string | null
+  name: string
+  created_at: string
+}
+
+/** A folder in the whole-tree response, with its subfolders inside it. */
+export interface FolderNode {
+  id: string
+  name: string
+  parent_id: string | null
+  children: FolderNode[]
+}
+
+export interface FolderCrumb {
+  id: string
+  name: string
+}
+
+export interface FileItem {
+  id: string
+  folder_id: string
+  kind: ItemKind
+  name: string
+  url: string | null
+  source: ItemSource
+  size: number | null
+  mime: string | null
+  added_by: Person | null
+  created_at: string
+}
+
+export interface FolderChildren {
+  folder: Folder
+  /** The folders above this one, outermost first, ending with it. */
+  path: FolderCrumb[]
+  folders: Folder[]
+  items: FileItem[]
+}
+
+export interface LinkInput {
+  name: string
+  url: string
+  source: ItemSource
+  added_by?: string | null
 }
 
 export interface Health {
@@ -99,7 +154,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       credentials: 'same-origin', // carries the session cookie
       headers: {
         Accept: 'application/json',
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        // FormData carries its own multipart content type, boundary included;
+        // setting one here would produce a body the server cannot parse.
+        ...(init.body && !(init.body instanceof FormData)
+          ? { 'Content-Type': 'application/json' }
+          : {}),
         ...init.headers,
       },
     })
@@ -152,6 +211,28 @@ export const api = {
       method: 'PUT',
       body: body({ person_ids: personIds }),
     }),
+
+  getTree: (ref: string) => request<FolderNode[]>(`/projects/${ref}/tree`),
+  createFolder: (ref: string, input: { name: string; parent_id: string | null }) =>
+    request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
+  updateFolder: (id: string, input: { name?: string; parent_id?: string | null }) =>
+    request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
+  deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
+  getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
+
+  uploadFile: (folderId: string, file: File, addedBy?: string | null) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (addedBy) form.append('added_by', addedBy)
+    return request<FileItem>(`/folders/${folderId}/upload`, { method: 'POST', body: form })
+  },
+  addLink: (folderId: string, input: LinkInput) =>
+    request<FileItem>(`/folders/${folderId}/links`, { method: 'POST', body: body(input) }),
+  updateItem: (id: string, input: Partial<LinkInput>) =>
+    request<FileItem>(`/items/${id}`, { method: 'PATCH', body: body(input) }),
+  deleteItem: (id: string) => request<{ ok: boolean }>(`/items/${id}`, { method: 'DELETE' }),
+  /** Where the browser fetches a file's bytes from — used as an anchor's href. */
+  downloadUrl: (id: string) => `${API_BASE}/items/${id}/download`,
 
   listPeople: () => request<Person[]>('/people'),
   createPerson: (input: PersonInput) =>

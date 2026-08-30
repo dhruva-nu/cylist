@@ -40,6 +40,9 @@ function ProjectTabs() {
       <Link to="/p/$projectKey" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Overview
       </Link>
+      <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Files
+      </Link>
       <Link
         to="/p/$projectKey/people"
         params={{ projectKey }}
@@ -54,7 +57,9 @@ function ProjectTabs() {
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+  const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
+  const area = onFiles ? 'Files' : onPeople ? 'People' : null
 
   if (!inProject) {
     return (
@@ -70,11 +75,11 @@ function Breadcrumbs() {
     <div className={styles.crumbs}>
       <Link to="/">All projects</Link>
       <span className={styles.separator}>›</span>
-      {onPeople ? (
+      {area ? (
         <>
           <ProjectCrumbLink projectKey={projectKey} />
           <span className={styles.separator}>›</span>
-          <b>People</b>
+          <b>{area}</b>
         </>
       ) : (
         <ProjectName projectKey={projectKey} />

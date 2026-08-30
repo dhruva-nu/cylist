@@ -56,6 +56,13 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class PayloadTooLargeError(AppError):
+    """The request body is bigger than the configured limit allows."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    code = "payload_too_large"
+
+
 class UnprocessableRequestError(AppError):
     """Well-formed, but it breaks a business rule."""
 
