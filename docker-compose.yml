@@ -1,0 +1,42 @@
+# Development stack. Production runs a single image that serves the built SPA
+# from FastAPI; see backend/Dockerfile.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cylist
+      POSTGRES_PASSWORD: cylist
+      POSTGRES_DB: cylist
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Throwaway database for the test suite. Kept separate so running tests never
+  # touches development data, and tmpfs-backed so it is fast and disposable.
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cylist
+      POSTGRES_PASSWORD: cylist
+      POSTGRES_DB: cylist_test
+      PGDATA: /var/lib/postgresql/data
+    command: ["postgres", "-c", "fsync=off", "-c", "full_page_writes=off"]
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

@@ -1,0 +1,138 @@
+/*
+ * Design tokens, taken from the approved mock.
+ *
+ * Three theme states must all resolve:
+ *   1. no attribute + light OS  -> the bare :root block
+ *   2. no attribute + dark OS   -> the prefers-color-scheme block
+ *   3. an explicit choice       -> the [data-theme] blocks, which win either way
+ *
+ * Components must only ever reference var(--token); never declare a colour
+ * inside a media query, or it will be missing in the un-stamped state.
+ */
+
+:root {
+  /* Surfaces — a warm, paper-like ground rather than a neutral grey. */
+  --bg: #f5f3ee;
+  --paper: #ffffff;
+  --paper-2: #f8f6f1;
+  --line: #e6e1d6;
+  --line-2: #d3ccbc;
+
+  /* Text */
+  --ink: #283c46;
+  --ink-2: #5c6b73;
+  --ink-3: #8e9aa1;
+
+  /* Brand: yellow marks and selects; green confirms. */
+  --brand: #f7c948;
+  --brand-ink: #5a4300;
+  --brand-soft: #fff3c7;
+  --go: #1d7d46;
+  --go-hover: #166a3a;
+  --link: #1e5a8a;
+
+  /* Task status — semantic, deliberately separate from the brand hue. */
+  --ok: #2a8f5a;
+  --ok-soft: #e1f3e8;
+  --hold: #c77d00;
+  --hold-soft: #fff0cc;
+  --blocked: #c43d3d;
+  --blocked-soft: #fbe3e3;
+
+  --shadow: 0 1px 3px rgb(40 60 70 / 8%), 0 10px 30px -18px rgb(40 60 70 / 25%);
+  --shadow-lg: 0 2px 6px rgb(40 60 70 / 8%), 0 24px 60px -24px rgb(40 60 70 / 35%);
+
+  --font-ui: 'Figtree', system-ui, sans-serif;
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --radius-card: 18px;
+  --radius-control: 999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #1c2429;
+    --paper: #26313a;
+    --paper-2: #2e3a44;
+    --line: #39464f;
+    --line-2: #4a5963;
+    --ink: #eef1f2;
+    --ink-2: #b4bfc5;
+    --ink-3: #7c8a92;
+    --brand-ink: #ffe79a;
+    --brand-soft: #4a3f14;
+    --go: #3ba56a;
+    --go-hover: #48b878;
+    --link: #7db7e8;
+    --ok: #4fbf80;
+    --ok-soft: #1e3a2a;
+    --hold: #f0a93a;
+    --hold-soft: #463617;
+    --blocked: #ef6b6b;
+    --blocked-soft: #472222;
+    --shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
+    --shadow-lg: 0 2px 6px rgb(0 0 0 / 30%), 0 24px 60px -24px rgb(0 0 0 / 70%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #1c2429;
+  --paper: #26313a;
+  --paper-2: #2e3a44;
+  --line: #39464f;
+  --line-2: #4a5963;
+  --ink: #eef1f2;
+  --ink-2: #b4bfc5;
+  --ink-3: #7c8a92;
+  --brand-ink: #ffe79a;
+  --brand-soft: #4a3f14;
+  --go: #3ba56a;
+  --go-hover: #48b878;
+  --link: #7db7e8;
+  --ok: #4fbf80;
+  --ok-soft: #1e3a2a;
+  --hold: #f0a93a;
+  --hold-soft: #463617;
+  --blocked: #ef6b6b;
+  --blocked-soft: #472222;
+  --shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 30%), 0 24px 60px -24px rgb(0 0 0 / 70%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: var(--font-ui);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

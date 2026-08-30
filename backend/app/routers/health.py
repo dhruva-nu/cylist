@@ -1,0 +1,43 @@
+"""Liveness and readiness.
+
+Unauthenticated on purpose: a load balancer or ``docker healthcheck`` must be
+able to reach it without credentials. It reveals nothing but whether the
+process can talk to its database.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_session
+from app.schemas.common import Schema
+
+router = APIRouter(tags=["health"])
+
+
+class Health(Schema):
+    status: Literal["ok", "degraded"]
+    database: Literal["up", "down"]
+
+
+@router.get("/health", response_model=Health, summary="Service health")
+async def health(
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+) -> Health:
+    """Report whether the API can serve requests.
+
+    Returns ``503`` when the database is unreachable so orchestrators stop
+    routing traffic here.
+    """
+    try:
+        await session.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return Health(status="degraded", database="down")
+    return Health(status="ok", database="up")

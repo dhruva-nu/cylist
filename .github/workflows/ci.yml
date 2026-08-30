@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CYLIST_DATABASE_URL: postgresql+asyncpg://cylist:cylist@localhost:5432/cylist_test
+  CYLIST_TEST_DATABASE_URL: postgresql+asyncpg://cylist:cylist@localhost:5432/cylist_test
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cylist
+          POSTGRES_PASSWORD: cylist
+          POSTGRES_DB: cylist_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cylist -d cylist_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Type-check
+        run: uv run mypy app
+
+      - name: Test
+        run: uv run pytest -q
+
+      # Proves the migrations produce exactly the schema the models describe,
+      # and that every revision reverses cleanly.
+      - name: Verify migrations
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npx prettier --check "src/**/*.{ts,tsx,css}"
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
