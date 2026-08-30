@@ -31,11 +31,14 @@ export function Modal({
   onClose,
   children,
   footer,
+  headerActions,
 }: {
   title: string
   onClose: () => void
   children: ReactNode
   footer: ReactNode
+  /** Controls that belong beside the title rather than in the footer. */
+  headerActions?: ReactNode
 }) {
   const panel = useRef<HTMLDivElement>(null)
   const opener = useRef<Element | null>(null)
@@ -106,9 +109,12 @@ export function Modal({
       >
         <div className={styles.header}>
           <h2>{title}</h2>
-          <Button variant="ghost" small onClick={onClose} aria-label="Close">
-            ✕
-          </Button>
+          <div className={styles.headerActions}>
+            {headerActions}
+            <Button variant="ghost" small onClick={onClose} aria-label="Close">
+              ✕
+            </Button>
+          </div>
         </div>
         {children}
         <div className={styles.footer}>{footer}</div>
