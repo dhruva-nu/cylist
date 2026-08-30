@@ -80,19 +80,36 @@ Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
 ### The runner
 
 A self-hosted GitHub Actions runner, labelled `cylist`, lives in
-`~/actions-runner` and is run by systemd — as a **user** service rather than a
-system one, so nothing about it needs root:
+`~/actions-runner` and is run by systemd as `dnu2`:
 
 ```bash
-systemctl --user status github-runner-cylist
-journalctl --user -u github-runner-cylist -f
+systemctl status github-runner-cylist
+journalctl -u github-runner-cylist -f
 ```
 
-`loginctl enable-linger dnu2` is what keeps it running when nobody is logged in,
-and across reboots. The runner works as `dnu2`, who is in the `docker` group —
-which is what lets it build without privilege.
+It is a **system** unit, and the reason is worth knowing, because the symptom is
+baffling on its own:
 
-To re-register it (a new repository, or a revoked token):
+> `permission denied while trying to connect to the Docker daemon socket`
+> — from a user who is plainly in the `docker` group.
+
+A systemd *user* manager fixes its supplementary groups once, when it starts. If
+`dnu2` joined `docker` after that — which is to say, at any point after the last
+login — then every `systemctl --user` service keeps the older group set for as
+long as that manager lives, however many times the service itself is restarted.
+An SSH login gets fresh groups and works fine, so deploying by hand succeeds
+while the identical deploy from CI fails. Restarting the user manager would fix
+it and would also kill the desktop session, since `dnu2` is the machine's
+logged-in user.
+
+`SupplementaryGroups=docker` in a system unit sidesteps all of it: the group is
+granted at exec, every time. It also means the runner comes up at boot rather
+than at login, which is what you want on a server.
+
+The unit is [`scripts/github-runner-cylist.service`](scripts/github-runner-cylist.service);
+installing it is a copy into `/etc/systemd/system` and an `enable --now`.
+
+To re-register the runner (a new repository, or a revoked token):
 
 ```bash
 gh api repos/dhruva-nu/cylist/actions/runners/registration-token -q .token
@@ -104,19 +121,44 @@ cd ~/actions-runner && ./config.sh --unattended --replace \
 ### Serving it
 
 ```bash
-sudo tailscale serve --bg --https 443 http://127.0.0.1:8000
-sudo tailscale funnel --bg 443
+sudo tailscale funnel --bg --https 443 http://127.0.0.1:8000
 ```
 
-`serve` terminates HTTPS and proxies to the app on loopback, which is the only
-thing that reaches it. `funnel` then puts that same URL on the public internet,
-with the app's own password login as the only gate — which is why production
-sets `CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
+Note the shape of that. `tailscale funnel --bg 443` looks like it means "turn
+Funnel on for port 443" and does not: the argument is the *target*, so it
+quietly repoints the proxy at `127.0.0.1:443`, where nothing is listening — and
+the site answers 502 while `funnel status` cheerfully reports Funnel on.
 
-Both need root unless you run `sudo tailscale set --operator=$USER` once, after
-which they do not. `tailscale serve status` shows where it currently points, and
-`sudo tailscale funnel --bg off` takes it back off the public internet without
-disturbing the tailnet.
+That terminates HTTPS, proxies to the app on loopback — the only thing that
+reaches it — and puts the URL on the public internet, with the app's own
+password login as the only gate. Which is why production sets
+`CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
+
+It needs root unless you run `sudo tailscale set --operator=$USER` once, after
+which it does not. `tailscale serve status` shows where it currently points, and
+`sudo tailscale funnel --https=443 off` takes it back off the public internet.
+
+## When a deploy fails
+
+**`permission denied ... /var/run/docker.sock`,** from a user who is in the
+`docker` group — the runner's groups, not the user's. See the note above, and
+check the process itself:
+
+```bash
+grep ^Groups: /proc/$(systemctl show -p MainPID --value github-runner-cylist)/status
+getent group docker        # the gid to look for
+```
+
+**That fixed nothing, and the journal says `A session for this runner already
+exists`** — an older `Runner.Listener` survived a stop and still holds the
+session, so it, and not the service you just repaired, is taking the jobs.
+`pgrep -af Runner.Listener` lists them; `ps -o lstart= -p <pid>` tells you which
+is the stale one. Kill it. `KillMode=mixed` in the unit is what stops this
+happening again.
+
+**A migration failed** — nothing was restarted, so the previous container is
+still serving. Fix the migration and deploy again, or restore the dump
+`deploy.sh` took moments earlier; see *Rolling back*.
 
 ## Deploying by hand
 

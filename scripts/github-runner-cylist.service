@@ -1,0 +1,36 @@
+[Unit]
+Description=GitHub Actions runner for dhruva-nu/cylist
+Documentation=https://github.com/dhruva-nu/cylist/blob/main/DEPLOY.md
+# The runner's whole job is to build and restart containers, so it is worth
+# starting after the daemon it drives — but only Wants, not Requires: a Docker
+# restart should not take the runner down with it.
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=dnu2
+Group=dnu2
+# The reason this is a system unit rather than a `systemctl --user` one. A user
+# manager fixes its supplementary groups when it starts, so a user service
+# started before dnu2 joined `docker` never sees the group, however many times
+# it is restarted — and every docker command in a deploy fails with EACCES.
+# Naming the group here means it is granted at exec, every time.
+SupplementaryGroups=docker
+WorkingDirectory=/home/dnu2/actions-runner
+ExecStart=/home/dnu2/actions-runner/run.sh
+Restart=always
+RestartSec=5
+# `mixed`, not the `process` that GitHub's own svc.sh ships. Both send SIGTERM
+# to run.sh alone, so a deploy in flight gets to finish — but `process` stops
+# there, and a Runner.Listener that does not take the hint is left orphaned,
+# still holding the runner's session. The next service to start then loops on
+# "A session for this runner already exists" while the stale process quietly
+# goes on taking jobs. `mixed` gives it TimeoutStopSec to leave, then kills
+# whatever is still in the cgroup.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=multi-user.target

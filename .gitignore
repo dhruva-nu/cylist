@@ -12,6 +12,11 @@ htmlcov/
 node_modules/
 dist/
 *.tsbuildinfo
+# package-lock.json is the lockfile: CI and the production image both run
+# `npm ci`, so a second lockfile from another package manager is a second
+# source of truth that can disagree with it silently. Delete this line if the
+# project ever actually moves to bun — and move CI and the Dockerfile with it.
+bun.lock
 
 # Local state
 .env
