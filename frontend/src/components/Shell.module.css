@@ -1,0 +1,198 @@
+/* Off-screen until focused, then a normal-looking button at the top left. */
+.skip {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 30;
+  padding: 10px 16px;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip:focus-visible {
+  transform: none;
+}
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+}
+
+.bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px 24px 8px;
+}
+
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 20px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.theme {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.theme button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme button:hover {
+  color: var(--ink);
+}
+
+.theme button.themeOn {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.nav {
+  display: flex;
+  gap: 6px;
+}
+
+.nav a {
+  padding: 7px 14px;
+  border-radius: var(--radius-control);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.nav a:hover {
+  background: var(--paper);
+}
+
+.nav a.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.crumbs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 6px 24px 0;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.crumbs a {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.crumbs b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.separator {
+  color: var(--ink-3);
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 24px 60px;
+}
+
+.wide {
+  max-width: none;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 30px;
+  text-align: center;
+}
+
+.head p {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 16px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .nav {
+    display: none;
+  }
+}

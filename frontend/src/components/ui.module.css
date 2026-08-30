@@ -1,0 +1,147 @@
+/* Shared primitives. Everything reads from the tokens in theme/tokens.css. */
+
+.button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.go {
+  border-color: var(--go);
+  background: var(--go);
+  color: var(--go-ink);
+}
+
+.go:hover:not(:disabled) {
+  border-color: var(--go-hover);
+  background: var(--go-hover);
+}
+
+.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.danger {
+  color: var(--blocked);
+}
+
+.small {
+  padding: 4px 11px;
+  font-size: 13px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.clickable {
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+
+.clickable:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+
+  /* The ink is set inline: it depends on the identity colour behind it. */
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.avatarLarge {
+  width: 52px;
+  height: 52px;
+  font-size: 19px;
+}
+
+.tag {
+  padding: 2px 8px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.team {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.client {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.eyebrow {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+  border: 2px dashed var(--line-2);
+  border-radius: var(--radius-card);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.banner {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--blocked-soft);
+  color: var(--blocked);
+  font-size: 14px;
+}

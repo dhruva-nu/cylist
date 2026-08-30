@@ -1,0 +1,69 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.project {
+  min-height: 220px;
+  padding: 30px 24px 22px;
+  align-items: center;
+  text-align: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 6px;
+  border-radius: 20px;
+
+  /* The ink is set inline: it depends on the project's own colour. */
+  font-family: var(--font-ui);
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.project h3 {
+  font-size: 20px;
+}
+
+.project p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.new {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  border: 2px dashed var(--line-2);
+  border-radius: var(--radius-card);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.new:hover {
+  border-color: var(--brand-ink);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}

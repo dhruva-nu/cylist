@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -34,6 +35,11 @@ from app.main import create_app
 from app.models import Base
 
 OWNER_PASSWORD = "correct-horse-battery-staple"
+
+VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
+"""A fixed 32-byte AES key, so a ciphertext written by one test is readable by
+the next. Never used anywhere but here; a real one comes from
+``python -m app.cli generate-vault-key``."""
 
 TEST_DATABASE_NAME = "cylist_test"
 
@@ -73,6 +79,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory, database_url: str) -> Set
         database_url=database_url,
         data_dir=tmp_path_factory.mktemp("cylist-data"),
         password_hash=hash_password(OWNER_PASSWORD),
+        vault_key=VAULT_KEY,
         cors_origins=[],
     )
 
@@ -106,12 +113,14 @@ async def session(database: Database) -> AsyncIterator[AsyncSession]:
         yield db_session
 
 
-@pytest.fixture
-async def client(settings: Settings, database: Database) -> AsyncIterator[AsyncClient]:
-    """An HTTP client wired to the app, sharing the test database.
+@asynccontextmanager
+async def client_for(settings: Settings, database: Database) -> AsyncIterator[AsyncClient]:
+    """An HTTP client wired to an app built with these settings.
 
     The app is built without its lifespan so it reuses the session-scoped
-    engine instead of opening a second pool per test.
+    engine instead of opening a second pool per test. Exposed rather than
+    inlined into the fixture because a test that needs different configuration
+    — a smaller upload cap, say — has to build its own app to get it.
     """
     app = create_app(settings)
     app.state.settings = settings
@@ -122,9 +131,21 @@ async def client(settings: Settings, database: Database) -> AsyncIterator[AsyncC
         yield http
 
 
-@pytest.fixture
-async def signed_in(client: AsyncClient) -> AsyncClient:
-    """A client holding a valid owner session cookie."""
+async def sign_in(client: AsyncClient) -> AsyncClient:
+    """Give a client the owner's session cookie."""
     response = await client.post("/auth/login", json={"password": OWNER_PASSWORD})
     assert response.status_code == 200, response.text
     return client
+
+
+@pytest.fixture
+async def client(settings: Settings, database: Database) -> AsyncIterator[AsyncClient]:
+    """An HTTP client wired to the app, sharing the test database."""
+    async with client_for(settings, database) as http:
+        yield http
+
+
+@pytest.fixture
+async def signed_in(client: AsyncClient) -> AsyncClient:
+    """A client holding a valid owner session cookie."""
+    return await sign_in(client)

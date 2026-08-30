@@ -61,8 +61,11 @@ class Activity(Base, UUIDPrimaryKeyMixin):
     entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
     entity_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
 
-    project_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
-    """Scopes the feed to one project. The foreign key arrives with the
-    ``project`` table in the next migration."""
+    project_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("project.id", ondelete="SET NULL"),
+    )
+    """Scopes the feed to one project. Nulled rather than cascaded if a project
+    ever goes away, so the record of what happened outlives it."""
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

@@ -1,0 +1,115 @@
+.section {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin: 26px 0 12px;
+}
+
+.section h2 {
+  font-size: 18px;
+}
+
+.section span {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.person {
+  flex-direction: row;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 18px;
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.nameRow b {
+  font-family: var(--font-ui);
+  font-size: 16px;
+}
+
+.role {
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.responsibilities {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--paper-2);
+}
+
+.option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--go);
+}
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.optionText b {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.optionText span {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}

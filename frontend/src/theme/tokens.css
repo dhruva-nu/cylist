@@ -1,5 +1,5 @@
 /*
- * Design tokens, taken from the approved mock.
+ * Design tokens, taken from the approved mock and then retuned for contrast.
  *
  * Three theme states must all resolve:
  *   1. no attribute + light OS  -> the bare :root block
@@ -8,6 +8,19 @@
  *
  * Components must only ever reference var(--token); never declare a colour
  * inside a media query, or it will be missing in the un-stamped state.
+ *
+ * States 2 and 3 have to be written twice — CSS has no way to share one
+ * declaration list between a media query and a selector. So only the *names*
+ * are repeated: every dark value is declared once as a --dark-* token below,
+ * and the two blocks at the bottom do nothing but point the real tokens at
+ * them. A value therefore cannot drift between "the OS says dark" and "the
+ * toggle says dark"; at worst a line is missing from one list, and the two
+ * lists sit next to each other so that is visible.
+ *
+ * Contrast: every token used as text clears WCAG AA (4.5:1) against every
+ * surface it is actually painted on, in both themes. The ink ramp is three
+ * steps rather than a light grey tail, because a 2.6:1 caption is not a
+ * caption anybody can read.
  */
 
 :root {
@@ -18,10 +31,10 @@
   --line: #e6e1d6;
   --line-2: #d3ccbc;
 
-  /* Text */
+  /* Text. 11.5:1 / 7.8:1 / 5.2:1 on paper — three readable steps. */
   --ink: #283c46;
-  --ink-2: #5c6b73;
-  --ink-3: #8e9aa1;
+  --ink-2: #49545b;
+  --ink-3: #626e76;
 
   /* Brand: yellow marks and selects; green confirms. */
   --brand: #f7c948;
@@ -29,18 +42,53 @@
   --brand-soft: #fff3c7;
   --go: #1d7d46;
   --go-hover: #166a3a;
+  --go-ink: #ffffff;
   --link: #1e5a8a;
 
   /* Task status — semantic, deliberately separate from the brand hue. */
-  --ok: #2a8f5a;
+  --ok: #247b4e;
   --ok-soft: #e1f3e8;
-  --hold: #c77d00;
+  --hold: #9b6100;
   --hold-soft: #fff0cc;
-  --blocked: #c43d3d;
+  --blocked: #bd3939;
   --blocked-soft: #fbe3e3;
 
+  --scrim: rgb(40 60 70 / 50%);
   --shadow: 0 1px 3px rgb(40 60 70 / 8%), 0 10px 30px -18px rgb(40 60 70 / 25%);
   --shadow-lg: 0 2px 6px rgb(40 60 70 / 8%), 0 24px 60px -24px rgb(40 60 70 / 35%);
+
+  /*
+   * The focus ring. Not the brand yellow: at 1.7:1 on paper it is a decoration
+   * rather than an indicator, and keyboard users need to find it at a glance.
+   * Painted with an offset so it always lands on the surrounding surface,
+   * never on the control it is marking.
+   */
+  --focus: #20455a;
+
+  /*
+   * Colours that do not flip, because what sits on them does not either.
+   *
+   * The brand yellow is the same in both themes, so its ink is too. Identity
+   * colours (a person's avatar, a project's mark) are stored per row and can
+   * be any hex at all, so the frontend picks between these two by luminance
+   * rather than assuming white will do — see readableInkOn() in ui.tsx.
+   */
+  --on-brand: #3a2e00;
+  --on-accent: #ffffff;
+  --on-accent-dark: #21303a;
+
+  /*
+   * File-type badges. Fixed hues rather than theme tokens: they are labels for
+   * a kind of thing, not part of the surface, and each is dark enough for
+   * --on-accent to clear AA on it in either theme.
+   */
+  --file-pdf: #c3533d;
+  --file-doc: #3b6fc2;
+  --file-sheet: #278655;
+  --file-archive: #7a6b9e;
+  --file-image: #a76900;
+  --file-other: #5c6b73;
+  --file-link: #4a7b8c;
 
   --font-ui: 'Figtree', system-ui, sans-serif;
   --font-body: 'Source Sans 3', system-ui, sans-serif;
@@ -48,56 +96,107 @@
 
   --radius-card: 18px;
   --radius-control: 999px;
+
+  /*
+   * The dark palette, declared once. Nothing reads these directly; the two
+   * blocks at the end of this file are what put them to work.
+   */
+  --dark-bg: #1c2429;
+  --dark-paper: #26313a;
+  --dark-paper-2: #2e3a44;
+  --dark-line: #39464f;
+  --dark-line-2: #4a5963;
+  --dark-ink: #eef1f2;
+  --dark-ink-2: #c2cbcf;
+  --dark-ink-3: #9ca7ad;
+  --dark-brand-ink: #ffe79a;
+  --dark-brand-soft: #4a3f14;
+  --dark-go: #41b675;
+  --dark-go-hover: #5cc98a;
+  --dark-go-ink: #0d2a1a;
+  --dark-link: #7db7e8;
+  --dark-ok: #4fbf80;
+  --dark-ok-soft: #1e3a2a;
+  --dark-hold: #f0a93a;
+  --dark-hold-soft: #463617;
+  --dark-blocked: #f18080;
+  --dark-blocked-soft: #472222;
+  --dark-scrim: rgb(0 0 0 / 62%);
+  --dark-focus: #f7c948;
+  --dark-shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
+  --dark-shadow-lg: 0 2px 6px rgb(0 0 0 / 30%), 0 24px 60px -24px rgb(0 0 0 / 70%);
 }
 
+/*
+ * Dark, chosen by the OS and not overruled by the toggle.
+ *
+ * --brand is deliberately absent from both lists: the yellow is the one hue
+ * the mock keeps identical in both themes, so remapping it would be a
+ * no-op pretending to be a decision.
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #1c2429;
-    --paper: #26313a;
-    --paper-2: #2e3a44;
-    --line: #39464f;
-    --line-2: #4a5963;
-    --ink: #eef1f2;
-    --ink-2: #b4bfc5;
-    --ink-3: #7c8a92;
-    --brand-ink: #ffe79a;
-    --brand-soft: #4a3f14;
-    --go: #3ba56a;
-    --go-hover: #48b878;
-    --link: #7db7e8;
-    --ok: #4fbf80;
-    --ok-soft: #1e3a2a;
-    --hold: #f0a93a;
-    --hold-soft: #463617;
-    --blocked: #ef6b6b;
-    --blocked-soft: #472222;
-    --shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
-    --shadow-lg: 0 2px 6px rgb(0 0 0 / 30%), 0 24px 60px -24px rgb(0 0 0 / 70%);
+    --bg: var(--dark-bg);
+    --paper: var(--dark-paper);
+    --paper-2: var(--dark-paper-2);
+    --line: var(--dark-line);
+    --line-2: var(--dark-line-2);
+    --ink: var(--dark-ink);
+    --ink-2: var(--dark-ink-2);
+    --ink-3: var(--dark-ink-3);
+    --brand-ink: var(--dark-brand-ink);
+    --brand-soft: var(--dark-brand-soft);
+    --go: var(--dark-go);
+    --go-hover: var(--dark-go-hover);
+    --go-ink: var(--dark-go-ink);
+    --link: var(--dark-link);
+    --ok: var(--dark-ok);
+    --ok-soft: var(--dark-ok-soft);
+    --hold: var(--dark-hold);
+    --hold-soft: var(--dark-hold-soft);
+    --blocked: var(--dark-blocked);
+    --blocked-soft: var(--dark-blocked-soft);
+    --scrim: var(--dark-scrim);
+    --focus: var(--dark-focus);
+    --shadow: var(--dark-shadow);
+    --shadow-lg: var(--dark-shadow-lg);
+
+    color-scheme: dark;
   }
 }
 
+/* Dark, chosen in the interface. Wins whatever the OS says. */
 :root[data-theme='dark'] {
-  --bg: #1c2429;
-  --paper: #26313a;
-  --paper-2: #2e3a44;
-  --line: #39464f;
-  --line-2: #4a5963;
-  --ink: #eef1f2;
-  --ink-2: #b4bfc5;
-  --ink-3: #7c8a92;
-  --brand-ink: #ffe79a;
-  --brand-soft: #4a3f14;
-  --go: #3ba56a;
-  --go-hover: #48b878;
-  --link: #7db7e8;
-  --ok: #4fbf80;
-  --ok-soft: #1e3a2a;
-  --hold: #f0a93a;
-  --hold-soft: #463617;
-  --blocked: #ef6b6b;
-  --blocked-soft: #472222;
-  --shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
-  --shadow-lg: 0 2px 6px rgb(0 0 0 / 30%), 0 24px 60px -24px rgb(0 0 0 / 70%);
+  --bg: var(--dark-bg);
+  --paper: var(--dark-paper);
+  --paper-2: var(--dark-paper-2);
+  --line: var(--dark-line);
+  --line-2: var(--dark-line-2);
+  --ink: var(--dark-ink);
+  --ink-2: var(--dark-ink-2);
+  --ink-3: var(--dark-ink-3);
+  --brand-ink: var(--dark-brand-ink);
+  --brand-soft: var(--dark-brand-soft);
+  --go: var(--dark-go);
+  --go-hover: var(--dark-go-hover);
+  --go-ink: var(--dark-go-ink);
+  --link: var(--dark-link);
+  --ok: var(--dark-ok);
+  --ok-soft: var(--dark-ok-soft);
+  --hold: var(--dark-hold);
+  --hold-soft: var(--dark-hold-soft);
+  --blocked: var(--dark-blocked);
+  --blocked-soft: var(--dark-blocked-soft);
+  --scrim: var(--dark-scrim);
+  --focus: var(--dark-focus);
+  --shadow: var(--dark-shadow);
+  --shadow-lg: var(--dark-shadow-lg);
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 * {
@@ -121,11 +220,26 @@ h3 {
   text-wrap: balance;
 }
 
-button:focus-visible,
-input:focus-visible,
-a:focus-visible {
-  outline: 3px solid var(--brand);
+/*
+ * Everything focusable, not just buttons, inputs and links: tree rows and
+ * board cards take focus through tabindex, and an element you can reach but
+ * cannot see is worse than one you cannot reach.
+ */
+:focus-visible {
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* Only ever hidden from sight — screen readers still announce it. */
+.visually-hidden {
+  position: absolute;
+  overflow: hidden;
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
