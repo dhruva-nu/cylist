@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.routers.projects import resolved_project
@@ -28,7 +28,7 @@ router = APIRouter(tags=["board"])
 
 async def resolved_column(
     column_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> BoardColumn:
     """Turn the path segment into a column, 404-ing if nothing matches."""
     return await columns.get(session, column_id)
@@ -59,7 +59,7 @@ async def _board(session: AsyncSession, project: Project) -> Board:
 async def list_columns(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Board:
     """The board, left to right, with how many cards each column holds."""
     return await _board(session, project)
@@ -76,7 +76,7 @@ async def create_column(
     body: ColumnCreate,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ColumnRead:
     """Add a column to the right of the existing ones.
 
@@ -106,7 +106,7 @@ async def reorder_columns(
     body: ColumnOrder,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Board:
     """Set the left-to-right order of the whole board.
 
@@ -131,7 +131,7 @@ async def update_column(
     body: ColumnUpdate,
     column: BoardColumn = Depends(resolved_column),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> ColumnRead:
     """Change a column's name or description. Omitted fields are left alone."""
     updated = await columns.update(session, column, body)
@@ -157,7 +157,7 @@ async def update_column(
 async def delete_column(
     column: BoardColumn = Depends(resolved_column),
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete an empty column.
 

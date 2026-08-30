@@ -240,6 +240,13 @@ export function ProjectVault() {
       {adding ? (
         <NodeDialog
           destination={adding}
+          onCreated={(created) => {
+            setOpenTrees((current) =>
+              current.includes(created.tree_id) ? current : [...current, created.tree_id],
+            )
+            if (created.parent_id) setBranchOpen(created.parent_id, true)
+            setSelectedId(created.id)
+          }}
           onDone={async (name) => {
             await refresh()
             announce(`Added ${name}.`)
@@ -841,11 +848,14 @@ interface SecretForm {
 function NodeDialog({
   node,
   destination,
+  onCreated,
   onDone,
   onClose,
 }: {
   node?: VaultNode
   destination: Destination
+  /** What was just added, so the screen can open the tree onto it. */
+  onCreated?: (created: VaultNode) => void
   onDone: (name: string) => Promise<void>
   onClose: () => void
 }) {
@@ -872,9 +882,9 @@ function NodeDialog({
           name: name.trim(),
           ...(node.kind === 'secret' ? { secret } : {}),
         })
-        return
+        return null
       }
-      await api.createVaultNode({
+      return api.createVaultNode({
         tree_id: destination.treeId,
         parent_id: destination.parentId,
         name: name.trim(),
@@ -882,7 +892,10 @@ function NodeDialog({
         ...(kind === 'secret' ? { secret: { ...secret, value: form.value } } : {}),
       })
     },
-    onSuccess: async () => {
+    onSuccess: async (created) => {
+      // Before the refetch, so the tree is already open on the new node by
+      // the time it arrives rather than adding it somewhere out of sight.
+      if (created) onCreated?.(created)
       await onDone(name.trim())
       onClose()
     },

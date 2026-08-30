@@ -29,7 +29,7 @@ from app.config import Settings, app_settings
 from app.core import crypto
 from app.core.clock import now
 from app.core.crypto import VaultCipher
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
 from app.routers.projects import resolved_project
@@ -66,12 +66,12 @@ def vault_cipher(settings: Settings = Depends(app_settings)) -> VaultCipher:
     return crypto.cipher_for(settings.vault_key)
 
 
-async def resolved_tree(tree_id: UUID, session: AsyncSession = Depends(get_session)) -> VaultTree:
+async def resolved_tree(tree_id: UUID, session: AsyncSession = SessionDependency) -> VaultTree:
     """Turn the path segment into a tree, 404-ing if nothing matches."""
     return await vault.get_tree(session, tree_id)
 
 
-async def resolved_node(node_id: UUID, session: AsyncSession = Depends(get_session)) -> VaultNode:
+async def resolved_node(node_id: UUID, session: AsyncSession = SessionDependency) -> VaultNode:
     """Turn the path segment into a node, 404-ing if nothing matches."""
     return await vault.get_node(session, node_id)
 
@@ -88,7 +88,7 @@ async def resolved_node(node_id: UUID, session: AsyncSession = Depends(get_sessi
 async def list_trees(
     _: Principal = Depends(READ),
     project: Project = Depends(resolved_project),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> list[VaultTreeRead]:
     """The trees down the left of the vault screen, with their headline counts."""
     trees = await vault.list_trees(session, project)
@@ -108,7 +108,7 @@ async def create_tree(
     body: VaultTreeCreate,
     principal: Principal = Depends(WRITE),
     project: Project = Depends(resolved_project),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> VaultTreeRead:
     """Add a tree — "Logins", "Certificates & keys", whatever the project needs."""
     tree = await vault.create_tree(session, project, body)
@@ -132,7 +132,7 @@ async def create_tree(
 async def get_tree(
     _: Principal = Depends(READ),
     tree: VaultTree = Depends(resolved_tree),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> VaultTreeDetail:
     """Every node in the tree, nested, with each secret's metadata.
 
@@ -157,7 +157,7 @@ async def update_tree(
     body: VaultTreeUpdate,
     principal: Principal = Depends(WRITE),
     tree: VaultTree = Depends(resolved_tree),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> VaultTreeRead:
     updated = await vault.update_tree(session, tree, body)
     await activity.record(
@@ -176,7 +176,7 @@ async def update_tree(
 async def delete_tree(
     principal: Principal = Depends(WRITE),
     tree: VaultTree = Depends(resolved_tree),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a tree and every credential in it. There is no undo."""
     name, project_id, tree_id = tree.name, tree.project_id, tree.id
@@ -209,7 +209,7 @@ async def delete_tree(
 async def create_node(
     body: VaultNodeCreate,
     principal: Principal = Depends(WRITE),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),
 ) -> VaultNodeRead:
     """Create a node.
@@ -238,7 +238,7 @@ async def create_node(
 async def get_node(
     _: Principal = Depends(READ),
     node: VaultNode = Depends(resolved_node),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> VaultNodeRead:
     """One node and its subtree — metadata only, never a secret value."""
     nodes = await vault.nodes_in_tree(session, node.tree_id)
@@ -255,7 +255,7 @@ async def update_node(
     body: VaultNodeUpdate,
     principal: Principal = Depends(WRITE),
     node: VaultNode = Depends(resolved_node),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),
 ) -> VaultNodeRead:
     """Change any subset of a node. Omitted fields are left alone.
@@ -283,7 +283,7 @@ async def update_node(
 async def delete_node(
     principal: Principal = Depends(WRITE),
     node: VaultNode = Depends(resolved_node),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a node. A branch takes its whole subtree with it."""
     tree = await vault.get_tree(session, node.tree_id)
@@ -314,7 +314,7 @@ async def move_node(
     body: VaultNodeMove,
     principal: Principal = Depends(WRITE),
     node: VaultNode = Depends(resolved_node),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> VaultNodeRead:
     """Re-parent and reposition a node within its tree.
 
@@ -352,7 +352,7 @@ async def move_node(
 async def reveal_secret(
     principal: Principal = Depends(REVEAL),
     node: VaultNode = Depends(resolved_node),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),
 ) -> SecretRevealed:
     """Decrypt one credential and return it.

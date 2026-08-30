@@ -152,3 +152,43 @@ class TestAuditTrail:
 
         assert [entry["verb"] for entry in entries] == ["project.created"]
         assert entries[0]["payload"] == {"key": "ATL", "name": ATLAS["name"]}
+
+
+OWNER = {
+    "name": "Dhruva N",
+    "kind": "team",
+    "role": "Owner",
+    "responsibilities": "Everything, until somebody else is here to do it.",
+    "is_me": True,
+}
+
+
+class TestTheOwnerJoinsEveryProject:
+    """Whoever is marked as you is on a project from the moment it exists."""
+
+    async def test_a_new_project_has_the_owner_on_it(self, signed_in: AsyncClient) -> None:
+        owner = (await signed_in.post("/people", json=OWNER)).json()
+
+        project = (await signed_in.post("/projects", json=ATLAS)).json()
+
+        assert project["member_count"] == 1
+        members = (await signed_in.get(f"/projects/{project['key']}/members")).json()["members"]
+        assert [person["id"] for person in members] == [owner["id"]]
+
+    async def test_a_project_started_before_there_was_an_owner_is_left_alone(
+        self, signed_in: AsyncClient
+    ) -> None:
+        project = (await signed_in.post("/projects", json=ATLAS)).json()
+        await signed_in.post("/people", json=OWNER)
+
+        assert (await signed_in.get(f"/projects/{project['key']}")).json()["member_count"] == 0
+
+    async def test_the_owner_can_be_taken_off_a_project_afterwards(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await signed_in.post("/people", json=OWNER)
+        project = (await signed_in.post("/projects", json=ATLAS)).json()
+
+        await signed_in.put(f"/projects/{project['key']}/members", json={"person_ids": []})
+
+        assert (await signed_in.get(f"/projects/{project['key']}")).json()["member_count"] == 0

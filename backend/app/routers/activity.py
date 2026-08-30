@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.activity import Activity
 from app.schemas.activity import ActivityRead
 from app.services import projects
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/activity", tags=["activity"])
 @router.get("", response_model=list[ActivityRead], summary="Recent activity")
 async def list_activity(
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     project: str | None = Query(
         default=None,
         description="Limit to one project, by id or by key such as `ATL`.",

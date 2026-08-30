@@ -179,3 +179,55 @@ class TestScopes:
 
         assert response.status_code == 403
         assert response.json()["error"]["details"]["missing_scopes"] == ["write"]
+
+
+class TestWhoIsMe:
+    """One directory entry stands for the owner, and joins every new project."""
+
+    async def test_nobody_is_me_to_begin_with(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/people", json=ADITI)
+
+        assert (await signed_in.get("/me")).json()["person"] is None
+
+    async def test_a_person_can_be_created_as_me(self, signed_in: AsyncClient) -> None:
+        body = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+
+        assert body["is_me"] is True
+        assert (await signed_in.get("/me")).json()["person"]["id"] == body["id"]
+
+    async def test_a_person_can_be_marked_as_me_afterwards(self, signed_in: AsyncClient) -> None:
+        person = (await signed_in.post("/people", json=ADITI)).json()
+
+        updated = (await signed_in.patch(f"/people/{person['id']}", json={"is_me": True})).json()
+
+        assert updated["is_me"] is True
+
+    async def test_marking_someone_takes_it_off_whoever_had_it(
+        self, signed_in: AsyncClient
+    ) -> None:
+        first = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+        second = (await signed_in.post("/people", json={**SANJAY, "is_me": True})).json()
+
+        directory = {
+            entry["id"]: entry["is_me"] for entry in (await signed_in.get("/people")).json()
+        }
+
+        assert directory[second["id"]] is True
+        assert directory[first["id"]] is False
+
+    async def test_it_can_be_given_up_without_naming_a_successor(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+
+        await signed_in.patch(f"/people/{person['id']}", json={"is_me": False})
+
+        assert (await signed_in.get("/me")).json()["person"] is None
+
+    async def test_archiving_me_gives_the_flag_up(self, signed_in: AsyncClient) -> None:
+        """An archived person cannot be a member, so they cannot be the owner."""
+        person = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+
+        await signed_in.delete(f"/people/{person['id']}")
+
+        assert (await signed_in.get("/me")).json()["person"] is None

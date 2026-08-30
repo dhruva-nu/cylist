@@ -1,12 +1,14 @@
-/** The project grid — the first thing you see. */
+/** The project grid — the first thing you see — and the card that says who you are. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
-import { ApiError, api, type ProjectInput } from '../api/client'
+import { ApiError, api, type Person, type ProjectInput } from '../api/client'
 import { Field, Modal, ModalBody } from '../components/Modal'
+import { PersonDialog } from '../components/PersonDialog'
 import { PageHead } from '../components/Shell'
 import {
+  Avatar,
   Button,
   EmptyState,
   ErrorBanner,
@@ -36,6 +38,8 @@ export function Home() {
       >
         Every project has a board, a file store, a vault and its people. Pick one to open it.
       </PageHead>
+
+      <MeCard onSaved={announce} />
 
       {projects.isPending ? <EmptyState>Loading projects…</EmptyState> : null}
 
@@ -85,6 +89,75 @@ export function Home() {
         <NewProjectDialog
           onCreated={(name) => announce(`${name} created. It is now in your project list.`)}
           onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * Who you are, on the screen where you start projects.
+ *
+ * One entry in the people directory is you, and it is put on every project you
+ * create — so it belongs next to the button that creates them, not buried on a
+ * project's People tab where you can only reach it once a project exists.
+ */
+function MeCard({ onSaved }: { onSaved: (message: string) => void }) {
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const me: Person | null = identity.data?.person ?? null
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['me'] }),
+      queryClient.invalidateQueries({ queryKey: ['people'] }),
+    ])
+  }
+
+  return (
+    <>
+      {me ? (
+        <div className={`${cardStyles.card} ${styles.me}`}>
+          <Avatar name={me.name} colour={me.colour} large />
+          <div className={styles.meText}>
+            <div className={styles.meName}>
+              <b>{me.name}</b>
+              <span className={styles.youTag}>you</span>
+            </div>
+            <span className={styles.meRole}>{me.role}</span>
+            <span className={styles.meNote}>
+              On every project you create, and pickable as an assignee from the moment it exists.
+            </span>
+          </div>
+          <Button onClick={() => setEditing(true)}>Edit</Button>
+        </div>
+      ) : (
+        <button
+          className={`${cardStyles.card} ${styles.me} ${styles.meEmpty}`}
+          onClick={() => setEditing(true)}
+        >
+          <span className={styles.meText}>
+            <b>Who are you?</b>
+            <span className={styles.meNote}>
+              Add yourself once and you are put on every project you create.
+            </span>
+          </span>
+          <span className={styles.meAdd}>+ Add me</span>
+        </button>
+      )}
+
+      {editing ? (
+        <PersonDialog
+          title={me ? 'This is me' : 'Add yourself'}
+          // Spread rather than `person={me ?? undefined}`: under
+          // exactOptionalPropertyTypes an absent prop and an undefined one are
+          // different things, and this dialog means "creating" by absence.
+          {...(me ? { person: me } : {})}
+          claimingMe
+          onSaved={(name) => onSaved(`${name} is you.`)}
+          onDone={refresh}
+          onClose={() => setEditing(false)}
         />
       ) : null}
     </>

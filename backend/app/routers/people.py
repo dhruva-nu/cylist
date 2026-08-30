@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.person import PersonKind
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonCreate, PersonRead, PersonUpdate
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/people", tags=["people"])
 @router.get("", response_model=list[PersonRead], summary="List people")
 async def list_people(
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
     kind: PersonKind | None = Query(default=None, description="Filter to team or clients."),
     include_archived: bool = Query(default=False),
 ) -> list[PersonRead]:
@@ -41,7 +41,7 @@ async def list_people(
 async def create_person(
     body: PersonCreate,
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> PersonRead:
     """Add someone to the directory.
 
@@ -64,7 +64,7 @@ async def create_person(
 async def get_person(
     person_id: UUID,
     _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> PersonRead:
     return PersonRead.model_validate(await people.get(session, person_id))
 
@@ -74,7 +74,7 @@ async def update_person(
     person_id: UUID,
     body: PersonUpdate,
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> PersonRead:
     """Change any subset of a person's details. Omitted fields are left alone."""
     person = await people.update(session, person_id, body)
@@ -93,7 +93,7 @@ async def update_person(
 async def archive_person(
     person_id: UUID,
     principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Archive someone rather than deleting them.
 

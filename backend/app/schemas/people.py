@@ -31,6 +31,14 @@ class PersonCreate(Schema):
         pattern=_COLOUR_PATTERN,
         description="Six-digit hex. Omit to take a stable colour from the palette.",
     )
+    is_me: bool = Field(
+        default=False,
+        description=(
+            "Mark this person as you. At most one person is; setting it here "
+            "takes it off whoever had it. You are added to every project you "
+            "create."
+        ),
+    )
 
     @field_validator("name", "role", "responsibilities")
     @classmethod
@@ -53,6 +61,13 @@ class PersonUpdate(Schema):
     archived: bool | None = Field(
         default=None, description="Set false to bring an archived person back."
     )
+    is_me: bool | None = Field(
+        default=None,
+        description=(
+            "Set true to make this person you, which takes it off whoever had "
+            "it. Set false to say nobody here is you."
+        ),
+    )
 
 
 class PersonRead(Schema):
@@ -65,3 +80,4 @@ class PersonRead(Schema):
     colour: str
     archived_at: datetime | None
     created_at: datetime
+    is_me: bool

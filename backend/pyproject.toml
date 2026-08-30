@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Cylist API — projects, boards, files and a vault, for humans and agents alike."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi>=0.115",
+    # 0.141 is where a dependency can declare `scope="function"`, which is
+    # what makes the request commit before its response goes out — see
+    # app/db.py.
+    "fastapi>=0.141",
     "uvicorn[standard]>=0.32",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",

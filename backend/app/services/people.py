@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now
@@ -23,10 +24,32 @@ async def create(session: AsyncSession, data: PersonCreate) -> Person:
         responsibilities=data.responsibilities,
         email=data.email,
         colour=data.colour or colour_for(data.name),
+        is_me=data.is_me,
     )
+    if data.is_me:
+        await _clear_me(session)
     session.add(person)
     await session.flush()
     return person
+
+
+async def get_me(session: AsyncSession) -> Person | None:
+    """The person marked as you, if anyone is."""
+    person = await session.scalar(select(Person).where(Person.is_me.is_(True)))
+    return person
+
+
+async def _clear_me(session: AsyncSession, *, keep: UUID | None = None) -> None:
+    """Take the flag off everyone else.
+
+    The partial unique index would otherwise reject the second person to claim
+    it, and refusing the claim is the wrong answer: saying "this is me" means
+    the last one was wrong, not that this one is.
+    """
+    statement = sql_update(Person).where(Person.is_me.is_(True)).values(is_me=False)
+    if keep is not None:
+        statement = statement.where(Person.id != keep)
+    await session.execute(statement)
 
 
 async def get(session: AsyncSession, person_id: UUID) -> Person:
@@ -60,13 +83,19 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
     """
     person = await get(session, person_id)
 
-    fields = data.model_dump(exclude_unset=True, exclude={"archived"})
+    fields = data.model_dump(exclude_unset=True, exclude={"archived", "is_me"})
     for field, value in fields.items():
         setattr(person, field, value)
 
     if data.archived is not None:
         person.archived_at = now() if data.archived else None
 
+    if data.is_me is not None:
+        if data.is_me:
+            await _clear_me(session, keep=person.id)
+        person.is_me = data.is_me
+
+    await session.flush()
     return person
 
 
@@ -75,4 +104,8 @@ async def archive(session: AsyncSession, person_id: UUID) -> Person:
     person = await get(session, person_id)
     if not person.is_archived:
         person.archived_at = now()
+    # Archiving is how someone stops being on the projects; keeping "this is
+    # you" on a row nobody can be assigned would only mean new projects were
+    # created with a member they are not allowed to have.
+    person.is_me = False
     return person

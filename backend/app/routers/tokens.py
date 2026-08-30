@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.api_token import TokenKind
 from app.schemas.common import Acknowledged
 from app.schemas.tokens import TokenCreate, TokenIssued, TokenRead
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/tokens", tags=["tokens"])
 @router.get("", response_model=list[TokenRead], summary="List API tokens")
 async def list_tokens(
     _: Principal = Depends(require(Scope.ADMIN)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> list[TokenRead]:
     """Return every live API token. Browser sessions are not listed."""
     return [TokenRead.model_validate(token) for token in await tokens.list_api_tokens(session)]
@@ -42,7 +42,7 @@ async def list_tokens(
 async def create_token(
     body: TokenCreate,
     principal: Principal = Depends(require(Scope.ADMIN)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> TokenIssued:
     """Mint a token and return its plaintext exactly once.
 
@@ -72,7 +72,7 @@ async def create_token(
 async def revoke_token(
     token_id: UUID,
     principal: Principal = Depends(require(Scope.ADMIN)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Revoke a token immediately. Requests using it stop working at once."""
     token = await tokens.revoke(session, token_id)

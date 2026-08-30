@@ -23,7 +23,7 @@ from app.auth.scopes import Scope, parse_scopes
 from app.auth.tokens import hash_token, looks_like_token
 from app.core.clock import now
 from app.core.errors import ForbiddenError, UnauthorizedError
-from app.db import get_session
+from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import ApiToken, TokenKind
 
@@ -49,7 +49,7 @@ def _presented_credential(request: Request) -> tuple[str, Channel] | None:
 
 async def current_principal(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDependency,
 ) -> Principal:
     """Resolve the caller, or raise :class:`UnauthorizedError`.
 
