@@ -22,6 +22,8 @@ LENA_ID = "0192f3c4-0002-7000-8000-00000000012a"
 LEO_ID = "0192f3c4-0002-7000-8000-0000000001e0"
 
 TASK_ID = "0192f3c4-0003-7000-8000-000000000002"
+SUBTASK_ID = "0192f3c4-0003-7000-8000-000000000003"
+CHECKLIST_ITEM_ID = "0192f3c4-000b-7000-8000-000000000001"
 CONTRACTS_ID = "0192f3c4-0004-7000-8000-000000000001"
 NESTED_ID = "0192f3c4-0004-7000-8000-000000000002"
 
@@ -98,6 +100,9 @@ TASK = {
     "project_id": PROJECT_ID,
     "reference": "ATL-2",
     "number": 2,
+    "parent_id": None,
+    "parent_reference": None,
+    "sub_number": None,
     "column_id": DOING_ID,
     "position": 0,
     "title": "Switch the invoice job over",
@@ -110,8 +115,32 @@ TASK = {
     "pr_ref": None,
     "waiting_on": [],
     "comment_count": 0,
+    "checklist": [],
+    "open_subtask_count": 0,
     "created_at": "2026-02-01T09:00:00Z",
     "comments": [],
+    "subtasks": [],
+}
+
+SUBTASK = {
+    **TASK,
+    "id": SUBTASK_ID,
+    "reference": "ATL-2-1",
+    "number": None,
+    "parent_id": TASK_ID,
+    "parent_reference": "ATL-2",
+    "sub_number": 1,
+    "column_id": BACKLOG_ID,
+    "title": "Drain the old queue",
+}
+
+CHECKLIST_ITEM = {
+    "id": CHECKLIST_ITEM_ID,
+    "task_id": TASK_ID,
+    "title": "Tell support",
+    "state": "open",
+    "position": 0,
+    "created_at": "2026-02-06T09:00:00Z",
 }
 
 FOLDER_TREE = [
@@ -284,6 +313,19 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         return httpx.Response(201, json={**TASK, "title": body["title"]})
     if path in {"/tasks/ATL-2", f"/tasks/{TASK_ID}"}:
         return httpx.Response(200, json=TASK)
+    if path in {"/tasks/ATL-2-1", f"/tasks/{SUBTASK_ID}"}:
+        return httpx.Response(200, json=SUBTASK)
+    if path.endswith("/subtasks") and method == "POST":
+        body = json.loads(request.content)
+        return httpx.Response(201, json={**SUBTASK, "title": body["title"]})
+    if path.endswith("/subtasks") and method == "GET":
+        return httpx.Response(200, json=[SUBTASK])
+    if path.endswith("/checklist") and method == "POST":
+        body = json.loads(request.content)
+        return httpx.Response(201, json={**CHECKLIST_ITEM, "title": body["title"]})
+    if path.startswith("/checklist/") and method == "PATCH":
+        body = json.loads(request.content)
+        return httpx.Response(200, json={**CHECKLIST_ITEM, **body})
     if path.endswith("/move"):
         body = json.loads(request.content)
         return httpx.Response(200, json={**TASK, "column_id": body["column_id"]})

@@ -7,7 +7,10 @@ than mechanics:
   at one end, and letting a client drop a card straight into "Done" makes the
   board a record of intentions rather than of progress;
 * a task cannot go on hold or become blocked without a reason — a red card
-  that does not say why is a question, not information.
+  that does not say why is a question, not information;
+* a card with unfinished sub-tasks cannot reach the board's last column —
+  see :func:`unsettled`. A ticket whose parts are still open is not done, and
+  the board saying otherwise is how work gets forgotten rather than finished.
 """
 
 from __future__ import annotations
@@ -21,29 +24,65 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import NotFoundError, UnprocessableRequestError
 from app.models.board import BoardColumn
 from app.models.project import Project
-from app.models.task import CommentKind, Task, TaskComment, TaskStatus, TaskWaitingOn
-from app.schemas.tasks import CommentCreate, TaskCreate, TaskMove, TaskStatusChange, TaskUpdate
+from app.models.task import (
+    ChecklistState,
+    CommentKind,
+    Task,
+    TaskChecklistItem,
+    TaskComment,
+    TaskStatus,
+    TaskWaitingOn,
+)
+from app.schemas.tasks import (
+    ChecklistItemCreate,
+    ChecklistItemUpdate,
+    CommentCreate,
+    TaskCreate,
+    TaskMove,
+    TaskStatusChange,
+    TaskUpdate,
+)
 from app.services import columns, projects
 
 _CLEARABLE = frozenset({"jira_ref", "pr_ref"})
 """The only task fields a ``PATCH`` may set back to null."""
 
 
-async def create(session: AsyncSession, project: Project, data: TaskCreate) -> Task:
+async def create(
+    session: AsyncSession,
+    project: Project,
+    data: TaskCreate,
+    *,
+    parent: Task | None = None,
+) -> Task:
     """Add a task to the bottom of the board's first column.
 
+    With ``parent`` the new card is a sub-task of it, numbered ``ATL-41-2``
+    rather than taking a project number of its own.
+
     Raises:
-        UnprocessableRequestError: if the assignee is not a project member.
+        UnprocessableRequestError: if the assignee is not a project member, or
+            if ``parent`` is itself a sub-task.
     """
     await projects.require_members(session, project.id, [data.assignee_id])
 
+    if parent is not None and parent.parent_id is not None:
+        raise UnprocessableRequestError(
+            f"{parent.reference} is already a sub-task, so it cannot have sub-tasks of its own. "
+            "A board that nests further is a tree, not a board.",
+            details={"parent": parent.reference},
+        )
+
     column = await columns.first(session, project)
-    number = await _next_number(session, project)
+    number = None if parent else await _next_number(session, project)
+    sub_number = await _next_sub_number(session, parent) if parent else None
     position = await _length(session, column.id)
 
     task = Task(
         project_id=project.id,
         number=number,
+        parent_id=parent.id if parent else None,
+        sub_number=sub_number,
         column_id=column.id,
         position=position,
         title=data.title,
@@ -60,7 +99,7 @@ async def create(session: AsyncSession, project: Project, data: TaskCreate) -> T
 
     # Relationships are only populated by a SELECT, and a just-inserted row has
     # not had one. Load them now so callers can read them without lazy IO.
-    await session.refresh(task, ["project", "assignee", "waiting_on"])
+    await session.refresh(task, ["project", "assignee", "waiting_on", "parent", "checklist"])
     return task
 
 
@@ -68,8 +107,8 @@ async def resolve(session: AsyncSession, reference: str) -> Task:
     """Look a task up by id or by reference.
 
     Args:
-        reference: A UUID, or a task reference such as ``ATL-41``
-            (case-insensitive on the key).
+        reference: A UUID, or a task reference such as ``ATL-41`` — or
+            ``ATL-41-2`` for a sub-task (case-insensitive on the key).
 
     Raises:
         NotFoundError: if nothing matches.
@@ -77,14 +116,28 @@ async def resolve(session: AsyncSession, reference: str) -> Task:
     try:
         statement = select(Task).where(Task.id == UUID(reference))
     except ValueError:
-        key, _, number = reference.rpartition("-")
-        if not key or not number.isdigit():
+        # A key can hold no dash, so the parts are unambiguous: ``KEY-number``
+        # names a card and ``KEY-number-sub`` names a sub-task of one.
+        key, *numbers = reference.split("-")
+        if not key or not numbers or not all(part.isdigit() for part in numbers):
             raise NotFoundError(f"No task matching {reference!r}.") from None
+        if len(numbers) > 2:
+            raise NotFoundError(
+                f"No task matching {reference!r}. Sub-tasks go one level deep, "
+                "so a reference carries at most two numbers."
+            ) from None
+
         statement = (
             select(Task)
             .join(Project, Project.id == Task.project_id)
-            .where(Project.key == key.upper(), Task.number == int(number))
+            .where(Project.key == key.upper(), Task.number == int(numbers[0]))
         )
+        if len(numbers) == 2:
+            parent = statement.subquery()
+            statement = select(Task).where(
+                Task.parent_id.in_(select(parent.c.id)),
+                Task.sub_number == int(numbers[1]),
+            )
 
     task = await session.scalar(statement)
     if task is None:
@@ -136,10 +189,16 @@ async def delete(session: AsyncSession, task: Task) -> None:
     Its number is not returned to the pool: ``project.task_counter`` only ever
     goes up, so ``ATL-41`` never names a second task.
     """
-    column_id = task.column_id
+    # A parent takes its sub-tasks with it (ON DELETE CASCADE), and those may
+    # sit in other columns, so every column the deletion empties a slot in has
+    # to close up — not just the one the card itself was in.
+    emptied = {task.column_id} | set(
+        await session.scalars(select(Task.column_id).where(Task.parent_id == task.id))
+    )
     await session.delete(task)
     await session.flush()
-    await _renumber(session, column_id)
+    for column_id in emptied:
+        await _renumber(session, column_id)
 
 
 async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
@@ -149,7 +208,8 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
     anywhere, including straight back to the first column.
 
     Raises:
-        UnprocessableRequestError: if the column belongs to another project.
+        UnprocessableRequestError: if the column belongs to another project, or
+            if the destination is the last column and a sub-task is still open.
     """
     column = await columns.get(session, data.column_id)
     if column.project_id != task.project_id:
@@ -157,6 +217,8 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
             "That column is on a different project's board.",
             details={"column_id": str(column.id)},
         )
+
+    await _refuse_unfinished(session, task, column)
 
     source_id = task.column_id
     siblings = [
@@ -286,6 +348,176 @@ async def status_counts(session: AsyncSession, project: Project) -> dict[TaskSta
     for status, total in rows:
         counts[status] = total
     return counts
+
+
+async def subtasks(session: AsyncSession, task: Task) -> list[Task]:
+    """The task's own cards on the board, in sub-number order."""
+    return list(
+        await session.scalars(
+            select(Task).where(Task.parent_id == task.id).order_by(Task.sub_number)
+        )
+    )
+
+
+async def checklist(session: AsyncSession, task: Task) -> list[TaskChecklistItem]:
+    """The task's tick boxes, top to bottom."""
+    return list(
+        await session.scalars(
+            select(TaskChecklistItem)
+            .where(TaskChecklistItem.task_id == task.id)
+            .order_by(TaskChecklistItem.position)
+        )
+    )
+
+
+async def add_checklist_item(
+    session: AsyncSession, task: Task, data: ChecklistItemCreate
+) -> TaskChecklistItem:
+    """Add a tick box to the bottom of a task's checklist."""
+    existing = await session.scalar(
+        select(func.count())
+        .select_from(TaskChecklistItem)
+        .where(TaskChecklistItem.task_id == task.id)
+    )
+    item = TaskChecklistItem(
+        task_id=task.id,
+        title=data.title,
+        state=ChecklistState.OPEN,
+        position=existing or 0,
+    )
+    session.add(item)
+    await session.flush()
+    return item
+
+
+async def get_checklist_item(session: AsyncSession, item_id: UUID) -> TaskChecklistItem:
+    item = await session.get(TaskChecklistItem, item_id)
+    if item is None:
+        raise NotFoundError("No checklist item with that id.")
+    return item
+
+
+async def update_checklist_item(
+    session: AsyncSession, item: TaskChecklistItem, data: ChecklistItemUpdate
+) -> TaskChecklistItem:
+    """Retitle an item, or tick, cancel or reopen it."""
+    if data.title is not None:
+        item.title = data.title
+    if data.state is not None:
+        item.state = data.state
+    await session.flush()
+    return item
+
+
+async def delete_checklist_item(session: AsyncSession, item: TaskChecklistItem) -> None:
+    """Remove a tick box, closing the gap it leaves."""
+    task_id = item.task_id
+    await session.delete(item)
+    await session.flush()
+    for position, remaining in enumerate(
+        await session.scalars(
+            select(TaskChecklistItem)
+            .where(TaskChecklistItem.task_id == task_id)
+            .order_by(TaskChecklistItem.position)
+        )
+    ):
+        remaining.position = position
+    await session.flush()
+
+
+async def open_subtask_counts(
+    session: AsyncSession, project_id: UUID, task_ids: list[UUID]
+) -> dict[UUID, int]:
+    """How many sub-tasks — cards and tick boxes alike — are still open.
+
+    Two queries for the whole board rather than a walk per card: this number
+    appears on every task in every listing, and the rule it stands for is the
+    one that decides whether a card may be dropped in the last column.
+    """
+    if not task_ids:
+        return {}
+
+    finished = (await columns.last(session, project_id)).id
+    counts: dict[UUID, int] = {}
+
+    open_cards = await session.execute(
+        select(Task.parent_id, func.count())
+        .where(
+            Task.parent_id.in_(task_ids),
+            Task.status != TaskStatus.CANCELLED,
+            Task.column_id != finished,
+        )
+        .group_by(Task.parent_id)
+    )
+    for parent_id, total in open_cards:
+        counts[parent_id] = counts.get(parent_id, 0) + total
+
+    open_boxes = await session.execute(
+        select(TaskChecklistItem.task_id, func.count())
+        .where(
+            TaskChecklistItem.task_id.in_(task_ids),
+            TaskChecklistItem.state == ChecklistState.OPEN,
+        )
+        .group_by(TaskChecklistItem.task_id)
+    )
+    for task_id, total in open_boxes:
+        counts[task_id] = counts.get(task_id, 0) + total
+
+    return counts
+
+
+async def _refuse_unfinished(session: AsyncSession, task: Task, column: BoardColumn) -> None:
+    """Stop a card reaching the last column while a sub-task is still open.
+
+    Enforced on the move rather than on the sub-task, because "done" is a place
+    on the board rather than a flag: the only moment the rule can be checked is
+    the moment the card is put there.
+
+    Raises:
+        UnprocessableRequestError: if anything under the task is still open.
+    """
+    finished = await columns.last(session, task.project_id)
+    if column.id != finished.id or task.column_id == finished.id:
+        return
+
+    open_cards = [
+        subtask.reference
+        for subtask in await subtasks(session, task)
+        if subtask.status is not TaskStatus.CANCELLED and subtask.column_id != finished.id
+    ]
+    open_boxes = [
+        item.title for item in await checklist(session, task) if item.state is ChecklistState.OPEN
+    ]
+    if not open_cards and not open_boxes:
+        return
+
+    outstanding = [*open_cards, *open_boxes]
+    raise UnprocessableRequestError(
+        f"{task.reference} still has {len(outstanding)} unfinished "
+        f"{'sub-task' if len(outstanding) == 1 else 'sub-tasks'}: "
+        f"{', '.join(outstanding)}. Finish or cancel each of them before moving this card "
+        f"to {finished.name}.",
+        details={
+            "column": finished.name,
+            "open_subtasks": open_cards,
+            "open_checklist_items": open_boxes,
+        },
+    )
+
+
+async def _next_sub_number(session: AsyncSession, parent: Task) -> int:
+    """Take the next sub-number under a card.
+
+    The parent's own counter, locked, for the same reason a project has one:
+    ``ATL-41-2`` must never name a second sub-task, however many were deleted
+    or created at the same moment.
+    """
+    counter = await session.scalar(
+        select(Task.subtask_counter).where(Task.id == parent.id).with_for_update()
+    )
+    parent.subtask_counter = (counter or 0) + 1
+    await session.flush()
+    return parent.subtask_counter
 
 
 async def _next_number(session: AsyncSession, project: Project) -> int:

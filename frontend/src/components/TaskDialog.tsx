@@ -9,13 +9,21 @@
  * Saving may be several requests: the fields, then a move, then the status
  * change, then a comment. They go in that order so the status entry lands on a
  * card that already reads the way it will after the save.
+ *
+ * Sub-tasks come in two kinds and are edited two ways. Tick boxes are saved
+ * the moment they are ticked, because a checkbox that only takes effect when
+ * you remember to press Save is a checkbox that lies. Sub-tasks with a card of
+ * their own are not edited here at all: "Split into a sub-task" hands the job
+ * back to the board, which opens a second dialog for the new card.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type KeyboardEvent } from 'react'
 import {
   api,
   type BoardColumn,
+  type ChecklistItem,
+  type ChecklistState,
   type Person,
   type TaskComment,
   type TaskDetail,
@@ -31,6 +39,7 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'hold', label: 'On hold' },
   { value: 'blocked', label: 'Blocked' },
+  { value: 'cancelled', label: 'Cancelled' },
 ]
 
 const TYPES: TaskType[] = ['feature', 'bug', 'chore']
@@ -39,8 +48,17 @@ interface DialogProps {
   projectKey: string
   /** Null opens the dialog for a new task, which is locked to the first column. */
   taskId: string | null
+  /**
+   * Set on a new task to make it a sub-task of that reference. Ignored when
+   * `taskId` is set: a card's parentage is decided when it is created.
+   */
+  parentRef?: string | null
   columns: BoardColumn[]
   firstColumn: BoardColumn
+  /** Opens another card in this dialog's place — a sub-task, from the list. */
+  onOpenTask?: ((taskRef: string) => void) | undefined
+  /** Asks the board to open a new-sub-task dialog under this reference. */
+  onSplit?: ((parentRef: string) => void) | undefined
   /**
    * Where to say what happened. The dialog closes on success, taking any live
    * region inside it with it before a screen reader could read one, so the
@@ -95,11 +113,14 @@ export function TaskDialog(props: DialogProps) {
 
 function TaskForm({
   projectKey,
+  parentRef,
   columns,
   firstColumn,
   task,
   members,
   announce,
+  onOpenTask,
+  onSplit,
   onDone,
   onClose,
 }: DialogProps & { task: TaskDetail | null; members: Person[] }) {
@@ -134,7 +155,9 @@ function TaskForm({
       }
       const saved = task
         ? await api.updateTask(task.id, payload)
-        : await api.createTask(projectKey, payload)
+        : parentRef
+          ? await api.createSubtask(parentRef, payload)
+          : await api.createTask(projectKey, payload)
 
       // Top of the column rather than the bottom: a card moved from a dialog
       // has no place on the board the reader is already looking at.
@@ -217,7 +240,7 @@ function TaskForm({
 
   return (
     <Modal
-      title={task ? task.reference : 'New task'}
+      title={task ? task.reference : parentRef ? `New sub-task of ${parentRef}` : 'New task'}
       onClose={onClose}
       footer={
         <>
@@ -234,7 +257,13 @@ function TaskForm({
           ) : null}
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="go" disabled={save.isPending || !complete} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving…' : task ? 'Save changes' : 'Create task'}
+            {save.isPending
+              ? 'Saving…'
+              : task
+                ? 'Save changes'
+                : parentRef
+                  ? 'Create sub-task'
+                  : 'Create task'}
           </Button>
         </>
       }
@@ -383,6 +412,16 @@ function TaskForm({
           </div>
         ) : null}
 
+        {task ? (
+          <Subtasks
+            task={task}
+            onOpenTask={onOpenTask}
+            onSplit={onSplit}
+            announce={announce}
+            onDone={onDone}
+          />
+        ) : null}
+
         <Field label="Comments">
           <div className={styles.timeline}>
             {task?.comments.length ? (
@@ -478,6 +517,197 @@ function Entry({ entry, members }: { entry: TaskComment; members: Person[] }) {
         </div>
         {entry.body}
       </div>
+    </div>
+  )
+}
+
+const CHECKLIST_LABELS: Record<ChecklistState, string> = {
+  open: 'Open',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
+
+/**
+ * Both kinds of sub-task, on the card they belong to.
+ *
+ * The tick boxes save on the spot rather than on the dialog's Save button: a
+ * checkbox that quietly waits for a second, unrelated button is a checkbox
+ * that has already lied to whoever ticked it. The cards do not save here at
+ * all — splitting hands the job back to the board, which opens a fresh dialog
+ * for the new card, because a sub-task needs every field a card needs.
+ */
+function Subtasks({
+  task,
+  onOpenTask,
+  onSplit,
+  announce,
+  onDone,
+}: {
+  task: TaskDetail
+  onOpenTask?: ((taskRef: string) => void) | undefined
+  onSplit?: ((parentRef: string) => void) | undefined
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const [title, setTitle] = useState('')
+  const queryClient = useQueryClient()
+
+  async function refresh() {
+    await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    await onDone()
+  }
+
+  const add = useMutation({
+    mutationFn: (text: string) => api.addChecklistItem(task.id, text),
+    onSuccess: async (item) => {
+      announce(`Added ${item.title} to the checklist.`)
+      setTitle('')
+      await refresh()
+    },
+  })
+
+  const setState = useMutation({
+    mutationFn: ({ id, state }: { id: string; state: ChecklistState }) =>
+      api.updateChecklistItem(id, { state }),
+    onSuccess: async (item) => {
+      announce(`${item.title} is ${CHECKLIST_LABELS[item.state].toLowerCase()}.`)
+      await refresh()
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteChecklistItem(id),
+    onSuccess: refresh,
+  })
+
+  const error = add.error ?? setState.error ?? remove.error
+  const outstanding = task.open_subtask_count
+
+  return (
+    <Field label="Sub-tasks">
+      {error ? <ErrorBanner>{error.message}</ErrorBanner> : null}
+
+      <div className={styles.subtasks}>
+        {task.subtasks.map((child) => (
+          <button
+            key={child.id}
+            type="button"
+            className={styles.subtaskRow}
+            onClick={() => onOpenTask?.(child.reference)}
+          >
+            <span className={styles.subRef}>{child.reference}</span>
+            <span className={styles.subTitle}>{child.title}</span>
+            <span className={styles.subState}>
+              {STATUSES.find((option) => option.value === child.status)?.label}
+            </span>
+          </button>
+        ))}
+
+        {task.checklist.map((item) => (
+          <ChecklistRow
+            key={item.id}
+            item={item}
+            busy={setState.isPending || remove.isPending}
+            onSetState={(state) => setState.mutate({ id: item.id, state })}
+            onRemove={() => remove.mutate(item.id)}
+          />
+        ))}
+
+        {task.subtasks.length === 0 && task.checklist.length === 0 ? (
+          <span className={styles.empty}>No sub-tasks.</span>
+        ) : null}
+
+        <div className={styles.composer}>
+          <input
+            value={title}
+            aria-label="Add a checklist item"
+            maxLength={200}
+            onChange={(event) => setTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && title.trim()) {
+                event.preventDefault()
+                add.mutate(title.trim())
+              }
+            }}
+            placeholder="Add a checklist item…"
+          />
+          <Button
+            small
+            disabled={!title.trim() || add.isPending}
+            onClick={() => add.mutate(title.trim())}
+          >
+            Add
+          </Button>
+        </div>
+
+        {/* A sub-task cannot be split again: the board would stop being one. */}
+        {task.parent_id === null ? (
+          <Button small variant="ghost" onClick={() => onSplit?.(task.reference)}>
+            + Split into a sub-task with its own card
+          </Button>
+        ) : (
+          <small>
+            A sub-task of{' '}
+            <button
+              type="button"
+              className={styles.parentLink}
+              onClick={() => onOpenTask?.(task.parent_reference ?? '')}
+            >
+              {task.parent_reference}
+            </button>
+            . Sub-tasks go one level deep.
+          </small>
+        )}
+
+        {outstanding ? (
+          <small className={styles.gate}>
+            {outstanding} still open. Every sub-task has to be finished or cancelled before this
+            card can move to {'the board’s last column'}.
+          </small>
+        ) : null}
+      </div>
+    </Field>
+  )
+}
+
+/** One tick box: ticked, cancelled, put back, or removed outright. */
+function ChecklistRow({
+  item,
+  busy,
+  onSetState,
+  onRemove,
+}: {
+  item: ChecklistItem
+  busy: boolean
+  onSetState: (state: ChecklistState) => void
+  onRemove: () => void
+}) {
+  const settled = item.state !== 'open'
+
+  return (
+    <div className={`${styles.checkRow} ${settled ? styles.settled : ''}`}>
+      <label className={styles.checkLabel}>
+        <input
+          type="checkbox"
+          checked={item.state === 'done'}
+          disabled={busy}
+          onChange={(event) => onSetState(event.target.checked ? 'done' : 'open')}
+        />
+        <span className={item.state === 'cancelled' ? styles.struck : ''}>{item.title}</span>
+      </label>
+      <span className={styles.checkActions}>
+        <Button
+          small
+          variant="ghost"
+          disabled={busy}
+          onClick={() => onSetState(item.state === 'cancelled' ? 'open' : 'cancelled')}
+        >
+          {item.state === 'cancelled' ? 'Reopen' : 'Cancel'}
+        </Button>
+        <Button small variant="ghost" danger disabled={busy} onClick={onRemove}>
+          Delete
+        </Button>
+      </span>
     </div>
   )
 }

@@ -22,7 +22,14 @@ from app.models.board import BoardColumn
 from app.models.file import Blob, FileItem, Folder, ItemKind
 from app.models.person import Person
 from app.models.project import Project
-from app.models.task import CommentKind, Task, TaskComment, TaskStatus
+from app.models.task import (
+    ChecklistState,
+    CommentKind,
+    Task,
+    TaskChecklistItem,
+    TaskComment,
+    TaskStatus,
+)
 from app.models.vault import VaultNode, VaultNodeKind
 from app.services import vault
 from app.storage import BlobStore, LocalBlobStore
@@ -124,8 +131,12 @@ class TestWhatItWrites:
     ) -> None:
         """ATL-41 is the reference in the screenshots; a renumbered board is a wrong one."""
         atlas = await project_by(session, "ATL")
+        # Top-level cards only: a sub-task holds no project number, which is
+        # exactly why splitting ATL-35 did not push the next card off 42.
         numbers = await session.scalars(
-            select(Task.number).where(Task.project_id == atlas.id).order_by(Task.number.desc())
+            select(Task.number)
+            .where(Task.project_id == atlas.id, Task.parent_id.is_(None))
+            .order_by(Task.number.desc())
         )
 
         assert list(numbers) == [41, 38, 35, 33, 30, 27, 22, 19]
@@ -157,7 +168,7 @@ class TestWhatItWrites:
             select(Task.number, BoardColumn.name)
             .join(BoardColumn, BoardColumn.id == Task.column_id)
             .join(Project, Project.id == Task.project_id)
-            .where(Project.key == "ATL")
+            .where(Project.key == "ATL", Task.parent_id.is_(None))
             .order_by(BoardColumn.position, Task.position)
         )
 
@@ -170,6 +181,36 @@ class TestWhatItWrites:
             (27, "Review"),
             (22, "Done"),
             (19, "Done"),
+        ]
+
+    async def test_splits_a_card_into_sub_tasks(
+        self, session: AsyncSession, seeded: seed.Summary
+    ) -> None:
+        """ATL-35 shows both kinds at once, which is the whole point of them."""
+        atlas = await project_by(session, "ATL")
+        parent = await session.scalar(
+            select(Task).where(Task.project_id == atlas.id, Task.number == 35)
+        )
+        assert parent is not None
+
+        children = list(
+            await session.scalars(
+                select(Task).where(Task.parent_id == parent.id).order_by(Task.sub_number)
+            )
+        )
+        boxes = list(
+            await session.scalars(
+                select(TaskChecklistItem)
+                .where(TaskChecklistItem.task_id == parent.id)
+                .order_by(TaskChecklistItem.position)
+            )
+        )
+
+        assert [child.reference for child in children] == ["ATL-35-1", "ATL-35-2"]
+        assert [box.state for box in boxes] == [
+            ChecklistState.DONE,
+            ChecklistState.OPEN,
+            ChecklistState.CANCELLED,
         ]
 
     async def test_a_blocked_task_carries_its_reason_and_its_tags(
@@ -282,10 +323,10 @@ class TestWhatItWrites:
         assert await count_of(session, Activity) == 0
 
     async def test_reports_what_it_wrote(self, seeded: seed.Summary) -> None:
-        assert seeded.tasks == 13
+        assert seeded.tasks == 15
         assert seeded.people == 7
         assert seeded.secrets == 14
-        assert "13 tasks" in seeded.render()
+        assert "15 tasks" in seeded.render()
 
 
 class TestSurveying:
@@ -303,7 +344,7 @@ class TestSurveying:
             ("HRM", "Hermes Notifications"),
             ("ORB", "Orbit Internal Portal"),
         ]
-        assert inventory.tasks == 13
+        assert inventory.tasks == 15
         assert inventory.people == 7
 
     async def test_does_not_count_the_root_folders(
@@ -332,7 +373,7 @@ class TestRefusing:
 
         message = capsys.readouterr().err
         assert "ATL  Atlas Billing Migration" in message
-        assert "13 tasks" in message
+        assert "15 tasks" in message
         assert "--force" in message
 
     async def test_leaves_the_data_alone_when_it_refuses(
@@ -357,7 +398,7 @@ class TestRefusing:
         await seed.run(settings, force=True, assume_yes=False)
 
         assert await count_of(session, Project) == 3
-        assert await count_of(session, Task) == 13
+        assert await count_of(session, Task) == 15
 
     async def test_will_not_run_in_production(
         self, settings: Settings, capsys: pytest.CaptureFixture[str]
@@ -421,7 +462,7 @@ class TestForcing:
         assert code == 0
         assert await count_of(session, Project) == 3
         assert await count_of(session, Person) == 7
-        assert await count_of(session, Task) == 13
+        assert await count_of(session, Task) == 15
 
     async def test_leaves_the_audit_trail_and_the_tokens_alone(
         self, session: AsyncSession, settings: Settings, seeded: seed.Summary
@@ -498,7 +539,7 @@ class TestFailingPartWay:
             await seed.run(settings, force=True, assume_yes=True)
 
         assert await count_of(session, Project) == 3
-        assert await count_of(session, Task) == 13
+        assert await count_of(session, Task) == 15
         assert await count_of(session, Person) == 7
 
     async def test_the_bytes_survive_a_failed_force(

@@ -46,6 +46,12 @@
   color: var(--blocked);
 }
 
+/* Grey rather than red: cancelled is a settled state, not an alarm. */
+.on.cancelled {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+
 /* The reason panel takes the colour of the status being chosen, so the tint
    confirms the choice before the text is read. */
 .why {
@@ -60,6 +66,10 @@
 
 .why.blocked {
   background: var(--blocked-soft);
+}
+
+.why.cancelled {
+  background: var(--paper-2);
 }
 
 .why small {
@@ -186,4 +196,103 @@
 
 .spacer {
   margin-right: auto;
+}
+
+/* --- Sub-tasks ----------------------------------------------------------- */
+
+.subtasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A whole row is the target rather than the reference alone: the title is what
+   the eye lands on, and a link you have to aim at is a link you misclick. */
+.subtaskRow {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subtaskRow:hover {
+  border-color: var(--line-2);
+}
+
+.subRef {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.subTitle {
+  flex: 1;
+  font-weight: 600;
+}
+
+.subState {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.checkRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 4px 3px 0;
+  font-size: 14px;
+}
+
+.checkLabel {
+  display: flex;
+  flex: 1;
+  gap: 9px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.checkLabel input {
+  width: auto;
+  margin: 0;
+}
+
+/* Struck through rather than hidden: a cancelled item is a decision somebody
+   made, and hiding it makes the decision look like it never happened. */
+.struck {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.settled .checkLabel span {
+  color: var(--ink-3);
+}
+
+.checkActions {
+  display: flex;
+  gap: 2px;
+}
+
+.parentLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gate {
+  color: var(--hold);
+  font-weight: 600;
 }

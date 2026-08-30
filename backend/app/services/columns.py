@@ -82,6 +82,27 @@ async def first(session: AsyncSession, project: Project) -> BoardColumn:
     return column
 
 
+async def last(session: AsyncSession, project_id: UUID) -> BoardColumn:
+    """The rightmost column — where finished work ends up.
+
+    Named rather than configured: the board's own order says which column is
+    the end of the line, and a second "which one means done?" setting would be
+    a thing to keep in step with it.
+
+    Raises:
+        UnprocessableRequestError: if the board has no columns at all.
+    """
+    column = await session.scalar(
+        select(BoardColumn)
+        .where(BoardColumn.project_id == project_id)
+        .order_by(BoardColumn.position.desc())
+        .limit(1)
+    )
+    if column is None:
+        raise UnprocessableRequestError("This project has no board columns.")
+    return column
+
+
 async def count(session: AsyncSession, project_id: UUID) -> int:
     total = await session.scalar(
         select(func.count()).select_from(BoardColumn).where(BoardColumn.project_id == project_id)
