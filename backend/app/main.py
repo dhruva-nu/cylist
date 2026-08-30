@@ -21,6 +21,7 @@ from app.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.db import Database
 from app.routers import api_router
+from app.spa import mount_spa
 
 API_PREFIX = "/api/v1"
 
@@ -84,6 +85,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=API_PREFIX)
+
+    # Last, because it claims "/": in the production image the built SPA is
+    # served from this same process, and in development there is nothing to
+    # serve and this does nothing.
+    mount_spa(app, settings.web_dir, reserved=API_PREFIX)
     return app
 
 

@@ -2,6 +2,7 @@
 #
 #   make setup     install every dependency
 #   make dev       run the API and the web app
+#   make up        run the whole stack in Docker instead
 #   make check     everything CI runs
 
 BACKEND  := backend
@@ -11,7 +12,8 @@ UV       := uv --project $(BACKEND)
 
 .DEFAULT_GOAL := help
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
-        migrate-check test lint format typecheck check seed backup hash-password vault-key clean
+        up down logs image deploy prod-logs prod-ps migrate-check test lint \
+        format typecheck check seed backup hash-password vault-key clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -36,6 +38,32 @@ migrate: ## Apply all migrations to the development database
 
 revision: ## Autogenerate a migration: make revision m="add projects"
 	cd $(BACKEND) && uv run alembic revision --autogenerate -m "$(m)"
+
+up: ## Run the whole stack in Docker: Postgres, API on :8000, web app on :5173
+	docker compose up --build
+
+down: ## Stop the stack and remove its containers (volumes are kept)
+	docker compose down
+
+logs: ## Follow the API and web app logs
+	docker compose logs -f backend frontend
+
+image: ## Build the production image: API and built SPA in one container
+	docker build -f $(BACKEND)/Dockerfile -t cylist:latest .
+
+# --- Production, on the server ---------------------------------------------
+# These act on docker-compose.prod.yml, so they mean something only on
+# dnu-home-1. CI runs `deploy` for you on every push to main; run it by hand
+# when you want to ship without waiting, or to see why a deploy failed.
+
+deploy: ## Build, migrate and restart the production stack on this machine
+	scripts/deploy.sh
+
+prod-logs: ## Follow the production app's logs
+	docker compose -f docker-compose.prod.yml logs -f app
+
+prod-ps: ## Show what the production stack is running
+	docker compose -f docker-compose.prod.yml ps
 
 migrate-check: ## Prove migrations match the models and reverse cleanly
 	cd $(BACKEND) && CYLIST_DATABASE_URL=$(TEST_DATABASE_URL) \

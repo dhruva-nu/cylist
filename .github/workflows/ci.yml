@@ -7,7 +7,10 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded pull request runs are worth cancelling. A run on main is not: it
+  # ends in a deploy, and a deploy cancelled between `alembic upgrade` and the
+  # container restart leaves the server in a state nobody chose.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CYLIST_DATABASE_URL: postgresql+asyncpg://cylist:cylist@localhost:5432/cylist_test
@@ -134,3 +137,26 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Everything above runs on GitHub's machines. This one runs on dnu-home-1
+  # itself, through a self-hosted runner that polls GitHub outbound — which is
+  # why deploying to a server behind a home router needs no inbound port, no
+  # deploy key, and no secrets stored in this repository.
+  deploy:
+    name: Deploy to dnu-home-1
+    needs: [backend, agents, frontend]
+    # Only main, and only a real push: a pull request that happens to target
+    # main must not put anything on the server.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, cylist]
+    environment:
+      name: production
+      url: https://dnu-home-1.tail222f46.ts.net
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Builds the image, dumps the database, migrates, restarts the stack and
+      # waits for /api/v1/health. The same script deploys by hand over SSH.
+      - name: Deploy
+        run: scripts/deploy.sh

@@ -1,0 +1,33 @@
+# The production image is built from the repository root, because it contains
+# both halves of Cylist. Everything below either does not belong in it or would
+# be rebuilt inside it anyway.
+
+.git
+.github
+.gitignore
+
+# Rebuilt in the image, and copying a host build would bake in the wrong
+# platform's binaries.
+**/node_modules
+**/.venv
+frontend/dist
+
+# Secrets and local state. backend/.env in particular must never reach a layer.
+**/.env
+**/.env.*
+!**/.env.example
+backend/data
+backups
+
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.DS_Store
+
+# Documentation and tooling that no build step reads.
+*.md
+Makefile
+docker-compose*.yml
+/scripts

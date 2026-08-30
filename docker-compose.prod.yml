@@ -1,0 +1,75 @@
+# The production stack, as it runs on dnu-home-1.
+#
+#   scripts/deploy.sh          builds, migrates and restarts it
+#   make prod-logs             follows it
+#
+# Two containers, not four. The API image already carries the built SPA (see
+# backend/Dockerfile), so there is no separate web server, and Postgres
+# publishes no port at all — only the app container can reach it, over the
+# compose network.
+#
+# The app listens on 127.0.0.1:8000 rather than every interface: the only thing
+# that should reach it directly is `tailscale serve`, which terminates HTTPS and
+# proxies to loopback. Binding 0.0.0.0 here would put the app on the LAN behind
+# nothing.
+#
+# Secrets live outside the repository, in $CYLIST_PROD_DIR — a directory CI
+# never checks out or overwrites, so a deploy cannot clobber the vault key.
+
+name: cylist-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      # POSTGRES_PASSWORD, and the user and database the app connects as.
+      - ${CYLIST_PROD_DIR:?set CYLIST_PROD_DIR to the directory holding app.env and postgres.env}/postgres.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      # The root, because this image builds the SPA as well as the API.
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    image: cylist:latest
+    env_file:
+      # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY.
+      #
+      # Raw, because an argon2 hash is full of `$` and compose would otherwise
+      # read `$argon2id$v=19$...` as three empty variables and blank the
+      # password out from under you.
+      - path: ${CYLIST_PROD_DIR:?set CYLIST_PROD_DIR to the directory holding app.env and postgres.env}/app.env
+        format: raw
+    environment:
+      # Fixed by the deployment rather than by the secrets file, so that file
+      # holds only things that are actually secret.
+      CYLIST_ENVIRONMENT: prod
+      CYLIST_DATA_DIR: /data
+      CYLIST_WEB_DIR: /app/web
+      # Empty on purpose. The SPA is served by this same process, so every
+      # request is same-origin and no CORS middleware is installed at all —
+      # which is the strongest setting, not a missing one.
+      CYLIST_CORS_ORIGINS: "[]"
+    ports:
+      # Loopback only. See the note at the top of this file.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - cylist-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  # Named for this project (cylist-prod), so they are distinct from the
+  # development stack's volumes even on a machine that has run both.
+  postgres-data:
+  cylist-data:

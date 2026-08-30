@@ -1,5 +1,13 @@
-# Development stack. Production runs a single image that serves the built SPA
-# from FastAPI; see backend/Dockerfile.
+# The development stack: `docker compose up` gives you Postgres, the API on
+# :8000 and the web app on :5173, each reloading on save.
+#
+# Both halves run from a bind mount of the source tree, not from a copy baked
+# into the image, so editing a file on the host is the same as editing it in the
+# container — the point of running these in Docker is a matching environment,
+# not a slower edit loop.
+#
+# Production is a different shape entirely: one image serving the API and the
+# built SPA from one process. See backend/Dockerfile.
 
 services:
   postgres:
@@ -38,5 +46,56 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build:
+      # The root, because backend/Dockerfile also builds the SPA for production.
+      context: .
+      dockerfile: backend/Dockerfile
+      target: dev
+    # Migrations before the server: a container that starts against a schema it
+    # does not match is a container that only fails later, and less clearly.
+    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    env_file:
+      # Where CYLIST_PASSWORD_HASH and CYLIST_VAULT_KEY come from. Optional so
+      # the stack still starts on a fresh clone; the app says what is missing.
+      - path: ./backend/.env
+        required: false
+        # Raw, because an argon2 hash is full of $ and compose would otherwise
+        # read `$argon2id$v=19$...` as three empty variables and blank the
+        # password out from under you.
+        format: raw
+    environment:
+      # These win over the .env file, whose values name the host's ports.
+      CYLIST_DATABASE_URL: postgresql+asyncpg://cylist:cylist@postgres:5432/cylist
+      CYLIST_DATA_DIR: /data
+      # The web app is a separate origin in development, so the cookie it is
+      # issued has to be allowed to cross.
+      CYLIST_CORS_ORIGINS: '["http://localhost:5173"]'
+    volumes:
+      - ./backend:/app
+      - cylist-data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      # localhost inside this container is this container. The API is a sibling.
+      CYLIST_API_PROXY: http://backend:8000
+    volumes:
+      - ./frontend:/app
+      # Keeps the image's install: the host's node_modules must not shadow it.
+      - frontend-node-modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
 volumes:
   postgres-data:
+  cylist-data:
+  frontend-node-modules:
