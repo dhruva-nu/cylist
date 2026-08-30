@@ -48,6 +48,14 @@ def blob_path(settings: Settings, content: bytes) -> Path:
     return settings.blob_dir / digest[0:2] / digest[2:4] / digest
 
 
+async def root_id(client: AsyncClient, key: str = "ATL") -> str:
+    """The project's root folder, which every tree is hung from."""
+    response = await client.get(f"/projects/{key}/tree")
+    assert response.status_code == 200, response.text
+    folder_id: str = response.json()["id"]
+    return folder_id
+
+
 async def make_folder(client: AsyncClient, name: str, parent_id: str | None = None) -> str:
     body = {"name": name, "parent_id": parent_id}
     response = await client.post("/projects/ATL/folders", json=body)
@@ -96,13 +104,15 @@ async def capped(
 
 
 class TestCreatingFolders:
-    async def test_creates_one_at_the_top_level(self, project: AsyncClient) -> None:
+    async def test_creates_one_in_the_root(self, project: AsyncClient) -> None:
+        """No parent named means the project's root, not no parent at all."""
         response = await project.post("/projects/ATL/folders", json={"name": "Architecture"})
 
         assert response.status_code == 201
         body = response.json()
         assert body["name"] == "Architecture"
-        assert body["parent_id"] is None
+        assert body["parent_id"] == await root_id(project)
+        assert body["is_root"] is False
 
     async def test_creates_one_inside_another(self, project: AsyncClient) -> None:
         parent = await make_folder(project, "Finance inputs")
@@ -132,8 +142,9 @@ class TestCreatingFolders:
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "conflict"
 
-    async def test_refuses_two_top_level_folders_with_one_name(self, project: AsyncClient) -> None:
-        """Postgres counts NULLs as distinct, so this needs its own index to hold."""
+    async def test_refuses_two_folders_with_one_name_in_the_root(
+        self, project: AsyncClient
+    ) -> None:
         await make_folder(project, "Exports")
 
         assert (
@@ -175,20 +186,103 @@ class TestCreatingFolders:
         assert response.status_code == 422
 
 
-class TestTheTree:
-    async def test_starts_empty(self, project: AsyncClient) -> None:
-        """A project's root is implicit, so a new project has no folders at all."""
-        assert (await project.get("/projects/ATL/tree")).json() == []
+class TestTheRoot:
+    async def test_a_new_project_has_one(self, project: AsyncClient) -> None:
+        tree = (await project.get("/projects/ATL/tree")).json()
 
-    async def test_nests_folders_inside_their_parents(self, project: AsyncClient) -> None:
+        assert tree["is_root"] is True
+        assert tree["parent_id"] is None
+        assert tree["children"] == []
+
+    async def test_is_named_after_the_project(self, project: AsyncClient) -> None:
+        tree = (await project.get("/projects/ATL/tree")).json()
+
+        assert tree["name"] == ATLAS["name"]
+
+    async def test_follows_the_project_when_it_is_renamed(self, project: AsyncClient) -> None:
+        """The root stands for the project, so a stale name would be a lie."""
+        await project.patch("/projects/ATL", json={"name": "Atlas Billing"})
+
+        assert (await project.get("/projects/ATL/tree")).json()["name"] == "Atlas Billing"
+
+    async def test_takes_files_directly(self, project: AsyncClient) -> None:
+        """The point of the whole exercise: a README beside the tree, not in it."""
+        response = await upload(project, await root_id(project), "README.md", content_of("readme"))
+
+        assert response.status_code == 201
+        assert response.json()["folder_id"] == await root_id(project)
+
+    async def test_takes_links_directly(self, project: AsyncClient) -> None:
+        response = await project.post(
+            f"/folders/{await root_id(project)}/links",
+            json={
+                "name": "Project brief",
+                "url": "https://docs.google.com/document/d/atlas-brief",
+                "source": "gdrive",
+            },
+        )
+
+        assert response.status_code == 201
+
+    async def test_cannot_be_renamed(self, project: AsyncClient) -> None:
+        response = await project.patch(
+            f"/folders/{await root_id(project)}", json={"name": "Something else"}
+        )
+
+        assert response.status_code == 422
+        message = response.json()["error"]["message"]
+        assert "stands for the project" in message
+        assert "Rename the project" in message
+
+    async def test_cannot_be_moved(self, project: AsyncClient) -> None:
+        elsewhere = await make_folder(project, "Architecture")
+
+        response = await project.patch(
+            f"/folders/{await root_id(project)}", json={"parent_id": elsewhere}
+        )
+
+        assert response.status_code == 422
+
+    async def test_cannot_be_deleted(self, project: AsyncClient) -> None:
+        response = await project.delete(f"/folders/{await root_id(project)}")
+
+        assert response.status_code == 422
+        assert "cannot be deleted" in response.json()["error"]["message"]
+
+    async def test_a_refused_delete_leaves_it_there(self, project: AsyncClient) -> None:
+        before = await root_id(project)
+
+        await project.delete(f"/folders/{before}")
+
+        assert await root_id(project) == before
+
+    async def test_each_project_gets_its_own(self, project: AsyncClient) -> None:
+        await project.post("/projects", json=HERMES)
+
+        assert await root_id(project, "ATL") != await root_id(project, "HRM")
+
+    async def test_the_database_permits_only_one_per_project(
+        self, project: AsyncClient, session: AsyncSession
+    ) -> None:
+        """The rule is an index, not a convention the service remembers."""
+        project_id = UUID((await project.get("/projects/ATL")).json()["id"])
+
+        session.add(Folder(project_id=project_id, parent_id=None, name="Impostor"))
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+
+class TestTheTree:
+    async def test_starts_at_the_root(self, project: AsyncClient) -> None:
         finance = await make_folder(project, "Finance inputs")
         await make_folder(project, "2025", finance)
         await make_folder(project, "Architecture")
 
         tree = (await project.get("/projects/ATL/tree")).json()
 
-        assert [node["name"] for node in tree] == ["Architecture", "Finance inputs"]
-        assert [node["name"] for node in tree[1]["children"]] == ["2025"]
+        assert [node["name"] for node in tree["children"]] == ["Architecture", "Finance inputs"]
+        assert [node["name"] for node in tree["children"][1]["children"]] == ["2025"]
 
     async def test_comes_back_in_one_call_however_deep(self, project: AsyncClient) -> None:
         first = await make_folder(project, "One")
@@ -197,7 +291,7 @@ class TestTheTree:
 
         tree = (await project.get("/projects/ATL/tree")).json()
 
-        assert tree[0]["children"][0]["children"][0]["name"] == "Three"
+        assert tree["children"][0]["children"][0]["children"][0]["name"] == "Three"
 
 
 class TestFolderContents:
@@ -221,7 +315,11 @@ class TestFolderContents:
 
         body = (await project.get(f"/folders/{second}/children")).json()
 
-        assert [crumb["name"] for crumb in body["path"]] == ["Finance inputs", "2025"]
+        assert [crumb["name"] for crumb in body["path"]] == [
+            ATLAS["name"],
+            "Finance inputs",
+            "2025",
+        ]
 
     async def test_an_unknown_folder_is_a_clean_404(self, project: AsyncClient) -> None:
         response = await project.get(f"/folders/{UNKNOWN_ID}/children")
@@ -246,14 +344,14 @@ class TestMovingFolders:
 
         assert body["parent_id"] == parent
 
-    async def test_moves_back_to_the_top_level(self, project: AsyncClient) -> None:
-        """An explicit null means the top level; omitting it leaves the parent alone."""
+    async def test_moves_back_into_the_root(self, project: AsyncClient) -> None:
+        """An explicit null means the root; omitting it leaves the parent alone."""
         parent = await make_folder(project, "Finance inputs")
         child = await make_folder(project, "2025", parent)
 
         body = (await project.patch(f"/folders/{child}", json={"parent_id": None})).json()
 
-        assert body["parent_id"] is None
+        assert body["parent_id"] == await root_id(project)
 
     async def test_renaming_does_not_move(self, project: AsyncClient) -> None:
         parent = await make_folder(project, "Finance inputs")
@@ -290,14 +388,15 @@ class TestMovingFolders:
         await project.patch(f"/folders/{grandparent}", json={"parent_id": parent})
 
         tree = (await project.get("/projects/ATL/tree")).json()
-        assert [node["name"] for node in tree] == ["One"]
+        assert [node["name"] for node in tree["children"]] == ["One"]
 
     async def test_refuses_a_folder_nested_deeper_than_the_limit(
         self, project: AsyncClient
     ) -> None:
         """The cap is what makes every walk up the tree terminate."""
         parent: str | None = None
-        for level in range(MAX_DEPTH):
+        # One short of the cap: the root already occupies the first level.
+        for level in range(MAX_DEPTH - 1):
             parent = await make_folder(project, f"level-{level}", parent)
 
         response = await project.post(
@@ -661,7 +760,7 @@ class TestDeletingFolders:
 
         await project.delete(f"/folders/{parent}")
 
-        assert (await project.get("/projects/ATL/tree")).json() == []
+        assert (await project.get("/projects/ATL/tree")).json()["children"] == []
 
     async def test_cleans_the_content_out_of_the_store(
         self, project: AsyncClient, settings: Settings
@@ -695,9 +794,8 @@ class TestDeletingFolders:
 
         await project.delete(f"/folders/{doomed}")
 
-        assert [node["name"] for node in (await project.get("/projects/ATL/tree")).json()] == [
-            "Architecture"
-        ]
+        tree = (await project.get("/projects/ATL/tree")).json()
+        assert [node["name"] for node in tree["children"]] == ["Architecture"]
 
 
 class TestProjectSummary:
@@ -716,10 +814,19 @@ class TestProjectSummary:
         assert summary["file_count"] == 2
 
     async def test_is_zero_for_an_untouched_project(self, project: AsyncClient) -> None:
+        """The root is not counted: every project has one, so it says nothing."""
         summary = (await project.get("/projects/ATL/summary")).json()
 
         assert summary["folder_count"] == 0
         assert summary["file_count"] == 0
+
+    async def test_counts_files_sitting_in_the_root(self, project: AsyncClient) -> None:
+        await upload(project, await root_id(project), "README.md", content_of("root readme"))
+
+        summary = (await project.get("/projects/ATL/summary")).json()
+
+        assert summary["folder_count"] == 0
+        assert summary["file_count"] == 1
 
     async def test_counts_only_this_projects_files(self, project: AsyncClient) -> None:
         await project.post("/projects", json=HERMES)

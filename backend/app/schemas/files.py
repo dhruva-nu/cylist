@@ -34,7 +34,7 @@ def clean_name(value: str) -> str:
 class FolderCreate(Schema):
     name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
     parent_id: UUID | None = Field(
-        default=None, description="Omit for a folder at the top level of the project."
+        default=None, description="Omit to put the folder in the project's root folder."
     )
 
     @field_validator("name")
@@ -47,7 +47,10 @@ class FolderUpdate(Schema):
     """Rename a folder, move it, or both.
 
     ``parent_id`` distinguishes omitted from null: leaving it out keeps the
-    folder where it is, sending `null` moves it to the top level.
+    folder where it is, sending `null` moves it to the project's root.
+
+    The root itself accepts neither — it stands for the project, and the API
+    says so with a 422 rather than silently ignoring the request.
     """
 
     name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_LENGTH)
@@ -62,8 +65,14 @@ class FolderUpdate(Schema):
 class FolderRead(Schema):
     id: UUID
     project_id: UUID
-    parent_id: UUID | None
+    parent_id: UUID | None = Field(description="Null only for the project's root folder.")
     name: str
+    is_root: bool = Field(
+        description=(
+            "Whether this is the project's root folder, which is named after the"
+            " project and cannot be renamed, moved or deleted."
+        )
+    )
     created_at: datetime
 
 
@@ -73,6 +82,7 @@ class FolderNode(Schema):
     id: UUID
     name: str
     parent_id: UUID | None
+    is_root: bool
     children: list[FolderNode]
 
 
@@ -112,7 +122,10 @@ class FolderChildren(Schema):
 
     folder: FolderRead
     path: list[FolderCrumb] = Field(
-        description="The folders above this one, outermost first, ending with it."
+        description=(
+            "The folders above this one, outermost first, ending with it."
+            " Always starts at the project's root."
+        )
     )
     folders: list[FolderRead]
     items: list[ItemRead]

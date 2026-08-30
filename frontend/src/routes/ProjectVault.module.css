@@ -60,6 +60,29 @@
   font-size: 14.5px;
 }
 
+.tier,
+.children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The ring goes on the row, not on the <li> that takes focus: a branch's <li>
+   wraps its whole open subtree, and an outline around all of that says nothing
+   about where the keyboard is. Inset, so it does not collide with the row
+   above. Both selectors outrank the global :focus-visible rule, which would
+   otherwise win or lose on stylesheet order. */
+.row:focus-visible {
+  outline: none;
+}
+
+.row:focus-visible > .node {
+  outline: 3px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* A row, not a button — but "+ Add a node" below the tree still is one, so the
+   control resets stay. */
 .node {
   display: flex;
   gap: 7px;

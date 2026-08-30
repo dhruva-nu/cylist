@@ -34,7 +34,7 @@
   height: 32px;
   border-radius: 10px;
   background: var(--brand);
-  color: #3a2e00;
+  color: var(--on-brand);
   font-size: 16px;
 }
 
@@ -68,7 +68,7 @@
 
 .go {
   background: var(--go);
-  color: #fff;
+  color: var(--go-ink);
 }
 
 .go:hover:not(:disabled) {

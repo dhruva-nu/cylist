@@ -12,7 +12,7 @@
  */
 
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import {
   api,
   type BoardColumn,
@@ -41,6 +41,12 @@ interface DialogProps {
   taskId: string | null
   columns: BoardColumn[]
   firstColumn: BoardColumn
+  /**
+   * Where to say what happened. The dialog closes on success, taking any live
+   * region inside it with it before a screen reader could read one, so the
+   * board keeps the region and the dialog only supplies the words.
+   */
+  announce: (message: string) => void
   onDone: () => Promise<void>
   onClose: () => void
 }
@@ -93,6 +99,7 @@ function TaskForm({
   firstColumn,
   task,
   members,
+  announce,
   onDone,
   onClose,
 }: DialogProps & { task: TaskDetail | null; members: Person[] }) {
@@ -115,6 +122,8 @@ function TaskForm({
   const was = task?.status ?? 'active'
   const changing = status !== was
   const stalling = changing && status !== 'active'
+  const moving = task !== null && columnId !== task.column_id
+  const destination = columns.find((column) => column.id === columnId)?.name ?? null
 
   const save = useMutation({
     mutationFn: async () => {
@@ -140,8 +149,17 @@ function TaskForm({
       }
 
       if (comment.trim()) await api.addComment(saved.id, comment.trim(), author || null)
+      return saved
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      announce(
+        summarise(
+          saved.reference,
+          task === null,
+          moving ? destination : null,
+          changing ? status : null,
+        ),
+      )
       await onDone()
       onClose()
     },
@@ -150,6 +168,7 @@ function TaskForm({
   const remove = useMutation({
     mutationFn: () => api.deleteTask(task?.id ?? ''),
     onSuccess: async () => {
+      announce(`${task?.reference ?? 'The task'} deleted.`)
       await onDone()
       onClose()
     },
@@ -168,6 +187,32 @@ function TaskForm({
     setTagged((current) =>
       current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId],
     )
+  }
+
+  /**
+   * Arrow keys walk the status control, as they do any radio group.
+   *
+   * Focus moves with the choice rather than staying put: the roving tabindex
+   * follows whichever option is checked, so leaving focus behind would make
+   * the second arrow press do nothing.
+   */
+  function walkStatus(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const step =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? -1
+          : 0
+    if (step === 0) return
+
+    event.preventDefault()
+    const next = (index + step + STATUSES.length) % STATUSES.length
+    const option = STATUSES[next]
+    if (!option) return
+
+    setStatus(option.value)
+    const group = event.currentTarget.parentElement
+    group?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
   }
 
   return (
@@ -284,14 +329,19 @@ function TaskForm({
         </FieldPair>
 
         <Field label="Status">
-          <div className={styles.segmented} role="group">
-            {STATUSES.map((option) => (
+          <div className={styles.segmented} role="radiogroup" aria-label="Status">
+            {STATUSES.map((option, index) => (
               <button
                 key={option.value}
                 type="button"
+                role="radio"
+                aria-checked={status === option.value}
+                // One stop for the whole group, on whichever option is chosen:
+                // Tab should pass a three-way choice, not visit it three times.
+                tabIndex={status === option.value ? 0 : -1}
                 className={status === option.value ? `${styles.on} ${styles[option.value]}` : ''}
-                aria-pressed={status === option.value}
                 onClick={() => setStatus(option.value)}
+                onKeyDown={(event) => walkStatus(event, index)}
               >
                 {option.label}
               </button>
@@ -310,7 +360,7 @@ function TaskForm({
               />
             </Field>
             <Field label="Who is this waiting on?">
-              <div className={styles.tagPicker}>
+              <div className={styles.tagPicker} role="group" aria-label="Who is this waiting on?">
                 {members.map((person) => (
                   <button
                     key={person.id}
@@ -355,6 +405,7 @@ function TaskForm({
               </select>
               <input
                 value={comment}
+                aria-label="Add a comment"
                 onChange={(event) => setComment(event.target.value)}
                 placeholder="Add a comment…"
               />
@@ -364,6 +415,28 @@ function TaskForm({
       </ModalBody>
     </Modal>
   )
+}
+
+/**
+ * One sentence covering everything a save did.
+ *
+ * A save is up to four requests, and hearing four separate confirmations of
+ * one button press is worse than hearing none.
+ */
+function summarise(
+  reference: string,
+  created: boolean,
+  movedTo: string | null,
+  newStatus: TaskStatus | null,
+): string {
+  const parts = [created ? `Created ${reference}.` : `Saved ${reference}.`]
+  if (movedTo) parts.push(`Moved to ${movedTo}.`)
+
+  // Only when it actually changed: "status active" after every save is noise
+  // that trains people to stop listening to the region.
+  const label = STATUSES.find((option) => option.value === newStatus)?.label
+  if (label) parts.push(`Status ${label.toLowerCase()}.`)
+  return parts.join(' ')
 }
 
 /** One timeline entry. System entries are drawn apart from what people wrote. */

@@ -51,10 +51,14 @@ async def _run_on_maintenance_db(url: URL, statements: list[str]) -> None:
         await engine.dispose()
 
 
-def _alembic_config(url: URL) -> Config:
+def _alembic_config() -> Config:
+    """Alembic pointed at this repository.
+
+    No URL: ``env.py`` reads that from the environment, and pushing one through
+    the ini file would fail on any URL containing a percent sign.
+    """
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    config.set_main_option("sqlalchemy.url", url.render_as_string(hide_password=False))
     return config
 
 
@@ -83,10 +87,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
 
-    # env.py reads the URL from the environment, so it must agree with the
-    # config we pass in.
+    # env.py reads the URL from the environment, and is imported for the
+    # first time by the commands below, so this has to be set before them.
     os.environ["CYLIST_DATABASE_URL"] = scratch_url.render_as_string(hide_password=False)
-    config = _alembic_config(scratch_url)
+    config = _alembic_config()
 
     try:
         print("→ upgrade head")

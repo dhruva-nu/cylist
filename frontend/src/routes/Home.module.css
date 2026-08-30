@@ -20,7 +20,8 @@
   height: 64px;
   margin-bottom: 6px;
   border-radius: 20px;
-  color: #fff;
+
+  /* The ink is set inline: it depends on the project's own colour. */
   font-family: var(--font-ui);
   font-size: 24px;
   font-weight: 800;

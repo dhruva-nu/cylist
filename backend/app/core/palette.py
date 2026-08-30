@@ -7,6 +7,10 @@ project does not change appearance when rows are reordered or re-seeded.
 
 The values are the accent colours from the approved design; none of them is the
 brand yellow or the semantic status colours, which are reserved.
+
+Every one is dark enough for white initials to clear WCAG AA on it, which is
+why the amber and the sage are a shade deeper here than in the mock: an avatar
+is text, and 3.3:1 initials are a decoration of a name rather than a name.
 """
 
 from __future__ import annotations
@@ -16,10 +20,10 @@ import hashlib
 PALETTE: tuple[str, ...] = (
     "#1D7D46",  # green
     "#3B6FC2",  # blue
-    "#C77D00",  # amber
+    "#A76900",  # amber
     "#7A6B9E",  # violet
     "#8E6A3D",  # clay
-    "#2A8F5A",  # sage
+    "#278655",  # sage
     "#B5533F",  # rust
     "#4A7B8C",  # slate blue
 )

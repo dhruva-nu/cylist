@@ -100,12 +100,9 @@
   color: var(--ink-3);
 }
 
-.node.on svg {
+.node.on svg,
+.node.on .caret {
   color: var(--brand-ink);
-}
-
-.kids {
-  padding-left: 16px;
 }
 
 .drop {
@@ -171,6 +168,19 @@
   font-weight: 600;
 }
 
+/* A button that has to read as the row it sits in, not as a control. */
+.openFolder {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
 .badge {
   display: grid;
   flex: none;
@@ -178,43 +188,49 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  color: #fff;
+  color: var(--on-accent);
   font-family: var(--font-ui);
   font-size: 10px;
   font-weight: 700;
 }
 
+/*
+ * A badge names a kind of file, so its colour is fixed rather than themed —
+ * and each one is dark enough for --on-accent to clear AA on it either way.
+ * The two that used --ink-3 and --ink-2 were white on a token that turns pale
+ * in dark mode; the link badge measured 1.9:1 there.
+ */
 .pdf {
-  background: #c4553f;
+  background: var(--file-pdf);
 }
 
 .doc {
-  background: #3b6fc2;
+  background: var(--file-doc);
 }
 
 .xls {
-  background: #2a8f5a;
+  background: var(--file-sheet);
 }
 
 .zip {
-  background: #7a6b9e;
+  background: var(--file-archive);
 }
 
 .img {
-  background: #c77d00;
+  background: var(--file-image);
 }
 
 .other {
-  background: var(--ink-3);
+  background: var(--file-other);
 }
 
 .link {
-  background: var(--ink-2);
+  background: var(--file-link);
 }
 
 .folder {
   background: var(--brand);
-  color: #3a2e00;
+  color: var(--on-brand);
 }
 
 .muted {

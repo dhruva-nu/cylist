@@ -15,26 +15,26 @@ import styles from './ProjectHub.module.css'
 
 const ICONS = {
   board: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <rect x="3" y="4" width="5" height="16" rx="1.5" />
       <rect x="10" y="4" width="5" height="10" rx="1.5" />
       <rect x="17" y="4" width="4" height="13" rx="1.5" />
     </svg>
   ),
   files: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
     </svg>
   ),
   vault: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <rect x="4" y="10" width="16" height="10" rx="2" />
       <path d="M8 10V7a4 4 0 0 1 8 0v3" />
       <circle cx="12" cy="15" r="1.3" />
     </svg>
   ),
   people: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <circle cx="9" cy="8" r="3.2" />
       <path d="M3.5 19a5.5 5.5 0 0 1 11 0" />
       <circle cx="17" cy="9" r="2.5" />

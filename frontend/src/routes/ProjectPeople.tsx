@@ -12,7 +12,16 @@ import { useState } from 'react'
 import { api, type Person, type PersonInput, type PersonKind } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
-import { Avatar, Button, EmptyState, ErrorBanner, KindTag, cardStyles } from '../components/ui'
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  ErrorBanner,
+  KindTag,
+  LiveRegion,
+  cardStyles,
+  useAnnouncer,
+} from '../components/ui'
 import styles from './ProjectPeople.module.css'
 
 export function ProjectPeople() {
@@ -21,6 +30,7 @@ export function ProjectPeople() {
   const [adding, setAdding] = useState(false)
   const [choosing, setChoosing] = useState(false)
   const [editing, setEditing] = useState<Person | null>(null)
+  const { message, announce } = useAnnouncer()
 
   const members = useQuery({
     queryKey: ['members', projectKey],
@@ -37,11 +47,18 @@ export function ProjectPeople() {
   }
 
   const remove = useMutation({
-    mutationFn: (personId: string) =>
-      api.setMembers(
-        projectKey,
-        (members.data?.members ?? []).filter((p) => p.id !== personId).map((p) => p.id),
-      ),
+    mutationFn: (personId: string) => {
+      const going = (members.data?.members ?? []).find((person) => person.id === personId)
+      return api
+        .setMembers(
+          projectKey,
+          (members.data?.members ?? []).filter((p) => p.id !== personId).map((p) => p.id),
+        )
+        .then((result) => {
+          announce(`${going?.name ?? 'That person'} is no longer on this project.`)
+          return result
+        })
+    },
     onSuccess: refresh,
   })
 
@@ -69,6 +86,7 @@ export function ProjectPeople() {
       </PageHead>
 
       {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
+      <LiveRegion message={message} />
 
       <Group title="Team" people={team} onEdit={setEditing} onRemove={remove.mutate} />
       <Group title="Clients" people={clients} onEdit={setEditing} onRemove={remove.mutate} />
@@ -77,6 +95,7 @@ export function ProjectPeople() {
         <PersonDialog
           title="Add a person"
           projectKey={projectKey}
+          onSaved={(name) => announce(`${name} is now on this project.`)}
           currentMemberIds={members.data.members.map((person) => person.id)}
           onDone={refresh}
           onClose={() => setAdding(false)}
@@ -87,6 +106,7 @@ export function ProjectPeople() {
         <PersonDialog
           title="Edit person"
           person={editing}
+          onSaved={(name) => announce(`${name} saved.`)}
           onDone={refresh}
           onClose={() => setEditing(null)}
         />
@@ -96,6 +116,11 @@ export function ProjectPeople() {
         <DirectoryDialog
           projectKey={projectKey}
           currentMemberIds={members.data.members.map((person) => person.id)}
+          onSaved={(count) =>
+            announce(
+              `Membership saved. ${count} ${count === 1 ? 'person is' : 'people are'} on this project.`,
+            )
+          }
           onDone={refresh}
           onClose={() => setChoosing(false)}
         />
@@ -172,6 +197,7 @@ function PersonDialog({
   person,
   projectKey,
   currentMemberIds,
+  onSaved,
   onDone,
   onClose,
 }: {
@@ -179,6 +205,7 @@ function PersonDialog({
   person?: Person
   projectKey?: string
   currentMemberIds?: string[]
+  onSaved: (name: string) => void
   onDone: () => Promise<void>
   onClose: () => void
 }) {
@@ -199,15 +226,17 @@ function PersonDialog({
       const payload = { ...input, email: input.email?.trim() ? input.email.trim() : null }
       if (person) {
         await api.updatePerson(person.id, payload)
-        return
+        return payload.name
       }
       const created = await api.createPerson(payload)
       if (projectKey) {
         await api.setMembers(projectKey, [...(currentMemberIds ?? []), created.id])
       }
+      return created.name
     },
-    onSuccess: async () => {
+    onSuccess: async (name) => {
       await onDone()
+      onSaved(name)
       onClose()
     },
   })
@@ -283,11 +312,13 @@ function PersonDialog({
 function DirectoryDialog({
   projectKey,
   currentMemberIds,
+  onSaved,
   onDone,
   onClose,
 }: {
   projectKey: string
   currentMemberIds: string[]
+  onSaved: (count: number) => void
   onDone: () => Promise<void>
   onClose: () => void
 }) {
@@ -296,8 +327,9 @@ function DirectoryDialog({
 
   const save = useMutation({
     mutationFn: () => api.setMembers(projectKey, selected),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await onDone()
+      onSaved(result.members.length)
       onClose()
     },
   })

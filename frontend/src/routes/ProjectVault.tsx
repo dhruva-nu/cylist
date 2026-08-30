@@ -10,7 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import {
   api,
   type SecretInput,
@@ -20,7 +20,15 @@ import {
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
-import { Button, EmptyState, ErrorBanner, Eyebrow, cardStyles } from '../components/ui'
+import {
+  Button,
+  EmptyState,
+  ErrorBanner,
+  Eyebrow,
+  LiveRegion,
+  cardStyles,
+  useAnnouncer,
+} from '../components/ui'
 import styles from './ProjectVault.module.css'
 
 const MASK = '••••••••••••'
@@ -52,6 +60,7 @@ interface Destination {
 export function ProjectVault() {
   const { projectKey } = useParams({ from: '/p/$projectKey/vault' })
   const queryClient = useQueryClient()
+  const { message, announce } = useAnnouncer()
 
   const [openTrees, setOpenTrees] = useState<string[]>([])
   const [openNodes, setOpenNodes] = useState<string[]>([])
@@ -88,9 +97,11 @@ export function ProjectVault() {
   }
 
   const remove = useMutation({
-    mutationFn: (nodeId: string) => api.deleteVaultNode(nodeId),
-    onSuccess: async () => {
+    // The node rather than its id, so the announcement can name what has gone.
+    mutationFn: (node: VaultNode) => api.deleteVaultNode(node.id),
+    onSuccess: async (_deleted, node) => {
       setSelectedId(null)
+      announce(`Deleted ${node.name}.`)
       await refresh()
     },
   })
@@ -111,6 +122,15 @@ export function ProjectVault() {
     if (node.kind === 'branch') setOpenNodes((current) => toggle(current, node.id))
   }
 
+  /** Expand or collapse one branch. The arrow keys need to say which, where a
+   * click only ever means "the other one". */
+  function setBranchOpen(nodeId: string, open: boolean) {
+    setOpenNodes((current) => {
+      if (open) return current.includes(nodeId) ? current : [...current, nodeId]
+      return current.filter((other) => other !== nodeId)
+    })
+  }
+
   return (
     <>
       <PageHead
@@ -124,6 +144,8 @@ export function ProjectVault() {
         Multiple trees, each as deep as you like. Secrets stay masked until you reveal them, and
         every reveal is written to the activity log.
       </PageHead>
+
+      <LiveRegion message={message} />
 
       {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
 
@@ -151,21 +173,21 @@ export function ProjectVault() {
                 </button>
                 {openTrees.includes(tree.id) ? (
                   <div className={styles.branchList}>
-                    {tree.nodes.map((node) => (
-                      <NodeRow
-                        key={node.id}
-                        node={node}
-                        selectedId={selectedId}
-                        openNodes={openNodes}
-                        onSelect={select}
-                      />
-                    ))}
+                    <TreeNav
+                      tree={tree}
+                      selectedId={selectedId}
+                      openNodes={openNodes}
+                      onSelect={select}
+                      onSetOpen={setBranchOpen}
+                    />
+                    {/* Outside the tree on purpose: role="tree" may only hold
+                        treeitems, and this is an action, not a node. */}
                     <button
                       type="button"
                       className={`${styles.node} ${styles.add}`}
                       onClick={() => setAdding({ treeId: tree.id, parentId: null })}
                     >
-                      <span className={styles.caret} />+ Add a node
+                      <span className={styles.caret} aria-hidden="true" />+ Add a node
                     </button>
                   </div>
                 ) : null}
@@ -178,13 +200,14 @@ export function ProjectVault() {
               <NodeDetail
                 node={selected.node}
                 path={selected.path}
+                announce={announce}
                 onAdd={(kind) =>
                   setAdding({ treeId: selected.node.tree_id, parentId: selected.node.id, kind })
                 }
                 onSelect={select}
                 onEdit={() => setEditing(selected.node)}
                 onMove={() => setMoving(selected.node)}
-                onDelete={() => remove.mutate(selected.node.id)}
+                onDelete={() => remove.mutate(selected.node)}
               />
             ) : (
               <div className={styles.blank}>
@@ -204,18 +227,35 @@ export function ProjectVault() {
       )}
 
       {namingTree ? (
-        <TreeDialog projectKey={projectKey} onDone={refresh} onClose={() => setNamingTree(false)} />
+        <TreeDialog
+          projectKey={projectKey}
+          onDone={async (name) => {
+            await refresh()
+            announce(`Created the ${name} tree.`)
+          }}
+          onClose={() => setNamingTree(false)}
+        />
       ) : null}
 
       {adding ? (
-        <NodeDialog destination={adding} onDone={refresh} onClose={() => setAdding(null)} />
+        <NodeDialog
+          destination={adding}
+          onDone={async (name) => {
+            await refresh()
+            announce(`Added ${name}.`)
+          }}
+          onClose={() => setAdding(null)}
+        />
       ) : null}
 
       {editing ? (
         <NodeDialog
           node={editing}
           destination={{ treeId: editing.tree_id, parentId: editing.parent_id }}
-          onDone={refresh}
+          onDone={async (name) => {
+            await refresh()
+            announce(`Saved ${name}.`)
+          }}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -224,7 +264,10 @@ export function ProjectVault() {
         <MoveDialog
           node={moving}
           tree={loaded.find((tree) => tree.id === moving.tree_id)}
-          onDone={refresh}
+          onDone={async (name) => {
+            await refresh()
+            announce(`Moved ${name}.`)
+          }}
           onClose={() => setMoving(null)}
         />
       ) : null}
@@ -232,13 +275,148 @@ export function ProjectVault() {
   )
 }
 
+/** One row of a tree as the keyboard sees it: flattened, and only what is on
+ * screen — a collapsed branch's children are not somewhere the arrows can go. */
+interface Row {
+  node: VaultNode
+  parentId: string | null
+  level: number
+}
+
+function visibleRows(
+  nodes: VaultNode[],
+  openNodes: string[],
+  level = 1,
+  parentId: string | null = null,
+): Row[] {
+  return nodes.flatMap((node) => {
+    const row = { node, parentId, level }
+    const expanded = node.kind === 'branch' && openNodes.includes(node.id)
+    return expanded ? [row, ...visibleRows(node.children, openNodes, level + 1, node.id)] : [row]
+  })
+}
+
+/**
+ * One tree, navigable by keyboard.
+ *
+ * Each tree is its own `role="tree"` holding a single tab stop, so Tab steps
+ * between trees and the arrows move within one. The alternative — every node
+ * its own tab stop — makes a vault of forty credentials forty presses deep,
+ * which is how a tree stops being a shortcut and becomes an obstacle.
+ */
+function TreeNav({
+  tree,
+  selectedId,
+  openNodes,
+  onSelect,
+  onSetOpen,
+}: {
+  tree: VaultTreeDetail
+  selectedId: string | null
+  openNodes: string[]
+  onSelect: (node: VaultNode) => void
+  onSetOpen: (nodeId: string, open: boolean) => void
+}) {
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  const list = useRef<HTMLUListElement>(null)
+
+  const rows = visibleRows(tree.nodes, openNodes)
+  // Where Tab lands: wherever the arrows left off, else the selection, else the
+  // top. A row that has just been collapsed out of sight falls through the same
+  // chain rather than taking the tree's only tab stop with it.
+  const active =
+    rows.find((row) => row.node.id === focusedId)?.node.id ??
+    rows.find((row) => row.node.id === selectedId)?.node.id ??
+    rows[0]?.node.id ??
+    null
+
+  function focus(nodeId: string) {
+    setFocusedId(nodeId)
+    list.current?.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`)?.focus()
+  }
+
+  function choose(node: VaultNode) {
+    focus(node.id)
+    onSelect(node)
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLUListElement>) {
+    const index = rows.findIndex((row) => row.node.id === active)
+    const row = rows[index]
+    if (row === undefined) return
+
+    const { node, parentId } = row
+    const isBranch = node.kind === 'branch'
+    const expanded = isBranch && openNodes.includes(node.id)
+    const previous = rows[index - 1]
+    const next = rows[index + 1]
+    const first = rows[0]
+    const last = rows[rows.length - 1]
+
+    switch (event.key) {
+      case 'ArrowDown':
+        if (next) focus(next.node.id)
+        break
+      case 'ArrowUp':
+        if (previous) focus(previous.node.id)
+        break
+      case 'ArrowRight':
+        // Open it, or — already open — step into it. Two meanings for one key,
+        // but they are the same intention twice: go further in.
+        if (isBranch && !expanded) onSetOpen(node.id, true)
+        else if (expanded && node.children[0]) focus(node.children[0].id)
+        break
+      case 'ArrowLeft':
+        if (expanded) onSetOpen(node.id, false)
+        else if (parentId) focus(parentId)
+        break
+      case 'Home':
+        if (first) focus(first.node.id)
+        break
+      case 'End':
+        if (last) focus(last.node.id)
+        break
+      case 'Enter':
+      case ' ':
+        choose(node)
+        break
+      default:
+        return
+    }
+
+    // Only reached for a key we handled: Space would scroll the page and the
+    // arrows would scroll the rail out from under the row they just moved to.
+    event.preventDefault()
+  }
+
+  return (
+    <ul ref={list} role="tree" aria-label={tree.name} className={styles.tier} onKeyDown={onKeyDown}>
+      {tree.nodes.map((node) => (
+        <NodeRow
+          key={node.id}
+          node={node}
+          level={1}
+          activeId={active}
+          selectedId={selectedId}
+          openNodes={openNodes}
+          onSelect={choose}
+        />
+      ))}
+    </ul>
+  )
+}
+
 function NodeRow({
   node,
+  level,
+  activeId,
   selectedId,
   openNodes,
   onSelect,
 }: {
   node: VaultNode
+  level: number
+  activeId: string | null
   selectedId: string | null
   openNodes: string[]
   onSelect: (node: VaultNode) => void
@@ -247,36 +425,56 @@ function NodeRow({
   const isBranch = node.kind === 'branch'
 
   return (
-    <div>
-      <button
-        type="button"
+    <li
+      role="treeitem"
+      // Named explicitly, because the accessible name of a branch would
+      // otherwise gather up every descendant nested inside its <li>.
+      aria-label={node.name}
+      aria-level={level}
+      aria-selected={node.id === selectedId}
+      aria-expanded={isBranch ? open : undefined}
+      data-node-id={node.id}
+      tabIndex={node.id === activeId ? 0 : -1}
+      className={styles.row}
+    >
+      <span
         className={`${styles.node} ${node.id === selectedId ? styles.selected : ''}`}
-        onClick={() => onSelect(node)}
+        onClick={(event) => {
+          // A subtree is nested inside its branch's <li>, so without this a
+          // click on a child would select every ancestor on the way up.
+          event.stopPropagation()
+          onSelect(node)
+        }}
       >
-        <span className={`${styles.caret} ${open ? styles.open : ''}`}>{isBranch ? '▶' : ''}</span>
+        <span className={`${styles.caret} ${open ? styles.open : ''}`} aria-hidden="true">
+          {isBranch ? '▶' : ''}
+        </span>
         {isBranch ? <FolderIcon /> : <LockIcon />}
         <span className={styles.nodeName}>{node.name}</span>
-      </button>
+      </span>
       {isBranch && open ? (
-        <div className={styles.children}>
+        <ul role="group" className={styles.children}>
           {node.children.map((child) => (
             <NodeRow
               key={child.id}
               node={child}
+              level={level + 1}
+              activeId={activeId}
               selectedId={selectedId}
               openNodes={openNodes}
               onSelect={onSelect}
             />
           ))}
-        </div>
+        </ul>
       ) : null}
-    </div>
+    </li>
   )
 }
 
 function NodeDetail({
   node,
   path,
+  announce,
   onAdd,
   onSelect,
   onEdit,
@@ -285,6 +483,7 @@ function NodeDetail({
 }: {
   node: VaultNode
   path: string[]
+  announce: (message: string) => void
   onAdd: (kind: VaultNodeKind) => void
   onSelect: (node: VaultNode) => void
   onEdit: () => void
@@ -328,7 +527,7 @@ function NodeDetail({
       </div>
 
       {node.kind === 'secret' ? (
-        <SecretDetail node={node} />
+        <SecretDetail node={node} announce={announce} />
       ) : (
         <div className={styles.cards}>
           {node.children.map((child) => (
@@ -357,7 +556,13 @@ function NodeDetail({
  * `revealed` is the only place a plaintext lives, and it is cleared whenever
  * the selected node changes so switching entries cannot leave one on screen.
  */
-function SecretDetail({ node }: { node: VaultNode }) {
+function SecretDetail({
+  node,
+  announce,
+}: {
+  node: VaultNode
+  announce: (message: string) => void
+}) {
   const [revealed, setRevealed] = useState<string | null>(null)
   const [copied, setCopied] = useState<'username' | 'secret' | null>(null)
 
@@ -374,7 +579,13 @@ function SecretDetail({ node }: { node: VaultNode }) {
 
   const reveal = useMutation({
     mutationFn: () => api.revealSecret(node.id),
-    onSuccess: (secret) => setRevealed(secret.value),
+    onSuccess: (secret) => {
+      setRevealed(secret.value)
+      // What is announced is that it is on screen, never the value itself: a
+      // live region is read aloud, and a credential read aloud is a credential
+      // told to the room.
+      announce(`The secret for ${node.name} is now showing on screen.`)
+    },
   })
 
   /** Copying the secret reveals it, so it goes through the same logged
@@ -388,8 +599,22 @@ function SecretDetail({ node }: { node: VaultNode }) {
       await navigator.clipboard.writeText(text)
       return what
     },
-    onSuccess: setCopied,
+    onSuccess: (what) => {
+      setCopied(what)
+      announce(`${what === 'username' ? 'Username' : 'Secret'} copied to the clipboard.`)
+    },
   })
+
+  /** Reveal, or put it away again. Hiding is a state change nobody watching
+   * the screen can miss and nobody listening would otherwise hear. */
+  function toggleReveal() {
+    if (revealed === null) {
+      reveal.mutate()
+      return
+    }
+    setRevealed(null)
+    announce(`The secret for ${node.name} is hidden again.`)
+  }
 
   const secret = node.secret
   if (!secret) return <p className={styles.note}>This entry has no stored value.</p>
@@ -405,7 +630,12 @@ function SecretDetail({ node }: { node: VaultNode }) {
             <span className={styles.key}>Username</span>
             <span className={styles.value}>
               <span className={styles.mono}>{secret.username}</span>
-              <Button variant="ghost" small onClick={() => copy.mutate('username')}>
+              <Button
+                variant="ghost"
+                small
+                aria-label={copied === 'username' ? 'Username copied' : 'Copy username'}
+                onClick={() => copy.mutate('username')}
+              >
                 {copied === 'username' ? 'Copied' : 'Copy'}
               </Button>
             </span>
@@ -414,19 +644,30 @@ function SecretDetail({ node }: { node: VaultNode }) {
 
         <span className={styles.key}>Secret</span>
         <span className={styles.value}>
-          <span className={styles.masked}>{revealed ?? MASK}</span>
-          <Button
-            variant="ghost"
-            small
-            disabled={reveal.isPending}
-            onClick={() => (revealed ? setRevealed(null) : reveal.mutate())}
-          >
+          {/* Masked, the dots are decoration standing in for something absent,
+              so they are hidden and the state is spelled out instead — twelve
+              bullet characters read one at a time tell nobody anything. */}
+          <span className={styles.masked}>
+            {revealed === null ? (
+              <>
+                <span className="visually-hidden">Secret, hidden</span>
+                <span aria-hidden="true">{MASK}</span>
+              </>
+            ) : (
+              <>
+                <span className="visually-hidden">Secret, showing: </span>
+                {revealed}
+              </>
+            )}
+          </span>
+          <Button variant="ghost" small disabled={reveal.isPending} onClick={toggleReveal}>
             {revealed ? 'Hide' : reveal.isPending ? 'Revealing…' : 'Reveal'}
           </Button>
           <Button
             variant="ghost"
             small
             disabled={copy.isPending}
+            aria-label={copied === 'secret' ? 'Secret copied' : 'Copy secret'}
             onClick={() => copy.mutate('secret')}
           >
             {copied === 'secret' ? 'Copied' : 'Copy'}
@@ -468,7 +709,7 @@ function TreeDialog({
   onClose,
 }: {
   projectKey: string
-  onDone: () => Promise<void>
+  onDone: (name: string) => Promise<void>
   onClose: () => void
 }) {
   const [name, setName] = useState('')
@@ -476,7 +717,9 @@ function TreeDialog({
   const save = useMutation({
     mutationFn: () => api.createVaultTree(projectKey, name.trim()),
     onSuccess: async () => {
-      await onDone()
+      // The name goes back up rather than the dialog announcing it: the screen
+      // owns the live region, and the dialog is about to stop existing.
+      await onDone(name.trim())
       onClose()
     },
   })
@@ -512,6 +755,73 @@ function TreeDialog({
   )
 }
 
+const KINDS: { value: VaultNodeKind; label: string }[] = [
+  { value: 'branch', label: 'Branch' },
+  { value: 'secret', label: 'Secret' },
+]
+
+/**
+ * Branch or secret, as a radio group rather than as two buttons.
+ *
+ * One tab stop with the arrows moving between the choices. Two adjacent tab
+ * stops that look like a single control is how a five-field form comes to feel
+ * like a ten-field one.
+ */
+function KindPicker({
+  kind,
+  onPick,
+}: {
+  kind: VaultNodeKind
+  onPick: (kind: VaultNodeKind) => void
+}) {
+  const group = useRef<HTMLDivElement>(null)
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const step =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? -1
+          : 0
+    if (step === 0) return
+    event.preventDefault()
+
+    const index = KINDS.findIndex((option) => option.value === kind)
+    const next = KINDS[(index + step + KINDS.length) % KINDS.length]
+    if (next === undefined) return
+
+    onPick(next.value)
+    // Focus follows the choice, or the group's single tab stop would be left
+    // sitting on the option the user just moved away from.
+    group.current?.querySelector<HTMLElement>(`[data-kind="${next.value}"]`)?.focus()
+  }
+
+  return (
+    <div
+      ref={group}
+      role="radiogroup"
+      aria-label="Kind"
+      className={styles.segmented}
+      onKeyDown={onKeyDown}
+    >
+      {KINDS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          data-kind={option.value}
+          aria-checked={option.value === kind}
+          tabIndex={option.value === kind ? 0 : -1}
+          className={option.value === kind ? styles.on : undefined}
+          onClick={() => onPick(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /** The form's own shape: every field a string, so the inputs stay controlled.
  * Blanks are turned back into nulls on the way to the API. */
 interface SecretForm {
@@ -536,7 +846,7 @@ function NodeDialog({
 }: {
   node?: VaultNode
   destination: Destination
-  onDone: () => Promise<void>
+  onDone: (name: string) => Promise<void>
   onClose: () => void
 }) {
   const editing = node !== undefined
@@ -573,7 +883,7 @@ function NodeDialog({
       })
     },
     onSuccess: async () => {
-      await onDone()
+      await onDone(name.trim())
       onClose()
     },
   })
@@ -603,22 +913,7 @@ function NodeDialog({
         {/* Hidden when the caller already said which — "+ Secret" means secret. */}
         {editing || destination.kind ? null : (
           <Field label="Kind">
-            <div className={styles.segmented}>
-              <button
-                type="button"
-                className={kind === 'branch' ? styles.on : undefined}
-                onClick={() => setKind('branch')}
-              >
-                Branch
-              </button>
-              <button
-                type="button"
-                className={kind === 'secret' ? styles.on : undefined}
-                onClick={() => setKind('secret')}
-              >
-                Secret
-              </button>
-            </div>
+            <KindPicker kind={kind} onPick={setKind} />
           </Field>
         )}
 
@@ -677,7 +972,7 @@ function MoveDialog({
 }: {
   node: VaultNode
   tree: VaultTreeDetail | undefined
-  onDone: () => Promise<void>
+  onDone: (name: string) => Promise<void>
   onClose: () => void
 }) {
   const [parentId, setParentId] = useState<string>(node.parent_id ?? '')
@@ -686,7 +981,7 @@ function MoveDialog({
   const save = useMutation({
     mutationFn: () => api.moveVaultNode(node.id, parentId || null, position),
     onSuccess: async () => {
-      await onDone()
+      await onDone(node.name)
       onClose()
     },
   })

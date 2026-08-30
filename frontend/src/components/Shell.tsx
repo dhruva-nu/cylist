@@ -2,10 +2,20 @@
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { api } from '../api/client'
+import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
 import { Avatar } from './ui'
 import styles from './Shell.module.css'
+
+const THEME_LABELS: Record<ThemeChoice, string> = {
+  light: 'Light',
+  dark: 'Dark',
+  system: 'System',
+}
+
+/** The owner's mark in the bar. A fixed accent, not a token that flips. */
+const OWNER_COLOUR = '#4a7b8c'
 
 export function Shell() {
   const matchRoute = useMatchRoute()
@@ -15,20 +25,85 @@ export function Shell() {
 
   return (
     <>
+      {/*
+        Eight tab stops sit between the top of the page and the content —
+        wordmark, five tabs, the theme control, the breadcrumb. Tabbing past
+        them on every navigation is the sort of thing that makes a keyboard
+        unusable, so there is a way over them.
+      */}
+      <a href="#content" className={styles.skip}>
+        Skip to content
+      </a>
       <div className={styles.top}>
         <div className={styles.bar}>
           <Link to="/" className={styles.brand}>
             <span className={styles.mark}>C</span> Cylist
           </Link>
           <ProjectTabs />
-          <Avatar name="You" colour="var(--ink-2)" />
+          <div className={styles.right}>
+            <ThemeToggle />
+            <Avatar name="You" colour={OWNER_COLOUR} />
+          </div>
         </div>
         <Breadcrumbs />
       </div>
-      <div className={`${styles.wrap} ${wide ? styles.wide : ''}`}>
+      <main id="content" className={`${styles.wrap} ${wide ? styles.wide : ''}`}>
         <Outlet />
-      </div>
+      </main>
     </>
+  )
+}
+
+/**
+ * Light / dark / system.
+ *
+ * A radio group rather than three buttons: the three are one choice with one
+ * answer, so a screen reader should say "2 of 3" and the arrow keys should
+ * move between them. Roving tabindex keeps the whole control to a single tab
+ * stop, which is what a header full of navigation needs.
+ */
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+  const group = useRef<HTMLDivElement>(null)
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) return
+
+    event.preventDefault()
+    const at = THEME_CHOICES.indexOf(theme)
+    // The fallback never fires — the modulo keeps the index in range — but
+    // saying so costs less than an assertion that stops being true.
+    const next = THEME_CHOICES[(at + step + THEME_CHOICES.length) % THEME_CHOICES.length] ?? theme
+    setTheme(next)
+    // Focus follows selection in a radio group, and the button for `next` is
+    // the only one that will be tabbable after this render.
+    group.current?.querySelector<HTMLElement>(`[data-choice="${next}"]`)?.focus()
+  }
+
+  return (
+    <div
+      ref={group}
+      className={styles.theme}
+      role="radiogroup"
+      aria-label="Colour theme"
+      onKeyDown={onKeyDown}
+    >
+      {THEME_CHOICES.map((choice) => (
+        <button
+          key={choice}
+          type="button"
+          data-choice={choice}
+          role="radio"
+          aria-checked={theme === choice}
+          tabIndex={theme === choice ? 0 : -1}
+          className={theme === choice ? styles.themeOn : undefined}
+          onClick={() => setTheme(choice)}
+        >
+          {THEME_LABELS[choice]}
+        </button>
+      ))}
+    </div>
   )
 }
 

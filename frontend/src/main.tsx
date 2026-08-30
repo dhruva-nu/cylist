@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { applyStoredTheme } from './theme/theme'
 import './theme/tokens.css'
+
+// Before React mounts, so the first paint is already the right theme rather
+// than the light one flashing on the way to the dark one.
+applyStoredTheme()
 
 const queryClient = new QueryClient({
   defaultOptions: {

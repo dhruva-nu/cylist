@@ -227,8 +227,14 @@ export type ItemSource = 'upload' | 'sharepoint' | 'gdrive' | 'other'
 export interface Folder {
   id: string
   project_id: string
+  /** Null only for the project's root folder. */
   parent_id: string | null
   name: string
+  /**
+   * Whether this is the project's root: one per project, named after it,
+   * holding files and folders alike, and impossible to rename or delete.
+   */
+  is_root: boolean
   created_at: string
 }
 
@@ -237,6 +243,7 @@ export interface FolderNode {
   id: string
   name: string
   parent_id: string | null
+  is_root: boolean
   children: FolderNode[]
 }
 
@@ -366,7 +373,8 @@ export const api = {
       body: body({ person_ids: personIds }),
     }),
 
-  getTree: (ref: string) => request<FolderNode[]>(`/projects/${ref}/tree`),
+  /** The project's root folder, with the whole tree nested inside it. */
+  getTree: (ref: string) => request<FolderNode>(`/projects/${ref}/tree`),
   createFolder: (ref: string, input: { name: string; parent_id: string | null }) =>
     request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
   updateFolder: (id: string, input: { name?: string; parent_id?: string | null }) =>

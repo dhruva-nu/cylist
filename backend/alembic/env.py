@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
+from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from app.config import get_settings
@@ -21,7 +22,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+DATABASE_URL = get_settings().database_url
+"""Where the migrations run.
+
+Used directly rather than written back into the ini file: ConfigParser reads a
+bare ``%`` as interpolation, and a perfectly ordinary URL — a percent-encoded
+password, or the ``?host=%2Ftmp%2F…`` of a unix socket — is full of them.
+"""
 
 target_metadata = Base.metadata
 
@@ -39,7 +46,7 @@ def _configure(connection: Connection) -> None:
 def run_migrations_offline() -> None:
     """Emit SQL to stdout without connecting, for review or manual apply."""
     context.configure(
-        url=config.get_main_option("sqlalchemy.url"),
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -56,10 +63,9 @@ def _run(connection: Connection) -> None:
 
 async def run_migrations_online() -> None:
     """Apply migrations against the configured database."""
-    engine = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-    )
+    # NullPool: this engine runs one connection once and is thrown away, so a
+    # pool would only leave sockets open for the process to shut down.
+    engine = create_async_engine(DATABASE_URL, poolclass=pool.NullPool)
     async with engine.connect() as connection:
         await connection.run_sync(_run)
     await engine.dispose()
