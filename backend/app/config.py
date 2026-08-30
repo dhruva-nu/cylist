@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     max_upload_mb: int = Field(default=200, gt=0)
 
+    # --- The web app ------------------------------------------------------
+    # Where the built SPA lives, relative to the working directory. The
+    # production image builds it here; in development it does not exist and the
+    # app is served by Vite instead, so the default is simply never found.
+    web_dir: Path = Path("./web")
+
     # --- Secrets ----------------------------------------------------------
     password_hash: str = ""
     vault_key: str = ""

@@ -105,6 +105,17 @@ pg_dump "$CYLIST_DATABASE_URL" > cylist.sql   # the data
 rsync -a "$CYLIST_DATA_DIR"/ backup/data/     # the uploaded files
 ```
 
+## Deploying
+
+`main` deploys itself. Every push that passes CI is built and released to
+**dnu-home-1** by a self-hosted runner on that machine, and served over HTTPS at
+<https://dnu-home-1.tail222f46.ts.net> — one container holding the API and the
+built SPA, in front of a Postgres that publishes no port at all.
+
+`make deploy` runs the same script by hand on the server. See
+[DEPLOY.md](DEPLOY.md) for the shape of it, the one-time setup, and how to roll
+a bad release back.
+
 ## The CLI and the MCP server
 
 Everything the web app does is an HTTP call, so two other clients ship with it.
