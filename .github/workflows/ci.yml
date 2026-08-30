@@ -54,19 +54,15 @@ jobs:
           uv run ruff format --check .
 
       - name: Type-check
-        run: uv run mypy app
+        run: uv run mypy app scripts
 
       - name: Test
         run: uv run pytest -q
 
       # Proves the migrations produce exactly the schema the models describe,
-      # and that every revision reverses cleanly.
+      # and that every revision reverses cleanly. Uses its own scratch database.
       - name: Verify migrations
-        run: |
-          uv run alembic upgrade head
-          uv run alembic check
-          uv run alembic downgrade base
-          uv run alembic upgrade head
+        run: uv run python -m scripts.check_migrations
 
   frontend:
     name: Frontend

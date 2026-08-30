@@ -38,11 +38,8 @@ revision: ## Autogenerate a migration: make revision m="add projects"
 	cd $(BACKEND) && uv run alembic revision --autogenerate -m "$(m)"
 
 migrate-check: ## Prove migrations match the models and reverse cleanly
-	cd $(BACKEND) && CYLIST_DATABASE_URL=$(TEST_DATABASE_URL) sh -c '\
-	  uv run alembic upgrade head && \
-	  uv run alembic check && \
-	  uv run alembic downgrade base && \
-	  uv run alembic upgrade head'
+	cd $(BACKEND) && CYLIST_DATABASE_URL=$(TEST_DATABASE_URL) \
+	  uv run python -m scripts.check_migrations
 
 dev-api: ## Run the API with reload on :8000
 	cd $(BACKEND) && uv run uvicorn app.main:app --reload --port 8000
@@ -65,7 +62,7 @@ format: ## Auto-format both sides
 	npm --prefix $(FRONTEND) run format
 
 typecheck: ## Type-check both sides
-	cd $(BACKEND) && uv run mypy app
+	cd $(BACKEND) && uv run mypy app scripts
 	npm --prefix $(FRONTEND) run typecheck
 
 check: lint typecheck test migrate-check ## Everything CI runs

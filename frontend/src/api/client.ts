@@ -7,12 +7,13 @@
  * code. Callers branch on `error.code`, never on a status number.
  *
  * Once the backend is running, regenerate exact response types with
- * `npm run api:types`; the hand-written types below cover Phase 0 only.
+ * `npm run api:types`.
  */
 
 const API_BASE = '/api/v1'
 
 export type Scope = 'read' | 'write' | 'vault:read' | 'vault:reveal' | 'admin'
+export type PersonKind = 'team' | 'client'
 
 export interface Identity {
   token_id: string
@@ -21,18 +22,46 @@ export interface Identity {
   scopes: Scope[]
 }
 
-export interface ApiToken {
+export interface Person {
   id: string
   name: string
-  scopes: Scope[]
+  kind: PersonKind
+  role: string
+  responsibilities: string
+  email: string | null
+  colour: string
+  archived_at: string | null
   created_at: string
-  expires_at: string | null
-  last_used_at: string | null
 }
 
-export interface IssuedToken extends ApiToken {
-  /** The only copy of the plaintext. Shown once, never retrievable again. */
-  token: string
+export interface PersonInput {
+  name: string
+  kind: PersonKind
+  role: string
+  responsibilities: string
+  email?: string | null
+}
+
+export interface Project {
+  id: string
+  key: string
+  name: string
+  description: string
+  colour: string
+  archived_at: string | null
+  created_at: string
+  member_count: number
+}
+
+export interface ProjectSummary extends Project {
+  team_count: number
+  client_count: number
+}
+
+export interface ProjectInput {
+  key: string
+  name: string
+  description?: string
 }
 
 export interface Health {
@@ -97,23 +126,37 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T
 }
 
+const body = (value: unknown) => JSON.stringify(value)
+
 export const api = {
   health: () => request<Health>('/health'),
 
   signIn: (password: string) =>
-    request<Identity>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ password }),
-    }),
-
+    request<Identity>('/auth/login', { method: 'POST', body: body({ password }) }),
   signOut: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
-
   me: () => request<Identity>('/me'),
 
-  listTokens: () => request<ApiToken[]>('/tokens'),
+  listProjects: () => request<Project[]>('/projects'),
+  getProject: (ref: string) => request<Project>(`/projects/${ref}`),
+  getProjectSummary: (ref: string) => request<ProjectSummary>(`/projects/${ref}/summary`),
+  createProject: (input: ProjectInput) =>
+    request<Project>('/projects', { method: 'POST', body: body(input) }),
+  updateProject: (ref: string, input: Partial<ProjectInput>) =>
+    request<Project>(`/projects/${ref}`, { method: 'PATCH', body: body(input) }),
+  archiveProject: (ref: string) =>
+    request<{ ok: boolean }>(`/projects/${ref}`, { method: 'DELETE' }),
 
-  issueToken: (input: { name: string; scopes: Scope[]; expires_in_days?: number }) =>
-    request<IssuedToken>('/tokens', { method: 'POST', body: JSON.stringify(input) }),
+  listMembers: (ref: string) => request<{ members: Person[] }>(`/projects/${ref}/members`),
+  setMembers: (ref: string, personIds: string[]) =>
+    request<{ members: Person[] }>(`/projects/${ref}/members`, {
+      method: 'PUT',
+      body: body({ person_ids: personIds }),
+    }),
 
-  revokeToken: (id: string) => request<{ ok: boolean }>(`/tokens/${id}`, { method: 'DELETE' }),
+  listPeople: () => request<Person[]>('/people'),
+  createPerson: (input: PersonInput) =>
+    request<Person>('/people', { method: 'POST', body: body(input) }),
+  updatePerson: (id: string, input: Partial<PersonInput>) =>
+    request<Person>(`/people/${id}`, { method: 'PATCH', body: body(input) }),
+  archivePerson: (id: string) => request<{ ok: boolean }>(`/people/${id}`, { method: 'DELETE' }),
 }

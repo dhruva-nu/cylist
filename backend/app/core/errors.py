@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -85,6 +86,9 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=_error_body(
                 "validation_failed",
                 "The request body or parameters are invalid.",
-                {"fields": exc.errors()},
+                # jsonable_encoder is required, not decorative: for a custom
+                # field validator Pydantic puts the original exception object
+                # in ctx, which JSONResponse cannot serialise.
+                {"fields": jsonable_encoder(exc.errors())},
             ),
         )
