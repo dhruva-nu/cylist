@@ -1,7 +1,7 @@
 /**
  * A project's four areas.
  *
- * Board, Files and Vault are shown but not yet wired: they are Phases 2 to 4.
+ * Board and Vault are shown but not yet wired: they are Phases 2 and 4.
  * Showing them greyed with the phase they arrive in is more honest than hiding
  * them, and keeps the shape of the finished product visible.
  */
@@ -84,7 +84,22 @@ export function ProjectHub() {
           Tasks as cards across up to 8 columns. Colour flags anything on hold or blocked.
         </Tool>
 
-        <Tool icon={ICONS.files} title="Files" phase="Phase 3">
+        <Tool
+          icon={ICONS.files}
+          title="Files"
+          to="/p/$projectKey/files"
+          projectKey={projectKey}
+          meta={
+            <>
+              <span>
+                {project.file_count} {project.file_count === 1 ? 'item' : 'items'}
+              </span>
+              <span>
+                {project.folder_count} {project.folder_count === 1 ? 'folder' : 'folders'}
+              </span>
+            </>
+          }
+        >
           Folders and files on the server, with SharePoint and Google Drive links beside them.
         </Tool>
 
@@ -109,7 +124,7 @@ function Tool({
   title: string
   children: ReactNode
   meta?: ReactNode
-  to?: '/p/$projectKey/people'
+  to?: '/p/$projectKey/people' | '/p/$projectKey/files'
   projectKey?: string
   phase?: string
 }) {
