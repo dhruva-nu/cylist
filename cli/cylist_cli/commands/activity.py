@@ -30,14 +30,8 @@ def register(subparsers: Any) -> None:
 
 
 def _activity(args: argparse.Namespace, ctx: Context) -> None:
-    project_id = None
-    if args.project:
-        # The feed filters by project *id* only, so a key has to be resolved
-        # first — the one endpoint in the API that does not take {project_ref}.
-        project_id = str(ctx.client.get(f"/projects/{args.project}")["id"])
-
     entries = ctx.client.get(
-        "/activity", project_id=project_id, entity_type=args.entity, limit=args.limit
+        "/activity", project=args.project, entity_type=args.entity, limit=args.limit
     )
 
     if ctx.as_json:

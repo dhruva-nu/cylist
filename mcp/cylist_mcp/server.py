@@ -442,11 +442,8 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         ] = 20,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            project_id = None
-            if project:
-                project_id = str((await client.get(f"/projects/{project}"))["id"])
             entries = await client.get(
-                "/activity", project_id=project_id, entity_type=entity_type, limit=limit
+                "/activity", project=project, entity_type=entity_type, limit=limit
             )
             return {"activity": entries}
 

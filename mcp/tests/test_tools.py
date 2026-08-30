@@ -125,14 +125,16 @@ async def test_list_files_walks_a_path(server: MCPServer) -> None:
     assert result.data["items"][0]["name"] == "Signed MSA"
 
 
-async def test_read_activity_resolves_a_project_key(
+async def test_read_activity_passes_the_project_key_straight_through(
     server: MCPServer, recorder: fake_api.Recorder
 ) -> None:
+    """No key-to-id round trip: the feed accepts a key directly."""
     result = await call(server, "read_activity", project="ATL", limit=5)
     assert not result.is_error
     query = recorder.sent("GET", "/activity").url.params
-    assert query["project_id"] == fake_api.PROJECT_ID
+    assert query["project"] == "ATL"
     assert query["limit"] == "5"
+    assert recorder.count("GET", "/projects/ATL") == 0
 
 
 # --- Writing ---------------------------------------------------------------

@@ -148,7 +148,7 @@ class TestAuditTrail:
     ) -> None:
         created = (await signed_in.post("/projects", json=ATLAS)).json()
 
-        entries = (await signed_in.get("/activity", params={"project_id": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
 
         assert [entry["verb"] for entry in entries] == ["project.created"]
         assert entries[0]["payload"] == {"key": "ATL", "name": ATLAS["name"]}

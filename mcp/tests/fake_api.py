@@ -222,6 +222,14 @@ class Recorder:
                 return request
         raise AssertionError(f"No {method} {path} was sent. Sent: " + ", ".join(self.paths()))
 
+    def count(self, method: str, path: str) -> int:
+        """How many matching requests were sent — 0 proves one was avoided."""
+        return sum(
+            1
+            for request in self.requests
+            if request.method == method and request.url.path.endswith(path)
+        )
+
     def body(self, method: str, path: str) -> dict[str, Any]:
         payload = json.loads(self.sent(method, path).content or b"{}")
         assert isinstance(payload, dict)

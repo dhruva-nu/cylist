@@ -744,7 +744,7 @@ class TestAuditTrail:
         await project.delete(f"/folders/{folder}")
 
         project_id = (await project.get("/projects/ATL")).json()["id"]
-        entries = (await project.get("/activity", params={"project_id": project_id})).json()
+        entries = (await project.get("/activity", params={"project": project_id})).json()
 
         assert {entry["verb"] for entry in entries} == {
             "project.created",
@@ -763,7 +763,7 @@ class TestAuditTrail:
         await project.get("/projects/ATL/tree")
 
         project_id = (await project.get("/projects/ATL")).json()["id"]
-        entries = (await project.get("/activity", params={"project_id": project_id})).json()
+        entries = (await project.get("/activity", params={"project": project_id})).json()
         assert [entry["verb"] for entry in entries] == ["folder.created", "project.created"]
 
 

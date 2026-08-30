@@ -56,3 +56,19 @@ async def test_an_agents_action_is_attributed_to_the_api_channel(
     entries = (await signed_in.get("/activity", headers=agent)).json()
 
     assert {entry["channel"] for entry in entries} == {"web"}
+
+
+async def test_the_feed_can_be_filtered_by_project_key(signed_in: AsyncClient) -> None:
+    """A key, not just an id — otherwise every client resolves it first."""
+    await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+
+    by_key = (await signed_in.get("/activity", params={"project": "atl"})).json()
+
+    assert [entry["verb"] for entry in by_key] == ["project.created"]
+
+
+async def test_an_unknown_project_filter_is_a_clean_404(signed_in: AsyncClient) -> None:
+    response = await signed_in.get("/activity", params={"project": "NOPE"})
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"

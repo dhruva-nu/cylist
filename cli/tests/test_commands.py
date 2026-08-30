@@ -418,11 +418,18 @@ def test_vault_add_reads_the_value_from_stdin_not_an_argument(
 # --- Activity --------------------------------------------------------------
 
 
-def test_activity_resolves_a_project_key_to_an_id(run: Runner, recorder: fake_api.Recorder) -> None:
-    """The one endpoint that takes project_id rather than {project_ref}."""
+def test_activity_passes_the_project_key_straight_through(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    """The feed takes a key like every other project-scoped path.
+
+    It used to accept only a UUID, so this command spent a request resolving
+    the key first. Asserting the absence of that request keeps it gone.
+    """
     result = run("activity", "--project", "ATL")
     assert result.code == 0
-    assert recorder.sent("GET", "/activity").url.params["project_id"] == fake_api.PROJECT_ID
+    assert recorder.sent("GET", "/activity").url.params["project"] == "ATL"
+    assert recorder.count("GET", "/projects/ATL") == 0
     assert "board-tidy agent" in result.out
     assert "task.status_changed" in result.out
 

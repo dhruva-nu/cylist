@@ -691,7 +691,7 @@ class TestRevealing:
 
         await signed_in.post(f"/vault/nodes/{node['id']}/reveal")
 
-        feed = (await signed_in.get("/activity", params={"project_id": project_id})).json()
+        feed = (await signed_in.get("/activity", params={"project": project_id})).json()
         assert "vault.secret_revealed" in [entry["verb"] for entry in feed]
 
 

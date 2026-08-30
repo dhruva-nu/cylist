@@ -149,7 +149,7 @@ class TestAdding:
         created = (await signed_in.post("/projects", json=ATLAS)).json()
         await _add_column(signed_in, "Review")
 
-        entries = (await signed_in.get("/activity", params={"project_id": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
 
         assert entries[0]["verb"] == "column.created"
         assert entries[0]["payload"] == {"name": "Review", "position": 2}
@@ -232,7 +232,7 @@ class TestDeleting:
 
         await signed_in.delete(f"/columns/{extra['id']}")
 
-        entries = (await signed_in.get("/activity", params={"project_id": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
         assert entries[0]["verb"] == "column.deleted"
         assert entries[0]["payload"] == {"name": "Review"}
 
