@@ -1,9 +1,8 @@
 /**
  * A project's four areas.
  *
- * Vault is shown but not yet wired: it is Phase 4.
- * Showing them greyed with the phase they arrive in is more honest than hiding
- * them, and keeps the shape of the finished product visible.
+ * All four are live: the board, the file store, the vault and the people on
+ * the project, each summarised by the counts behind its card.
  */
 
 import { useQuery } from '@tanstack/react-query'
@@ -121,7 +120,23 @@ export function ProjectHub() {
           Folders and files on the server, with SharePoint and Google Drive links beside them.
         </Tool>
 
-        <Tool icon={ICONS.vault} title="Vault" phase="Phase 4">
+        <Tool
+          icon={ICONS.vault}
+          title="Vault"
+          to="/p/$projectKey/vault"
+          projectKey={projectKey}
+          meta={
+            <>
+              <span>
+                {project.vault_tree_count} {project.vault_tree_count === 1 ? 'tree' : 'trees'}
+              </span>
+              <span>
+                {project.vault_secret_count}{' '}
+                {project.vault_secret_count === 1 ? 'secret' : 'secrets'}
+              </span>
+            </>
+          }
+        >
           Logins, keys and links in trees you shape yourself.
         </Tool>
       </div>
@@ -142,7 +157,11 @@ function Tool({
   title: string
   children: ReactNode
   meta?: ReactNode
-  to?: '/p/$projectKey/board' | '/p/$projectKey/files' | '/p/$projectKey/people'
+  to?:
+    | '/p/$projectKey/board'
+    | '/p/$projectKey/files'
+    | '/p/$projectKey/vault'
+    | '/p/$projectKey/people'
   projectKey?: string
   phase?: string
 }) {

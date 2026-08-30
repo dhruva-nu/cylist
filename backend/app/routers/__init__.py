@@ -17,6 +17,7 @@ from app.routers import (
     projects,
     tasks,
     tokens,
+    vault,
 )
 
 api_router = APIRouter()
@@ -24,6 +25,10 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(tokens.router)
 api_router.include_router(projects.router)
+# Registered after `projects` so `/projects/{project_ref}/vault/trees` resolves
+# against the same `{project_ref}` the rest of that prefix uses.
+api_router.include_router(vault.project_router)
+api_router.include_router(vault.router)
 api_router.include_router(people.router)
 api_router.include_router(columns.router)
 api_router.include_router(tasks.router)

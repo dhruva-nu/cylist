@@ -20,6 +20,7 @@ from app.models.task import (
     TaskType,
     TaskWaitingOn,
 )
+from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 
 __all__ = [
     "Activity",
@@ -43,4 +44,8 @@ __all__ = [
     "TaskType",
     "TaskWaitingOn",
     "TokenKind",
+    "VaultNode",
+    "VaultNodeKind",
+    "VaultSecret",
+    "VaultTree",
 ]

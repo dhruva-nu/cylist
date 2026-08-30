@@ -73,8 +73,7 @@ class ProjectRead(Schema):
 class ProjectSummary(ProjectRead):
     """The numbers behind a project's hub cards.
 
-    Grows as later phases land: the vault counts join it when those
-    tables exist.
+    One request behind the four cards on a project's hub.
     """
 
     team_count: int
@@ -88,6 +87,9 @@ class ProjectSummary(ProjectRead):
     file_count: int = Field(
         description="Everything in the project's folders — uploads and links alike."
     )
+
+    vault_tree_count: int
+    vault_secret_count: int = Field(description="Credentials stored across every tree.")
 
 
 class MembershipUpdate(Schema):

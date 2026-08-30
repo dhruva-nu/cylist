@@ -36,6 +36,11 @@ from app.models import Base
 
 OWNER_PASSWORD = "correct-horse-battery-staple"
 
+VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
+"""A fixed 32-byte AES key, so a ciphertext written by one test is readable by
+the next. Never used anywhere but here; a real one comes from
+``python -m app.cli generate-vault-key``."""
+
 TEST_DATABASE_NAME = "cylist_test"
 
 
@@ -74,6 +79,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory, database_url: str) -> Set
         database_url=database_url,
         data_dir=tmp_path_factory.mktemp("cylist-data"),
         password_hash=hash_password(OWNER_PASSWORD),
+        vault_key=VAULT_KEY,
         cors_origins=[],
     )
 

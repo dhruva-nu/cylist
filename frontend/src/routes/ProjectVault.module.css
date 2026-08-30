@@ -1,0 +1,295 @@
+/* The vault screen: trees down the left, one node's detail on the right. */
+
+.split {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+  min-height: 60vh;
+}
+
+.trees {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tree {
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.treeHead {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 18px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.treeHead b {
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.treeCount {
+  color: var(--ink-3);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.branchList {
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+}
+
+.node {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.node:hover {
+  background: var(--paper-2);
+}
+
+.node.selected {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 700;
+}
+
+.node svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--ink-3);
+}
+
+.node.selected svg {
+  color: var(--brand-ink);
+}
+
+.nodeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  width: 14px;
+  color: var(--ink-3);
+  font-size: 10px;
+  text-align: center;
+  transition: transform 0.12s;
+}
+
+.caret.open {
+  transform: rotate(90deg);
+}
+
+.children {
+  padding-left: 16px;
+}
+
+.add {
+  color: var(--ink-3);
+}
+
+.pane {
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.detail {
+  padding: 24px;
+}
+
+.detailHead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.detailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.path {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.note {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px 18px;
+  align-items: center;
+  margin-top: 24px;
+  font-size: 14.5px;
+}
+
+.key {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+}
+
+.mono {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.masked {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  overflow-wrap: anywhere;
+}
+
+.updated {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+
+.value a {
+  color: var(--link);
+  overflow-wrap: anywhere;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.childCard {
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.childCard b {
+  font-family: var(--font-ui);
+}
+
+.childKind {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--ink-3);
+}
+
+.childKind svg {
+  width: 16px;
+  height: 16px;
+}
+
+.blank {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  height: 100%;
+  padding: 30px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.blank svg {
+  width: 36px;
+  height: 36px;
+}
+
+.hint {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.segmented {
+  display: flex;
+  overflow: hidden;
+  width: fit-content;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+}
+
+.segmented button {
+  padding: 7px 16px;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--line-2);
+}
+
+.segmented button.on {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+@media (max-width: 860px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}

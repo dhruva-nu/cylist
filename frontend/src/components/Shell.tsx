@@ -51,6 +51,9 @@ function ProjectTabs() {
       <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Files
       </Link>
+      <Link to="/p/$projectKey/vault" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Vault
+      </Link>
       <Link
         to="/p/$projectKey/people"
         params={{ projectKey }}
@@ -68,7 +71,16 @@ function Breadcrumbs() {
   const onBoard = matchRoute({ to: '/p/$projectKey/board' })
   const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
-  const area = onBoard ? 'Board' : onFiles ? 'Files' : onPeople ? 'People' : null
+  const onVault = matchRoute({ to: '/p/$projectKey/vault' })
+  const area = onBoard
+    ? 'Board'
+    : onFiles
+      ? 'Files'
+      : onVault
+        ? 'Vault'
+        : onPeople
+          ? 'People'
+          : null
 
   if (!inProject) {
     return (
