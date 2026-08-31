@@ -305,24 +305,56 @@
   gap: 6px;
 }
 
-/* A whole row is the target rather than the reference alone: the title is what
-   the eye lands on, and a link you have to aim at is a link you misclick. */
+/* The row is a container, not the button: it holds a tick box as well, and one
+   control cannot sit inside another. */
 .subtaskRow {
   display: flex;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
   padding: 7px 11px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--paper);
   color: var(--ink);
   font-size: 14px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .subtaskRow:hover {
   border-color: var(--line-2);
+}
+
+/* Undoing the `.field input { width: 100% }` every other field in this dialog
+   wants — the same reset .checkLabel makes, so both kinds of sub-task carry
+   the same tick box. */
+.subtaskRow input {
+  flex: none;
+  width: auto;
+  margin: 0;
+}
+
+/* A whole row is the target rather than the reference alone: the title is what
+   the eye lands on, and a link you have to aim at is a link you misclick. */
+.subOpen {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Struck through once it is done, for the same reason the tick boxes are: the
+   list is read to find what is left, and what is left should be the only thing
+   on it still asking to be read. */
+.subtaskRow.settled .subTitle {
+  color: var(--ink-3);
+  text-decoration: line-through;
 }
 
 .subRef {
@@ -371,16 +403,7 @@
   text-decoration: line-through;
 }
 
-/* The detail view's row: the same shape as .checkLabel without the tick box. */
-.checkRead {
-  display: flex;
-  flex: 1;
-  gap: 9px;
-  align-items: center;
-}
-
-.settled .checkLabel span,
-.settled .checkRead span {
+.settled .checkLabel span {
   color: var(--ink-3);
 }
 
