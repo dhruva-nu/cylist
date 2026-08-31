@@ -228,6 +228,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The card's own reference and its parent's, together at the head of the card.
+   Sub-tasks are the only cards with two, so the pair only ever appears where
+   it means something. */
+.refs {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+/* --ink-2 like .reference, and for the same reason: this rides on cards that
+   may be tinted amber or red, where the quietest ink stops clearing AA. The
+   word "of" carries the relationship, so the colour does not have to. */
+.parent {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .title {
   font-family: var(--font-ui);
   font-size: 15px;

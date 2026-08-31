@@ -25,6 +25,7 @@ import {
   type ChecklistItem,
   type ChecklistState,
   type Person,
+  type Task,
   type TaskComment,
   type TaskDetail,
   type TaskInput,
@@ -415,6 +416,7 @@ function TaskForm({
         {task ? (
           <Subtasks
             task={task}
+            columns={columns}
             onOpenTask={onOpenTask}
             onSplit={onSplit}
             announce={announce}
@@ -538,12 +540,15 @@ const CHECKLIST_LABELS: Record<ChecklistState, string> = {
  */
 function Subtasks({
   task,
+  columns,
   onOpenTask,
   onSplit,
   announce,
   onDone,
 }: {
   task: TaskDetail
+  /** The board's columns, in order — the last of them is what "done" means. */
+  columns: BoardColumn[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   onSplit?: ((parentRef: string) => void) | undefined
   announce: (message: string) => void
@@ -580,8 +585,33 @@ function Subtasks({
     onSuccess: refresh,
   })
 
-  const error = add.error ?? setState.error ?? remove.error
+  /**
+   * Tick a sub-task's card off, or put it back.
+   *
+   * A move rather than a flag, because "done" is a place on this board and not
+   * a field on the card — the same rule the server enforces when it refuses a
+   * parent whose sub-tasks are still open. Position 0, as every move made from
+   * a dialog is: a card dropped at the bottom of a column lands somewhere the
+   * reader cannot see.
+   */
+  const setColumn = useMutation({
+    mutationFn: ({ child, column }: { child: Task; column: BoardColumn }) =>
+      api.moveTask(child.id, column.id, 0),
+    onSuccess: async (moved, { column }) => {
+      announce(`${moved.reference} moved to ${column.name}.`)
+      await refresh()
+    },
+  })
+
+  const error = add.error ?? setState.error ?? remove.error ?? setColumn.error
   const outstanding = task.open_subtask_count
+
+  // The board's own order says which column means finished — the same answer
+  // `columns.last` gives the server. Reopening sends the card back to the
+  // first, which is the only column that means "not started" rather than a
+  // guess at where the card was before it was ticked.
+  const finishedColumn = columns[columns.length - 1]
+  const firstColumn = columns[0]
 
   return (
     <Field label="Sub-tasks">
@@ -589,18 +619,16 @@ function Subtasks({
 
       <div className={styles.subtasks}>
         {task.subtasks.map((child) => (
-          <button
+          <SubtaskRow
             key={child.id}
-            type="button"
-            className={styles.subtaskRow}
-            onClick={() => onOpenTask?.(child.reference)}
-          >
-            <span className={styles.subRef}>{child.reference}</span>
-            <span className={styles.subTitle}>{child.title}</span>
-            <span className={styles.subState}>
-              {STATUSES.find((option) => option.value === child.status)?.label}
-            </span>
-          </button>
+            child={child}
+            column={columns.find((option) => option.id === child.column_id)}
+            finishedColumn={finishedColumn}
+            firstColumn={firstColumn}
+            busy={setColumn.isPending}
+            onOpen={() => onOpenTask?.(child.reference)}
+            onMove={(column) => setColumn.mutate({ child, column })}
+          />
         ))}
 
         {task.checklist.map((item) => (
@@ -667,6 +695,78 @@ function Subtasks({
         ) : null}
       </div>
     </Field>
+  )
+}
+
+/**
+ * One sub-task that has a card of its own.
+ *
+ * The tick box is here, and not only inside the card's own dialog, because the
+ * reason to be looking at this list is to see what is left — and a list you
+ * have to leave in order to tick something off is a list that gets left. It
+ * ticks the same way the checklist above it does, so the two kinds of sub-task
+ * are finished with the same gesture even though only one of them is a row in
+ * a table.
+ *
+ * What it does is a move, so the label says which column: a checkbox that
+ * silently relocates a card on the board behind the dialog is worse than no
+ * checkbox at all. Ticking sends the card to the last column; unticking brings
+ * it back to the first, which is the only honest destination — where the card
+ * sat before it was ticked is not recorded anywhere.
+ */
+function SubtaskRow({
+  child,
+  column,
+  finishedColumn,
+  firstColumn,
+  busy,
+  onOpen,
+  onMove,
+}: {
+  child: Task
+  /** The column the card is in now, if the board still has it. */
+  column: BoardColumn | undefined
+  finishedColumn: BoardColumn | undefined
+  firstColumn: BoardColumn | undefined
+  busy: boolean
+  onOpen: () => void
+  onMove: (column: BoardColumn) => void
+}) {
+  const finished = finishedColumn !== undefined && child.column_id === finishedColumn.id
+  const target = finished ? firstColumn : finishedColumn
+  const status = STATUSES.find((option) => option.value === child.status)
+
+  return (
+    <div className={`${styles.subtaskRow} ${finished ? styles.settled : ''}`}>
+      <input
+        type="checkbox"
+        checked={finished}
+        disabled={busy || target === undefined}
+        aria-label={
+          target === undefined
+            ? `${child.reference} cannot be moved`
+            : finished
+              ? `${child.reference} is done. Reopen it into ${target.name}.`
+              : `Mark ${child.reference} done by moving it to ${target.name}.`
+        }
+        onChange={() => {
+          if (target) onMove(target)
+        }}
+      />
+      {/* The button is the whole of the rest of the row rather than the
+          reference alone: the title is what the eye lands on, and a link you
+          have to aim at is a link you misclick. It cannot wrap the tick box —
+          one control does not go inside another. */}
+      <button type="button" className={styles.subOpen} onClick={onOpen}>
+        <span className={styles.subRef}>{child.reference}</span>
+        <span className={styles.subTitle}>{child.title}</span>
+      </button>
+      {/* The column, because that is what the tick box just changed — the
+          status only replaces it when it is the more urgent of the two. */}
+      <span className={styles.subState}>
+        {child.status === 'active' ? column?.name : status?.label}
+      </span>
+    </div>
   )
 }
 

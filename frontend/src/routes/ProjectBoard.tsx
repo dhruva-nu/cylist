@@ -500,14 +500,29 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
         }
         listeners?.onKeyDown?.(event)
       }}
-      aria-label={`${task.reference}: ${task.title}`}
+      aria-label={
+        task.parent_reference
+          ? `${task.reference}: ${task.title}, a sub-task of ${task.parent_reference}`
+          : `${task.reference}: ${task.title}`
+      }
       style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : {}}
       className={[styles.task, styles[task.status], isDragging && styles.dragging]
         .filter(Boolean)
         .join(' ')}
     >
       <div className={styles.taskRow}>
-        <span className={styles.reference}>{task.reference}</span>
+        <span className={styles.refs}>
+          <span className={styles.reference}>{task.reference}</span>
+          {/* A sub-task's own reference already carries its parent's number,
+              but `ATL-41-2` only says so to a reader who knows the scheme —
+              and on a board, where the two cards may be columns apart, the
+              parent is the thing you need to recognise the card at all. */}
+          {task.parent_reference ? (
+            <span className={styles.parent} title={`Sub-task of ${task.parent_reference}`}>
+              of {task.parent_reference}
+            </span>
+          ) : null}
+        </span>
         {task.status === 'active' ? (
           <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
         ) : (
