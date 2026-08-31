@@ -14,7 +14,7 @@ from fastapi import Request
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-Environment = Literal["dev", "test", "prod"]
+Environment = Literal["dev", "test", "staging", "prod"]
 
 
 class Settings(BaseSettings):
@@ -76,6 +76,19 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "prod"
+
+    @property
+    def is_deployed(self) -> bool:
+        """Whether this is a deployed stack rather than someone's machine.
+
+        Staging and production differ in which data they hold, not in how they
+        are run: both are one container behind ``tailscale serve``, reached over
+        HTTPS, holding rows someone would miss. The decisions that turn on that
+        — issuing the session cookie ``Secure``, refusing to seed fictional
+        data over the top — belong here rather than on
+        :attr:`is_production`, which stays a question about which stack this is.
+        """
+        return self.environment in ("staging", "prod")
 
 
 @lru_cache(maxsize=1)

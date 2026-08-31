@@ -116,6 +116,19 @@ built SPA, in front of a Postgres that publishes no port at all.
 [DEPLOY.md](DEPLOY.md) for the shape of it, the one-time setup, and how to roll
 a bad release back.
 
+**Staging** is the same machine, the same image and the same deploy script, on
+:8001 and on the tailnet only. The `staging` branch deploys itself there, and
+`make staging-refresh` reloads it from production's database and files — so what
+it rehearses is a real release against real rows.
+
+```bash
+make staging-deploy    # or just push to `staging`
+make staging-refresh   # reload it from production
+```
+
+Because it is restored from production it holds real vault ciphertext, and its
+secrets deserve production's care. DEPLOY.md says what that means.
+
 ## The CLI and the MCP server
 
 Everything the web app does is an HTTP call, so two other clients ship with it.

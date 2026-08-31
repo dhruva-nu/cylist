@@ -6,15 +6,21 @@
 # deploy from GitHub and a deploy you run by hand over SSH are the same code
 # path — the one you can debug is the one that actually ships.
 #
-#   scripts/deploy.sh
+#   scripts/deploy.sh            production, on :8000   (the default)
+#   scripts/deploy.sh staging    staging, on :8001
 #
-# Reads CYLIST_PROD_DIR (default ~/cylist-prod) for the secrets that must not
-# live in the repository:
+# One script rather than two, because the interesting part is the order of the
+# steps and that order is not something staging should get a second, drifting
+# copy of. Only the four values below differ between the environments.
 #
-#   $CYLIST_PROD_DIR/app.env       CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH,
-#                                  CYLIST_VAULT_KEY
-#   $CYLIST_PROD_DIR/postgres.env  POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-#   $CYLIST_PROD_DIR/backups/      where this script leaves its dumps
+# Reads the secrets that must not live in the repository from
+# CYLIST_PROD_DIR (default ~/cylist-prod) or CYLIST_STAGING_DIR
+# (default ~/cylist-staging):
+#
+#   $SECRETS_DIR/app.env       CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH,
+#                              CYLIST_VAULT_KEY
+#   $SECRETS_DIR/postgres.env  POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#   $SECRETS_DIR/backups/      where this script leaves its dumps
 #
 # The order below is deliberate. The image is built before anything running is
 # touched, so a build that does not compile changes nothing. The database is
@@ -26,18 +32,44 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export CYLIST_PROD_DIR="${CYLIST_PROD_DIR:-$HOME/cylist-prod}"
-BACKUPS="$CYLIST_PROD_DIR/backups"
-KEEP_BACKUPS="${KEEP_BACKUPS:-10}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/api/v1/health}"
+ENVIRONMENT="${1:-prod}"
+case "$ENVIRONMENT" in
+  prod)
+    COMPOSE_FILE="docker-compose.prod.yml"
+    SECRETS_VAR="CYLIST_PROD_DIR"
+    DEFAULT_SECRETS_DIR="$HOME/cylist-prod"
+    PORT=8000
+    ;;
+  staging)
+    COMPOSE_FILE="docker-compose.staging.yml"
+    SECRETS_VAR="CYLIST_STAGING_DIR"
+    DEFAULT_SECRETS_DIR="$HOME/cylist-staging"
+    PORT=8001
+    ;;
+  *)
+    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging]" >&2
+    exit 2
+    ;;
+esac
 
-compose() { docker compose -f docker-compose.prod.yml "$@"; }
+# Whichever variable this environment uses, honoured if already set and exported
+# either way — compose reads it back out of the environment to find app.env.
+SECRETS_DIR="${!SECRETS_VAR:-$DEFAULT_SECRETS_DIR}"
+export "${SECRETS_VAR}=${SECRETS_DIR}"
+
+BACKUPS="$SECRETS_DIR/backups"
+KEEP_BACKUPS="${KEEP_BACKUPS:-10}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:$PORT/api/v1/health}"
+
+compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 step() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
 
 for f in app.env postgres.env; do
-  [[ -f "$CYLIST_PROD_DIR/$f" ]] ||
-    { echo "missing $CYLIST_PROD_DIR/$f — see docs/DEPLOY.md" >&2; exit 1; }
+  [[ -f "$SECRETS_DIR/$f" ]] ||
+    { echo "missing $SECRETS_DIR/$f — see DEPLOY.md" >&2; exit 1; }
 done
+
+printf '\033[1mDeploying %s\033[0m from %s\n' "$ENVIRONMENT" "$SECRETS_DIR"
 
 step "Building the image"
 # Both halves compile here: the Dockerfile runs `npm run build`, which
@@ -92,5 +124,6 @@ step "Tidying up"
 # Only the layers nothing references. Named images and volumes are untouched.
 docker image prune --force > /dev/null
 
-printf '\n\033[1mDeployed\033[0m %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo "working tree")"
+printf '\n\033[1mDeployed\033[0m %s to %s\n' \
+  "$(git rev-parse --short HEAD 2>/dev/null || echo "working tree")" "$ENVIRONMENT"
 compose ps

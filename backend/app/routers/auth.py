@@ -36,7 +36,7 @@ def _set_session_cookie(response: Response, value: str, settings: Settings) -> N
         value,
         max_age=int(timedelta(hours=settings.session_ttl_hours).total_seconds()),
         httponly=True,  # unreadable from JavaScript, so XSS cannot exfiltrate it
-        secure=settings.is_production,  # plain HTTP is fine on localhost only
+        secure=settings.is_deployed,  # staging and prod are HTTPS; dev and test are not
         samesite="lax",  # survives normal navigation, not cross-site form posts
         path="/",
     )

@@ -359,22 +359,31 @@ class TestRefusing:
         assert await count_of(session, Project) == 3
         assert await count_of(session, Task) == 13
 
-    async def test_will_not_run_in_production(
-        self, settings: Settings, capsys: pytest.CaptureFixture[str]
+    @pytest.mark.parametrize("environment", ["prod", "staging"])
+    async def test_will_not_run_in_a_deployed_environment(
+        self,
+        settings: Settings,
+        capsys: pytest.CaptureFixture[str],
+        environment: str,
     ) -> None:
-        production = settings.model_copy(update={"environment": "prod"})
+        # Staging is refused for the same reason production is: it is restored
+        # from a production dump, so seeding it writes fiction over real rows.
+        deployed = settings.model_copy(update={"environment": environment})
 
-        code = await seed.run(production, force=True, assume_yes=True)
+        code = await seed.run(deployed, force=True, assume_yes=True)
 
         assert code == 1
-        assert "production environment" in capsys.readouterr().err
+        error = capsys.readouterr().err
+        assert "deployed environment" in error
+        assert f"CYLIST_ENVIRONMENT={environment}" in error
 
-    async def test_production_is_refused_before_anything_is_written(
-        self, session: AsyncSession, settings: Settings
+    @pytest.mark.parametrize("environment", ["prod", "staging"])
+    async def test_a_deployed_environment_is_refused_before_anything_is_written(
+        self, session: AsyncSession, settings: Settings, environment: str
     ) -> None:
-        production = settings.model_copy(update={"environment": "prod"})
+        deployed = settings.model_copy(update={"environment": environment})
 
-        await seed.run(production, force=True, assume_yes=True)
+        await seed.run(deployed, force=True, assume_yes=True)
 
         assert await count_of(session, Project) == 0
 

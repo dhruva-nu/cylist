@@ -1163,10 +1163,11 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
     name = make_url(url).database or "?"
     print(f"Seeding {_redacted(url)}")
 
-    if settings.is_production:
+    if settings.is_deployed:
         print(
-            "\nThis is a production environment (CYLIST_ENVIRONMENT=prod). The seed "
-            "writes fictional projects and credentials, so it refuses to run here.",
+            f"\nThis is a deployed environment (CYLIST_ENVIRONMENT={settings.environment}). "
+            "The seed writes fictional projects and credentials, so it refuses to "
+            "run here.",
             file=sys.stderr,
         )
         return 1
