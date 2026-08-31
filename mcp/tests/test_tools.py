@@ -19,6 +19,9 @@ EXPECTED_TOOLS = {
     "list_tasks",
     "get_task",
     "create_task",
+    "create_subtask",
+    "add_checklist_item",
+    "set_checklist_item",
     "move_task",
     "set_task_status",
     "add_comment",
@@ -172,6 +175,107 @@ async def test_create_task_rejects_an_invented_type(server: MCPServer) -> None:
     )
     assert result.is_error
     assert "'feature', 'bug', 'chore'" in result.text
+
+
+# --- Sub-tasks -------------------------------------------------------------
+
+
+async def test_create_subtask_posts_under_the_parent(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "create_subtask",
+        task="ATL-2",
+        title="Drain the old queue",
+        description="Nothing is left in it before the cutover.",
+        task_type="chore",
+        due_date="2026-03-20",
+        assignee="Aditi K",
+    )
+    assert not result.is_error
+    assert result.data["task"]["reference"] == "ATL-2-1"
+    assert recorder.body("POST", "/tasks/ATL-2/subtasks")["assignee_id"] == fake_api.ADITI_ID
+
+
+async def test_create_subtask_resolves_the_assignee_against_the_right_project(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """The parent's key comes off the front of its reference, not the back.
+
+    'ATL-2-1' rsplit on a dash would ask for the members of a project called
+    'ATL-2', which does not exist.
+    """
+    result = await call(
+        server,
+        "create_subtask",
+        task="ATL-2",
+        title="Drain the old queue",
+        description="Nothing is left in it before the cutover.",
+        task_type="chore",
+        due_date="2026-03-20",
+        assignee="Aditi K",
+    )
+    assert not result.is_error
+    assert recorder.sent("GET", "/projects/ATL/members")
+
+
+async def test_a_subtask_is_addressed_by_its_own_reference(server: MCPServer) -> None:
+    result = await call(server, "get_task", task="ATL-2-1")
+    assert not result.is_error
+    assert result.data["task"]["parent_reference"] == "ATL-2"
+
+
+async def test_add_checklist_item_posts_the_title(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "add_checklist_item", task="ATL-2", title="Tell support")
+    assert not result.is_error
+    assert result.data["item"]["state"] == "open"
+    assert recorder.body("POST", "/tasks/ATL-2/checklist") == {"title": "Tell support"}
+
+
+async def test_set_checklist_item_ticks_it(server: MCPServer, recorder: fake_api.Recorder) -> None:
+    result = await call(server, "set_checklist_item", item=fake_api.CHECKLIST_ITEM_ID, state="done")
+    assert not result.is_error
+    assert result.data["item"]["state"] == "done"
+    assert recorder.body("PATCH", f"/checklist/{fake_api.CHECKLIST_ITEM_ID}") == {"state": "done"}
+
+
+async def test_set_checklist_item_rejects_a_state_that_is_not_one(server: MCPServer) -> None:
+    result = await call(
+        server, "set_checklist_item", item=fake_api.CHECKLIST_ITEM_ID, state="ticked"
+    )
+    assert result.is_error
+    assert "'open', 'done', 'cancelled'" in result.text
+
+
+async def test_set_checklist_item_needs_something_to_change(server: MCPServer) -> None:
+    result = await call(server, "set_checklist_item", item=fake_api.CHECKLIST_ITEM_ID)
+    assert result.is_error
+    assert "Nothing to change" in result.text
+
+
+async def test_cancelled_is_a_status_a_task_can_take(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "set_task_status",
+        task="ATL-2",
+        status="cancelled",
+        reason="The vendor withdrew the endpoint.",
+    )
+    assert not result.is_error
+    assert recorder.body("POST", "/status")["status"] == "cancelled"
+
+
+async def test_cancelling_without_a_reason_is_refused_locally(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "set_task_status", task="ATL-2", status="cancelled")
+    assert result.is_error
+    assert recorder.count("POST", "/status") == 0
 
 
 async def test_move_task_accepts_a_column_name(

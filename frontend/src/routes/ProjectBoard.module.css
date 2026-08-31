@@ -196,6 +196,20 @@
   background: var(--blocked);
 }
 
+/* No tint and a grey rail: a cancelled card is finished with, not urgent. */
+.cancelled {
+  background: var(--paper-2);
+}
+
+.cancelled::before {
+  background: var(--ink-3);
+}
+
+.cancelled .title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
 .taskRow {
   display: flex;
   gap: 8px;
@@ -265,6 +279,10 @@
   color: var(--blocked);
 }
 
+.pill_cancelled {
+  color: var(--ink-3);
+}
+
 .waiting {
   display: flex;
   flex-wrap: wrap;
@@ -286,6 +304,13 @@
   /* Tinted cards again — see .reference. */
   color: var(--ink-2);
   font-size: 12px;
+}
+
+/* Amber, because this is the number that will refuse the card at the last
+   column — the only count on a card that is a rule rather than a fact. */
+.open {
+  color: var(--hold);
+  font-weight: 600;
 }
 
 .trailing {

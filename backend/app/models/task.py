@@ -12,7 +12,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Date, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,6 +43,13 @@ class TaskStatus(StrEnum):
     BLOCKED = "blocked"
     """Cannot proceed. Somebody has to do something first."""
 
+    CANCELLED = "cancelled"
+    """Dropped. Not going to be done, and nothing is waiting for it.
+
+    A settled state rather than a stalled one: a cancelled sub-task no longer
+    holds its parent back, which is the whole reason the state exists.
+    """
+
     @property
     def label(self) -> str:
         """How this status is worded in a status-change comment."""
@@ -52,7 +60,26 @@ _STATUS_LABELS = {
     TaskStatus.ACTIVE: "Active",
     TaskStatus.HOLD: "On hold",
     TaskStatus.BLOCKED: "Blocked",
+    TaskStatus.CANCELLED: "Cancelled",
 }
+
+
+class ChecklistState(StrEnum):
+    """Where one checklist item has got to.
+
+    Only three states, and two of them are settled: a checklist exists to be
+    emptied, and an item nobody will ever tick is cancelled rather than left
+    open forever holding the card back.
+    """
+
+    OPEN = "open"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether this item has stopped holding its task back."""
+        return self is not ChecklistState.OPEN
 
 
 class CommentKind(StrEnum):
@@ -83,8 +110,25 @@ def _enum(python_type: type[StrEnum], name: str) -> Enum:
 class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "task"
     __table_args__ = (
-        Index("ix_task_project_id_number", "project_id", "number", unique=True),
+        # Unique over top-level cards alone: a sub-task has no project number,
+        # it borrows its parent's and adds its own to the end.
+        Index(
+            "ix_task_project_id_number",
+            "project_id",
+            "number",
+            unique=True,
+            postgresql_where=sql_text("parent_id IS NULL"),
+        ),
         Index("ix_task_project_id_column_id_position", "project_id", "column_id", "position"),
+        Index("ix_task_parent_id_sub_number", "parent_id", "sub_number", unique=True),
+        # Exactly one of the two numbering schemes applies to any given row, so
+        # neither "a top-level card with a sub-number" nor "a sub-task with a
+        # project number" can be written at all.
+        CheckConstraint(
+            "(parent_id IS NULL) = (number IS NOT NULL) "
+            "AND (parent_id IS NULL) = (sub_number IS NULL)",
+            name="numbered_by_parentage",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -93,8 +137,9 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
 
-    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    number: Mapped[int | None] = mapped_column(Integer)
     """Per-project, handed out by ``project.task_counter`` and never reused.
+    Null on a sub-task, which is numbered under its parent instead.
     With the project's key it forms the reference the task is known by
     everywhere else — ``ATL-41`` in a commit message, a Slack thread, a CLI
     argument — so the same number turning up on a second task would be a lie."""
@@ -136,6 +181,27 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     jira_ref: Mapped[str | None] = mapped_column(String(64))
     pr_ref: Mapped[str | None] = mapped_column(String(200))
 
+    parent_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task.id", ondelete="CASCADE"),
+    )
+    """The card this one was split out of, if any.
+
+    One level deep and no further: a sub-task that could itself be split turns
+    the board into a tree, and a tree is a thing you navigate rather than read.
+    Enforced in the service, which is the only place that can see the parent.
+    """
+
+    sub_number: Mapped[int | None] = mapped_column(Integer)
+    """Per-parent, handed out by ``parent.subtask_counter``. Null at the top
+    level. With the parent's reference it forms ``ATL-41-2``."""
+
+    subtask_counter: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sql_text("0")
+    )
+    """Highest sub-number ever handed out under this card. Only ever goes up,
+    for the same reason ``project.task_counter`` does."""
+
     project: Mapped[Project] = relationship(lazy="selectin")
     assignee: Mapped[Person] = relationship(lazy="selectin")
 
@@ -145,10 +211,50 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         lazy="selectin",  # one extra query per fetch, never N+1
     )
 
+    parent: Mapped[Task | None] = relationship(
+        remote_side="Task.id",
+        back_populates="subtasks",
+        lazy="selectin",
+        # Loaded eagerly because ``reference`` cannot be read without it, and a
+        # reference is in every response a task appears in. The chain stops
+        # after one hop: a parent never has a parent of its own.
+        join_depth=2,
+    )
+
+    subtasks: Mapped[list[Task]] = relationship(
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        order_by="Task.sub_number",
+        passive_deletes=True,  # the FK's ON DELETE CASCADE does the work
+        lazy="noload",  # loaded deliberately, never on the board's list query
+    )
+
+    checklist: Mapped[list[TaskChecklistItem]] = relationship(
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="TaskChecklistItem.position",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
     @property
     def reference(self) -> str:
-        """``ATL-41``. Accepted anywhere the task's id is."""
+        """``ATL-41``, or ``ATL-41-2`` for a sub-task on the board.
+
+        Accepted anywhere the task's id is.
+        """
+        if self.parent is not None:
+            return f"{self.parent.reference}-{self.sub_number}"
         return f"{self.project.key}-{self.number}"
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether this task has stopped holding a parent back.
+
+        Cancelled counts; finished does not live on the task at all — it is
+        "in the board's last column", which only the board can say.
+        """
+        return self.status is TaskStatus.CANCELLED
 
 
 class TaskWaitingOn(Base, TimestampMixin):
@@ -201,3 +307,33 @@ class TaskComment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     Empty for a comment somebody typed."""
 
     author: Mapped[Person | None] = relationship(lazy="selectin")
+
+
+class TaskChecklistItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A sub-task that is a tick box rather than a card.
+
+    The lightweight half of CYLIST-3: no column, no assignee, no reference —
+    just a line of text that has to be ticked or dropped before the card it
+    sits on can reach the end of the board. Anything that needs an owner and a
+    due date is a sub-task on the board instead.
+    """
+
+    __tablename__ = "task_checklist_item"
+    __table_args__ = (Index("ix_task_checklist_item_task_id_position", "task_id", "position"),)
+
+    task_id: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    state: Mapped[ChecklistState] = mapped_column(
+        _enum(ChecklistState, "checklist_state"), nullable=False, default=ChecklistState.OPEN
+    )
+
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    """Top to bottom within the card, contiguous from zero."""
+
+    task: Mapped[Task] = relationship(back_populates="checklist")

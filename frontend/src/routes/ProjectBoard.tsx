@@ -176,6 +176,8 @@ export function ProjectBoard() {
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [creatingTask, setCreatingTask] = useState(false)
+  /** The parent a new sub-task is being written under, if one is. */
+  const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
   const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
@@ -330,6 +332,22 @@ export function ProjectBoard() {
         />
       ) : null}
 
+      {/* One dialog at a time, never stacked: the sub-task's card needs every
+          field a card needs, and a form drawn on top of the form it came from
+          is two Save buttons with no way to tell which one is which. */}
+      {splitting && firstColumn ? (
+        <TaskDialog
+          projectKey={projectKey}
+          taskId={null}
+          parentRef={splitting}
+          columns={columns}
+          firstColumn={firstColumn}
+          announce={announce}
+          onDone={refresh}
+          onClose={() => setSplitting(null)}
+        />
+      ) : null}
+
       {openTaskId && firstColumn ? (
         <TaskDialog
           projectKey={projectKey}
@@ -337,6 +355,11 @@ export function ProjectBoard() {
           columns={columns}
           firstColumn={firstColumn}
           announce={announce}
+          onOpenTask={setOpenTaskId}
+          onSplit={(parentRef) => {
+            setOpenTaskId(null)
+            setSplitting(parentRef)
+          }}
           onDone={refresh}
           onClose={() => setOpenTaskId(null)}
         />
@@ -448,7 +471,12 @@ function Column({
   )
 }
 
-const STATUS_LABELS = { active: 'Active', hold: 'On hold', blocked: 'Blocked' } as const
+const STATUS_LABELS = {
+  active: 'Active',
+  hold: 'On hold',
+  blocked: 'Blocked',
+  cancelled: 'Cancelled',
+} as const
 
 function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
@@ -507,6 +535,13 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
           {task.jira_ref ? <span>⌗ {task.jira_ref}</span> : null}
           {task.pr_ref ? <span>⎇ {task.pr_ref}</span> : null}
           {task.comment_count ? <span>✎ {task.comment_count}</span> : null}
+          {/* The one number on a card that can stop it moving: while it is
+              above zero the server refuses the last column. */}
+          {task.open_subtask_count ? (
+            <span className={styles.open} title={`${task.open_subtask_count} sub-tasks still open`}>
+              ☑ {task.open_subtask_count}
+            </span>
+          ) : null}
         </div>
         <span className={styles.trailing}>
           <span className={`${styles.due} ${late ? styles.late : ''}`}>

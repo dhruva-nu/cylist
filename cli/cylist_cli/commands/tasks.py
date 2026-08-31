@@ -11,7 +11,7 @@ from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
 
 TASK_TYPES = ("feature", "bug", "chore")
-STATUSES = ("active", "hold", "blocked")
+STATUSES = ("active", "hold", "blocked", "cancelled")
 TITLE_WIDTH = 46
 
 
@@ -61,13 +61,13 @@ def register(subparsers: Any) -> None:
         "status",
         help="Change a task's status.",
         description=(
-            "'hold' and 'blocked' require --reason; the API rejects them "
+            "'hold', 'blocked' and 'cancelled' require --reason; the API rejects them "
             "without one. The reason is written to the task's timeline."
         ),
     )
     status.add_argument("task", metavar="TASK")
     status.add_argument("status", metavar="STATUS", choices=STATUSES)
-    status.add_argument("--reason", help="Required for hold and blocked.")
+    status.add_argument("--reason", help="Required for hold, blocked and cancelled.")
     status.add_argument(
         "--waiting-on",
         action="append",
@@ -158,10 +158,13 @@ def _project_of(task: dict[str, Any]) -> str:
     Used in place of ``project_id`` wherever the value may end up in a message.
     Every path that takes ``{project_ref}`` accepts a key, and an error reading
     "no person called 'Le' in ATL's members" is worth having over the same
-    sentence with a UUID in it. Keys cannot contain a dash, so the split is
-    unambiguous; the id remains the fallback.
+    sentence with a UUID in it.
+
+    Split from the front: a sub-task's reference carries two numbers —
+    ``ATL-41-2`` — and only the key is wanted. Keys cannot contain a dash, so
+    the first segment is always it; the id remains the fallback.
     """
-    key = str(task.get("reference", "")).rsplit("-", 1)[0]
+    key = str(task.get("reference", "")).split("-", 1)[0]
     return key or str(task["project_id"])
 
 
@@ -190,8 +193,45 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
             ("Waiting on", waiting),
             ("Jira", str(task.get("jira_ref") or "")),
             ("PR", str(task.get("pr_ref") or "")),
+            ("Parent", str(task.get("parent_reference") or "")),
         ]
     )
+    _render_subtasks(task)
+
+
+_CHECKLIST_MARKS = {"done": "[x]", "cancelled": "[-]", "open": "[ ]"}
+
+
+def _render_subtasks(task: dict[str, Any]) -> None:
+    """The cards split out of this one, then the tick boxes on it.
+
+    Both are listed even when empty-handed is the answer, because the number
+    that matters is how many are still open: while it is above zero the card
+    cannot reach the board's last column, and that is worth seeing before the
+    move is attempted rather than after it is refused.
+    """
+    subtasks = task.get("subtasks") or []
+    checklist = task.get("checklist") or []
+    if not subtasks and not checklist:
+        return
+
+    output.echo()
+    output.echo("Sub-tasks")
+    output.echo("---------")
+    for subtask in subtasks:
+        output.echo(f"  {subtask['reference']}  {subtask['title']}  ({subtask['status']})")
+    for item in checklist:
+        mark = _CHECKLIST_MARKS.get(str(item.get("state")), "[ ]")
+        output.echo(f"  {mark} {item['title']}")
+
+    open_count = int(task.get("open_subtask_count") or 0)
+    if open_count:
+        noun = "sub-task" if open_count == 1 else "sub-tasks"
+        output.echo()
+        output.echo(
+            f"  {open_count} open {noun}: finish or cancel each before moving this card "
+            "to the last column."
+        )
 
 
 def _render_timeline(comments: list[dict[str, Any]], names: dict[str, str]) -> None:

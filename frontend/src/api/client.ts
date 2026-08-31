@@ -75,7 +75,9 @@ export interface ProjectSummary extends Project {
 }
 
 export type TaskType = 'feature' | 'bug' | 'chore'
-export type TaskStatus = 'active' | 'hold' | 'blocked'
+export type TaskStatus = 'active' | 'hold' | 'blocked' | 'cancelled'
+/** Where one tick-box sub-task has got to. `done` and `cancelled` both settle it. */
+export type ChecklistState = 'open' | 'done' | 'cancelled'
 export type CommentKind = 'comment' | 'status_change'
 
 export interface BoardColumn {
@@ -117,12 +119,29 @@ export interface TaskComment {
   created_at: string
 }
 
+/** A sub-task that is a tick box rather than a card: no owner, no reference. */
+export interface ChecklistItem {
+  id: string
+  task_id: string
+  title: string
+  state: ChecklistState
+  position: number
+  created_at: string
+}
+
 export interface Task {
   id: string
   project_id: string
-  /** `ATL-41` — usable in place of the id on every task path. */
+  /** `ATL-41`, or `ATL-41-2` for a sub-task. Usable in place of the id. */
   reference: string
-  number: number
+  /** Null on a sub-task, which is numbered under its parent instead. */
+  number: number | null
+  /** The card this was split out of, if any. */
+  parent_id: string | null
+  /** `ATL-41`, when this is a sub-task. */
+  parent_reference: string | null
+  /** `2` in `ATL-41-2`. Null at the top level. */
+  sub_number: number | null
   column_id: string
   position: number
   title: string
@@ -135,11 +154,19 @@ export interface Task {
   pr_ref: string | null
   waiting_on: Person[]
   comment_count: number
+  checklist: ChecklistItem[]
+  /**
+   * Sub-tasks — cards and tick boxes together — that are neither finished nor
+   * cancelled. While this is above zero the card cannot reach the last column.
+   */
+  open_subtask_count: number
   created_at: string
 }
 
 export interface TaskDetail extends Task {
   comments: TaskComment[]
+  /** Sub-tasks with a card of their own, in sub-number order. */
+  subtasks: Task[]
 }
 
 /** The fields of a task the board can edit. Status moves separately. */
@@ -417,6 +444,18 @@ export const api = {
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
   createTask: (ref: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
+  /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */
+  createSubtask: (parentRef: string, input: TaskInput) =>
+    request<TaskDetail>(`/tasks/${parentRef}/subtasks`, { method: 'POST', body: body(input) }),
+  addChecklistItem: (taskRef: string, title: string) =>
+    request<ChecklistItem>(`/tasks/${taskRef}/checklist`, {
+      method: 'POST',
+      body: body({ title }),
+    }),
+  updateChecklistItem: (itemId: string, input: { title?: string; state?: ChecklistState }) =>
+    request<ChecklistItem>(`/checklist/${itemId}`, { method: 'PATCH', body: body(input) }),
+  deleteChecklistItem: (itemId: string) =>
+    request<{ ok: boolean }>(`/checklist/${itemId}`, { method: 'DELETE' }),
   updateTask: (taskRef: string, input: Partial<TaskInput>) =>
     request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: body(input) }),
   deleteTask: (taskRef: string) =>
