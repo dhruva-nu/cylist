@@ -99,8 +99,11 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `list_tasks` | the cards on a board, filterable by status or assignee |
 | `get_task` | one card with its whole timeline |
 | `create_task` | add a card to the first column |
+| `create_subtask` | split a card into one of its own, `ATL-41-2` |
+| `add_checklist_item` | add a tick-box sub-task to a card |
+| `set_checklist_item` | tick, cancel, reopen or retitle one |
 | `move_task` | move a card to a named column |
-| `set_task_status` | active / hold / blocked, with a reason and tags |
+| `set_task_status` | active / hold / blocked / cancelled, with a reason and tags |
 | `add_comment` | write to a card's timeline |
 | `list_people` | the directory, or one project's members |
 | `list_files` | folders and items, by path |
@@ -117,6 +120,9 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
   the candidates rather than picking one.
 - **`get_project` returns the columns**, so an agent can call `move_task` with
   a column name it has actually seen instead of inventing one.
+- **Sub-tasks gate the last column.** Both kinds — cards of their own and tick
+  boxes — must be finished or cancelled before `move_task` will put the parent
+  in the board's last column; the refusal names what is still outstanding.
 
 ### Errors are results, not exceptions
 

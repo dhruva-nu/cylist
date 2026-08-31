@@ -6,6 +6,8 @@ agent can call `/tasks/ATL-41` with the string a human just read out.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,13 +16,17 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.project import Project
-from app.models.task import Task, TaskComment
+from app.models.task import Task, TaskChecklistItem, TaskComment
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.tasks import (
+    ChecklistItemCreate,
+    ChecklistItemRead,
+    ChecklistItemUpdate,
     CommentCreate,
     CommentRead,
+    SubtaskCreate,
     TaskCreate,
     TaskDetail,
     TaskMove,
@@ -58,12 +64,26 @@ def _comment(entry: TaskComment) -> CommentRead:
     )
 
 
-def _read(task: Task, comment_count: int) -> TaskRead:
+def _item(item: TaskChecklistItem) -> ChecklistItemRead:
+    return ChecklistItemRead(
+        id=item.id,
+        task_id=item.task_id,
+        title=item.title,
+        state=item.state,
+        position=item.position,
+        created_at=item.created_at,
+    )
+
+
+def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
     return TaskRead(
         id=task.id,
         project_id=task.project_id,
         reference=task.reference,
         number=task.number,
+        parent_id=task.parent_id,
+        parent_reference=task.parent.reference if task.parent else None,
+        sub_number=task.sub_number,
         column_id=task.column_id,
         position=task.position,
         title=task.title,
@@ -76,15 +96,22 @@ def _read(task: Task, comment_count: int) -> TaskRead:
         pr_ref=task.pr_ref,
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
         comment_count=comment_count,
+        checklist=[_item(item) for item in task.checklist],
+        open_subtask_count=open_subtasks,
         created_at=task.created_at,
     )
 
 
 async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     timeline = await tasks.comments(session, task)
+    children = await tasks.subtasks(session, task)
+    counts = await tasks.open_subtask_counts(
+        session, task.project_id, [task.id, *(child.id for child in children)]
+    )
     return TaskDetail(
-        **_read(task, len(timeline)).model_dump(),
+        **_read(task, len(timeline), counts.get(task.id, 0)).model_dump(),
         comments=[_comment(entry) for entry in timeline],
+        subtasks=[_read(child, 0, counts.get(child.id, 0)) for child in children],
     )
 
 
@@ -102,8 +129,10 @@ async def list_tasks(
     columns left to right and the cards top to bottom within each.
     """
     found = await tasks.list_for_project(session, project)
-    counts = await tasks.comment_counts(session, [task.id for task in found])
-    return [_read(task, counts.get(task.id, 0)) for task in found]
+    ids = [task.id for task in found]
+    counts = await tasks.comment_counts(session, ids)
+    open_subtasks = await tasks.open_subtask_counts(session, project.id, ids)
+    return [_read(task, counts.get(task.id, 0), open_subtasks.get(task.id, 0)) for task in found]
 
 
 @router.post(
@@ -209,7 +238,14 @@ async def delete_task(
     "/tasks/{task_ref}/move",
     response_model=TaskDetail,
     summary="Move a task",
-    responses={422: {"description": "That column is on another project's board."}},
+    responses={
+        422: {
+            "description": (
+                "That column is on another project's board, or the destination "
+                "is the last column and a sub-task is still open."
+            )
+        }
+    },
 )
 async def move_task(
     body: TaskMove,
@@ -221,6 +257,10 @@ async def move_task(
 
     Any column, in either direction. A position past the end of the column is
     clamped to it, so "drop at the bottom" needs no length lookup first.
+
+    One restriction: a card with an unfinished sub-task — a card of its own not
+    yet in the last column, or a checklist item still open — cannot be moved
+    into the last column. That is a 422 naming what is still outstanding.
     """
     moved = await tasks.move(session, task, body)
     await activity.record(
@@ -271,6 +311,164 @@ async def change_status(
         payload={"reference": updated.reference, **entry.meta},
     )
     return await _detail(session, updated)
+
+
+@router.get(
+    "/tasks/{task_ref}/subtasks",
+    response_model=list[TaskRead],
+    summary="List a task's sub-tasks",
+)
+async def list_subtasks(
+    task: Task = Depends(resolved_task),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+) -> list[TaskRead]:
+    """The cards split out of this one, in sub-number order.
+
+    Only the sub-tasks that have a card of their own. The tick-box kind rides
+    along on the task itself, as `checklist`.
+    """
+    children = await tasks.subtasks(session, task)
+    counts = await tasks.open_subtask_counts(
+        session, task.project_id, [child.id for child in children]
+    )
+    return [_read(child, 0, counts.get(child.id, 0)) for child in children]
+
+
+@router.post(
+    "/tasks/{task_ref}/subtasks",
+    response_model=TaskDetail,
+    status_code=status.HTTP_201_CREATED,
+    summary="Split a task into a sub-task",
+    responses={
+        422: {
+            "description": (
+                "The assignee is not a member of this project, or the task is itself a sub-task."
+            )
+        }
+    },
+)
+async def create_subtask(
+    body: SubtaskCreate,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> TaskDetail:
+    """Add a sub-task that gets its own card on the board.
+
+    It is a task in every respect — first column, owner, due date — except its
+    reference, which is numbered under its parent: `ATL-41-2`. Sub-tasks go one
+    level deep; splitting a sub-task again is a 422.
+
+    Until every sub-task is in the board's last column or cancelled, the parent
+    cannot be moved there.
+    """
+    subtask = await tasks.create(session, task.project, body, parent=task)
+    await activity.record(
+        session,
+        principal,
+        "task.subtask_created",
+        entity_type="task",
+        entity_id=subtask.id,
+        project_id=subtask.project_id,
+        payload={
+            "reference": subtask.reference,
+            "parent": task.reference,
+            "title": subtask.title,
+        },
+    )
+    return await _detail(session, subtask)
+
+
+@router.post(
+    "/tasks/{task_ref}/checklist",
+    response_model=ChecklistItemRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a checklist item",
+)
+async def add_checklist_item(
+    body: ChecklistItemCreate,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> ChecklistItemRead:
+    """Add a tick-box sub-task to the bottom of a task's checklist.
+
+    A line of text with no card, no owner and no reference — the lightweight
+    half of sub-tasks. It still has to be ticked or cancelled before the card
+    can reach the board's last column.
+    """
+    item = await tasks.add_checklist_item(session, task, body)
+    await activity.record(
+        session,
+        principal,
+        "task.checklist_added",
+        entity_type="task",
+        entity_id=task.id,
+        project_id=task.project_id,
+        payload={"reference": task.reference, "title": item.title},
+    )
+    return _item(item)
+
+
+@router.patch(
+    "/checklist/{item_id}",
+    response_model=ChecklistItemRead,
+    summary="Tick, cancel, reopen or retitle a checklist item",
+)
+async def update_checklist_item(
+    body: ChecklistItemUpdate,
+    item_id: UUID,
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> ChecklistItemRead:
+    """Change one tick box.
+
+    `state` is `open`, `done` or `cancelled`; the last two both count as
+    settled, so either one stops the item holding its card back.
+    """
+    item = await tasks.get_checklist_item(session, item_id)
+    updated = await tasks.update_checklist_item(session, item, body)
+    task = await tasks.resolve(session, str(updated.task_id))
+    await activity.record(
+        session,
+        principal,
+        "task.checklist_updated",
+        entity_type="task",
+        entity_id=task.id,
+        project_id=task.project_id,
+        payload={
+            "reference": task.reference,
+            "title": updated.title,
+            "state": updated.state.value,
+        },
+    )
+    return _item(updated)
+
+
+@router.delete(
+    "/checklist/{item_id}", response_model=Acknowledged, summary="Delete a checklist item"
+)
+async def delete_checklist_item(
+    item_id: UUID,
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> Acknowledged:
+    """Remove a tick box entirely. Cancel it instead to keep the record."""
+    item = await tasks.get_checklist_item(session, item_id)
+    task = await tasks.resolve(session, str(item.task_id))
+    title = item.title
+    await tasks.delete_checklist_item(session, item)
+    await activity.record(
+        session,
+        principal,
+        "task.checklist_deleted",
+        entity_type="task",
+        entity_id=task.id,
+        project_id=task.project_id,
+        payload={"reference": task.reference, "title": title},
+    )
+    return Acknowledged()
 
 
 @router.get(
