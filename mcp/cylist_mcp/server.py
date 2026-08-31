@@ -48,6 +48,14 @@ candidates rather than a guess.
 A task cannot be put on hold or blocked without a reason. That is enforced by
 the server, not by politeness — `set_task_status` needs `reason` for `hold`
 and `blocked`, and `waiting_on` should name whoever the work is now waiting on.
+The same goes for `cancelled`, which is how work that is not going to happen
+stops holding up the card it belongs to.
+
+A task can be split two ways. `create_subtask` makes a card of its own,
+referenced `ATL-41-2` and addressable like any other task; `add_checklist_item`
+makes a tick box that lives on the parent alone. Either way, every one of them
+has to be finished or cancelled before the parent can be moved into the board's
+last column — `move_task` refuses and names what is still outstanding.
 """
 
 
@@ -194,13 +202,115 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         return await _guard(call)
 
     @server.tool(
+        name="create_subtask",
+        description=(
+            "Split a task into a sub-task that gets its own card on the board. "
+            "It is a task in every respect — first column, owner, due date — "
+            "except its reference, which is numbered under its parent: a "
+            "sub-task of ATL-41 is ATL-41-2, and is addressable by that "
+            "everywhere a task reference is taken. Sub-tasks go one level deep, "
+            "so splitting a sub-task again is refused. Use add_checklist_item "
+            "instead when the piece needs no owner and no card of its own. "
+            "Returns the created sub-task."
+        ),
+    )
+    async def create_subtask(
+        task: Annotated[
+            str, Field(description="The parent task: a reference such as 'ATL-41', or its id.")
+        ],
+        title: Annotated[str, Field(description="One line naming the work.")],
+        description: Annotated[str, Field(description="What done looks like.")],
+        task_type: Annotated[str, Field(description="One of 'feature', 'bug' or 'chore'.")],
+        due_date: Annotated[str, Field(description="ISO date, e.g. '2026-03-31'.")],
+        assignee: Annotated[str, Field(description="Who owns it: a project member's name or id.")],
+        jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
+        pr_ref: Annotated[str | None, Field(description="Pull request URL, if any.")] = None,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            _check_choice("task_type", task_type, ("feature", "bug", "chore"))
+            parent = await client.get(f"/tasks/{task}")
+            project_ref = _project_of(parent)
+            body: dict[str, Any] = {
+                "title": title,
+                "description": description,
+                "type": task_type,
+                "due_date": due_date,
+                "assignee_id": await resolve.person_id(client, assignee, project_ref=project_ref),
+            }
+            if jira_ref:
+                body["jira_ref"] = jira_ref
+            if pr_ref:
+                body["pr_ref"] = pr_ref
+            return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="add_checklist_item",
+        description=(
+            "Add a tick-box sub-task to a task: a line of text with no card, no "
+            "owner and no reference of its own. Use this for the 'and don't "
+            "forget X' pieces — tell support, update the runbook — and "
+            "create_subtask for anything that needs an owner and a due date. "
+            "The item still has to be ticked or cancelled before the task can "
+            "be moved into the board's last column. Returns the created item, "
+            "whose id set_checklist_item takes."
+        ),
+    )
+    async def add_checklist_item(
+        task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
+        title: Annotated[str, Field(description="What has to be done, in one line.")],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            return {"item": await client.post(f"/tasks/{task}/checklist", {"title": title})}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="set_checklist_item",
+        description=(
+            "Tick, cancel or reopen a tick-box sub-task, or retitle it. State is "
+            "'done' for finished, 'cancelled' for work that is not going to "
+            "happen, and 'open' to put it back. Done and cancelled both count as "
+            "settled, so either one stops the item holding its task back. The "
+            "item's id comes from get_task, which lists a task's checklist. "
+            "Returns the updated item."
+        ),
+    )
+    async def set_checklist_item(
+        item: Annotated[str, Field(description="The checklist item's id, from get_task.")],
+        state: Annotated[
+            str | None, Field(description="One of 'open', 'done' or 'cancelled'.")
+        ] = None,
+        title: Annotated[str | None, Field(description="A new title for the item.")] = None,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            body: dict[str, Any] = {}
+            if state is not None:
+                _check_choice("state", state, ("open", "done", "cancelled"))
+                body["state"] = state
+            if title is not None:
+                body["title"] = title
+            if not body:
+                raise CylistError(
+                    "Nothing to change. Pass state, title, or both.",
+                    code="validation_failed",
+                    details={"field": "state"},
+                )
+            return {"item": await client.patch(f"/checklist/{item}", body)}
+
+        return await _guard(call)
+
+    @server.tool(
         name="move_task",
         description=(
             "Move a card to another column on the same board. The column may be "
             "named ('In progress') or given as an id; get_project lists them. "
             "Position counts from the top of the column and is clamped to its "
             "length, so 0 puts the card first and a large number puts it last. "
-            "Moving does not change the task's status. Returns the moved task."
+            "Moving does not change the task's status. A card with a sub-task "
+            "still open cannot be moved into the board's last column; that comes "
+            "back as an error naming what is outstanding. Returns the moved task."
         ),
     )
     async def move_task(
@@ -224,7 +334,7 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         name="set_task_status",
         description=(
             "Move a task between 'active', 'hold' and 'blocked'. A reason is "
-            "required for 'hold' and 'blocked' and is written to the task's "
+            "required for 'hold', 'blocked' and 'cancelled', and is written to the task's "
             "timeline, so say what is actually in the way rather than restating "
             "the status. waiting_on names the people the work now waits on — "
             "they must be project members — and is cleared when the task goes "
@@ -233,10 +343,12 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
     )
     async def set_task_status(
         task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
-        status: Annotated[str, Field(description="One of 'active', 'hold' or 'blocked'.")],
+        status: Annotated[
+            str, Field(description="One of 'active', 'hold', 'blocked' or 'cancelled'.")
+        ],
         reason: Annotated[
             str | None,
-            Field(description="Why. Required for 'hold' and 'blocked'."),
+            Field(description="Why. Required for 'hold', 'blocked' and 'cancelled'."),
         ] = None,
         waiting_on: Annotated[
             list[str] | None,
@@ -514,14 +626,18 @@ def _project_of(task: dict[str, Any]) -> str:
 
     Used in place of ``project_id`` wherever the value may reach the model in
     a message: "no person called 'Le' in ATL's members" is actionable, the
-    same sentence with a UUID in it is not. Keys cannot contain a dash.
+    same sentence with a UUID in it is not.
+
+    Split from the front rather than the back, because a sub-task's reference
+    carries two numbers — ``ATL-41-2`` — and only the key is wanted. Keys
+    cannot contain a dash, so the first segment is always it.
     """
-    key = str(task.get("reference", "")).rsplit("-", 1)[0]
+    key = str(task.get("reference", "")).split("-", 1)[0]
     return key or str(task["project_id"])
 
 
 def _check_status(status: str) -> None:
-    _check_choice("status", status, ("active", "hold", "blocked"))
+    _check_choice("status", status, ("active", "hold", "blocked", "cancelled"))
 
 
 def _check_choice(field: str, value: str, allowed: tuple[str, ...]) -> None:

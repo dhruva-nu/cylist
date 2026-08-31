@@ -13,8 +13,10 @@ from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.models.task import (
+    ChecklistState,
     CommentKind,
     Task,
+    TaskChecklistItem,
     TaskComment,
     TaskStatus,
     TaskType,
@@ -29,6 +31,7 @@ __all__ = [
     "Blob",
     "BoardColumn",
     "Channel",
+    "ChecklistState",
     "CommentKind",
     "FileItem",
     "Folder",
@@ -39,6 +42,7 @@ __all__ = [
     "Project",
     "ProjectMember",
     "Task",
+    "TaskChecklistItem",
     "TaskComment",
     "TaskStatus",
     "TaskType",
