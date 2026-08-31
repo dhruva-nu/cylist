@@ -90,3 +90,10 @@
   color: var(--ink-3);
   font-size: 13px;
 }
+
+.headerActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+}

@@ -1,6 +1,16 @@
 /**
  * The task dialog: every field of a card, plus its timeline.
  *
+ * Opening a card lands on a read-only detail view. Nothing in it is a form
+ * control — no input, select or textarea is rendered at all — so a card can be
+ * read, and read out, with no way to change it by accident. Editing is behind
+ * the pencil in the header (and the Edit button beside it in the footer);
+ * pressing either swaps the same dialog over to the form below. Cancel,
+ * Escape and the backdrop go back to the detail view rather than throwing the
+ * whole dialog away, so a mis-click costs one keystroke instead of your place
+ * on the board. A new task has nothing to read yet, so it opens straight on
+ * the form.
+ *
  * The status control is the interesting part. Choosing On hold or Blocked
  * reveals a reason box and a picker of people to tag, and neither the button
  * nor the server will let the change through without a reason — a red card
@@ -18,7 +28,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, type KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
   type BoardColumn,
@@ -99,16 +109,173 @@ export function TaskDialog(props: DialogProps) {
     )
   }
 
-  // Remounting per task keeps the form's initial state honest: a dialog opened
-  // on a different card must not inherit the last one's half-typed edits.
-  return (
-    <TaskForm
-      key={taskId ?? 'new'}
-      {...props}
-      task={task.data ?? null}
-      members={members.data.members}
-    />
+  // Remounting per task keeps the state honest: a dialog opened on a different
+  // card must not inherit the last one's half-typed edits, nor its edit mode.
+  const detail = task.data ?? null
+  if (detail === null) {
+    return (
+      <TaskForm
+        key="new"
+        {...props}
+        task={null}
+        members={members.data.members}
+        onCancel={onClose}
+      />
+    )
+  }
+
+  return <TaskPanel key={detail.id} {...props} task={detail} members={members.data.members} />
+}
+
+/**
+ * One card: read it, then choose to edit it.
+ *
+ * The mode lives here rather than in either half, so that leaving the form
+ * unmounts it — cancelling really does discard the edits rather than leaving
+ * them parked behind a flag.
+ */
+function TaskPanel(props: DialogProps & { task: TaskDetail; members: Person[] }) {
+  const [editing, setEditing] = useState(false)
+
+  if (editing) return <TaskForm {...props} onCancel={() => setEditing(false)} />
+  return <TaskDetailView {...props} onEdit={() => setEditing(true)} />
+}
+
+/**
+ * The read-only view of a card.
+ *
+ * Deliberately plain markup: a card's fields are text here, not disabled
+ * inputs. A disabled input still looks like somewhere to type and still has to
+ * be kept in sync with a form; text cannot be saved by mistake at all. The
+ * only controls on the view are Edit and Close.
+ */
+function TaskDetailView({
+  task,
+  members,
+  columns,
+  onOpenTask,
+  onEdit,
+  onClose,
+}: DialogProps & { task: TaskDetail; members: Person[]; onEdit: () => void }) {
+  const column = columns.find((candidate) => candidate.id === task.column_id)
+  const late = isOverdue(task.due_date)
+  const statusLabel = STATUSES.find((option) => option.value === task.status)?.label ?? task.status
+
+  const edit = (
+    <Button variant="ghost" small onClick={onEdit} aria-label="Edit task" title="Edit task">
+      ✎
+    </Button>
   )
+
+  return (
+    <Modal
+      title={task.reference}
+      onClose={onClose}
+      headerActions={edit}
+      footer={
+        <>
+          <Button onClick={onClose}>Close</Button>
+          <Button variant="go" onClick={onEdit}>
+            ✎ Edit
+          </Button>
+        </>
+      }
+    >
+      <ModalBody>
+        <h3 className={styles.readTitle}>{task.title}</h3>
+
+        <div className={styles.chips}>
+          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>
+        </div>
+
+        <ReadField label="Description">
+          <p className={styles.prose}>{task.description}</p>
+        </ReadField>
+
+        <div className={styles.readPair}>
+          <ReadField label="Assignee">
+            <span className={styles.person}>
+              <Avatar name={task.assignee.name} colour={task.assignee.colour} />
+              {task.assignee.name}
+              <span className={styles.role}>· {task.assignee.role.split(',')[0]}</span>
+            </span>
+          </ReadField>
+          <ReadField label="Due date">
+            <span className={late ? styles.late : ''}>
+              {late ? '⚠ ' : ''}
+              {formatDue(task.due_date)}
+            </span>
+          </ReadField>
+        </div>
+
+        <div className={styles.readPair}>
+          <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+          <ReadField label="Waiting on">
+            {task.waiting_on.length ? task.waiting_on.map((person) => person.name).join(', ') : '—'}
+          </ReadField>
+        </div>
+
+        {task.jira_ref || task.pr_ref ? (
+          <div className={styles.readPair}>
+            <ReadField label="Jira">{task.jira_ref ?? '—'}</ReadField>
+            <ReadField label="Pull request">{task.pr_ref ?? '—'}</ReadField>
+          </div>
+        ) : null}
+
+        <ReadField label="Sub-tasks">
+          <SubtasksRead task={task} onOpenTask={onOpenTask} />
+        </ReadField>
+
+        <ReadField label="Timeline">
+          <div className={styles.timeline}>
+            {task.comments.length ? (
+              task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
+            ) : (
+              <span className={styles.empty}>Nothing has happened to this card yet.</span>
+            )}
+          </div>
+        </ReadField>
+      </ModalBody>
+    </Modal>
+  )
+}
+
+/** A labelled row of the detail view. The `Field` twin for text with no input. */
+function ReadField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className={styles.readField}>
+      <span className={styles.readLabel}>{label}</span>
+      <div className={styles.readValue}>{children}</div>
+    </div>
+  )
+}
+
+/**
+ * Parse a plain `YYYY-MM-DD` as a local date.
+ *
+ * `new Date(iso)` reads it as UTC midnight, which shows as the previous day
+ * anywhere west of Greenwich — and a due date off by one is worse than none.
+ */
+function localDate(iso: string): Date {
+  const [year = 1970, month = 1, day = 1] = iso.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function formatDue(iso: string): string {
+  if (!iso) return '—'
+  return localDate(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function isOverdue(iso: string): boolean {
+  if (!iso) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return localDate(iso) < today
 }
 
 function TaskForm({
@@ -123,7 +290,16 @@ function TaskForm({
   onSplit,
   onDone,
   onClose,
-}: DialogProps & { task: TaskDetail | null; members: Person[] }) {
+  onCancel,
+}: DialogProps & {
+  task: TaskDetail | null
+  members: Person[]
+  /**
+   * Leaving the form without saving. On an existing card that is a step back
+   * to the detail view; on a new one there is nothing behind it, so it closes.
+   */
+  onCancel: () => void
+}) {
   const [form, setForm] = useState<TaskInput>({
     title: task?.title ?? '',
     description: task?.description ?? '',
@@ -240,8 +416,16 @@ function TaskForm({
 
   return (
     <Modal
-      title={task ? task.reference : parentRef ? `New sub-task of ${parentRef}` : 'New task'}
-      onClose={onClose}
+      // Escape and the backdrop mean "stop editing", which on an existing card
+      // is the detail view rather than the board.
+      title={
+        task
+          ? `${task.reference} · editing`
+          : parentRef
+            ? `New sub-task of ${parentRef}`
+            : 'New task'
+      }
+      onClose={onCancel}
       footer={
         <>
           {task ? (
@@ -255,7 +439,7 @@ function TaskForm({
               Delete
             </Button>
           ) : null}
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onCancel}>Cancel</Button>
           <Button variant="go" disabled={save.isPending || !complete} onClick={() => save.mutate()}>
             {save.isPending
               ? 'Saving…'
@@ -527,6 +711,13 @@ const CHECKLIST_LABELS: Record<ChecklistState, string> = {
   cancelled: 'Cancelled',
 }
 
+/** The detail view's stand-in for a tick box, which it does not render. */
+const CHECKLIST_MARKS: Record<ChecklistState, string> = {
+  open: '\u2610',
+  done: '\u2611',
+  cancelled: '\u2612',
+}
+
 /**
  * Both kinds of sub-task, on the card they belong to.
  *
@@ -667,6 +858,85 @@ function Subtasks({
         ) : null}
       </div>
     </Field>
+  )
+}
+
+/**
+ * Both kinds of sub-task, read-only.
+ *
+ * The twin of `Subtasks` for the detail view, and deliberately a separate
+ * component rather than a `disabled` prop on that one: this renders no
+ * checkbox and calls no mutation at all, so there is nothing here that could
+ * change the card by accident. A tick box shown greyed out would still read as
+ * somewhere to click.
+ *
+ * Opening a sub-task's own card is the exception, and it is not an edit — it
+ * is the same navigation the board offers, landing on another detail view.
+ */
+function SubtasksRead({
+  task,
+  onOpenTask,
+}: {
+  task: TaskDetail
+  onOpenTask?: ((taskRef: string) => void) | undefined
+}) {
+  const outstanding = task.open_subtask_count
+
+  return (
+    <div className={styles.subtasks}>
+      {task.subtasks.map((child) => (
+        <button
+          key={child.id}
+          type="button"
+          className={styles.subtaskRow}
+          onClick={() => onOpenTask?.(child.reference)}
+        >
+          <span className={styles.subRef}>{child.reference}</span>
+          <span className={styles.subTitle}>{child.title}</span>
+          <span className={styles.subState}>
+            {STATUSES.find((option) => option.value === child.status)?.label}
+          </span>
+        </button>
+      ))}
+
+      {task.checklist.map((item) => (
+        <div
+          key={item.id}
+          className={`${styles.checkRow} ${item.state !== 'open' ? styles.settled : ''}`}
+        >
+          <span className={styles.checkRead}>
+            <span aria-hidden="true">{CHECKLIST_MARKS[item.state]}</span>
+            <span className={item.state === 'cancelled' ? styles.struck : ''}>{item.title}</span>
+          </span>
+          <span className={styles.subState}>{CHECKLIST_LABELS[item.state]}</span>
+        </div>
+      ))}
+
+      {task.subtasks.length === 0 && task.checklist.length === 0 ? (
+        <span className={styles.empty}>No sub-tasks.</span>
+      ) : null}
+
+      {task.parent_id === null ? null : (
+        <small>
+          A sub-task of{' '}
+          <button
+            type="button"
+            className={styles.parentLink}
+            onClick={() => onOpenTask?.(task.parent_reference ?? '')}
+          >
+            {task.parent_reference}
+          </button>
+          . Sub-tasks go one level deep.
+        </small>
+      )}
+
+      {outstanding ? (
+        <small className={styles.gate}>
+          {outstanding} still open. Every sub-task has to be finished or cancelled before this card
+          can move to {'the board\u2019s last column'}.
+        </small>
+      ) : null}
+    </div>
   )
 }
 
