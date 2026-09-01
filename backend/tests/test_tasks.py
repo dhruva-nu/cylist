@@ -142,6 +142,35 @@ class TestCreating:
         assert task["jira_ref"] is None
         assert task["pr_ref"] is None
 
+    async def test_a_pasted_jira_link_survives_whole(self, signed_in: AsyncClient) -> None:
+        """A ref field takes the URL, not just the key.
+
+        The deep link a Jira board hands out is past 64 characters before the
+        company's own hostname, which is what revision 0009 widened the column
+        for. The board shows only the key the link ends in, but it can only
+        link to somewhere it still has the whole address of.
+        """
+        person = await _setup(signed_in)
+        link = (
+            "https://acme-engineering.atlassian.net"
+            "/jira/software/projects/ATL/boards/2?selectedIssue=ATL-41"
+        )
+        assert len(link) > 64
+
+        task = await _create(signed_in, person, jira_ref=link)
+
+        assert task["jira_ref"] == link
+
+    async def test_a_ref_past_the_column_is_refused(self, signed_in: AsyncClient) -> None:
+        """422 on the way in, rather than a 500 out of the database."""
+        person = await _setup(signed_in)
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks", json={**_task(person), "jira_ref": "x" * 201}
+        )
+
+        assert response.status_code == 422
+
     async def test_it_is_recorded_against_the_project(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         task = await _create(signed_in, person)

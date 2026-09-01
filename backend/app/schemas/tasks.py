@@ -31,7 +31,7 @@ class TaskCreate(Schema):
     type: TaskType
     due_date: date
     assignee_id: UUID = Field(description="Must be a member of the project.")
-    jira_ref: str | None = Field(default=None, max_length=64)
+    jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
     @field_validator("title", "description")
@@ -104,7 +104,7 @@ class TaskUpdate(Schema):
     type: TaskType | None = None
     due_date: date | None = None
     assignee_id: UUID | None = None
-    jira_ref: str | None = Field(default=None, max_length=64)
+    jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
     @field_validator("jira_ref", "pr_ref")
