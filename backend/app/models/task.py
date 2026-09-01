@@ -211,16 +211,19 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         server_default=sql_text("'{}'"),
     )
     """Up to 4 stage labels, left to right — a progress bar within a column
-    rather than the column itself. Empty means the card does not use the
-    feature at all. Long labels are fine: the board draws position, not
+    rather than the column itself, which is why :func:`app.services.tasks.move`
+    starts them again when a card changes column. Empty means the card does not
+    use the feature at all. Long labels are fine: the board draws position, not
     words, and shows the words on hover."""
 
     sub_status_index: Mapped[int | None] = mapped_column(Integer)
-    """Which of ``sub_statuses`` is current. Null exactly when the list is
-    empty — see ``sub_status_index_matches_list``. Moved by
-    :func:`app.services.tasks.set_sub_status` (the board card's slider), and
-    kept in range by the service whenever ``sub_statuses`` is edited out from
-    under it."""
+    """Which of ``sub_statuses`` is current — the stage in hand, not one
+    finished. Null exactly when the list is empty — see
+    ``sub_status_index_matches_list``. Moved by
+    :func:`app.services.tasks.set_sub_status` (the board card's slider), reset
+    to the first stage by :func:`app.services.tasks.move` when the card changes
+    column, and kept in range by the service whenever ``sub_statuses`` is
+    edited out from under it."""
 
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
 

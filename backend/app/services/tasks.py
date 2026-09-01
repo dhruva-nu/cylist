@@ -260,6 +260,12 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
     Unlike creation this is unrestricted: once a card is on the board it may go
     anywhere, including straight back to the first column.
 
+    A card that changes column starts its stages again. ``sub_statuses`` is
+    progress through the column the card is in, not through the board — "drafted,
+    reviewed, merged" means one thing in Review and another in Done — so a card
+    arriving somewhere new has not begun the stages it keeps there. Moving
+    within one column leaves the stage alone: nothing has been arrived at.
+
     Raises:
         UnprocessableRequestError: if the column belongs to another project, or
             if the destination is the last column and a sub-task is still open.
@@ -282,6 +288,8 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
     siblings.insert(min(data.position, len(siblings)), task)
 
     task.column_id = column.id
+    if source_id != column.id and task.sub_statuses:
+        task.sub_status_index = 0
     for position, sibling in enumerate(siblings):
         sibling.position = position
     await session.flush()

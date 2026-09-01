@@ -54,7 +54,7 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner, SubStatusBar, TaskRef } from './ui'
+import { Avatar, Button, ErrorBanner, PriorityIcon, SubStatusBar, TaskRef, TypeIcon } from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -207,8 +207,15 @@ function TaskDetailView({
         <h3 className={styles.readTitle}>{task.title}</h3>
 
         <div className={styles.chips}>
-          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          {/* The same two icons the board card carries, with the words kept:
+              a dialog has the room the card does not, and this is where you
+              come to read the card rather than scan it. */}
+          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>
+            <TypeIcon type={task.type} />
+            {task.type}
+          </span>
           <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
+            <PriorityIcon priority={task.priority} />
             {PRIORITIES.find((option) => option.value === task.priority)?.label ?? task.priority}
           </span>
           <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>

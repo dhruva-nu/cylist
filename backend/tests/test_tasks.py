@@ -604,6 +604,51 @@ class TestMoving:
 
         assert moved["column_id"] == todo
 
+    async def test_changing_column_starts_the_stages_again(self, signed_in: AsyncClient) -> None:
+        """Stages are progress through a column, so a new column has none yet."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Merged"])
+        done = (await _columns(signed_in))[1]["id"]
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()
+
+        assert moved["sub_status_index"] == 0
+
+    async def test_moving_within_a_column_keeps_the_stage(self, signed_in: AsyncClient) -> None:
+        """Nothing has been arrived at, so there is nothing to start again."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Merged"])
+        todo = (await _columns(signed_in))[0]["id"]
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": todo, "position": 0}
+            )
+        ).json()
+
+        assert moved["sub_status_index"] == 2
+
+    async def test_a_card_without_stages_is_unaffected_by_a_move(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        done = (await _columns(signed_in))[1]["id"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()
+
+        assert moved["sub_status_index"] is None
+
     async def test_inserting_pushes_the_cards_below_it_down(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         first = await _create(signed_in, person, title="First")

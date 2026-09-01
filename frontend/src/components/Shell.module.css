@@ -158,13 +158,27 @@
 }
 
 .wrap {
+  flex: 1;
   max-width: 1180px;
   margin: 0 auto;
   padding: 22px 24px 60px;
 }
 
+/* The board: full width, and a column of its own so the board inside it can
+   take whatever height is left under the bar and the heading by asking for it.
+   `min-height: 0` because a flex item will not shrink below its content
+   without it, which is how a board that scrolls its own columns ends up
+   pushing the page down instead of scrolling.
+
+   Less room underneath than a reading page gets. The 60px there is the runway
+   under text that ends mid-scroll; a board that reaches the bottom of the
+   window on purpose only wants the edge back. */
 .wide {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   max-width: none;
+  padding-bottom: 24px;
 }
 
 .head {

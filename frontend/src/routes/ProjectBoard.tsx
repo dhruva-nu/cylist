@@ -3,12 +3,26 @@
  *
  * Two rules from the API are visible in the UI rather than only enforced by
  * it: "+ Add a task" appears under the first column alone, because that is
- * where new work lands; and the "+ Add a column" tile counts down to eight and
- * then goes flat, because that is where a board stops being readable.
+ * where new work lands; and "+ Column" in the toolbar counts down to eight and
+ * then goes grey, because that is where a board stops being readable.
+ *
+ * Every column is a fixed height, whatever it is holding. A column that grew
+ * with its cards meant dropping one moved every other column on the row out
+ * from under the pointer — the board rearranging itself is a worse cost than a
+ * short column having some empty space in it. Width is the other way about:
+ * it answers to how many columns are open, not to what is in them, so the
+ * columns share the row out between them and fold one to give the rest more.
  *
  * Dragging updates the cache before the request goes out. A card that snaps
  * back is how you find out the move failed — waiting for a round trip to see a
  * card move makes the board feel broken even when it is working.
+ *
+ * The card under the pointer is drawn twice over: dimmed where it started, and
+ * again in a `DragOverlay` that floats above the board. A card moved in place
+ * instead would be dragged around inside a column that scrolls its own cards,
+ * which clips it at the column's edge the moment it leaves — and grows that
+ * column's scrollable area as it goes, so the list shifts under the pointer
+ * that is dragging out of it.
  *
  * Dragging is not only a pointer gesture. A focused card is picked up with
  * space and walked between columns with the arrow keys, which is the same
@@ -22,6 +36,7 @@
 
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
@@ -32,6 +47,7 @@ import {
   type Announcements,
   type ClientRect,
   type DragEndEvent,
+  type DragStartEvent,
   type KeyboardCodes,
   type KeyboardCoordinateGetter,
   type ScreenReaderInstructions,
@@ -39,7 +55,7 @@ import {
 } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
   type Board,
@@ -66,8 +82,10 @@ import {
   EmptyState,
   ErrorBanner,
   LiveRegion,
+  PriorityIcon,
   SubStatusBar,
   TaskRef,
+  TypeIcon,
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
@@ -205,6 +223,9 @@ export function ProjectBoard() {
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
   const [search, setSearch] = useState('')
+  /** What is in the air, so the overlay knows what to draw. */
+  const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
+  const boardRef = useRef<HTMLDivElement>(null)
   const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
 
@@ -366,7 +387,22 @@ export function ProjectBoard() {
     announce(`${moved.name} moved ${toIndex < fromIndex ? 'left' : 'right'}.`)
   }
 
+  // Only a card gets an overlay. A column is dragged where it stands: it is
+  // not inside anything that scrolls or clips, so it has no need of one.
+  const draggedTask =
+    dragging !== null && !isColumnDrag(dragging)
+      ? (tasks.data?.find((task) => task.id === dragging) ?? null)
+      : null
+
+  function onDragStart(event: DragStartEvent) {
+    setDragging(event.active.id)
+  }
+
   function onDragEnd(event: DragEndEvent) {
+    // Cleared here rather than in each branch below: every one of them ends
+    // the drag, and an overlay left on screen is a card stuck to the pointer.
+    setDragging(null)
+
     const overId = event.over?.id
     if (typeof overId !== 'string') return
 
@@ -387,16 +423,20 @@ export function ProjectBoard() {
 
   return (
     <>
-      <PageHead title="Kanban board">
-        Cards enter at the first column and move wherever the work does. Colour flags anything on
-        hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys.
-        Drag a column by its ⠿ handle to reorder it, or use the ← → buttons in its header.
-      </PageHead>
+      {/* No standing paragraph of instructions. What it said, the board says
+          better by being used: cards enter at the first column because that is
+          the only one with a "+", and a card is dragged by dragging it. The
+          keyboard's share of it is the part that is not self-evident, and that
+          is spoken by SCREEN_READER_INSTRUCTIONS to the people it is for. */}
+      <PageHead title="Kanban board" />
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
-      <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
+      <div className={styles.toolbar}>
+        <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
+        <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+      </div>
 
       <DndContext
         sensors={sensors}
@@ -405,16 +445,23 @@ export function ProjectBoard() {
         // lands the card dead centre — can rely on.
         collisionDetection={closestCenter}
         accessibility={{ announcements, screenReaderInstructions: SCREEN_READER_INSTRUCTIONS }}
+        // The board scrolls sideways to reach a column that is off the edge,
+        // and nothing else scrolls at all. Left to itself dnd-kit picks the
+        // nearest scrollable ancestor, which is the card list you are dragging
+        // out of: the column then scrolls its own cards away under the pointer
+        // for as long as you hold one near its top or bottom.
+        autoScroll={{ canScroll: (element) => element === boardRef.current }}
+        onDragStart={onDragStart}
         onDragEnd={onDragEnd}
+        onDragCancel={() => setDragging(null)}
       >
-        <div className={styles.board}>
-          {columns.map((column, index) => (
+        <div ref={boardRef} className={styles.board}>
+          {columns.map((column) => (
             <Column
               key={column.id}
               column={column}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
-              isLast={index === columns.length - 1}
               collapsed={collapsed.includes(column.id)}
               onToggleCollapse={() => {
                 toggle(column.id)
@@ -428,12 +475,26 @@ export function ProjectBoard() {
               onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
-              onMoveLeft={() => moveColumnTo(index, index - 1)}
-              onMoveRight={() => moveColumnTo(index, index + 1)}
             />
           ))}
-          <AddColumnTile board={board.data} onClick={() => setColumnDialog('new')} />
         </div>
+
+        {/* Outside the board, so the board's own overflow has nothing to say
+            about where the card in the air is allowed to be drawn. */}
+        <DragOverlay dropAnimation={null}>
+          {draggedTask ? (
+            <article
+              // Filtered like the card in the column, and for the same reason:
+              // an active task has no status class, and a template string would
+              // put the word "undefined" in the class list instead of nothing.
+              className={[styles.task, styles[draggedTask.status], styles.lifted]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <TaskCardBody task={draggedTask} />
+            </article>
+          ) : null}
+        </DragOverlay>
       </DndContext>
 
       {columnDialog ? (
@@ -595,28 +656,22 @@ function Column({
   column,
   tasks,
   isFirst,
-  isLast,
   collapsed,
   onToggleCollapse,
   onOpenTask,
   onMoveSubStatus,
   onAddTask,
   onEdit,
-  onMoveLeft,
-  onMoveRight,
 }: {
   column: BoardColumn
   tasks: Task[]
   isFirst: boolean
-  isLast: boolean
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
   onAddTask: () => void
   onEdit: () => void
-  onMoveLeft: () => void
-  onMoveRight: () => void
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
   // A column is draggable on the whole card (so it visually moves as one
@@ -639,112 +694,102 @@ function Column({
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined
 
-  if (collapsed) {
-    return (
-      <section
-        ref={setDropRef}
-        className={`${styles.rail} ${isOver ? styles.over : ''}`}
-        aria-label={`${column.name}, ${counted}, collapsed`}
-      >
-        <button
-          type="button"
-          className={styles.railBody}
-          aria-expanded={false}
-          aria-label={`Expand ${column.name}`}
-          onClick={onToggleCollapse}
-        >
-          <span aria-hidden="true">›</span>
-          <span className={styles.count}>{tasks.length}</span>
-          <span className={styles.railName}>{column.name}</span>
-        </button>
-        {/* The first column is where new work lands, so its "+" survives the
-            fold: otherwise tidying the board away takes the add button with
-            it. */}
-        {isFirst ? (
-          <button className={styles.railAdd} onClick={onAddTask} aria-label="Add a task">
-            +
-          </button>
-        ) : null}
-      </section>
-    )
-  }
-
   return (
     <section
       ref={setRefs}
       style={dragStyle}
-      className={[styles.column, isOver && styles.over, isDragging && styles.columnDragging]
+      className={[
+        styles.column,
+        collapsed && styles.collapsed,
+        isOver && styles.over,
+        isDragging && styles.columnDragging,
+      ]
         .filter(Boolean)
         .join(' ')}
-      aria-label={`${column.name}, ${counted}`}
+      aria-label={
+        collapsed ? `${column.name}, ${counted}, collapsed` : `${column.name}, ${counted}`
+      }
     >
-      <div className={styles.head}>
-        <div className={styles.headRow}>
+      {/* Folded and unfolded are two fillings of one box, not two boxes. The
+          box is what animates — it is the same element either way, so its
+          width has somewhere to travel from — and the keys are what make the
+          filling inside it a swap React remounts, so the fade runs each time
+          rather than only on the first. */}
+      {collapsed ? (
+        <div key="rail" className={styles.rail}>
           <button
             type="button"
-            className={styles.dragHandle}
-            {...attributes}
-            {...listeners}
-            aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
-            title="Drag to reorder"
+            className={styles.railBody}
+            aria-expanded={false}
+            aria-label={`Expand ${column.name}`}
+            onClick={onToggleCollapse}
           >
-            ⠿
-          </button>
-          <h3>{column.name}</h3>
-          <span className={styles.headActions}>
+            <span aria-hidden="true">›</span>
             <span className={styles.count}>{tasks.length}</span>
-            <Button
-              variant="ghost"
-              small
-              disabled={isFirst}
-              onClick={onMoveLeft}
-              aria-label={`Move ${column.name} left`}
-            >
-              ←
-            </Button>
-            <Button
-              variant="ghost"
-              small
-              disabled={isLast}
-              onClick={onMoveRight}
-              aria-label={`Move ${column.name} right`}
-            >
-              →
-            </Button>
-            <Button
-              variant="ghost"
-              small
-              aria-expanded
-              aria-label={`Collapse ${column.name}`}
-              onClick={onToggleCollapse}
-            >
-              ‹
-            </Button>
-            <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
-              ···
-            </Button>
-          </span>
+            <span className={styles.railName}>{column.name}</span>
+          </button>
+          {/* The first column is where new work lands, so its "+" survives the
+              fold: otherwise tidying the board away takes the add button with
+              it. */}
+          {isFirst ? (
+            <button className={styles.railAdd} onClick={onAddTask} aria-label="Add a task">
+              +
+            </button>
+          ) : null}
         </div>
-        <p>{column.description}</p>
-      </div>
-
-      <div className={styles.cards}>
-        {tasks.map((task) => (
-          <TaskCard
-            key={task.id}
-            task={task}
-            onOpen={() => onOpenTask(task.id)}
-            onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
-          />
-        ))}
-      </div>
-
-      {isFirst ? (
-        <button className={styles.addTask} onClick={onAddTask}>
-          + Add a task
-        </button>
       ) : (
-        <div className={styles.foot} />
+        <div key="open" className={styles.unfolded}>
+          <div className={styles.head}>
+            <div className={styles.headRow}>
+              <button
+                type="button"
+                className={styles.dragHandle}
+                {...attributes}
+                {...listeners}
+                aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
+                title="Drag to reorder"
+              >
+                ⠿
+              </button>
+              <h3>{column.name}</h3>
+              <span className={styles.headActions}>
+                <span className={styles.count}>{tasks.length}</span>
+                <Button
+                  variant="ghost"
+                  small
+                  aria-expanded
+                  aria-label={`Collapse ${column.name}`}
+                  onClick={onToggleCollapse}
+                >
+                  ‹
+                </Button>
+                <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
+                  ···
+                </Button>
+              </span>
+            </div>
+            <p>{column.description}</p>
+          </div>
+
+          <div className={styles.cards}>
+            {tasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onOpen={() => onOpenTask(task.id)}
+                onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+              />
+            ))}
+          </div>
+
+          {isFirst ? (
+            <button className={styles.addTask} onClick={onAddTask}>
+              + Add a task
+            </button>
+          ) : (
+            <div className={styles.foot} />
+          )}
+        </div>
       )}
     </section>
   )
@@ -755,6 +800,12 @@ const STATUS_LABELS = {
   hold: 'On hold',
   blocked: 'Blocked',
   cancelled: 'Cancelled',
+} as const
+
+const TYPE_LABELS = {
+  feature: 'Feature',
+  bug: 'Bug',
+  chore: 'Chore',
 } as const
 
 const PRIORITY_LABELS = {
@@ -773,8 +824,7 @@ function TaskCard({
   onOpen: () => void
   onMoveSubStatus: (index: number) => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
-  const late = isOverdue(task.due_date)
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
 
   return (
     <article
@@ -799,11 +849,39 @@ function TaskCard({
           ? `${task.reference}: ${task.title}, a sub-task of ${task.parent_reference}`
           : `${task.reference}: ${task.title}`
       }
-      style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : {}}
+      // No transform of its own: while this card is in the air the DragOverlay
+      // is the copy that follows the pointer, and this one stays put and dims.
       className={[styles.task, styles[task.status], isDragging && styles.dragging]
         .filter(Boolean)
         .join(' ')}
     >
+      <TaskCardBody task={task} onMoveSubStatus={onMoveSubStatus} />
+    </article>
+  )
+}
+
+/**
+ * What a card says, without any of what a card does.
+ *
+ * Drawn twice while a card is being dragged — dimmed in the column it came
+ * from, and solid in the overlay — so it lives apart from the drag wiring that
+ * only the one in the column has.
+ *
+ * `onMoveSubStatus` is optional because the overlay's copy has nothing to
+ * click: it is a picture of a card moving, and the stage it is on cannot be
+ * advanced in mid-air.
+ */
+function TaskCardBody({
+  task,
+  onMoveSubStatus,
+}: {
+  task: Task
+  onMoveSubStatus?: (index: number) => void
+}) {
+  const late = isOverdue(task.due_date)
+
+  return (
+    <>
       <div className={styles.taskRow}>
         <span className={styles.refs}>
           <span className={styles.reference}>{task.reference}</span>
@@ -818,16 +896,33 @@ function TaskCard({
           ) : null}
         </span>
         <span className={styles.badges}>
-          {/* Someday is the baseline every card starts on, so flagging it too
-              would just be noise on every single card — the same reasoning
-              that keeps the status pill off an active task. */}
+          {/* Icons rather than words, with the word each one stands for kept on
+              the chip: as a tooltip, and as text only a screen reader reads.
+              "This week · feature" spelled out was the widest thing on a row
+              that repeats down every card in the column, and the least worth
+              reading twice — but it is still what the chip means, so nothing
+              that cannot see the icon loses it.
+
+              Someday is the baseline every card starts on, so flagging it too
+              would be noise on every single card — the same reasoning that
+              keeps the status pill off an active task. */}
           {task.priority !== 'someday' ? (
-            <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
-              {PRIORITY_LABELS[task.priority]}
+            <span
+              className={`${styles.chip} ${styles.icon} ${styles[`priority_${task.priority}`]}`}
+              title={PRIORITY_LABELS[task.priority]}
+            >
+              <PriorityIcon priority={task.priority} />
+              <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
             </span>
           ) : null}
           {task.status === 'active' ? (
-            <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+            <span
+              className={`${styles.chip} ${styles.icon} ${styles[`type_${task.type}`]}`}
+              title={TYPE_LABELS[task.type]}
+            >
+              <TypeIcon type={task.type} />
+              <span className="visually-hidden">{TYPE_LABELS[task.type]}</span>
+            </span>
           ) : (
             <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
               {STATUS_LABELS[task.status]}
@@ -838,7 +933,7 @@ function TaskCard({
 
       <div className={styles.title}>{task.title}</div>
 
-      {task.sub_statuses.length ? (
+      {task.sub_statuses.length && onMoveSubStatus ? (
         <SubStatusBar
           labels={task.sub_statuses}
           index={task.sub_status_index ?? 0}
@@ -878,34 +973,43 @@ function TaskCard({
           <Avatar name={task.assignee.name} colour={task.assignee.colour} />
         </span>
       </div>
-    </article>
+    </>
   )
 }
 
-function AddColumnTile({ board, onClick }: { board: Board; onClick: () => void }) {
+/**
+ * Adds a column, from the toolbar rather than from a tile on the row's end.
+ *
+ * A full-height dashed tile spent a column's worth of the board on a button
+ * pressed once or twice in a board's life, and pushed the last real column off
+ * the edge to do it. Greyed at the limit rather than removed, so the button is
+ * still there to say why it will not open.
+ */
+function AddColumnButton({ board, onClick }: { board: Board; onClick: () => void }) {
   const full = board.columns.length >= board.max_columns
 
   return (
-    <button
+    <Button
+      small
       className={styles.addColumn}
-      // aria-disabled rather than disabled: the tile is where the limit is
-      // explained, and a disabled button cannot be focused to read it.
+      // aria-disabled rather than disabled: this is where the limit is
+      // explained, and a disabled button cannot be focused to read it. Greying
+      // itself at that point is the Button's own — see `[aria-disabled]`.
       aria-disabled={full}
+      title={
+        full
+          ? `Column limit reached — a board holds ${board.max_columns} columns.`
+          : `${board.columns.length} of ${board.max_columns} columns used`
+      }
       onClick={() => {
         if (!full) onClick()
       }}
     >
-      {full ? (
-        `Column limit reached (${board.max_columns} of ${board.max_columns})`
-      ) : (
-        <>
-          + Add a column
-          <span className={styles.hint}>
-            {board.columns.length} of {board.max_columns} used
-          </span>
-        </>
-      )}
-    </button>
+      + Column
+      <span className={styles.hint}>
+        {board.columns.length}/{board.max_columns}
+      </span>
+    </Button>
   )
 }
 
