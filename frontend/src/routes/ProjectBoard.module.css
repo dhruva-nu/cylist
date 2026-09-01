@@ -117,6 +117,24 @@
   border-radius: 16px;
   background: var(--paper);
   box-shadow: var(--shadow);
+
+  /* So a fold wipes rather than spills: while the box is narrowing, whatever
+     is inside it is still laid out at its own width. */
+  overflow: hidden;
+  transition:
+    flex-basis 240ms ease,
+    min-width 240ms ease,
+    max-width 240ms ease;
+}
+
+/* Folded. All three widths move together and land on the same number, and
+   they have to: min-width beats max-width in the cascade, so animating one
+   without the other would hold the column open at 280px for the whole of a
+   fold that is supposedly closing it. */
+.collapsed {
+  flex-basis: 52px;
+  min-width: 52px;
+  max-width: 52px;
 }
 
 .over {
@@ -124,23 +142,48 @@
   background: var(--brand-soft);
 }
 
-/* A folded column: the same card, narrowed to what you need to recognise it
-   and to drop onto it. Its own flex basis rather than a width, so it sits in
-   the same row as the columns either side of it. */
+/* What a folded column holds: narrowed to what you need to recognise it and
+   to drop onto it. The box around it keeps the row's height, so folding a
+   column changes its width and nothing else — which is the whole of what
+   there is to animate.
+
+   Both fillings are sized in their own right rather than to the box, so
+   neither reflows while the box is on its way between the two widths: the
+   rail is 52px throughout, and the unfolded column never narrows past the
+   width it would be readable at anyway. What is too wide to fit yet is
+   clipped, so a fold reads as a wipe. */
 .rail {
   display: flex;
-  flex: 0 0 52px;
   flex-direction: column;
   align-items: stretch;
+  width: 52px;
+  height: 100%;
+}
 
-  /* Tall enough to read the name down and to be an easy drop target, and no
-     taller: a rail that stretched to the board's full height would be the
-     largest thing on a screen it is meant to be getting out of the way of. */
-  min-height: 240px;
-  border: 2px solid transparent;
-  border-radius: 16px;
-  background: var(--paper);
-  box-shadow: var(--shadow);
+.unfolded {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 280px;
+  height: 100%;
+}
+
+/* The two fillings are a swap, and a swap in the middle of a resize is a
+   flicker unless it is faded. Keyed in the markup so React remounts them,
+   which is what runs this again on every fold rather than only the first. */
+.rail,
+.unfolded {
+  animation: unfurl 240ms ease;
+}
+
+@keyframes unfurl {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .railBody {

@@ -693,94 +693,102 @@ function Column({
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined
 
-  if (collapsed) {
-    return (
-      <section
-        ref={setDropRef}
-        className={`${styles.rail} ${isOver ? styles.over : ''}`}
-        aria-label={`${column.name}, ${counted}, collapsed`}
-      >
-        <button
-          type="button"
-          className={styles.railBody}
-          aria-expanded={false}
-          aria-label={`Expand ${column.name}`}
-          onClick={onToggleCollapse}
-        >
-          <span aria-hidden="true">›</span>
-          <span className={styles.count}>{tasks.length}</span>
-          <span className={styles.railName}>{column.name}</span>
-        </button>
-        {/* The first column is where new work lands, so its "+" survives the
-            fold: otherwise tidying the board away takes the add button with
-            it. */}
-        {isFirst ? (
-          <button className={styles.railAdd} onClick={onAddTask} aria-label="Add a task">
-            +
-          </button>
-        ) : null}
-      </section>
-    )
-  }
-
   return (
     <section
       ref={setRefs}
       style={dragStyle}
-      className={[styles.column, isOver && styles.over, isDragging && styles.columnDragging]
+      className={[
+        styles.column,
+        collapsed && styles.collapsed,
+        isOver && styles.over,
+        isDragging && styles.columnDragging,
+      ]
         .filter(Boolean)
         .join(' ')}
-      aria-label={`${column.name}, ${counted}`}
+      aria-label={
+        collapsed ? `${column.name}, ${counted}, collapsed` : `${column.name}, ${counted}`
+      }
     >
-      <div className={styles.head}>
-        <div className={styles.headRow}>
+      {/* Folded and unfolded are two fillings of one box, not two boxes. The
+          box is what animates — it is the same element either way, so its
+          width has somewhere to travel from — and the keys are what make the
+          filling inside it a swap React remounts, so the fade runs each time
+          rather than only on the first. */}
+      {collapsed ? (
+        <div key="rail" className={styles.rail}>
           <button
             type="button"
-            className={styles.dragHandle}
-            {...attributes}
-            {...listeners}
-            aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
-            title="Drag to reorder"
+            className={styles.railBody}
+            aria-expanded={false}
+            aria-label={`Expand ${column.name}`}
+            onClick={onToggleCollapse}
           >
-            ⠿
-          </button>
-          <h3>{column.name}</h3>
-          <span className={styles.headActions}>
+            <span aria-hidden="true">›</span>
             <span className={styles.count}>{tasks.length}</span>
-            <Button
-              variant="ghost"
-              small
-              aria-expanded
-              aria-label={`Collapse ${column.name}`}
-              onClick={onToggleCollapse}
-            >
-              ‹
-            </Button>
-            <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
-              ···
-            </Button>
-          </span>
+            <span className={styles.railName}>{column.name}</span>
+          </button>
+          {/* The first column is where new work lands, so its "+" survives the
+              fold: otherwise tidying the board away takes the add button with
+              it. */}
+          {isFirst ? (
+            <button className={styles.railAdd} onClick={onAddTask} aria-label="Add a task">
+              +
+            </button>
+          ) : null}
         </div>
-        <p>{column.description}</p>
-      </div>
-
-      <div className={styles.cards}>
-        {tasks.map((task) => (
-          <TaskCard
-            key={task.id}
-            task={task}
-            onOpen={() => onOpenTask(task.id)}
-            onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
-          />
-        ))}
-      </div>
-
-      {isFirst ? (
-        <button className={styles.addTask} onClick={onAddTask}>
-          + Add a task
-        </button>
       ) : (
-        <div className={styles.foot} />
+        <div key="open" className={styles.unfolded}>
+          <div className={styles.head}>
+            <div className={styles.headRow}>
+              <button
+                type="button"
+                className={styles.dragHandle}
+                {...attributes}
+                {...listeners}
+                aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
+                title="Drag to reorder"
+              >
+                ⠿
+              </button>
+              <h3>{column.name}</h3>
+              <span className={styles.headActions}>
+                <span className={styles.count}>{tasks.length}</span>
+                <Button
+                  variant="ghost"
+                  small
+                  aria-expanded
+                  aria-label={`Collapse ${column.name}`}
+                  onClick={onToggleCollapse}
+                >
+                  ‹
+                </Button>
+                <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
+                  ···
+                </Button>
+              </span>
+            </div>
+            <p>{column.description}</p>
+          </div>
+
+          <div className={styles.cards}>
+            {tasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onOpen={() => onOpenTask(task.id)}
+                onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+              />
+            ))}
+          </div>
+
+          {isFirst ? (
+            <button className={styles.addTask} onClick={onAddTask}>
+              + Add a task
+            </button>
+          ) : (
+            <div className={styles.foot} />
+          )}
+        </div>
       )}
     </section>
   )
