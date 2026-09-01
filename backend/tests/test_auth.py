@@ -64,7 +64,13 @@ class TestLogin:
 
     @pytest.mark.parametrize(
         ("environment", "secure"),
-        [("dev", False), ("test", False), ("staging", True), ("prod", True)],
+        [
+            ("dev", False),
+            ("test", False),
+            ("preview", True),
+            ("staging", True),
+            ("prod", True),
+        ],
     )
     async def test_marks_the_cookie_secure_wherever_https_terminates(
         self,

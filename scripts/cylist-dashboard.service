@@ -1,0 +1,26 @@
+[Unit]
+Description=Cylist status dashboard (loopback only; exposed via tailscale serve)
+Documentation=https://github.com/dhruva-nu/cylist/blob/main/DEPLOY.md
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=dnu2
+Group=dnu2
+# It shells out to `docker inspect` for each environment's app container, so
+# it needs the same group, granted the same way, for the same reason as
+# github-runner-cylist.service.
+SupplementaryGroups=docker
+# Not a repo checkout: CI's self-hosted jobs — including dev's, which can point
+# at any branch — check out into ~/actions-runner/_work/cylist/cylist and would
+# otherwise swap this service's own code out from under it mid-run. Installed
+# instead into a directory nothing deploys into; see DEPLOY.md's Dashboard
+# section for the copy step.
+WorkingDirectory=/home/dnu2/cylist-dashboard
+ExecStart=/usr/bin/python3 /home/dnu2/cylist-dashboard/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
