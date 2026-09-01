@@ -6,10 +6,12 @@
  * where new work lands; and "+ Column" in the toolbar counts down to eight and
  * then goes grey, because that is where a board stops being readable.
  *
- * Every column is the same fixed size, whatever it is holding. A column that
- * grew with its cards meant dropping one moved every other column on the row
- * out from under the pointer — the board rearranging itself is a worse cost
- * than a short column having some empty space in it.
+ * Every column is a fixed height, whatever it is holding. A column that grew
+ * with its cards meant dropping one moved every other column on the row out
+ * from under the pointer — the board rearranging itself is a worse cost than a
+ * short column having some empty space in it. Width is the other way about:
+ * it answers to how many columns are open, not to what is in them, so the
+ * columns share the row out between them and fold one to give the rest more.
  *
  * Dragging updates the cache before the request goes out. A card that snaps
  * back is how you find out the move failed — waiting for a round trip to see a
