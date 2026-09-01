@@ -1,0 +1,28 @@
+name: Deploy dev
+
+# Manual, and not tied to any branch: GitHub's own "Run workflow" dropdown lets
+# you pick whichever branch to run this from, and actions/checkout below
+# follows that same ref by default. That is the whole mechanism — no branch
+# input to maintain here.
+#
+# Unlike CI's deploy jobs, this does not `needs:` the test jobs. Dev exists so
+# you can put work here before it is finished, not after it has already passed
+# everything staging would demand of it.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    name: Deploy dev to dnu-home-1
+    runs-on: [self-hosted, cylist]
+    environment:
+      name: dev
+      url: https://dnu-home-1.tail222f46.ts.net:9443
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Builds the image, dumps the database, migrates, restarts the stack and
+      # waits for /api/v1/health — the same script production and staging use.
+      - name: Deploy
+        run: scripts/deploy.sh dev

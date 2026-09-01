@@ -13,7 +13,8 @@ UV       := uv --project $(BACKEND)
 .DEFAULT_GOAL := help
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
         up down logs image deploy prod-logs prod-ps staging-deploy \
-        staging-refresh staging-logs staging-ps staging-down migrate-check \
+        staging-refresh staging-logs staging-ps staging-down \
+        dev-deploy dev-logs dev-ps dev-down dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key \
         clean
 
@@ -98,6 +99,32 @@ staging-ps: ## Show what the staging stack is running
 
 staging-down: ## Stop the staging stack and remove its containers (volumes kept)
 	$(STAGING) down
+
+# --- Dev, on the same machine ------------------------------------------------
+# Not tied to any branch: its GitHub Actions workflow is workflow_dispatch, so
+# you pick whichever branch you are currently building in the "Run workflow"
+# dropdown. It listens on :8002, starts with its own empty database, and is
+# never restored from production — see docker-compose.dev.yml.
+
+CYLIST_DEV_DIR ?= $(HOME)/cylist-dev
+DEV := CYLIST_DEV_DIR=$(CYLIST_DEV_DIR) docker compose -f docker-compose.dev.yml
+
+dev-deploy: ## Build, migrate and restart the dev stack on this machine
+	scripts/deploy.sh dev
+
+dev-logs: ## Follow the dev app's logs
+	$(DEV) logs -f app
+
+dev-ps: ## Show what the dev stack is running
+	$(DEV) ps
+
+dev-down: ## Stop the dev stack and remove its containers (volumes kept)
+	$(DEV) down
+
+dashboard-sync: ## Copy the status dashboard to where its systemd service runs it from
+	mkdir -p $(HOME)/cylist-dashboard
+	cp scripts/dashboard/server.py scripts/dashboard/index.html $(HOME)/cylist-dashboard/
+	@echo "Copied. Restart it to pick up changes: sudo systemctl restart cylist-dashboard"
 
 migrate-check: ## Prove migrations match the models and reverse cleanly
 	cd $(BACKEND) && CYLIST_DATABASE_URL=$(TEST_DATABASE_URL) \

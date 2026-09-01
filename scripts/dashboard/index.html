@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cylist — dnu-home-1</title>
+<style>
+  :root {
+    --bg: #f4f1ec;
+    --card: #ffffff;
+    --border: #e0dbd0;
+    --text: #2b2822;
+    --muted: #7a7568;
+    --ok: #3f8f5f;
+    --degraded: #c98a2c;
+    --down: #b6483f;
+    --unknown: #a39c8c;
+    --bar-bg: #e8e3d8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1a17;
+      --card: #26231f;
+      --border: #3a362f;
+      --text: #ece7dd;
+      --muted: #948d7d;
+      --ok: #5fbf85;
+      --degraded: #e0a94a;
+      --down: #e0685c;
+      --unknown: #6b6558;
+      --bar-bg: #35312a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  header {
+    max-width: 900px;
+    margin: 0 auto 1.5rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  h1 {
+    font-size: 1.35rem;
+    margin: 0 0 0.25rem;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .disk {
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-align: right;
+    min-width: 160px;
+  }
+  .bar {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--bar-bg);
+    margin-top: 0.3rem;
+    overflow: hidden;
+  }
+  .bar > div {
+    height: 100%;
+    background: var(--ok);
+  }
+  .bar.warn > div { background: var(--degraded); }
+  .bar.crit > div { background: var(--down); }
+  .grid {
+    max-width: 900px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+  }
+  .card-head h2 {
+    font-size: 1.05rem;
+    margin: 0;
+  }
+  .dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .dot.ok { background: var(--ok); }
+  .dot.degraded { background: var(--degraded); }
+  .dot.down { background: var(--down); }
+  .dot.unknown { background: var(--unknown); }
+  .state {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .state.ok { color: var(--ok); }
+  .state.degraded { color: var(--degraded); }
+  .state.down { color: var(--down); }
+  .state.unknown { color: var(--muted); }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    margin-left: 0.4rem;
+  }
+  .badge.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .badge.down { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+  .badge.unknown { background: color-mix(in srgb, var(--unknown) 25%, transparent); color: var(--muted); }
+  dl {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.15rem 0.5rem;
+  }
+  dt { font-weight: 500; }
+  dd { margin: 0; text-align: right; }
+  dd.warn { color: var(--degraded); font-weight: 600; }
+  dd.crit { color: var(--down); font-weight: 600; }
+  a.open {
+    display: inline-block;
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+  }
+  a.open:hover { border-bottom-color: var(--text); }
+  footer {
+    max-width: 900px;
+    margin: 1.5rem auto 0;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Cylist</h1>
+    <div class="subtitle">dnu-home-1 — production, staging, dev</div>
+  </div>
+  <div class="disk" id="disk"></div>
+</header>
+<div class="grid" id="grid"></div>
+<footer id="footer">loading…</footer>
+
+<script>
+  const grid = document.getElementById("grid");
+  const footer = document.getElementById("footer");
+  const diskEl = document.getElementById("disk");
+
+  function dotClass(env) {
+    if (!env.container.deployed) return "unknown";
+    if (env.container.status !== "running") return "down";
+    if (env.health === "ok") return "ok";
+    if (env.health === "degraded") return "degraded";
+    return "down";
+  }
+
+  function stateText(env) {
+    if (!env.container.deployed) return "Not deployed";
+    if (env.container.status !== "running") return "Container " + env.container.status;
+    if (env.health === "ok") return "Healthy";
+    if (env.health === "degraded") return "Degraded";
+    return "Unreachable";
+  }
+
+  function publicBadge(env) {
+    if (env.public === "reachable") return '<span class="badge ok">served ✓</span>';
+    if (env.public === "unreachable") return '<span class="badge down">not served ✗</span>';
+    if (env.public === "checking") return '<span class="badge unknown">checking…</span>';
+    return "";
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return "—";
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 0) return "—";
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return mins + "m";
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + "h " + (mins % 60) + "m";
+    const days = Math.floor(hours / 24);
+    return days + "d " + (hours % 24) + "h";
+  }
+
+  function requestRows(env) {
+    if (!env.requests) return "";
+    const r = env.requests;
+    const errClass = (n) => (n > 0 ? "warn" : "");
+    return `
+      <dt>Requests</dt><dd>${r.total} since ${timeAgo(r.since)} ago</dd>
+      <dt>4xx / 5xx</dt><dd class="${r.status_5xx > 0 ? 'crit' : errClass(r.status_4xx)}">${r.status_4xx} / ${r.status_5xx}</dd>`;
+  }
+
+  function render(data) {
+    const disk = data.disk;
+    const diskCls = disk.percent >= 90 ? "crit" : disk.percent >= 75 ? "warn" : "";
+    diskEl.innerHTML = `Disk: ${disk.used_gb} / ${disk.total_gb} GB (${disk.percent}%)
+      <div class="bar ${diskCls}"><div style="width:${disk.percent}%"></div></div>`;
+
+    grid.innerHTML = data.environments.map(env => {
+      const cls = dotClass(env);
+      return `
+        <div class="card">
+          <div class="card-head">
+            <h2>${env.label}</h2>
+            <span class="dot ${cls}"></span>
+          </div>
+          <div class="state ${cls}">${stateText(env)} ${publicBadge(env)}</div>
+          <dl>
+            <dt>Uptime</dt><dd>${timeAgo(env.container.started_at)}</dd>
+            <dt>Restarts</dt><dd>${env.container.restart_count ?? "—"}</dd>
+            <dt>Last backup</dt><dd>${env.last_backup ? timeAgo(env.last_backup) + " ago" : "—"}</dd>
+            ${requestRows(env)}
+          </dl>
+          <a class="open" href="${env.url}" target="_blank" rel="noopener">Open ↗</a>
+        </div>`;
+    }).join("");
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch("/api/status");
+      render(await res.json());
+      footer.textContent = "last checked " + new Date().toLocaleTimeString();
+    } catch (err) {
+      footer.textContent = "dashboard backend unreachable — retrying…";
+    }
+  }
+
+  poll();
+  setInterval(poll, 8000);
+</script>
+</body>
+</html>
