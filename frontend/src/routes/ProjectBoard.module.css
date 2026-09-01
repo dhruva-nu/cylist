@@ -13,7 +13,7 @@
 .search {
   position: relative;
   grid-column: 2;
-  width: min(620px, 100%);
+  width: min(960px, 100%);
 }
 
 .search input {
