@@ -72,6 +72,7 @@ import {
   ErrorBanner,
   LiveRegion,
   PriorityIcon,
+  SubStatusBar,
   TaskRef,
   TypeIcon,
   useAnnouncer,
@@ -258,6 +259,32 @@ export function ProjectBoard() {
     onSettled: refresh,
   })
 
+  /**
+   * Dragging the sub-status slider on a card. Optimistic, because the whole
+   * point of the control is that a stage moves under the cursor rather than
+   * after a round trip.
+   */
+  const moveSubStatus = useMutation<
+    Task,
+    Error,
+    { taskId: string; index: number },
+    { previous: Task[] | undefined }
+  >({
+    mutationFn: ({ taskId, index }) => api.setSubStatus(taskId, index),
+    onMutate: async ({ taskId, index }) => {
+      await queryClient.cancelQueries({ queryKey: tasksKey })
+      const previous = queryClient.getQueryData<Task[]>(tasksKey)
+      queryClient.setQueryData<Task[]>(tasksKey, (current) =>
+        current?.map((task) => (task.id === taskId ? { ...task, sub_status_index: index } : task)),
+      )
+      return { previous }
+    },
+    onError: (_error, _move, context) => {
+      queryClient.setQueryData(tasksKey, context?.previous)
+    },
+    onSettled: refresh,
+  })
+
   const boardKey = ['board', projectKey]
 
   const reorderColumns = useMutation<Board, Error, string[], { previous: Board | undefined }>({
@@ -407,6 +434,7 @@ export function ProjectBoard() {
                 )
               }}
               onOpenTask={setOpenTaskId}
+              onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
             />
@@ -576,6 +604,7 @@ function Column({
   collapsed,
   onToggleCollapse,
   onOpenTask,
+  onMoveSubStatus,
   onAddTask,
   onEdit,
 }: {
@@ -585,6 +614,7 @@ function Column({
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
+  onMoveSubStatus: (taskId: string, index: number) => void
   onAddTask: () => void
   onEdit: () => void
 }) {
@@ -682,7 +712,12 @@ function Column({
 
       <div className={styles.cards}>
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} onOpen={() => onOpenTask(task.id)} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            onOpen={() => onOpenTask(task.id)}
+            onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+          />
         ))}
       </div>
 
@@ -717,7 +752,15 @@ const PRIORITY_LABELS = {
   someday: 'Someday',
 } as const
 
-function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
+function TaskCard({
+  task,
+  onOpen,
+  onMoveSubStatus,
+}: {
+  task: Task
+  onOpen: () => void
+  onMoveSubStatus: (index: number) => void
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
   const late = isOverdue(task.due_date)
 
@@ -799,6 +842,14 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
       </div>
 
       <div className={styles.title}>{task.title}</div>
+
+      {task.sub_statuses.length ? (
+        <SubStatusBar
+          labels={task.sub_statuses}
+          index={task.sub_status_index ?? 0}
+          onMove={onMoveSubStatus}
+        />
+      ) : null}
 
       {task.waiting_on.length ? (
         <div className={styles.waiting}>

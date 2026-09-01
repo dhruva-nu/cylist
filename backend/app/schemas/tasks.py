@@ -21,6 +21,15 @@ def _blank_to_none(value: str | None) -> str | None:
     return stripped or None
 
 
+def _clean_sub_statuses(value: list[str]) -> list[str]:
+    """Strip each label and refuse a blank one — a stage with no name is
+    nothing to advance towards."""
+    cleaned = [label.strip() for label in value]
+    if any(not label for label in cleaned):
+        raise ValueError("a sub-status label must not be blank")
+    return cleaned
+
+
 class TaskCreate(Schema):
     """A new card. It always lands in the board's first column."""
 
@@ -31,6 +40,14 @@ class TaskCreate(Schema):
     type: TaskType
     priority: TaskPriority = Field(
         default=TaskPriority.SOMEDAY, description="0 (urgent) to 3 (someday). Defaults to someday."
+    )
+    sub_statuses: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "Up to 4 short stage labels, left to right. Starts on the first one. "
+            "Advancing through them happens on the board, not here."
+        ),
     )
     due_date: date
     assignee_id: UUID = Field(description="Must be a member of the project.")
@@ -44,6 +61,11 @@ class TaskCreate(Schema):
         if not stripped:
             raise ValueError("must not be blank")
         return stripped
+
+    @field_validator("sub_statuses")
+    @classmethod
+    def _clean_sub_statuses(cls, value: list[str]) -> list[str]:
+        return _clean_sub_statuses(value)
 
     @field_validator("jira_ref", "pr_ref")
     @classmethod
@@ -106,10 +128,33 @@ class TaskUpdate(Schema):
     description: str | None = Field(default=None, min_length=1, max_length=5000)
     type: TaskType | None = None
     priority: TaskPriority | None = None
+    sub_statuses: list[str] | None = Field(
+        default=None,
+        max_length=4,
+        description=(
+            "Replaces the whole list of stage labels. The current stage is kept "
+            "if it still fits, otherwise pulled back to the new last one."
+        ),
+    )
+    sub_status_index: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Which stage is current, once `sub_statuses` has been applied. Send it "
+            "when reordering or removing stages has moved the marker — the caller "
+            "doing the reordering is the only one that knows where it went. Left "
+            "out, the marker stays where it was."
+        ),
+    )
     due_date: date | None = None
     assignee_id: UUID | None = None
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
+
+    @field_validator("sub_statuses")
+    @classmethod
+    def _clean_sub_statuses(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _clean_sub_statuses(value)
 
     @field_validator("jira_ref", "pr_ref")
     @classmethod
@@ -122,6 +167,18 @@ class TaskMove(Schema):
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+
+
+class SubStatusMove(Schema):
+    """Moves a card to one of its own sub-status stages."""
+
+    index: int = Field(
+        ge=0,
+        description=(
+            "Which stage to move to, counting from 0. Any of them, in either "
+            "direction — not just the next one."
+        ),
+    )
 
 
 class TaskStatusChange(Schema):
@@ -197,6 +254,12 @@ class TaskRead(Schema):
     description: str
     type: TaskType
     priority: TaskPriority
+    sub_statuses: list[str] = Field(
+        description="Up to 4 stage labels, left to right. Empty if the card doesn't use this."
+    )
+    sub_status_index: int | None = Field(
+        description="Index into `sub_statuses` of the current stage. Null when the list is empty."
+    )
     due_date: date
     assignee: PersonRead
     status: TaskStatus

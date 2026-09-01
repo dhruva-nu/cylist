@@ -276,6 +276,58 @@
   color: var(--blocked);
 }
 
+.subStatusEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subStatusEditorRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.subStatusEditorRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Move up, move down, remove. Sized by the row rather than by how wide each
+   glyph happens to be, so the three line up down the list. */
+.subStatusEditorRow button {
+  flex-shrink: 0;
+  min-width: 32px;
+  padding-inline: 6px;
+}
+
+/*
+ * The stage's place in the order, and — filled — which stage the card is
+ * sitting on. Without it, reordering would silently move the marker with no
+ * sign of where it had gone.
+ */
+.subStatusEditorNumber {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.subStatusEditorNow {
+  border-color: transparent;
+  background: var(--go);
+  color: var(--go-ink);
+  font-weight: 700;
+}
+
 .readField {
   display: flex;
   flex-direction: column;
