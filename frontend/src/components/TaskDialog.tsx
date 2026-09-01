@@ -49,6 +49,7 @@ import {
   type TaskComment,
   type TaskDetail,
   type TaskInput,
+  type TaskPriority,
   type TaskStatus,
   type TaskType,
 } from '../api/client'
@@ -64,6 +65,13 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
 ]
 
 const TYPES: TaskType[] = ['feature', 'bug', 'chore']
+
+const PRIORITIES: { value: TaskPriority; label: string }[] = [
+  { value: 'urgent', label: 'Urgent' },
+  { value: 'asap', label: 'ASAP' },
+  { value: 'week', label: 'This week' },
+  { value: 'someday', label: 'Someday' },
+]
 
 interface DialogProps {
   projectKey: string
@@ -200,6 +208,9 @@ function TaskDetailView({
 
         <div className={styles.chips}>
           <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
+            {PRIORITIES.find((option) => option.value === task.priority)?.label ?? task.priority}
+          </span>
           <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>
         </div>
 
@@ -328,6 +339,7 @@ function TaskForm({
     title: task?.title ?? '',
     description: task?.description ?? '',
     type: task?.type ?? 'feature',
+    priority: task?.priority ?? 'someday',
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
     jira_ref: task?.jira_ref ?? '',
@@ -525,6 +537,19 @@ function TaskForm({
             </Field>
           )}
         </FieldPair>
+
+        <Field label="Priority" required>
+          <select
+            value={form.priority}
+            onChange={(event) => setForm({ ...form, priority: event.target.value as TaskPriority })}
+          >
+            {PRIORITIES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
 
         <FieldPair>
           <Field label="Due date" required>

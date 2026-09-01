@@ -601,6 +601,13 @@ const STATUS_LABELS = {
   cancelled: 'Cancelled',
 } as const
 
+const PRIORITY_LABELS = {
+  urgent: 'Urgent',
+  asap: 'ASAP',
+  week: 'This week',
+  someday: 'Someday',
+} as const
+
 function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
   const late = isOverdue(task.due_date)
@@ -646,13 +653,23 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
             </span>
           ) : null}
         </span>
-        {task.status === 'active' ? (
-          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
-        ) : (
-          <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
-            {STATUS_LABELS[task.status]}
-          </span>
-        )}
+        <span className={styles.badges}>
+          {/* Someday is the baseline every card starts on, so flagging it too
+              would just be noise on every single card — the same reasoning
+              that keeps the status pill off an active task. */}
+          {task.priority !== 'someday' ? (
+            <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
+              {PRIORITY_LABELS[task.priority]}
+            </span>
+          ) : null}
+          {task.status === 'active' ? (
+            <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          ) : (
+            <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
+              {STATUS_LABELS[task.status]}
+            </span>
+          )}
+        </span>
       </div>
 
       <div className={styles.title}>{task.title}</div>

@@ -90,6 +90,20 @@
   --file-other: #5c6b73;
   --file-link: #4a7b8c;
 
+  /*
+   * Priority badges. Fixed hues, not theme tokens, for the same reason as the
+   * file-type badges above: a priority is a label on the task, not part of
+   * the surface. Used as text on `--paper`/`--paper-2`, same as `.type_*`, so
+   * each is picked for AA against those rather than against `--on-accent`.
+   * Ordered by urgency — someday is deliberately the most muted of the four,
+   * so the level that means "no rush" does not compete for attention with
+   * the ones that do.
+   */
+  --priority-urgent: #b3261e;
+  --priority-asap: #a76900;
+  --priority-week: #3b6fc2;
+  --priority-someday: #5c6b73;
+
   --font-ui: 'Figtree', system-ui, sans-serif;
   --font-body: 'Source Sans 3', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
