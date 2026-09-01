@@ -81,42 +81,51 @@
    moment they do not. */
 .board {
   display: flex;
+  flex: 1;
   gap: 16px;
-  align-items: flex-start;
+
+  /* The columns take the board's height rather than naming one of their own,
+     which is what makes the board exactly as tall as the window leaves it. */
+  align-items: stretch;
   justify-content: safe center;
-  min-height: 60vh;
+  min-height: 0;
 
   /* Wide enough for a focus ring: this scrolls, so anything nearer the edge
      than the ring is thick gets clipped rather than merely crowded. */
   padding: 6px 6px 20px;
+
+  /* Both axes named, as in `.cards`: a lone `overflow-x` computes the other to
+     `auto` too, and it may as well say which one it means. Sideways to reach a
+     column past the edge; downwards only on a window too short for the floor a
+     column stops shrinking at. */
   overflow-x: auto;
+  overflow-y: auto;
 }
 
-/* A fixed height and a width that shares out the row.
-   
-   The height is the part that had to stop moving: a column sized to its cards
-   changed height every time one was dropped, which moved every neighbour on
-   the row while the pointer was still over it. The cards scroll inside a fixed
-   frame instead.
-   
+/* One height for every column, and a width that shares out the row.
+
+   The height comes from the board, which takes what the window leaves under
+   the bar and the heading. It used to be `100vh` less a number standing for
+   everything above it, which is a number that is wrong the day anything up
+   there changes — as it was the day the heading lost its paragraph.
+
+   What matters is only that the height does not answer to the cards: a column
+   sized to its own changed height every time one was dropped, and moved every
+   neighbour on the row while the pointer was still over it. The cards scroll
+   inside instead.
+
    The width has no such problem, because it answers to how many columns are
    open rather than to what any of them is holding — so it grows to fill the
    board when three columns are showing and shrinks when eight are. Between a
    floor and a ceiling: a card stops being readable under about 280px, and past
    400px a column is mostly the empty right-hand side of its own cards. Past
-   the floor the board scrolls rather than squeezing any further.
-
-   170px is what the page spends above the board: the top bar, the heading and
-   the toolbar. It was 250 while a paragraph of instructions stood under the
-   heading — three lines at 16px and the 8px above them — and came down by
-   exactly that when the paragraph went. */
+   the floor the board scrolls rather than squeezing any further. */
 .column {
   display: flex;
   flex: 1 1 320px;
   flex-direction: column;
   min-width: 280px;
   max-width: 400px;
-  height: calc(100vh - 170px);
   min-height: 320px;
   border: 2px solid transparent;
   border-radius: 16px;
@@ -159,18 +168,23 @@
    clipped, so a fold reads as a wipe. */
 .rail {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: stretch;
   width: 52px;
-  height: 100%;
+  min-height: 0;
 }
 
+/* `flex: 1` rather than `height: 100%`, for both: the column no longer names a
+   height of its own — it takes the board's — and a percentage wants a number
+   to be a percentage of. */
 .unfolded {
   display: flex;
+  flex: 1;
   flex-direction: column;
   width: 100%;
   min-width: 280px;
-  height: 100%;
+  min-height: 0;
 }
 
 /* The two fillings are a swap, and a swap in the middle of a resize is a
