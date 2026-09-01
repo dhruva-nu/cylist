@@ -165,6 +165,22 @@ export interface TaskHistoryEntry {
   changes: FieldChange[]
 }
 
+/** How many history entries a page holds. The server's default, said out loud
+ * so the board can size its pager without a round trip to find out. */
+export const HISTORY_PER_PAGE = 10
+
+/** One page of a card's history, and enough to draw a pager for the rest. */
+export interface TaskHistoryPage {
+  entries: TaskHistoryEntry[]
+  /** How many entries the whole history holds. */
+  total: number
+  /** Which page this is, counting from 1. */
+  page: number
+  /** How many pages there are. At least 1, even when the history is empty. */
+  pages: number
+  per_page: number
+}
+
 export interface Task {
   id: string
   project_id: string
@@ -498,8 +514,12 @@ export const api = {
 
   listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
-  /** What has been done to a card — every edit, move and tick — newest first. */
-  getTaskHistory: (taskRef: string) => request<TaskHistoryEntry[]>(`/tasks/${taskRef}/history`),
+  /**
+   * One page of what has been done to a card — every edit, move and tick —
+   * newest first. Its own request, made only when somebody asks to see it.
+   */
+  getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
+    request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
   createTask: (ref: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */

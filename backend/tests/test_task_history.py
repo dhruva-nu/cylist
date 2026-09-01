@@ -46,10 +46,15 @@ async def _create(client: AsyncClient, assignee: str, **overrides: Any) -> dict[
     return dict(response.json())
 
 
-async def _history(client: AsyncClient, reference: str) -> list[dict[str, Any]]:
-    response = await client.get(f"/tasks/{reference}/history")
+async def _page(client: AsyncClient, reference: str, **params: Any) -> dict[str, Any]:
+    response = await client.get(f"/tasks/{reference}/history", params=params)
     assert response.status_code == 200, response.text
-    return list(response.json())
+    return dict(response.json())
+
+
+async def _history(client: AsyncClient, reference: str) -> list[dict[str, Any]]:
+    """The first page's entries, which is all of them in most of these tests."""
+    return list((await _page(client, reference))["entries"])
 
 
 async def _columns(client: AsyncClient) -> list[dict[str, Any]]:
@@ -168,15 +173,21 @@ class TestWhatChanged:
         assert entry["changes"][0]["from"] == "2026-09-01"
         assert entry["changes"][0]["to"] == "2026-10-01"
 
-    async def test_a_patch_that_changes_nothing_says_so(self, signed_in: AsyncClient) -> None:
+    async def test_a_patch_that_changes_nothing_is_not_history(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Saving a form without touching a field is not something that
+        happened to the work. The audit feed still has it."""
         aditi, _ = await _setup(signed_in)
         task = await _create(signed_in, aditi)
 
         await signed_in.patch(f"/tasks/{task['reference']}", json={"title": task["title"]})
 
-        entry = (await _history(signed_in, task["reference"]))[0]
-        assert entry["changes"] == []
-        assert entry["summary"] == "Saved with nothing changed."
+        assert [entry["verb"] for entry in await _history(signed_in, task["reference"])] == [
+            "task.created"
+        ]
+        feed = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        assert feed[0]["verb"] == "task.updated"
 
     async def test_names_the_assignee_rather_than_their_id(self, signed_in: AsyncClient) -> None:
         """An id tells the reader nothing about who picked the work up."""
@@ -234,8 +245,9 @@ class TestMoving:
             "to": "Done",
         }
 
-    async def test_reordering_within_a_column_changes_nothing(self, signed_in: AsyncClient) -> None:
-        """A card's place in a stack is not a fact about the work."""
+    async def test_reordering_within_a_column_is_not_history(self, signed_in: AsyncClient) -> None:
+        """A card's place in a stack is not a fact about the work, so dragging
+        one up its own column leaves its history alone."""
         aditi, _ = await _setup(signed_in)
         task = await _create(signed_in, aditi)
         await _create(signed_in, aditi, title="Second")
@@ -246,9 +258,9 @@ class TestMoving:
             json={"column_id": columns[0]["id"], "position": 1},
         )
 
-        entry = (await _history(signed_in, task["reference"]))[0]
-        assert entry["changes"] == []
-        assert entry["summary"] == "Reordered within its column."
+        assert [entry["verb"] for entry in await _history(signed_in, task["reference"])] == [
+            "task.created"
+        ]
 
     async def test_records_the_stage_a_move_reset(self, signed_in: AsyncClient) -> None:
         """Changing column restarts the stages, and that is a change nobody
@@ -331,3 +343,64 @@ class TestEverythingElse:
         entry = (await _history(signed_in, task["reference"]))[0]
         assert entry["summary"] == "Added a comment."
         assert "Stripe confirmed" not in str(entry)
+
+
+class TestPaging:
+    async def test_ten_to_a_page_by_default(self, signed_in: AsyncClient) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        for number in range(12):
+            await signed_in.patch(f"/tasks/{task['reference']}", json={"title": f"Take {number}"})
+
+        page = await _page(signed_in, task["reference"])
+
+        assert len(page["entries"]) == 10
+        assert page == {**page, "total": 13, "page": 1, "pages": 2, "per_page": 10}
+
+    async def test_the_second_page_carries_on_where_the_first_stopped(
+        self, signed_in: AsyncClient
+    ) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        for number in range(12):
+            await signed_in.patch(f"/tasks/{task['reference']}", json={"title": f"Take {number}"})
+
+        first = await _page(signed_in, task["reference"])
+        second = await _page(signed_in, task["reference"], page=2)
+
+        assert len(second["entries"]) == 3
+        assert second["page"] == 2
+        # Newest first, unbroken: the oldest entry is the card's creation.
+        ids = [entry["id"] for entry in [*first["entries"], *second["entries"]]]
+        assert len(set(ids)) == 13
+        assert second["entries"][-1]["summary"] == "Created this task."
+
+    async def test_the_page_size_can_be_asked_for(self, signed_in: AsyncClient) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        await signed_in.patch(f"/tasks/{task['reference']}", json={"title": "Renamed"})
+
+        page = await _page(signed_in, task["reference"], per_page=1)
+
+        assert [entry["verb"] for entry in page["entries"]] == ["task.updated"]
+        assert page["pages"] == 2
+
+    async def test_a_page_past_the_end_is_empty_rather_than_an_error(
+        self, signed_in: AsyncClient
+    ) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+
+        page = await _page(signed_in, task["reference"], page=9)
+
+        assert page["entries"] == []
+        assert page["pages"] == 1
+        assert page["total"] == 1
+
+    async def test_page_zero_is_refused(self, signed_in: AsyncClient) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+
+        response = await signed_in.get(f"/tasks/{task['reference']}/history", params={"page": 0})
+
+        assert response.status_code == 422

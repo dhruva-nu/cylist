@@ -133,6 +133,7 @@ def test_task_history_says_what_changed_and_who_changed_it(run: Runner) -> None:
     # An agent's work must not read as a person's.
     assert "board-tidy agent (agent)" in result.out
     assert "Web session\n" in result.out
+    assert "Page 1 of 2 — 12 entries." in result.out
 
 
 def test_task_new_resolves_the_assignee_and_normalises_the_date(

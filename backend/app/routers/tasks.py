@@ -32,6 +32,7 @@ from app.schemas.tasks import (
     TaskCreate,
     TaskDetail,
     TaskHistoryEntry,
+    TaskHistoryPage,
     TaskMove,
     TaskRead,
     TaskStatusChange,
@@ -185,16 +186,17 @@ async def get_task(
 
 @router.get(
     "/tasks/{task_ref}/history",
-    response_model=list[TaskHistoryEntry],
+    response_model=TaskHistoryPage,
     summary="Read a task's history",
 )
 async def task_history(
     task: Task = Depends(resolved_task),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-    limit: int = Query(default=100, ge=1, le=500),
-) -> list[TaskHistoryEntry]:
-    """Everything that has been done to this card, newest first.
+    page: int = Query(default=1, ge=1, description="Which page, counting from 1."),
+    per_page: int = Query(default=10, ge=1, le=100, description="Entries per page."),
+) -> TaskHistoryPage:
+    """What has been done to this card, newest first, a page at a time.
 
     Distinct from `/comments`, which is what people *said* about the card. This
     is what was *done* to it: every field edit with its old and new value,
@@ -202,25 +204,45 @@ async def task_history(
     the moment it happened and who did it. Because agents act through this same
     API, `channel` says whether a person or a bot was responsible.
 
+    A page past the end is not an error, it is empty: a client holding page 4
+    of a history that has since been trimmed should get an empty page and the
+    real `pages` count back, not a 404 it has to special-case.
+
+    Only what changed the card is here. Dragging a card up its own column, or
+    saving a form without touching a field, is a request the server handled
+    rather than something that happened to the work — those stay in
+    `/activity`, which is the record of who touched what.
+
     A sub-task keeps its own history rather than appearing in its parent's: it
     is a card, and its parent's history is about the parent.
     """
-    entries = await activity.for_entity(session, "task", task.id, limit=limit)
-    return [
-        TaskHistoryEntry(
-            id=entry.id,
-            occurred_at=entry.occurred_at,
-            actor_label=entry.actor_label,
-            channel=entry.channel,
-            verb=entry.verb,
-            summary=activity.describe(entry),
-            changes=[
-                FieldChange.model_validate(change) for change in entry.payload.get("changes") or []
-            ],
-            payload=entry.payload,
-        )
-        for entry in entries
-    ]
+    entries, total = await activity.for_entity(
+        session, "task", task.id, limit=per_page, offset=(page - 1) * per_page
+    )
+    return TaskHistoryPage(
+        entries=[
+            TaskHistoryEntry(
+                id=entry.id,
+                occurred_at=entry.occurred_at,
+                actor_label=entry.actor_label,
+                channel=entry.channel,
+                verb=entry.verb,
+                summary=activity.describe(entry),
+                changes=[
+                    FieldChange.model_validate(change)
+                    for change in entry.payload.get("changes") or []
+                ],
+                payload=entry.payload,
+            )
+            for entry in entries
+        ],
+        total=total,
+        page=page,
+        # At least one page, so "page 1 of 1" reads correctly on an empty
+        # history rather than "page 1 of 0".
+        pages=max(1, -(-total // per_page)),
+        per_page=per_page,
+    )
 
 
 @router.patch(

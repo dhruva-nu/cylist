@@ -73,7 +73,7 @@ cylist board ATL                       columns, side by side
 
 cylist tasks ls ATL [--status blocked] [--assignee "Aditi K"] [--column "In progress"]
 cylist task show ATL-41
-cylist task history ATL-41 [--limit 50]
+cylist task history ATL-41 [--page 1] [--per-page 10]
 cylist task new ATL --title … --description … --type feature --due 2026-03-31 --assignee "Aditi K"
 cylist task move ATL-41 --column "In progress" [--position 0]
 cylist task status ATL-41 blocked --reason "…" --waiting-on "Lena W"

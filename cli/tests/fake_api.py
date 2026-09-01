@@ -193,7 +193,7 @@ TIMELINE = [
     },
 ]
 
-TASK_HISTORY = [
+TASK_HISTORY_ENTRIES = [
     {
         "id": "0192f3c4-0011-7000-8000-000000000001",
         "occurred_at": "2026-02-06T09:15:00Z",
@@ -218,6 +218,14 @@ TASK_HISTORY = [
         "payload": {"reference": "ATL-2"},
     },
 ]
+
+TASK_HISTORY = {
+    "entries": TASK_HISTORY_ENTRIES,
+    "total": 12,
+    "page": 1,
+    "pages": 2,
+    "per_page": 10,
+}
 
 
 FOLDER_TREE = [

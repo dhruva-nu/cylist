@@ -41,7 +41,7 @@
  * card.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
@@ -305,10 +305,11 @@ function TaskDetailView({
  * wants the conversation; someone asking "why does this say Thursday now?"
  * wants the record, and interleaving the two buries each in the other.
  *
- * Closed to begin with, and not fetched until it is opened. A card that has
- * been worked on for a month carries a long record that nobody opened the
- * dialog to read, and paying for it on every open would slow down the common
- * case to serve the rare one.
+ * Closed to begin with, fetched only when it is opened, and then ten entries
+ * at a time. A card worked on for a month carries a long record that nobody
+ * opened the dialog to read: loading it on every open would slow the common
+ * case to serve the rare one, and loading all of it at once would bury the
+ * only part most readers want — the last thing that happened.
  *
  * The wording comes from the server rather than from a verb-to-sentence map
  * here, so the board, the CLI and an agent reading the API all tell the same
@@ -316,12 +317,18 @@ function TaskDetailView({
  */
 function History({ taskId }: { taskId: string }) {
   const [open, setOpen] = useState(false)
+  const [page, setPage] = useState(1)
 
   const history = useQuery({
-    queryKey: ['task-history', taskId],
-    queryFn: () => api.getTaskHistory(taskId),
+    queryKey: ['task-history', taskId, page],
+    queryFn: () => api.getTaskHistory(taskId, page),
     enabled: open,
+    // The previous page stays on screen while the next one loads. A pager that
+    // empties itself between clicks makes the dialog jump under the cursor.
+    placeholderData: keepPreviousData,
   })
+
+  const shown = history.data
 
   return (
     <details
@@ -337,16 +344,114 @@ function History({ taskId }: { taskId: string }) {
       {history.error ? <ErrorBanner>{history.error.message}</ErrorBanner> : null}
 
       <div className={styles.historyList}>
-        {history.isPending ? <span className={styles.empty}>Loading…</span> : null}
-        {history.data?.length === 0 ? (
+        {shown === undefined && history.isFetching ? (
+          <span className={styles.empty}>Loading…</span>
+        ) : null}
+        {shown?.total === 0 ? (
           <span className={styles.empty}>Nothing has happened to this card yet.</span>
         ) : null}
-        {history.data?.map((entry) => (
+        {shown?.entries.map((entry) => (
           <HistoryEntry key={entry.id} entry={entry} />
         ))}
       </div>
+
+      {shown && shown.pages > 1 ? (
+        <Pager page={shown.page} pages={shown.pages} total={shown.total} onGo={setPage} />
+      ) : null}
     </details>
   )
+}
+
+/**
+ * Which page of the history is showing, and how to reach the others.
+ *
+ * Every page is a numbered button rather than only Previous and Next: a record
+ * is usually read for a particular moment — "what did it look like in March" —
+ * and stepping there one page at a time means loading everything in between.
+ * A history long enough for that to become a wall of numbers is one nobody
+ * navigates by number anyway, so past nine pages the middle is elided.
+ */
+function Pager({
+  page,
+  pages,
+  total,
+  onGo,
+}: {
+  page: number
+  pages: number
+  total: number
+  onGo: (page: number) => void
+}) {
+  return (
+    <nav className={styles.pager} aria-label="History pages">
+      <Button
+        small
+        variant="ghost"
+        disabled={page === 1}
+        aria-label="Previous page"
+        onClick={() => onGo(page - 1)}
+      >
+        ‹
+      </Button>
+
+      {pageNumbers(page, pages).map((number, index) =>
+        number === null ? (
+          <span key={`gap-${index}`} className={styles.pagerGap} aria-hidden="true">
+            …
+          </span>
+        ) : (
+          <button
+            key={number}
+            type="button"
+            className={number === page ? styles.pageOn : styles.page}
+            aria-label={`Page ${number} of ${pages}`}
+            aria-current={number === page ? 'page' : undefined}
+            onClick={() => onGo(number)}
+          >
+            {number}
+          </button>
+        ),
+      )}
+
+      <Button
+        small
+        variant="ghost"
+        disabled={page === pages}
+        aria-label="Next page"
+        onClick={() => onGo(page + 1)}
+      >
+        ›
+      </Button>
+
+      <span className={styles.pagerCount}>{total} entries</span>
+    </nav>
+  )
+}
+
+/** How many page buttons fit before the middle has to be elided. */
+const PAGER_WIDTH = 9
+
+/**
+ * The page numbers to draw, with `null` standing for an elision.
+ *
+ * The first and last are always reachable — the beginning and the end of a
+ * record are the two moments anybody jumps to — and the rest of the room goes
+ * to the pages either side of where you are.
+ */
+function pageNumbers(page: number, pages: number): (number | null)[] {
+  if (pages <= PAGER_WIDTH) return Array.from({ length: pages }, (_, index) => index + 1)
+
+  const span = PAGER_WIDTH - 4 // first, last, and an elision at each end
+  const first = Math.min(Math.max(page - (span >> 1), 2), pages - span)
+  const middle = Array.from({ length: span }, (_, index) => first + index)
+
+  return [
+    1,
+    ...(first > 2 ? [null] : []),
+    ...middle,
+    ...(first + span <= pages - 1 ? [null] : []),
+    pages,
+  ]
 }
 
 /** One thing that happened, and the fields it moved. */

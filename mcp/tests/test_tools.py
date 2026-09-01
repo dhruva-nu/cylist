@@ -135,11 +135,12 @@ async def test_read_task_history_says_what_changed_and_who_changed_it(
     result = await call(server, "read_task_history", task="ATL-2")
 
     assert not result.is_error
-    entry = result.data["history"][0]
+    entry = result.data["history"]["entries"][0]
     assert entry["summary"] == "Moved from To do to In progress."
     assert entry["actor_label"] == "board-tidy agent"
     assert entry["channel"] == "api"
     assert entry["changes"][0]["from"] == "To do"
+    assert result.data["history"]["pages"] == 1
 
 
 async def test_read_activity_passes_the_project_key_straight_through(

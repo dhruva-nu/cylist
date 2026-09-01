@@ -322,3 +322,19 @@ class TaskHistoryEntry(Schema):
         description="Field-by-field detail, where the event has any. Empty otherwise.",
     )
     payload: dict[str, Any] = Field(description="Everything the entry recorded, unabridged.")
+
+
+class TaskHistoryPage(Schema):
+    """One page of a task's history, and enough to ask for the next.
+
+    An envelope rather than a bare list because a page of ten is only useful
+    beside the number it is ten of: without ``pages`` a client cannot draw a
+    pager, and without ``total`` it cannot say whether it is showing all of a
+    short history or the tip of a long one.
+    """
+
+    entries: list[TaskHistoryEntry]
+    total: int = Field(description="How many entries the whole history holds.")
+    page: int = Field(description="Which page this is, counting from 1.")
+    pages: int = Field(description="How many pages there are. At least 1, even when empty.")
+    per_page: int = Field(description="How many entries a page holds.")

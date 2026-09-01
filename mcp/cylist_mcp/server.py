@@ -173,17 +173,20 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "which is what people said about the card rather than what was done "
             "to it. 'channel' is 'web' if a person did it and 'api' if an agent "
             "did. A sub-task keeps its own history rather than appearing in its "
-            "parent's."
+            "parent's. Comes a page at a time: the reply carries 'total' and "
+            "'pages', so ask for the next page only if you still need it."
         ),
     )
     async def read_task_history(
         task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
-        limit: Annotated[
-            int, Field(description="How many entries. Default 50, maximum 500.", ge=1, le=500)
-        ] = 50,
+        page: Annotated[int, Field(description="Which page, counting from 1.", ge=1)] = 1,
+        per_page: Annotated[
+            int, Field(description="Entries per page. Default 10, maximum 100.", ge=1, le=100)
+        ] = 10,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            return {"history": await client.get(f"/tasks/{task}/history", limit=limit)}
+            history = await client.get(f"/tasks/{task}/history", page=page, per_page=per_page)
+            return {"history": history}
 
         return await _guard(call)
 

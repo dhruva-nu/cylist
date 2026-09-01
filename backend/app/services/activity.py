@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
@@ -61,21 +61,40 @@ async def for_entity(
     entity_type: str,
     entity_id: UUID,
     *,
-    limit: int = 100,
-) -> list[Activity]:
-    """One thing's own history, newest first.
+    limit: int,
+    offset: int = 0,
+) -> tuple[list[Activity], int]:
+    """One page of one thing's own history, newest first, and how many there are.
 
     Newest first because a history is read to find out what just happened; the
-    beginning of a long-running card is the part you already know.
+    beginning of a long-running card is the part you already know. Paged
+    because the record of a card worked on for a month is longer than anyone
+    opening it wants at once, and the total comes back with the page so the
+    caller can say how much more there is without asking again.
+
+    An entry that recorded no change to the thing itself is left out: dragging
+    a card up its own column, or saving a form without touching a field, is
+    not something that happened to the work. Those rows are still in the audit
+    feed, which is where "who touched this, and when" is asked; this is where
+    "what is different about it now" is.
     """
-    return list(
-        await session.scalars(
-            select(Activity)
-            .where(Activity.entity_type == entity_type, Activity.entity_id == entity_id)
-            .order_by(Activity.occurred_at.desc(), Activity.id.desc())
-            .limit(limit)
-        )
+    where = (
+        Activity.entity_type == entity_type,
+        Activity.entity_id == entity_id,
+        # ``->`` gives SQL NULL for a payload with no ``changes`` at all, which
+        # coalesces to "something happened" — an entry written before changes
+        # were recorded is not evidence that nothing changed.
+        func.coalesce(func.jsonb_array_length(Activity.payload["changes"]), 1) > 0,
     )
+    total = await session.scalar(select(func.count()).select_from(Activity).where(*where))
+    entries = await session.scalars(
+        select(Activity)
+        .where(*where)
+        .order_by(Activity.occurred_at.desc(), Activity.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(entries), total or 0
 
 
 def describe(entry: Activity) -> str:
@@ -94,14 +113,16 @@ def describe(entry: Activity) -> str:
         parent = payload.get("parent")
         return f"Split out of {parent}." if parent else "Created as a sub-task."
     if entry.verb == "task.updated":
-        if not changes:
-            return "Saved with nothing changed."
-        return f"Changed the {_listed(str(change['label']) for change in changes)}."
+        if changes:
+            return f"Changed the {_listed(str(change['label']) for change in changes)}."
+        # Entries written before old and new values were recorded still name
+        # the fields a save touched. Older ones than that say only that a save
+        # happened, which is worth more than a gap in the record.
+        fields = payload.get("fields") or []
+        return f"Changed the {_listed(str(field) for field in fields)}." if fields else "Updated."
     if entry.verb == "task.moved":
         column = next((change for change in changes if change["field"] == "column"), None)
-        if column is None:
-            return "Reordered within its column."
-        return f"Moved from {column['from']} to {column['to']}."
+        return f"Moved from {column['from']} to {column['to']}." if column else "Moved."
     if entry.verb == "task.sub_status_moved":
         stage = payload.get("sub_status")
         return f"Sub-status set to {stage}." if stage else "Sub-status moved."

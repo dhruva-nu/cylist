@@ -44,7 +44,10 @@ def register(subparsers: Any) -> None:
         ),
     )
     history.add_argument("task", metavar="TASK", help="Task reference or id, e.g. ATL-41.")
-    history.add_argument("--limit", type=int, default=50, help="Default 50, maximum 500.")
+    history.add_argument("--page", type=int, default=1, help="Which page. Default 1.")
+    history.add_argument(
+        "--per-page", type=int, default=10, help="Entries per page. Default 10, maximum 100."
+    )
     history.set_defaults(handler=_history)
 
     new = task_actions.add_parser(
@@ -276,13 +279,16 @@ def _render_timeline(comments: list[dict[str, Any]], names: dict[str, str]) -> N
 
 
 def _history(args: argparse.Namespace, ctx: Context) -> None:
-    entries = ctx.client.get(f"/tasks/{args.task}/history", limit=args.limit)
+    page = ctx.client.get(f"/tasks/{args.task}/history", page=args.page, per_page=args.per_page)
     if ctx.as_json:
-        output.emit_json(entries)
+        output.emit_json(page)
         return
 
+    entries = page.get("entries") or []
     if not entries:
-        output.echo("Nothing recorded yet.")
+        output.echo(
+            "Nothing recorded yet." if not page.get("total") else "No entries on this page."
+        )
         return
 
     width = output.terminal_width()
@@ -301,6 +307,10 @@ def _history(args: argparse.Namespace, ctx: Context) -> None:
             now = _value(change.get("to"))
             output.echo(f"    {change.get('label')}: {was} -> {now}")
         output.echo()
+
+    # Said even on a single page: without it a reader cannot tell a complete
+    # record from the first ten entries of a long one.
+    output.echo(f"Page {page.get('page')} of {page.get('pages')} — {page.get('total')} entries.")
 
 
 def _value(value: Any) -> str:
