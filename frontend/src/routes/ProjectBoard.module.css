@@ -13,17 +13,18 @@
 .search {
   position: relative;
   grid-column: 2;
-  width: min(460px, 100%);
+  width: min(620px, 100%);
 }
 
 .search input {
   width: 100%;
-  padding: 10px 18px;
+  padding: 13px 22px;
+  font-size: 15px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
-  font: inherit;
+  font-family: inherit;
 }
 
 .suggestions {
@@ -73,10 +74,16 @@
   font-weight: 700;
 }
 
+/* `safe center` rather than plain `center`: this row scrolls, and a centred
+   flex row that overflows spills equally off both ends — the leftmost column
+   ends up behind the start of the scroll range, where nothing can reach it.
+   `safe` centres while the columns fit and falls back to the left edge the
+   moment they do not. */
 .board {
   display: flex;
   gap: 16px;
   align-items: flex-start;
+  justify-content: safe center;
   min-height: 60vh;
 
   /* Wide enough for a focus ring: this scrolls, so anything nearer the edge
@@ -236,6 +243,9 @@
   font-size: 13px;
 }
 
+/* Both axes named. A lone `overflow-y` computes the other axis to `auto` as
+   well, which gave a column a sideways scrollbar of its own and let its cards
+   be dragged out of view inside it. */
 .cards {
   display: flex;
   flex: 1;
@@ -243,6 +253,7 @@
   gap: 10px;
   min-height: 60px;
   padding: 4px 12px 12px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -282,6 +293,15 @@
 
 .dragging {
   opacity: 0.4;
+}
+
+/* The overlay's copy: the same card, picked up. Full width of the overlay,
+   which dnd-kit has already sized to the card this was lifted from, so it
+   neither grows nor shrinks on the way out of the column. */
+.lifted {
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  cursor: grabbing;
 }
 
 .hold {

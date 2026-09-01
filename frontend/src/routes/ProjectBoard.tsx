@@ -15,6 +15,13 @@
  * back is how you find out the move failed — waiting for a round trip to see a
  * card move makes the board feel broken even when it is working.
  *
+ * The card under the pointer is drawn twice over: dimmed where it started, and
+ * again in a `DragOverlay` that floats above the board. A card moved in place
+ * instead would be dragged around inside a column that scrolls its own cards,
+ * which clips it at the column's edge the moment it leaves — and grows that
+ * column's scrollable area as it goes, so the list shifts under the pointer
+ * that is dragging out of it.
+ *
  * Dragging is not only a pointer gesture. A focused card is picked up with
  * space and walked between columns with the arrow keys, which is the same
  * operation through the same code path — see `DRAG_KEYS` and `moveByColumn`.
@@ -27,6 +34,7 @@
 
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
@@ -37,6 +45,7 @@ import {
   type Announcements,
   type ClientRect,
   type DragEndEvent,
+  type DragStartEvent,
   type KeyboardCodes,
   type KeyboardCoordinateGetter,
   type ScreenReaderInstructions,
@@ -44,7 +53,7 @@ import {
 } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
   type Board,
@@ -212,6 +221,9 @@ export function ProjectBoard() {
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
   const [search, setSearch] = useState('')
+  /** What is in the air, so the overlay knows what to draw. */
+  const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
+  const boardRef = useRef<HTMLDivElement>(null)
   const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
 
@@ -373,7 +385,22 @@ export function ProjectBoard() {
     announce(`${moved.name} moved ${toIndex < fromIndex ? 'left' : 'right'}.`)
   }
 
+  // Only a card gets an overlay. A column is dragged where it stands: it is
+  // not inside anything that scrolls or clips, so it has no need of one.
+  const draggedTask =
+    dragging !== null && !isColumnDrag(dragging)
+      ? (tasks.data?.find((task) => task.id === dragging) ?? null)
+      : null
+
+  function onDragStart(event: DragStartEvent) {
+    setDragging(event.active.id)
+  }
+
   function onDragEnd(event: DragEndEvent) {
+    // Cleared here rather than in each branch below: every one of them ends
+    // the drag, and an overlay left on screen is a card stuck to the pointer.
+    setDragging(null)
+
     const overId = event.over?.id
     if (typeof overId !== 'string') return
 
@@ -415,9 +442,17 @@ export function ProjectBoard() {
         // lands the card dead centre — can rely on.
         collisionDetection={closestCenter}
         accessibility={{ announcements, screenReaderInstructions: SCREEN_READER_INSTRUCTIONS }}
+        // The board scrolls sideways to reach a column that is off the edge,
+        // and nothing else scrolls at all. Left to itself dnd-kit picks the
+        // nearest scrollable ancestor, which is the card list you are dragging
+        // out of: the column then scrolls its own cards away under the pointer
+        // for as long as you hold one near its top or bottom.
+        autoScroll={{ canScroll: (element) => element === boardRef.current }}
+        onDragStart={onDragStart}
         onDragEnd={onDragEnd}
+        onDragCancel={() => setDragging(null)}
       >
-        <div className={styles.board}>
+        <div ref={boardRef} className={styles.board}>
           {columns.map((column) => (
             <Column
               key={column.id}
@@ -440,6 +475,23 @@ export function ProjectBoard() {
             />
           ))}
         </div>
+
+        {/* Outside the board, so the board's own overflow has nothing to say
+            about where the card in the air is allowed to be drawn. */}
+        <DragOverlay dropAnimation={null}>
+          {draggedTask ? (
+            <article
+              // Filtered like the card in the column, and for the same reason:
+              // an active task has no status class, and a template string would
+              // put the word "undefined" in the class list instead of nothing.
+              className={[styles.task, styles[draggedTask.status], styles.lifted]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <TaskCardBody task={draggedTask} />
+            </article>
+          ) : null}
+        </DragOverlay>
       </DndContext>
 
       {columnDialog ? (
@@ -761,8 +813,7 @@ function TaskCard({
   onOpen: () => void
   onMoveSubStatus: (index: number) => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
-  const late = isOverdue(task.due_date)
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
 
   return (
     <article
@@ -787,11 +838,39 @@ function TaskCard({
           ? `${task.reference}: ${task.title}, a sub-task of ${task.parent_reference}`
           : `${task.reference}: ${task.title}`
       }
-      style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : {}}
+      // No transform of its own: while this card is in the air the DragOverlay
+      // is the copy that follows the pointer, and this one stays put and dims.
       className={[styles.task, styles[task.status], isDragging && styles.dragging]
         .filter(Boolean)
         .join(' ')}
     >
+      <TaskCardBody task={task} onMoveSubStatus={onMoveSubStatus} />
+    </article>
+  )
+}
+
+/**
+ * What a card says, without any of what a card does.
+ *
+ * Drawn twice while a card is being dragged — dimmed in the column it came
+ * from, and solid in the overlay — so it lives apart from the drag wiring that
+ * only the one in the column has.
+ *
+ * `onMoveSubStatus` is optional because the overlay's copy has nothing to
+ * click: it is a picture of a card moving, and the stage it is on cannot be
+ * advanced in mid-air.
+ */
+function TaskCardBody({
+  task,
+  onMoveSubStatus,
+}: {
+  task: Task
+  onMoveSubStatus?: (index: number) => void
+}) {
+  const late = isOverdue(task.due_date)
+
+  return (
+    <>
       <div className={styles.taskRow}>
         <span className={styles.refs}>
           <span className={styles.reference}>{task.reference}</span>
@@ -843,7 +922,7 @@ function TaskCard({
 
       <div className={styles.title}>{task.title}</div>
 
-      {task.sub_statuses.length ? (
+      {task.sub_statuses.length && onMoveSubStatus ? (
         <SubStatusBar
           labels={task.sub_statuses}
           index={task.sub_status_index ?? 0}
@@ -883,7 +962,7 @@ function TaskCard({
           <Avatar name={task.assignee.name} colour={task.assignee.colour} />
         </span>
       </div>
-    </article>
+    </>
   )
 }
 
