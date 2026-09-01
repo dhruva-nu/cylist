@@ -182,7 +182,10 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     type: Mapped[TaskType] = mapped_column(_enum(TaskType, "task_type"), nullable=False)
 
     priority: Mapped[TaskPriority] = mapped_column(
-        _enum(TaskPriority, "task_priority"), nullable=False, default=TaskPriority.SOMEDAY
+        _enum(TaskPriority, "task_priority"),
+        nullable=False,
+        default=TaskPriority.SOMEDAY,
+        server_default=sql_text("'someday'"),
     )
 
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
