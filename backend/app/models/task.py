@@ -64,6 +64,23 @@ _STATUS_LABELS = {
 }
 
 
+class TaskPriority(StrEnum):
+    """How soon this needs attention, 0 (most) to 3 (least)."""
+
+    URGENT = "urgent"
+    """0. Drop what you are doing."""
+
+    ASAP = "asap"
+    """1. As fast as possible, once whatever is urgent is out of the way."""
+
+    WEEK = "week"
+    """2. Some time in the next week."""
+
+    SOMEDAY = "someday"
+    """3. Some time in the future. The default: nothing is marked urgent by
+    not having been asked about yet."""
+
+
 class ChecklistState(StrEnum):
     """Where one checklist item has got to.
 
@@ -163,6 +180,10 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     can pick up."""
 
     type: Mapped[TaskType] = mapped_column(_enum(TaskType, "task_type"), nullable=False)
+
+    priority: Mapped[TaskPriority] = mapped_column(
+        _enum(TaskPriority, "task_priority"), nullable=False, default=TaskPriority.SOMEDAY
+    )
 
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
 

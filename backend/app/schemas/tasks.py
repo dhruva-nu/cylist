@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
-from app.models.task import ChecklistState, CommentKind, TaskStatus, TaskType
+from app.models.task import ChecklistState, CommentKind, TaskPriority, TaskStatus, TaskType
 from app.schemas.common import Schema
 from app.schemas.people import PersonRead
 
@@ -29,6 +29,9 @@ class TaskCreate(Schema):
         min_length=1, max_length=5000, description="What done looks like. Required."
     )
     type: TaskType
+    priority: TaskPriority = Field(
+        default=TaskPriority.SOMEDAY, description="0 (urgent) to 3 (someday). Defaults to someday."
+    )
     due_date: date
     assignee_id: UUID = Field(description="Must be a member of the project.")
     jira_ref: str | None = Field(default=None, max_length=200)
@@ -102,6 +105,7 @@ class TaskUpdate(Schema):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, min_length=1, max_length=5000)
     type: TaskType | None = None
+    priority: TaskPriority | None = None
     due_date: date | None = None
     assignee_id: UUID | None = None
     jira_ref: str | None = Field(default=None, max_length=200)
@@ -192,6 +196,7 @@ class TaskRead(Schema):
     title: str
     description: str
     type: TaskType
+    priority: TaskPriority
     due_date: date
     assignee: PersonRead
     status: TaskStatus

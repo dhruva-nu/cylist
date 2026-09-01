@@ -308,6 +308,27 @@
   color: var(--ink-2);
 }
 
+/* The type/status chip's neighbour on the right of a card, and the priority
+   chip beside it when there is one. */
+.badges {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.priority_urgent {
+  color: var(--priority-urgent);
+}
+
+.priority_asap {
+  color: var(--priority-asap);
+}
+
+.priority_week {
+  color: var(--priority-week);
+}
+
 /* Deliberately paper-backed rather than tinted: the card behind it is already
    carrying the colour, and two washes of the same hue muddy both. */
 .pill {
