@@ -1,0 +1,89 @@
+# The dev stack, alongside production and staging on dnu-home-1.
+#
+#   scripts/deploy.sh dev     builds, migrates and restarts it
+#   make dev-logs             follows it
+#
+# The same two containers as production and staging, and deliberately the same
+# shape: one image serving the API and the built SPA, Postgres with no
+# published port.
+#
+# Unlike staging, dev is not tied to any one branch. Its deploy workflow is
+# workflow_dispatch — you pick the branch in GitHub's "Run workflow" dropdown
+# each time, so it can hold whatever you are currently building, tested with
+# real infrastructure, before that work earns a place on the `staging` branch.
+# It starts with an empty database of its own; it is never restored from
+# production the way staging is, so it never needs the production vault key.
+#
+# What differs from docker-compose.staging.yml is only what has to:
+#
+#   * the compose project name, so this stack's containers and volumes never
+#     collide with production's or staging's on a machine that runs all three;
+#   * the image tag — `cylist:dev`, not `cylist:latest` or `cylist:staging`,
+#     for the same reason staging has its own tag: building dev must not move
+#     the tag another environment restarts from;
+#   * port 8002, because production holds 8000 and staging holds 8001;
+#   * CYLIST_ENVIRONMENT=preview, which Settings.is_deployed treats as
+#     deployed (Secure session cookie, make seed refused) without touching
+#     what CYLIST_ENVIRONMENT=dev means for someone's own machine — see the
+#     docstring on that property.
+
+name: cylist-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      # POSTGRES_PASSWORD, and the user and database the app connects as.
+      - ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the directory holding app.env and postgres.env}/postgres.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      # The root, because this image builds the SPA as well as the API.
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    # Not cylist:latest or cylist:staging. See the note at the top of this file.
+    image: cylist:dev
+    env_file:
+      # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY.
+      #
+      # Raw, because an argon2 hash is full of `$` and compose would otherwise
+      # read `$argon2id$v=19$...` as three empty variables and blank the
+      # password out from under you.
+      - path: ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the directory holding app.env and postgres.env}/app.env
+        format: raw
+    environment:
+      # Not "dev" — see the note at the top of this file and the docstring on
+      # Settings.is_deployed.
+      CYLIST_ENVIRONMENT: preview
+      CYLIST_DATA_DIR: /data
+      CYLIST_WEB_DIR: /app/web
+      # Empty on purpose, as in production and staging: the SPA is served by
+      # this same process, so every request is same-origin and no CORS
+      # middleware is installed at all.
+      CYLIST_CORS_ORIGINS: "[]"
+    ports:
+      # Loopback only, and 8002 rather than production's 8000 or staging's
+      # 8001. `tailscale serve --https 9443` terminates HTTPS in front of it;
+      # nothing else should reach it directly.
+      - "127.0.0.1:8002:8000"
+    volumes:
+      - cylist-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  # Named for this project (cylist-dev), so production's and staging's data are
+  # different volumes entirely and no dev command can reach them.
+  postgres-data:
+  cylist-data:

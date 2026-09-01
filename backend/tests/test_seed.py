@@ -400,7 +400,7 @@ class TestRefusing:
         assert await count_of(session, Project) == 3
         assert await count_of(session, Task) == 15
 
-    @pytest.mark.parametrize("environment", ["prod", "staging"])
+    @pytest.mark.parametrize("environment", ["prod", "staging", "preview"])
     async def test_will_not_run_in_a_deployed_environment(
         self,
         settings: Settings,
@@ -409,6 +409,8 @@ class TestRefusing:
     ) -> None:
         # Staging is refused for the same reason production is: it is restored
         # from a production dump, so seeding it writes fiction over real rows.
+        # Preview holds no such dump, but it is still a deployment rather than
+        # someone's machine, and that is what is_deployed actually gates on.
         deployed = settings.model_copy(update={"environment": environment})
 
         code = await seed.run(deployed, force=True, assume_yes=True)
@@ -418,7 +420,7 @@ class TestRefusing:
         assert "deployed environment" in error
         assert f"CYLIST_ENVIRONMENT={environment}" in error
 
-    @pytest.mark.parametrize("environment", ["prod", "staging"])
+    @pytest.mark.parametrize("environment", ["prod", "staging", "preview"])
     async def test_a_deployed_environment_is_refused_before_anything_is_written(
         self, session: AsyncSession, settings: Settings, environment: str
     ) -> None:
