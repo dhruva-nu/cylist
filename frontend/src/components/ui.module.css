@@ -15,11 +15,20 @@
   cursor: pointer;
 }
 
-.button:hover:not(:disabled) {
+.button:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--ink-3);
 }
 
 .button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A button refusing rather than absent. aria-disabled keeps it focusable, for
+   the buttons whose whole job at the limit is to say what the limit is — it
+   has to be reachable to be read. It greys the same way :disabled does, so the
+   two are not two different kinds of "no". */
+.button[aria-disabled='true'] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -30,7 +39,7 @@
   color: var(--go-ink);
 }
 
-.go:hover:not(:disabled) {
+.go:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--go-hover);
   background: var(--go-hover);
 }
@@ -41,7 +50,7 @@
   color: var(--ink-2);
 }
 
-.ghost:hover:not(:disabled) {
+.ghost:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--paper-2);
   color: var(--ink);
 }
@@ -155,4 +164,11 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
   white-space: nowrap;
+}
+
+/* The type and priority glyphs. `block` so the line box around them does not
+   add a descender's worth of height to whatever chip they sit in. */
+.glyph {
+  display: block;
+  flex: none;
 }

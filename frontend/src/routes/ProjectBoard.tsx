@@ -3,8 +3,13 @@
  *
  * Two rules from the API are visible in the UI rather than only enforced by
  * it: "+ Add a task" appears under the first column alone, because that is
- * where new work lands; and the "+ Add a column" tile counts down to eight and
- * then goes flat, because that is where a board stops being readable.
+ * where new work lands; and "+ Column" in the toolbar counts down to eight and
+ * then goes grey, because that is where a board stops being readable.
+ *
+ * Every column is the same fixed size, whatever it is holding. A column that
+ * grew with its cards meant dropping one moved every other column on the row
+ * out from under the pointer — the board rearranging itself is a worse cost
+ * than a short column having some empty space in it.
  *
  * Dragging updates the cache before the request goes out. A card that snaps
  * back is how you find out the move failed — waiting for a round trip to see a
@@ -66,7 +71,9 @@ import {
   EmptyState,
   ErrorBanner,
   LiveRegion,
+  PriorityIcon,
   TaskRef,
+  TypeIcon,
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
@@ -362,14 +369,17 @@ export function ProjectBoard() {
     <>
       <PageHead title="Kanban board">
         Cards enter at the first column and move wherever the work does. Colour flags anything on
-        hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys.
-        Drag a column by its ⠿ handle to reorder it, or use the ← → buttons in its header.
+        hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys. A
+        column moves the same way, by its ⠿ handle.
       </PageHead>
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
-      <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
+      <div className={styles.toolbar}>
+        <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
+        <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+      </div>
 
       <DndContext
         sensors={sensors}
@@ -381,13 +391,12 @@ export function ProjectBoard() {
         onDragEnd={onDragEnd}
       >
         <div className={styles.board}>
-          {columns.map((column, index) => (
+          {columns.map((column) => (
             <Column
               key={column.id}
               column={column}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
-              isLast={index === columns.length - 1}
               collapsed={collapsed.includes(column.id)}
               onToggleCollapse={() => {
                 toggle(column.id)
@@ -400,11 +409,8 @@ export function ProjectBoard() {
               onOpenTask={setOpenTaskId}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
-              onMoveLeft={() => moveColumnTo(index, index - 1)}
-              onMoveRight={() => moveColumnTo(index, index + 1)}
             />
           ))}
-          <AddColumnTile board={board.data} onClick={() => setColumnDialog('new')} />
         </div>
       </DndContext>
 
@@ -567,26 +573,20 @@ function Column({
   column,
   tasks,
   isFirst,
-  isLast,
   collapsed,
   onToggleCollapse,
   onOpenTask,
   onAddTask,
   onEdit,
-  onMoveLeft,
-  onMoveRight,
 }: {
   column: BoardColumn
   tasks: Task[]
   isFirst: boolean
-  isLast: boolean
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onAddTask: () => void
   onEdit: () => void
-  onMoveLeft: () => void
-  onMoveRight: () => void
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
   // A column is draggable on the whole card (so it visually moves as one
@@ -666,24 +666,6 @@ function Column({
             <Button
               variant="ghost"
               small
-              disabled={isFirst}
-              onClick={onMoveLeft}
-              aria-label={`Move ${column.name} left`}
-            >
-              ←
-            </Button>
-            <Button
-              variant="ghost"
-              small
-              disabled={isLast}
-              onClick={onMoveRight}
-              aria-label={`Move ${column.name} right`}
-            >
-              →
-            </Button>
-            <Button
-              variant="ghost"
-              small
               aria-expanded
               aria-label={`Collapse ${column.name}`}
               onClick={onToggleCollapse}
@@ -720,6 +702,12 @@ const STATUS_LABELS = {
   hold: 'On hold',
   blocked: 'Blocked',
   cancelled: 'Cancelled',
+} as const
+
+const TYPE_LABELS = {
+  feature: 'Feature',
+  bug: 'Bug',
+  chore: 'Chore',
 } as const
 
 const PRIORITY_LABELS = {
@@ -775,16 +763,33 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
           ) : null}
         </span>
         <span className={styles.badges}>
-          {/* Someday is the baseline every card starts on, so flagging it too
-              would just be noise on every single card — the same reasoning
-              that keeps the status pill off an active task. */}
+          {/* Icons rather than words, with the word each one stands for kept on
+              the chip: as a tooltip, and as text only a screen reader reads.
+              "This week · feature" spelled out was the widest thing on a row
+              that repeats down every card in the column, and the least worth
+              reading twice — but it is still what the chip means, so nothing
+              that cannot see the icon loses it.
+
+              Someday is the baseline every card starts on, so flagging it too
+              would be noise on every single card — the same reasoning that
+              keeps the status pill off an active task. */}
           {task.priority !== 'someday' ? (
-            <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
-              {PRIORITY_LABELS[task.priority]}
+            <span
+              className={`${styles.chip} ${styles.icon} ${styles[`priority_${task.priority}`]}`}
+              title={PRIORITY_LABELS[task.priority]}
+            >
+              <PriorityIcon priority={task.priority} />
+              <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
             </span>
           ) : null}
           {task.status === 'active' ? (
-            <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+            <span
+              className={`${styles.chip} ${styles.icon} ${styles[`type_${task.type}`]}`}
+              title={TYPE_LABELS[task.type]}
+            >
+              <TypeIcon type={task.type} />
+              <span className="visually-hidden">{TYPE_LABELS[task.type]}</span>
+            </span>
           ) : (
             <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
               {STATUS_LABELS[task.status]}
@@ -831,30 +836,39 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   )
 }
 
-function AddColumnTile({ board, onClick }: { board: Board; onClick: () => void }) {
+/**
+ * Adds a column, from the toolbar rather than from a tile on the row's end.
+ *
+ * A full-height dashed tile spent a column's worth of the board on a button
+ * pressed once or twice in a board's life, and pushed the last real column off
+ * the edge to do it. Greyed at the limit rather than removed, so the button is
+ * still there to say why it will not open.
+ */
+function AddColumnButton({ board, onClick }: { board: Board; onClick: () => void }) {
   const full = board.columns.length >= board.max_columns
 
   return (
-    <button
+    <Button
+      small
       className={styles.addColumn}
-      // aria-disabled rather than disabled: the tile is where the limit is
-      // explained, and a disabled button cannot be focused to read it.
+      // aria-disabled rather than disabled: this is where the limit is
+      // explained, and a disabled button cannot be focused to read it. Greying
+      // itself at that point is the Button's own — see `[aria-disabled]`.
       aria-disabled={full}
+      title={
+        full
+          ? `Column limit reached — a board holds ${board.max_columns} columns.`
+          : `${board.columns.length} of ${board.max_columns} columns used`
+      }
       onClick={() => {
         if (!full) onClick()
       }}
     >
-      {full ? (
-        `Column limit reached (${board.max_columns} of ${board.max_columns})`
-      ) : (
-        <>
-          + Add a column
-          <span className={styles.hint}>
-            {board.columns.length} of {board.max_columns} used
-          </span>
-        </>
-      )}
-    </button>
+      + Column
+      <span className={styles.hint}>
+        {board.columns.length}/{board.max_columns}
+      </span>
+    </Button>
   )
 }
 

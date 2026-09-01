@@ -1,14 +1,26 @@
+/* Search dead centre with the add-column button beside it. A grid rather than
+   a centred flex row, so the box sits on the board's midline whatever is to
+   the right of it — with a flex row it would be pushed off centre by exactly
+   half the button. */
+.toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  margin: 0 6px 14px;
+}
+
 .search {
   position: relative;
-  width: min(420px, 100%);
-  margin: 0 6px 12px;
+  grid-column: 2;
+  width: min(460px, 100%);
 }
 
 .search input {
   width: 100%;
-  padding: 9px 12px;
+  padding: 10px 18px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
   font: inherit;
@@ -22,7 +34,7 @@
   padding: 6px;
   list-style: none;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--paper);
   box-shadow: var(--shadow-lg);
 
@@ -73,11 +85,15 @@
   overflow-x: auto;
 }
 
+/* Fixed on both axes, not merely capped. A column sized to its cards changed
+   height every time one was dropped, which moved every neighbour on the row
+   while the pointer was still over it; the cards scroll inside instead. */
 .column {
   display: flex;
   flex: 0 0 300px;
   flex-direction: column;
-  max-height: calc(100vh - 260px);
+  height: calc(100vh - 250px);
+  min-height: 320px;
   border: 2px solid transparent;
   border-radius: 16px;
   background: var(--paper);
@@ -359,6 +375,12 @@
   font-weight: 600;
 }
 
+/* An icon-only chip: square-ish padding, since there is no text to sit beside
+   and a pill's side padding would leave the glyph adrift in it. */
+.icon {
+  padding: 3px 6px;
+}
+
 .type_feature {
   color: var(--go);
 }
@@ -488,42 +510,20 @@
   height: 10px;
 }
 
+/* Sits in the toolbar's right-hand track, hard against the search box rather
+   than out at the board's edge, so the pair reads as one strip of controls. */
 .addColumn {
-  display: flex;
-  flex: 0 0 300px;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  min-height: 130px;
-  padding: 24px;
-  border: 2px dashed var(--line-2);
-  border-radius: 16px;
-  background: transparent;
-  color: var(--ink-3);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
+  grid-column: 3;
+  justify-self: start;
+  white-space: nowrap;
 }
 
-.addColumn:hover:not([aria-disabled='true']) {
-  border-color: var(--brand-ink);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
-}
-
-/* aria-disabled rather than :disabled, because the tile stays focusable: it is
-   where the eight-column limit is explained, and a control the keyboard cannot
-   reach cannot explain anything. */
-.addColumn[aria-disabled='true'] {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
+/* The count that turns the button into the place the limit is stated. */
 .hint {
-  font-size: 13px;
-  font-weight: 400;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 .note {

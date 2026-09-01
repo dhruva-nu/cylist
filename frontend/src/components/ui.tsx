@@ -1,7 +1,7 @@
 /** Shared presentational primitives, styled from the design tokens. */
 
 import { useCallback, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import type { PersonKind } from '../api/client'
+import type { PersonKind, TaskPriority, TaskType } from '../api/client'
 import styles from './ui.module.css'
 
 type ButtonVariant = 'plain' | 'go' | 'ghost'
@@ -85,6 +85,96 @@ export function Avatar({
     >
       {initials(name)}
     </span>
+  )
+}
+
+/**
+ * A task's type and priority, drawn rather than spelled.
+ *
+ * Both are closed sets of four or fewer values that appear on every card in a
+ * column, where the words are the widest thing on the row and the least worth
+ * reading twice. Inline paths rather than an icon package: eight glyphs do not
+ * earn a dependency, and `currentColor` keeps each one the colour the chip
+ * around it already carries.
+ *
+ * Every icon is decoration, `aria-hidden` and titleless: the word it replaces
+ * is never dropped, only moved onto the chip around it, which carries it as a
+ * tooltip and as text a screen reader still reads out.
+ */
+function Glyph({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      className={styles.glyph}
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  )
+}
+
+export function TypeIcon({ type }: { type: TaskType }) {
+  if (type === 'bug') {
+    return (
+      <Glyph>
+        {/* A shell with legs: the body reads at 14px even when the legs do not. */}
+        <path d="M5 6.5a3 3 0 0 1 6 0v3a3 3 0 0 1-6 0Z" />
+        <path d="M6 4.2 7 5.4M10 4.2 9 5.4M5 7.2H2.6M11 7.2h2.4M5 10.4H3M11 10.4h2" />
+      </Glyph>
+    )
+  }
+  if (type === 'chore') {
+    return (
+      <Glyph>
+        {/* A spanner: work that has to happen, not work anyone asked for. */}
+        <path d="M10.6 2.4a3.4 3.4 0 0 0-3.3 5.7L3 12.4l1.4 1.4 4.3-4.3a3.4 3.4 0 0 0 4.6-4.3l-2 2-1.7-1.7Z" />
+      </Glyph>
+    )
+  }
+  return (
+    <Glyph>
+      {/* A spark: the one of the three that is new work. */}
+      <path d="M8 2.2 9.4 6.6 13.8 8 9.4 9.4 8 13.8 6.6 9.4 2.2 8l4.4-1.4Z" />
+    </Glyph>
+  )
+}
+
+export function PriorityIcon({ priority }: { priority: TaskPriority }) {
+  // One shape rotated through four positions, so the four values read as one
+  // scale: two chevrons up, one up, level, one down.
+  if (priority === 'urgent') {
+    return (
+      <Glyph>
+        <path d="M3.5 8.5 8 4l4.5 4.5M3.5 12 8 7.5l4.5 4.5" />
+      </Glyph>
+    )
+  }
+  if (priority === 'asap') {
+    return (
+      <Glyph>
+        <path d="M3.5 10.2 8 5.8l4.5 4.4" />
+      </Glyph>
+    )
+  }
+  if (priority === 'week') {
+    return (
+      <Glyph>
+        <path d="M3.5 6.4h9M3.5 9.6h9" />
+      </Glyph>
+    )
+  }
+  return (
+    <Glyph>
+      <path d="M3.5 5.8 8 10.2l4.5-4.4" />
+    </Glyph>
   )
 }
 
