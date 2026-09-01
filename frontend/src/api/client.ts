@@ -131,6 +131,56 @@ export interface ChecklistItem {
   created_at: string
 }
 
+/** One field of a card, as it read before and after somebody touched it. */
+export interface FieldChange {
+  /** The field's name on the task, e.g. `due_date`. */
+  field: string
+  /** How to word it, e.g. `due date`. */
+  label: string
+  /** What it said before, already rendered — a person by name, a date as
+   * `YYYY-MM-DD`. Null when it was not set. */
+  from: string | number | string[] | null
+  to: string | number | string[] | null
+}
+
+/**
+ * One thing that happened to a task: what changed, when, and who did it.
+ *
+ * The counterpart to `TaskComment`. A comment is what somebody *said* about
+ * the card; this is what was *done* to it, whether by a person in the browser
+ * or by an agent through the API — which is what `channel` distinguishes.
+ */
+export interface TaskHistoryEntry {
+  id: string
+  occurred_at: string
+  /** A token's name, or `Web session` for somebody working in the browser. */
+  actor_label: string
+  channel: 'web' | 'api'
+  /** Dotted past-tense event name, e.g. `task.moved`. */
+  verb: string
+  /** The same thing as one readable sentence, worded by the server so the
+   * board, the CLI and an agent all tell the same story. */
+  summary: string
+  /** Field-by-field detail, where the event has any. Empty otherwise. */
+  changes: FieldChange[]
+}
+
+/** How many history entries a page holds. The server's default, said out loud
+ * so the board can size its pager without a round trip to find out. */
+export const HISTORY_PER_PAGE = 10
+
+/** One page of a card's history, and enough to draw a pager for the rest. */
+export interface TaskHistoryPage {
+  entries: TaskHistoryEntry[]
+  /** How many entries the whole history holds. */
+  total: number
+  /** Which page this is, counting from 1. */
+  page: number
+  /** How many pages there are. At least 1, even when the history is empty. */
+  pages: number
+  per_page: number
+}
+
 export interface Task {
   id: string
   project_id: string
@@ -464,6 +514,12 @@ export const api = {
 
   listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
+  /**
+   * One page of what has been done to a card — every edit, move and tick —
+   * newest first. Its own request, made only when somebody asks to see it.
+   */
+  getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
+    request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
   createTask: (ref: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */

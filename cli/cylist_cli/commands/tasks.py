@@ -13,6 +13,7 @@ from cylist_cli.errors import CylistError
 TASK_TYPES = ("feature", "bug", "chore")
 STATUSES = ("active", "hold", "blocked", "cancelled")
 TITLE_WIDTH = 46
+VALUE_WIDTH = 44
 
 
 def register(subparsers: Any) -> None:
@@ -31,6 +32,23 @@ def register(subparsers: Any) -> None:
     show = task_actions.add_parser("show", help="Show a task and its timeline.")
     show.add_argument("task", metavar="TASK", help="Task reference or id, e.g. ATL-41.")
     show.set_defaults(handler=_show)
+
+    history = task_actions.add_parser(
+        "history",
+        help="Show what has been done to a task.",
+        description=(
+            "Every change to the card, newest first: what was changed, from "
+            "what to what, when, and who changed it. Distinct from 'show', "
+            "whose timeline is what people said about the card rather than "
+            "what was done to it."
+        ),
+    )
+    history.add_argument("task", metavar="TASK", help="Task reference or id, e.g. ATL-41.")
+    history.add_argument("--page", type=int, default=1, help="Which page. Default 1.")
+    history.add_argument(
+        "--per-page", type=int, default=10, help="Entries per page. Default 10, maximum 100."
+    )
+    history.set_defaults(handler=_history)
 
     new = task_actions.add_parser(
         "new",
@@ -258,6 +276,49 @@ def _render_timeline(comments: list[dict[str, Any]], names: dict[str, str]) -> N
             for line in output.wrap(str(entry.get("body", "")), width - 2, indent="  "):
                 output.echo(line)
         output.echo()
+
+
+def _history(args: argparse.Namespace, ctx: Context) -> None:
+    page = ctx.client.get(f"/tasks/{args.task}/history", page=args.page, per_page=args.per_page)
+    if ctx.as_json:
+        output.emit_json(page)
+        return
+
+    entries = page.get("entries") or []
+    if not entries:
+        output.echo(
+            "Nothing recorded yet." if not page.get("total") else "No entries on this page."
+        )
+        return
+
+    width = output.terminal_width()
+    for entry in entries:
+        when = str(entry.get("occurred_at", ""))[:16].replace("T", " ")
+        who = str(entry.get("actor_label", "?"))
+        # The channel is spelled out rather than shown as a column: whether an
+        # agent or a person did something is the one thing a reader scanning
+        # this must not have to decode.
+        via = " (agent)" if entry.get("channel") == "api" else ""
+        output.echo(f"{when}  {who}{via}")
+        for line in output.wrap(str(entry.get("summary", "")), width - 2, indent="  "):
+            output.echo(line)
+        for change in entry.get("changes") or []:
+            was = _value(change.get("from"))
+            now = _value(change.get("to"))
+            output.echo(f"    {change.get('label')}: {was} -> {now}")
+        output.echo()
+
+    # Said even on a single page: without it a reader cannot tell a complete
+    # record from the first ten entries of a long one.
+    output.echo(f"Page {page.get('page')} of {page.get('pages')} — {page.get('total')} entries.")
+
+
+def _value(value: Any) -> str:
+    """One changed value, short enough to sit on a line with its twin."""
+    if value is None or value == "":
+        return "(none)"
+    text = " / ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+    return output.truncate(text, VALUE_WIDTH)
 
 
 # --- Mutations -------------------------------------------------------------

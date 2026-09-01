@@ -164,6 +164,33 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         return await _guard(call)
 
     @server.tool(
+        name="read_task_history",
+        description=(
+            "Read what has been done to one task, newest first: every field "
+            "edit with its old and new value, every move between columns, every "
+            "sub-status step, every checklist item ticked — each with the moment "
+            "it happened and who did it. Distinct from get_task's timeline, "
+            "which is what people said about the card rather than what was done "
+            "to it. 'channel' is 'web' if a person did it and 'api' if an agent "
+            "did. A sub-task keeps its own history rather than appearing in its "
+            "parent's. Comes a page at a time: the reply carries 'total' and "
+            "'pages', so ask for the next page only if you still need it."
+        ),
+    )
+    async def read_task_history(
+        task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
+        page: Annotated[int, Field(description="Which page, counting from 1.", ge=1)] = 1,
+        per_page: Annotated[
+            int, Field(description="Entries per page. Default 10, maximum 100.", ge=1, le=100)
+        ] = 10,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            history = await client.get(f"/tasks/{task}/history", page=page, per_page=per_page)
+            return {"history": history}
+
+        return await _guard(call)
+
+    @server.tool(
         name="create_task",
         description=(
             "Add a task to a project's board. It always lands at the bottom of "

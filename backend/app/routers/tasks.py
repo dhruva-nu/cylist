@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
@@ -26,10 +26,13 @@ from app.schemas.tasks import (
     ChecklistItemUpdate,
     CommentCreate,
     CommentRead,
+    FieldChange,
     SubStatusMove,
     SubtaskCreate,
     TaskCreate,
     TaskDetail,
+    TaskHistoryEntry,
+    TaskHistoryPage,
     TaskMove,
     TaskRead,
     TaskStatusChange,
@@ -181,6 +184,67 @@ async def get_task(
     return await _detail(session, task)
 
 
+@router.get(
+    "/tasks/{task_ref}/history",
+    response_model=TaskHistoryPage,
+    summary="Read a task's history",
+)
+async def task_history(
+    task: Task = Depends(resolved_task),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+    page: int = Query(default=1, ge=1, description="Which page, counting from 1."),
+    per_page: int = Query(default=10, ge=1, le=100, description="Entries per page."),
+) -> TaskHistoryPage:
+    """What has been done to this card, newest first, a page at a time.
+
+    Distinct from `/comments`, which is what people *said* about the card. This
+    is what was *done* to it: every field edit with its old and new value,
+    every move, every sub-status step, every checklist item ticked — each with
+    the moment it happened and who did it. Because agents act through this same
+    API, `channel` says whether a person or a bot was responsible.
+
+    A page past the end is not an error, it is empty: a client holding page 4
+    of a history that has since been trimmed should get an empty page and the
+    real `pages` count back, not a 404 it has to special-case.
+
+    Only what changed the card is here. Dragging a card up its own column, or
+    saving a form without touching a field, is a request the server handled
+    rather than something that happened to the work — those stay in
+    `/activity`, which is the record of who touched what.
+
+    A sub-task keeps its own history rather than appearing in its parent's: it
+    is a card, and its parent's history is about the parent.
+    """
+    entries, total = await activity.for_entity(
+        session, "task", task.id, limit=per_page, offset=(page - 1) * per_page
+    )
+    return TaskHistoryPage(
+        entries=[
+            TaskHistoryEntry(
+                id=entry.id,
+                occurred_at=entry.occurred_at,
+                actor_label=entry.actor_label,
+                channel=entry.channel,
+                verb=entry.verb,
+                summary=activity.describe(entry),
+                changes=[
+                    FieldChange.model_validate(change)
+                    for change in entry.payload.get("changes") or []
+                ],
+                payload=entry.payload,
+            )
+            for entry in entries
+        ],
+        total=total,
+        page=page,
+        # At least one page, so "page 1 of 1" reads correctly on an empty
+        # history rather than "page 1 of 0".
+        pages=max(1, -(-total // per_page)),
+        per_page=per_page,
+    )
+
+
 @router.patch(
     "/tasks/{task_ref}",
     response_model=TaskDetail,
@@ -198,7 +262,7 @@ async def update_task(
     Status is not among them: it moves through `POST /tasks/{ref}/status`,
     which is the only path that can insist on a reason.
     """
-    updated = await tasks.update(session, task, body)
+    updated, changes = await tasks.update(session, task, body)
     await activity.record(
         session,
         principal,
@@ -206,10 +270,7 @@ async def update_task(
         entity_type="task",
         entity_id=updated.id,
         project_id=updated.project_id,
-        payload={
-            "reference": updated.reference,
-            "fields": sorted(body.model_dump(exclude_unset=True)),
-        },
+        payload={"reference": updated.reference, "changes": changes},
     )
     return await _detail(session, updated)
 
@@ -266,7 +327,7 @@ async def move_task(
     yet in the last column, or a checklist item still open — cannot be moved
     into the last column. That is a 422 naming what is still outstanding.
     """
-    moved = await tasks.move(session, task, body)
+    moved, changes = await tasks.move(session, task, body)
     await activity.record(
         session,
         principal,
@@ -278,6 +339,7 @@ async def move_task(
             "reference": moved.reference,
             "column_id": str(moved.column_id),
             "position": moved.position,
+            "changes": changes,
         },
     )
     return await _detail(session, moved)
@@ -302,7 +364,7 @@ async def set_sub_status(
     This is what the board card's own sub-status slider calls: one click puts
     a card on the stage under the cursor without opening it.
     """
-    updated = await tasks.set_sub_status(session, task, body.index)
+    updated, changes = await tasks.set_sub_status(session, task, body.index)
     await activity.record(
         session,
         principal,
@@ -314,6 +376,7 @@ async def set_sub_status(
             "reference": updated.reference,
             "sub_status_index": updated.sub_status_index,
             "sub_status": updated.sub_statuses[body.index],
+            "changes": changes,
         },
     )
     return await _detail(session, updated)
@@ -348,7 +411,18 @@ async def change_status(
         entity_type="task",
         entity_id=updated.id,
         project_id=updated.project_id,
-        payload={"reference": updated.reference, **entry.meta},
+        payload={
+            "reference": updated.reference,
+            **entry.meta,
+            "changes": [
+                {
+                    "field": "status",
+                    "label": "status",
+                    "from": entry.meta["from"],
+                    "to": entry.meta["to"],
+                }
+            ],
+        },
     )
     return await _detail(session, updated)
 

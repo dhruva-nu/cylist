@@ -15,6 +15,9 @@ than mechanics:
 
 from __future__ import annotations
 
+from datetime import date
+from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import delete as sql_delete
@@ -23,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, UnprocessableRequestError
 from app.models.board import BoardColumn
+from app.models.person import Person
 from app.models.project import Project
 from app.models.task import (
     ChecklistState,
@@ -46,6 +50,25 @@ from app.services import columns, projects
 
 _CLEARABLE = frozenset({"jira_ref", "pr_ref"})
 """The only task fields a ``PATCH`` may set back to null."""
+
+_TRACKED: dict[str, str] = {
+    "title": "title",
+    "description": "description",
+    "type": "type",
+    "priority": "priority",
+    "sub_statuses": "sub-statuses",
+    "sub_status_index": "sub-status",
+    "due_date": "due date",
+    "assignee_id": "assignee",
+    "jira_ref": "Jira reference",
+    "pr_ref": "pull request",
+}
+"""The fields a task's history reports on, and how it names them.
+
+Insertion order is the order changes are listed in, so an entry reads down the
+card the way the card itself does rather than in whatever order the client
+happened to send the fields.
+"""
 
 
 async def create(
@@ -160,12 +183,25 @@ async def list_for_project(session: AsyncSession, project: Project) -> list[Task
     )
 
 
-async def update(session: AsyncSession, task: Task, data: TaskUpdate) -> Task:
+async def update(
+    session: AsyncSession, task: Task, data: TaskUpdate
+) -> tuple[Task, list[dict[str, Any]]]:
     """Apply a partial update. Status and column move through their own calls.
+
+    Returns the task and what actually changed about it — field by field, old
+    value beside new — which is what the card's history is written from. The
+    diff is taken from the row rather than from the request because a ``PATCH``
+    routinely sends back fields it is not changing, and a history that says
+    "changed the title" every time somebody edits a due date is one nobody
+    reads. It is taken *after* the write for the same reason: setting the
+    stages moves the current-stage marker, and that move is a change to report
+    even though no client asked for it.
 
     Raises:
         UnprocessableRequestError: if a new assignee is not a project member.
     """
+    before = _snapshot(task)
+
     # Only the two external refs can be cleared. A null anywhere else is a
     # client sending back a field it never filled in, not a request to erase a
     # title or unassign the work.
@@ -206,10 +242,12 @@ async def update(session: AsyncSession, task: Task, data: TaskUpdate) -> Task:
 
     await session.flush()
     await session.refresh(task, ["assignee"])
-    return task
+    return task, await _diff(session, before, _snapshot(task))
 
 
-async def set_sub_status(session: AsyncSession, task: Task, index: int) -> Task:
+async def set_sub_status(
+    session: AsyncSession, task: Task, index: int
+) -> tuple[Task, list[dict[str, Any]]]:
     """Move a task to one of its sub-status stages.
 
     Any stage, in either direction: the board draws this as a slider, and a
@@ -231,9 +269,17 @@ async def set_sub_status(session: AsyncSession, task: Task, index: int) -> Task:
             f"{task.reference} has {len(task.sub_statuses)} sub-statuses; "
             f"there is no stage {index}.",
         )
+    was_on = _stage(task.sub_statuses, task.sub_status_index)
     task.sub_status_index = index
     await session.flush()
-    return task
+
+    now_on = _stage(task.sub_statuses, index)
+    changes: list[dict[str, Any]] = (
+        []
+        if now_on == was_on
+        else [{"field": "sub_status_index", "label": "sub-status", "from": was_on, "to": now_on}]
+    )
+    return task, changes
 
 
 async def delete(session: AsyncSession, task: Task) -> None:
@@ -254,7 +300,9 @@ async def delete(session: AsyncSession, task: Task) -> None:
         await _renumber(session, column_id)
 
 
-async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
+async def move(
+    session: AsyncSession, task: Task, data: TaskMove
+) -> tuple[Task, list[dict[str, Any]]]:
     """Put a task in a column at a position.
 
     Unlike creation this is unrestricted: once a card is on the board it may go
@@ -265,6 +313,12 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
     reviewed, merged" means one thing in Review and another in Done — so a card
     arriving somewhere new has not begun the stages it keeps there. Moving
     within one column leaves the stage alone: nothing has been arrived at.
+
+    Returns the task and what changed about it, in the same shape
+    :func:`update` reports — the column it left and the one it arrived in, and
+    the stage it was put back to if that happened. Reordering within one column
+    changes nothing worth recording: a card's place in a stack is not a fact
+    about the work.
 
     Raises:
         UnprocessableRequestError: if the column belongs to another project, or
@@ -280,6 +334,7 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
     await _refuse_unfinished(session, task, column)
 
     source_id = task.column_id
+    was_on = _stage(task.sub_statuses, task.sub_status_index)
     siblings = [
         sibling
         for sibling in await _ordered(session, column.id)
@@ -294,10 +349,20 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> Task:
         sibling.position = position
     await session.flush()
 
-    if source_id != column.id:
-        await _renumber(session, source_id)
+    if source_id == column.id:
+        return task, []
 
-    return task
+    await _renumber(session, source_id)
+    source = await columns.get(session, source_id)
+    changes: list[dict[str, Any]] = [
+        {"field": "column", "label": "column", "from": source.name, "to": column.name},
+    ]
+    now_on = _stage(task.sub_statuses, task.sub_status_index)
+    if now_on != was_on:
+        changes.append(
+            {"field": "sub_status_index", "label": "sub-status", "from": was_on, "to": now_on}
+        )
+    return task, changes
 
 
 async def change_status(
@@ -525,6 +590,65 @@ async def open_subtask_counts(
         counts[task_id] = counts.get(task_id, 0) + total
 
     return counts
+
+
+def _snapshot(task: Task) -> dict[str, Any]:
+    """The tracked fields of a task as they stand, for diffing against later."""
+    return {field: getattr(task, field) for field in _TRACKED}
+
+
+async def _diff(
+    session: AsyncSession, before: dict[str, Any], after: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Describe what moved between two snapshots, in :data:`_TRACKED` order.
+
+    Values are rendered the way the card renders them — an assignee by name, a
+    sub-status by its label — because the history is read by people, and an id
+    tells the reader nothing about who picked the work up.
+    """
+    changes: list[dict[str, Any]] = []
+    for field, label in _TRACKED.items():
+        was, now = before[field], after[field]
+        if was == now:
+            continue
+        if field == "assignee_id":
+            # Reported as `assignee`, because what is reported is a person's
+            # name: calling the field `assignee_id` beside a name would be a
+            # lie about what the value is.
+            field = "assignee"
+            was, now = await _person_name(session, was), await _person_name(session, now)
+        elif field == "sub_status_index":
+            was = _stage(before["sub_statuses"], was)
+            now = _stage(after["sub_statuses"], now)
+        changes.append({"field": field, "label": label, "from": _plain(was), "to": _plain(now)})
+    return changes
+
+
+def _stage(labels: list[str], index: int | None) -> str | None:
+    """Name the stage an index points at, for a card that has stages."""
+    if index is None or not 0 <= index < len(labels):
+        return None
+    return labels[index]
+
+
+async def _person_name(session: AsyncSession, person_id: UUID | None) -> str | None:
+    if person_id is None:
+        return None
+    person = await session.get(Person, person_id)
+    return person.name if person else None
+
+
+def _plain(value: Any) -> Any:
+    """Make a value fit to store in the audit payload, which is JSONB."""
+    if isinstance(value, StrEnum):
+        return value.value
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    return value
 
 
 async def _refuse_unfinished(session: AsyncSession, task: Task, column: BoardColumn) -> None:

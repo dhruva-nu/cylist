@@ -215,6 +215,27 @@ VAULT_TREE_DETAIL = {
     ],
 }
 
+TASK_HISTORY_ENTRIES = [
+    {
+        "id": "0192f3c4-0010-7000-8000-000000000001",
+        "occurred_at": "2026-02-03T09:00:00Z",
+        "actor_label": "board-tidy agent",
+        "channel": "api",
+        "verb": "task.moved",
+        "summary": "Moved from To do to In progress.",
+        "changes": [{"field": "column", "label": "column", "from": "To do", "to": "In progress"}],
+        "payload": {"reference": "ATL-2"},
+    }
+]
+
+TASK_HISTORY = {
+    "entries": TASK_HISTORY_ENTRIES,
+    "total": 1,
+    "page": 1,
+    "pages": 1,
+    "per_page": 10,
+}
+
 ACTIVITY = [
     {
         "id": "0192f3c4-0009-7000-8000-000000000001",
@@ -311,6 +332,8 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
     if path.endswith("/tasks") and method == "POST":
         body = json.loads(request.content)
         return httpx.Response(201, json={**TASK, "title": body["title"]})
+    if path.endswith("/history") and method == "GET":
+        return httpx.Response(200, json=TASK_HISTORY)
     if path in {"/tasks/ATL-2", f"/tasks/{TASK_ID}"}:
         return httpx.Response(200, json=TASK)
     if path in {"/tasks/ATL-2-1", f"/tasks/{SUBTASK_ID}"}:
