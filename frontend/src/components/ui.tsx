@@ -137,4 +137,95 @@ export function LiveRegion({ message }: { message: string }) {
   )
 }
 
+/**
+ * A task's Jira key or pull request, as short as it can be said.
+ *
+ * Both fields are free text on the way in, and people fill them either way:
+ * `ATL-41` and `#212` typed by hand on one card, the whole URL pasted off the
+ * browser bar on the next. The URL is the more useful of the two — it is the
+ * only form that can be followed — and the less readable, being long enough to
+ * push everything else off the row it sits on. So a URL shows as the identifier
+ * it contains and carries the URL on the link; anything else shows as typed,
+ * with nothing to click.
+ *
+ * `stopPropagation` on the pointer and key events is what makes this safe to
+ * drop on a board card. That card is both the drag handle and the button that
+ * opens the task, so an event left to bubble would open the dialog behind the
+ * new tab, or pick the card up instead of following the link.
+ */
+export function TaskRef({ kind, value }: { kind: 'jira' | 'pr'; value: string }) {
+  const { label, href } = kind === 'jira' ? jiraRef(value) : prRef(value)
+  const icon = kind === 'jira' ? '\u2337' : '\u2387'
+
+  if (!href) {
+    return (
+      <span>
+        {icon} {label}
+      </span>
+    )
+  }
+
+  return (
+    <a
+      className={styles.taskRef}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      // The icon is decoration and the label is an abbreviation, so neither
+      // says on its own what the link goes to.
+      aria-label={`${kind === 'jira' ? 'Jira' : 'Pull request'} ${label}`}
+      title={href}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {icon} {label}
+    </a>
+  )
+}
+
+/** What :func:`TaskRef` renders: the text to show, and where it points. */
+interface Ref {
+  label: string
+  /** Null when the stored value is not a URL — there is nothing to follow. */
+  href: string | null
+}
+
+/**
+ * A stored `https://…` value as a URL, or null.
+ *
+ * The scheme test is not only about `new URL` accepting the string: it is what
+ * keeps a `javascript:` value someone typed into the Jira box out of an href.
+ */
+function asUrl(value: string): URL | null {
+  if (!/^https?:\/\//i.test(value)) return null
+  try {
+    return new URL(value)
+  } catch {
+    return null
+  }
+}
+
+/** The last path segment: the shortest thing left to show when nothing parses. */
+function lastSegment(url: URL): string {
+  return url.pathname.split('/').filter(Boolean).pop() ?? url.hostname
+}
+
+function jiraRef(value: string): Ref {
+  const url = asUrl(value)
+  if (!url) return { label: value, href: null }
+  // The query string is searched as well as the path: `/browse/ATL-41` is the
+  // link people copy, but a board hands out `?selectedIssue=ATL-41`.
+  const key = /[A-Z][A-Z0-9]*-\d+/i.exec(`${url.pathname} ${url.search}`)
+  return { label: key ? key[0].toUpperCase() : lastSegment(url), href: value }
+}
+
+function prRef(value: string): Ref {
+  const url = asUrl(value)
+  if (!url) return { label: value, href: null }
+  // GitHub and Bitbucket say `pull`/`pull-requests`, GitLab `merge_requests`.
+  const number = /\/(?:pull|pull-requests|merge_requests)\/(\d+)/i.exec(url.pathname)
+  return { label: number ? `#${number[1]}` : lastSegment(url), href: value }
+}
+
 export const cardStyles = styles

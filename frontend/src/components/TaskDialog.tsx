@@ -53,7 +53,7 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner } from './ui'
+import { Avatar, Button, ErrorBanner, TaskRef } from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -232,8 +232,12 @@ function TaskDetailView({
 
         {task.jira_ref || task.pr_ref ? (
           <div className={styles.readPair}>
-            <ReadField label="Jira">{task.jira_ref ?? '—'}</ReadField>
-            <ReadField label="Pull request">{task.pr_ref ?? '—'}</ReadField>
+            <ReadField label="Jira">
+              {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : '—'}
+            </ReadField>
+            <ReadField label="Pull request">
+              {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : '—'}
+            </ReadField>
           </div>
         ) : null}
 
@@ -549,7 +553,7 @@ function TaskForm({
             <input
               value={form.jira_ref ?? ''}
               onChange={(event) => setForm({ ...form, jira_ref: event.target.value })}
-              placeholder="ATL-00"
+              placeholder="ATL-00 or a URL"
             />
           </Field>
           <Field label="Pull request">

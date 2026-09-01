@@ -178,7 +178,7 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         _enum(TaskStatus, "task_status"), nullable=False, default=TaskStatus.ACTIVE
     )
 
-    jira_ref: Mapped[str | None] = mapped_column(String(64))
+    jira_ref: Mapped[str | None] = mapped_column(String(200))
     pr_ref: Mapped[str | None] = mapped_column(String(200))
 
     parent_id: Mapped[UUID | None] = mapped_column(

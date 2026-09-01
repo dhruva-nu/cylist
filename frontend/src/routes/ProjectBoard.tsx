@@ -44,7 +44,15 @@ import { api, type Board, type BoardColumn, type ColumnInput, type Task } from '
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
-import { Avatar, Button, EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../components/ui'
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  ErrorBanner,
+  LiveRegion,
+  TaskRef,
+  useAnnouncer,
+} from '../components/ui'
 import styles from './ProjectBoard.module.css'
 
 /**
@@ -547,8 +555,8 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
 
       <div className={styles.taskRow}>
         <div className={styles.links}>
-          {task.jira_ref ? <span>⌗ {task.jira_ref}</span> : null}
-          {task.pr_ref ? <span>⎇ {task.pr_ref}</span> : null}
+          {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : null}
+          {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : null}
           {task.comment_count ? <span>✎ {task.comment_count}</span> : null}
           {/* The one number on a card that can stop it moving: while it is
               above zero the server refuses the last column. */}
