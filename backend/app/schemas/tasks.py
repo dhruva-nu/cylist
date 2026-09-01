@@ -136,6 +136,16 @@ class TaskUpdate(Schema):
             "if it still fits, otherwise pulled back to the new last one."
         ),
     )
+    sub_status_index: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Which stage is current, once `sub_statuses` has been applied. Send it "
+            "when reordering or removing stages has moved the marker — the caller "
+            "doing the reordering is the only one that knows where it went. Left "
+            "out, the marker stays where it was."
+        ),
+    )
     due_date: date | None = None
     assignee_id: UUID | None = None
     jira_ref: str | None = Field(default=None, max_length=200)
@@ -157,6 +167,18 @@ class TaskMove(Schema):
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+
+
+class SubStatusMove(Schema):
+    """Moves a card to one of its own sub-status stages."""
+
+    index: int = Field(
+        ge=0,
+        description=(
+            "Which stage to move to, counting from 0. Any of them, in either "
+            "direction — not just the next one."
+        ),
+    )
 
 
 class TaskStatusChange(Schema):

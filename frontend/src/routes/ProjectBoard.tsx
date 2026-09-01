@@ -66,7 +66,7 @@ import {
   EmptyState,
   ErrorBanner,
   LiveRegion,
-  SubStatusChips,
+  SubStatusBar,
   TaskRef,
   useAnnouncer,
 } from '../components/ui'
@@ -252,24 +252,27 @@ export function ProjectBoard() {
     onSettled: refresh,
   })
 
-  const advanceSubStatus = useMutation<Task, Error, string, { previous: Task[] | undefined }>({
-    mutationFn: (taskId) => api.advanceSubStatus(taskId),
-    onMutate: async (taskId) => {
+  /**
+   * Dragging the sub-status slider on a card. Optimistic, because the whole
+   * point of the control is that a stage moves under the cursor rather than
+   * after a round trip.
+   */
+  const moveSubStatus = useMutation<
+    Task,
+    Error,
+    { taskId: string; index: number },
+    { previous: Task[] | undefined }
+  >({
+    mutationFn: ({ taskId, index }) => api.setSubStatus(taskId, index),
+    onMutate: async ({ taskId, index }) => {
       await queryClient.cancelQueries({ queryKey: tasksKey })
       const previous = queryClient.getQueryData<Task[]>(tasksKey)
       queryClient.setQueryData<Task[]>(tasksKey, (current) =>
-        current?.map((task) =>
-          task.id === taskId && task.sub_status_index !== null
-            ? {
-                ...task,
-                sub_status_index: Math.min(task.sub_status_index + 1, task.sub_statuses.length - 1),
-              }
-            : task,
-        ),
+        current?.map((task) => (task.id === taskId ? { ...task, sub_status_index: index } : task)),
       )
       return { previous }
     },
-    onError: (_error, _taskId, context) => {
+    onError: (_error, _move, context) => {
       queryClient.setQueryData(tasksKey, context?.previous)
     },
     onSettled: refresh,
@@ -422,7 +425,7 @@ export function ProjectBoard() {
                 )
               }}
               onOpenTask={setOpenTaskId}
-              onAdvanceSubStatus={(taskId) => advanceSubStatus.mutate(taskId)}
+              onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
               onMoveLeft={() => moveColumnTo(index, index - 1)}
@@ -596,7 +599,7 @@ function Column({
   collapsed,
   onToggleCollapse,
   onOpenTask,
-  onAdvanceSubStatus,
+  onMoveSubStatus,
   onAddTask,
   onEdit,
   onMoveLeft,
@@ -609,7 +612,7 @@ function Column({
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
-  onAdvanceSubStatus: (taskId: string) => void
+  onMoveSubStatus: (taskId: string, index: number) => void
   onAddTask: () => void
   onEdit: () => void
   onMoveLeft: () => void
@@ -731,7 +734,7 @@ function Column({
             key={task.id}
             task={task}
             onOpen={() => onOpenTask(task.id)}
-            onAdvanceSubStatus={() => onAdvanceSubStatus(task.id)}
+            onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
           />
         ))}
       </div>
@@ -764,11 +767,11 @@ const PRIORITY_LABELS = {
 function TaskCard({
   task,
   onOpen,
-  onAdvanceSubStatus,
+  onMoveSubStatus,
 }: {
   task: Task
   onOpen: () => void
-  onAdvanceSubStatus: () => void
+  onMoveSubStatus: (index: number) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
   const late = isOverdue(task.due_date)
@@ -836,10 +839,10 @@ function TaskCard({
       <div className={styles.title}>{task.title}</div>
 
       {task.sub_statuses.length ? (
-        <SubStatusButton
+        <SubStatusBar
           labels={task.sub_statuses}
           index={task.sub_status_index ?? 0}
-          onAdvance={onAdvanceSubStatus}
+          onMove={onMoveSubStatus}
         />
       ) : null}
 
@@ -876,50 +879,6 @@ function TaskCard({
         </span>
       </div>
     </article>
-  )
-}
-
-/**
- * The one control that changes a card without opening it: click to advance
- * one sub-status stage.
- *
- * `stopPropagation` on every event is what makes this safe to drop on a task
- * card — the card is both the drag handle and the button that opens the
- * dialog, so a click left to bubble would do one of those instead of
- * advancing the stage.
- */
-function SubStatusButton({
-  labels,
-  index,
-  onAdvance,
-}: {
-  labels: string[]
-  index: number
-  onAdvance: () => void
-}) {
-  const atLast = index >= labels.length - 1
-  const next = atLast ? null : labels[index + 1]
-
-  return (
-    <button
-      type="button"
-      className={styles.subStatus}
-      disabled={atLast}
-      onClick={(event) => {
-        event.stopPropagation()
-        onAdvance()
-      }}
-      onPointerDown={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-      aria-label={
-        atLast
-          ? `Sub-status: ${labels[index]}, the last stage`
-          : `Sub-status: ${labels[index]}. Click to advance to ${next}`
-      }
-      title={atLast ? undefined : `Advance to ${next}`}
-    >
-      <SubStatusChips labels={labels} index={index} />
-    </button>
   )
 }
 

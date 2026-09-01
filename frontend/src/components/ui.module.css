@@ -146,28 +146,164 @@
   font-size: 14px;
 }
 
-.subStatusChips {
+/*
+ * Sub-status: a segmented slider, not a row of labelled chips.
+ *
+ * A stage label can be a sentence — four of them side by side either wrap a
+ * board card into a paragraph or truncate down to nothing anyone can read. So
+ * the bar carries position only, one segment per stage, and the words live
+ * where there is room for them: the current stage on the head line, and
+ * whichever stage you point at in the hover tip, wrapped and in full. Nothing
+ * on the bar has to fit.
+ */
+.subStatus {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
 
-.subStatusChip {
-  padding: 2px 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-control);
-  background: var(--paper-2);
-  color: var(--ink-3);
-  font-size: 11px;
+.subStatusHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* --ink-2 rather than --ink-3: this rides on board cards that may be tinted
+   amber or red, where the quietest ink stops clearing AA. */
+.subStatusNow {
+  overflow: hidden;
+  color: var(--ink-2);
   font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Background and text colour come from the gradient inline — see
-   subStatusColor() — so this only has to drop the muted border. */
-.subStatusChipFilled {
-  border-color: transparent;
+.subStatusNowWrapped {
+  overflow: visible;
+  white-space: normal;
+}
+
+.subStatusCount {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fixed height, tall enough for the thumb: the row must not jump as the
+   current stage moves along it. */
+.subStatusTrack {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  height: 12px;
+}
+
+.subStatusSegment {
+  flex: 1;
+  min-width: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-2);
+  transition:
+    height 120ms ease,
+    background-color 120ms ease;
+}
+
+.subStatusDone {
+  background: var(--go);
+}
+
+/*
+ * The thumb: a slider's handle, stretched to the width of the stage it sits
+ * on. One segment taller than the rest is the whole of what the bar has to
+ * say, and it says it without a colour ramp — every finished stage is the
+ * same green, because "done" is not a matter of degree.
+ */
+.subStatusHere {
+  height: 12px;
+  background: var(--go);
+}
+
+.subStatusTrackLive .subStatusSegment {
+  cursor: pointer;
+}
+
+/* Half-way to the thumb's height: enough to say "this one would take the
+   handle" without pretending it already has. */
+.subStatusTrackLive .subStatusSegment:hover {
+  height: 8px;
+}
+
+/* The thumb is already as tall as it gets — it only darkens, to say that
+   clicking the stage you are on is a no-op rather than a dead control. */
+.subStatusTrackLive .subStatusDone:hover,
+.subStatusTrackLive .subStatusHere:hover {
+  height: 12px;
+  background: var(--go-hover);
+}
+
+/*
+ * Stages between the current one and the one under the cursor: filled at half
+ * strength, so the bar shows where a click would take the card before it
+ * takes it. Half strength rather than a second hue, because there is no third
+ * state to name — this is the same green, not yet earned.
+ */
+.subStatusTrackLive .subStatusAhead {
+  height: 8px;
+  background: var(--go);
+  opacity: 0.45;
+}
+
+/*
+ * The hover tip. Above everything — the modal sits at 20, the shell header at
+ * 30 — because it is used inside the task dialog as well as on the board.
+ *
+ * --ink on --paper is the inverse of body text in both themes, so it reads as
+ * an overlay rather than another panel. Positioned by the component; the
+ * transform is what makes those coordinates mean "centred, just clear of the
+ * anchor".
+ */
+.tip {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  transform: translate(-50%, calc(-100% - 8px));
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.tipBelow {
+  transform: translate(-50%, 8px);
+}
+
+.tipText {
+  font-weight: 600;
+}
+
+/* The same ink at 70%: a second line that reads as an aside rather than as
+   part of the label above it, without introducing a colour that would have to
+   be checked against two themes. */
+.tipNote {
+  opacity: 0.72;
+  font-size: 11px;
 }
 
 /* Underlined, not just tinted: this sits in a row of plain counts on a card

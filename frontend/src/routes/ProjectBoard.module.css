@@ -415,20 +415,6 @@
   color: var(--ink-3);
 }
 
-.subStatus {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
-.subStatus:disabled {
-  cursor: default;
-}
-
 .waiting {
   display: flex;
   flex-wrap: wrap;

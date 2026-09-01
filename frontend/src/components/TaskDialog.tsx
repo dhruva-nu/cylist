@@ -54,7 +54,7 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner, SubStatusChips, TaskRef } from './ui'
+import { Avatar, Button, ErrorBanner, SubStatusBar, TaskRef } from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -216,7 +216,7 @@ function TaskDetailView({
 
         {task.sub_statuses.length ? (
           <ReadField label="Sub-status">
-            <SubStatusChips labels={task.sub_statuses} index={task.sub_status_index ?? 0} />
+            <SubStatusBar labels={task.sub_statuses} index={task.sub_status_index ?? 0} wrap />
           </ReadField>
         ) : null}
 
@@ -352,6 +352,13 @@ function TaskForm({
     jira_ref: task?.jira_ref ?? '',
     pr_ref: task?.pr_ref ?? '',
   })
+  /**
+   * Which stage the card is on. Held apart from `form` because creating a card
+   * cannot say it — a new one starts on its first stage — while editing can:
+   * reordering or removing a stage moves the marker, and this form is the only
+   * thing that knows where it went.
+   */
+  const [subStatusIndex, setSubStatusIndex] = useState(task?.sub_status_index ?? 0)
   const [columnId, setColumnId] = useState(task?.column_id ?? firstColumn.id)
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'active')
   const [reason, setReason] = useState('')
@@ -374,7 +381,7 @@ function TaskForm({
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
       const saved = task
-        ? await api.updateTask(task.id, payload)
+        ? await api.updateTask(task.id, { ...payload, sub_status_index: subStatusIndex })
         : parentRef
           ? await api.createSubtask(parentRef, payload)
           : await api.createTask(projectKey, payload)
@@ -562,11 +569,15 @@ function TaskForm({
 
         <Field
           label="Sub-status"
-          hint="Up to 4 short stages, left to right. Advancing through them happens on the board."
+          hint="Up to 4 stages, in order. Moving the card between them happens on the board."
         >
           <SubStatusListEditor
             value={form.sub_statuses}
-            onChange={(sub_statuses) => setForm({ ...form, sub_statuses })}
+            current={subStatusIndex}
+            onChange={(sub_statuses, current) => {
+              setForm({ ...form, sub_statuses })
+              setSubStatusIndex(current)
+            }}
           />
         </Field>
 
@@ -710,22 +721,50 @@ function TaskForm({
 }
 
 /**
- * Up to 4 short stage labels, added, retitled and removed by hand.
+ * The stage list, edited by hand: renamed in place, reordered, removed, added.
  *
- * Order is the gradient's left-to-right axis, so there is no reordering
- * control beyond delete-and-re-add: a label's position is its meaning.
+ * Order is the axis the board's slider slides along, so moving a stage is a
+ * real edit rather than delete-and-retype. The current stage travels with its
+ * label — move "Review" up and the card is still on "Review" — which is why
+ * this owns the marker as well as the words.
  */
 function SubStatusListEditor({
   value,
+  current,
   onChange,
 }: {
   value: string[]
-  onChange: (value: string[]) => void
+  current: number
+  onChange: (value: string[], current: number) => void
 }) {
+  /** Swap two neighbours, taking the marker along if it is on one of them. */
+  const swap = (a: number, b: number) => {
+    const next = [...value]
+    next[a] = value[b] as string
+    next[b] = value[a] as string
+    onChange(next, current === a ? b : current === b ? a : current)
+  }
+
+  const remove = (index: number) => {
+    const next = value.filter((_, position) => position !== index)
+    // The marker follows what is left: a stage taken from behind it pulls it
+    // back one, and taking the current stage leaves the marker on whatever
+    // has moved up into its place — or on the new last stage if nothing has.
+    onChange(next, index < current ? current - 1 : Math.min(current, Math.max(next.length - 1, 0)))
+  }
+
   return (
     <div className={styles.subStatusEditor}>
       {value.map((label, index) => (
         <div key={index} className={styles.subStatusEditorRow}>
+          <span
+            className={`${styles.subStatusEditorNumber} ${
+              index === current ? styles.subStatusEditorNow : ''
+            }`}
+            title={index === current ? 'The stage this card is on' : `Stage ${index + 1}`}
+          >
+            {index + 1}
+          </span>
           <input
             value={label}
             maxLength={60}
@@ -734,21 +773,42 @@ function SubStatusListEditor({
             onChange={(event) => {
               const next = [...value]
               next[index] = event.target.value
-              onChange(next)
+              onChange(next, current)
             }}
           />
           <Button
             variant="ghost"
             small
+            disabled={index === 0}
+            aria-label={`Move stage ${index + 1} up`}
+            title="Move up"
+            onClick={() => swap(index, index - 1)}
+          >
+            ↑
+          </Button>
+          <Button
+            variant="ghost"
+            small
+            disabled={index === value.length - 1}
+            aria-label={`Move stage ${index + 1} down`}
+            title="Move down"
+            onClick={() => swap(index, index + 1)}
+          >
+            ↓
+          </Button>
+          <Button
+            variant="ghost"
+            small
             aria-label={`Remove stage ${index + 1}`}
-            onClick={() => onChange(value.filter((_, position) => position !== index))}
+            title="Remove"
+            onClick={() => remove(index)}
           >
             ×
           </Button>
         </div>
       ))}
       {value.length < 4 ? (
-        <Button variant="ghost" small onClick={() => onChange([...value, ''])}>
+        <Button variant="ghost" small onClick={() => onChange([...value, ''], current)}>
           + Add stage
         </Button>
       ) : null}

@@ -178,16 +178,27 @@ async def update(session: AsyncSession, task: Task, data: TaskUpdate) -> Task:
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
 
-    if "sub_statuses" in fields:
-        new_statuses = fields.pop("sub_statuses")
+    if "sub_statuses" in fields or "sub_status_index" in fields:
+        new_statuses = fields.pop("sub_statuses", task.sub_statuses)
+        wanted = fields.pop("sub_status_index", None)
         if not new_statuses:
+            # Nothing to point at, so an index sent alongside is moot rather
+            # than wrong: clearing the stages clears the marker.
             task.sub_status_index = None
-        elif task.sub_status_index is None:
-            task.sub_status_index = 0
+        elif wanted is not None:
+            # A caller that reordered or removed a stage knows where the
+            # current one ended up. Out of range is a bug on its side, not
+            # something to quietly round off.
+            if wanted >= len(new_statuses):
+                raise UnprocessableRequestError(
+                    f"sub_status_index {wanted} is past the last of "
+                    f"{len(new_statuses)} sub-statuses.",
+                )
+            task.sub_status_index = wanted
         else:
             # Preserve how far along the card was rather than restarting it —
             # only pulled back as far as the shorter list requires.
-            task.sub_status_index = min(task.sub_status_index, len(new_statuses) - 1)
+            task.sub_status_index = min(task.sub_status_index or 0, len(new_statuses) - 1)
         task.sub_statuses = new_statuses
 
     for field, value in fields.items():
@@ -198,21 +209,29 @@ async def update(session: AsyncSession, task: Task, data: TaskUpdate) -> Task:
     return task
 
 
-async def advance_sub_status(session: AsyncSession, task: Task) -> Task:
-    """Move a task to its next sub-status, one stage at a time.
+async def set_sub_status(session: AsyncSession, task: Task, index: int) -> Task:
+    """Move a task to one of its sub-status stages.
 
-    Stops at the last stage rather than wrapping back to the first — a fifth
-    click meaning "start over" is not something the board card can say without
-    a label to say it.
+    Any stage, in either direction: the board draws this as a slider, and a
+    slider that only went forwards would have no way to undo a mis-click. The
+    index is taken as given rather than clamped — the caller is pointing at a
+    stage it can see, so one out of range means it is looking at a stale list
+    and should be told so.
 
     Raises:
-        UnprocessableRequestError: if the task has no sub-statuses set.
+        UnprocessableRequestError: if the task has no sub-statuses set, or the
+            index does not name one of them.
     """
     if not task.sub_statuses:
         raise UnprocessableRequestError(
-            f"{task.reference} has no sub-statuses set. Add some before advancing.",
+            f"{task.reference} has no sub-statuses set. Add some before moving between them.",
         )
-    task.sub_status_index = min((task.sub_status_index or 0) + 1, len(task.sub_statuses) - 1)
+    if not 0 <= index < len(task.sub_statuses):
+        raise UnprocessableRequestError(
+            f"{task.reference} has {len(task.sub_statuses)} sub-statuses; "
+            f"there is no stage {index}.",
+        )
+    task.sub_status_index = index
     await session.flush()
     return task
 

@@ -26,6 +26,7 @@ from app.schemas.tasks import (
     ChecklistItemUpdate,
     CommentCreate,
     CommentRead,
+    SubStatusMove,
     SubtaskCreate,
     TaskCreate,
     TaskDetail,
@@ -283,30 +284,37 @@ async def move_task(
 
 
 @router.post(
-    "/tasks/{task_ref}/advance-sub-status",
+    "/tasks/{task_ref}/sub-status",
     response_model=TaskDetail,
-    summary="Advance a task's sub-status",
-    responses={422: {"description": "The task has no sub-statuses set."}},
+    summary="Move a task's sub-status",
+    responses={
+        422: {"description": "The task has no sub-statuses set, or there is no such stage."}
+    },
 )
-async def advance_sub_status(
+async def set_sub_status(
+    body: SubStatusMove,
     task: Task = Depends(resolved_task),
     principal: Principal = Depends(require(Scope.WRITE)),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
-    """Move a task to its next sub-status. Stops at the last one.
+    """Move a task to one of its sub-status stages, forwards or back.
 
-    This is what the board card's own sub-status control calls: one click
-    steps a card forward a stage without opening it.
+    This is what the board card's own sub-status slider calls: one click puts
+    a card on the stage under the cursor without opening it.
     """
-    updated = await tasks.advance_sub_status(session, task)
+    updated = await tasks.set_sub_status(session, task, body.index)
     await activity.record(
         session,
         principal,
-        "task.sub_status_advanced",
+        "task.sub_status_moved",
         entity_type="task",
         entity_id=updated.id,
         project_id=updated.project_id,
-        payload={"reference": updated.reference, "sub_status_index": updated.sub_status_index},
+        payload={
+            "reference": updated.reference,
+            "sub_status_index": updated.sub_status_index,
+            "sub_status": updated.sub_statuses[body.index],
+        },
     )
     return await _detail(session, updated)
 

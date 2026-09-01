@@ -182,12 +182,24 @@ export interface TaskInput {
   description: string
   type: TaskType
   priority: TaskPriority
-  /** Up to 4 short stage labels. Advancing through them happens on the board. */
+  /** Up to 4 short stage labels. Moving between them happens on the board. */
   sub_statuses: string[]
   due_date: string
   assignee_id: string
   jira_ref: string | null
   pr_ref: string | null
+}
+
+/**
+ * A partial edit of a task.
+ *
+ * `sub_status_index` is not part of `TaskInput` because creating a card cannot
+ * say it — a new card starts on its first stage. Editing one can: reordering
+ * or deleting a stage moves the current marker, and the form doing the
+ * reordering is the only thing that knows where it ended up.
+ */
+export interface TaskPatch extends Partial<TaskInput> {
+  sub_status_index?: number
 }
 
 export interface StatusChange {
@@ -466,7 +478,7 @@ export const api = {
     request<ChecklistItem>(`/checklist/${itemId}`, { method: 'PATCH', body: body(input) }),
   deleteChecklistItem: (itemId: string) =>
     request<{ ok: boolean }>(`/checklist/${itemId}`, { method: 'DELETE' }),
-  updateTask: (taskRef: string, input: Partial<TaskInput>) =>
+  updateTask: (taskRef: string, input: TaskPatch) =>
     request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: body(input) }),
   deleteTask: (taskRef: string) =>
     request<{ ok: boolean }>(`/tasks/${taskRef}`, { method: 'DELETE' }),
@@ -477,9 +489,10 @@ export const api = {
     }),
   setTaskStatus: (taskRef: string, change: StatusChange) =>
     request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: body(change) }),
-  /** Steps a task's sub-status forward one stage. Stops at the last one. */
-  advanceSubStatus: (taskRef: string) =>
-    request<TaskDetail>(`/tasks/${taskRef}/advance-sub-status`, { method: 'POST' }),
+  /** Moves a task to one of its sub-status stages — backwards as readily as
+   * forwards, which is what makes the board's control a slider. */
+  setSubStatus: (taskRef: string, index: number) =>
+    request<TaskDetail>(`/tasks/${taskRef}/sub-status`, { method: 'POST', body: body({ index }) }),
   addComment: (taskRef: string, text: string, authorId: string | null) =>
     request<TaskComment>(`/tasks/${taskRef}/comments`, {
       method: 'POST',
