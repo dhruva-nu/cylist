@@ -40,7 +40,23 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Board, type BoardColumn, type ColumnInput, type Task } from '../api/client'
+import {
+  api,
+  type Board,
+  type BoardColumn,
+  type ColumnInput,
+  type Person,
+  type Task,
+} from '../api/client'
+import {
+  activeToken,
+  applySuggestion,
+  filterTasks,
+  parseQuery,
+  suggestionsFor,
+  tokenize,
+  type Suggestion,
+} from './boardSearch'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
@@ -187,6 +203,7 @@ export function ProjectBoard() {
   /** The parent a new sub-task is being written under, if one is. */
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
+  const [search, setSearch] = useState('')
   const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
 
@@ -197,6 +214,12 @@ export function ProjectBoard() {
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
     queryFn: () => api.listTasks(projectKey),
+  })
+  // Needed for `who:` search matches and its autocomplete, not for rendering
+  // the board itself — every card already carries its own assignee.
+  const members = useQuery({
+    queryKey: ['members', projectKey],
+    queryFn: () => api.listMembers(projectKey),
   })
 
   const tasksKey = ['tasks', projectKey]
@@ -264,8 +287,14 @@ export function ProjectBoard() {
 
   const columns = board.data.columns
   const firstColumn = columns[0]
+  const memberList = members.data?.members ?? []
+
+  // Client-side, over what's already fetched: the board holds every task in
+  // memory regardless, and a search endpoint would be a second way to ask a
+  // question this data already answers.
+  const visibleTasks = filterTasks(tasks.data, parseQuery(tokenize(search)), columns, memberList)
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
-  for (const task of tasks.data) byColumn.get(task.column_id)?.push(task)
+  for (const task of visibleTasks) byColumn.get(task.column_id)?.push(task)
 
   // A column's own draggable id is prefixed to keep it out of the task id
   // namespace — the two are otherwise both plain UUIDs.
@@ -339,6 +368,8 @@ export function ProjectBoard() {
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
+
+      <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
 
       <DndContext
         sensors={sensors}
@@ -433,6 +464,96 @@ export function ProjectBoard() {
         />
       ) : null}
     </>
+  )
+}
+
+/**
+ * The board's search box: free text plus `col:`, `who:`, `blk:` and `hld:`
+ * tags (see `boardSearch.ts`). Typing `col:` or `who:` opens a suggestion
+ * list of the matching columns or people — arrow keys to move through it,
+ * enter or a click to accept, escape to dismiss it without losing the token
+ * being typed.
+ */
+function SearchBar({
+  query,
+  onChange,
+  columns,
+  members,
+}: {
+  query: string
+  onChange: (query: string) => void
+  columns: BoardColumn[]
+  members: Person[]
+}) {
+  const [highlighted, setHighlighted] = useState(0)
+  const [dismissed, setDismissed] = useState(false)
+  const suggestions = dismissed ? [] : suggestionsFor(activeToken(query), columns, members)
+
+  function pick(suggestion: Suggestion) {
+    onChange(applySuggestion(query, suggestion))
+    setHighlighted(0)
+  }
+
+  return (
+    <div className={styles.search}>
+      <input
+        type="text"
+        value={query}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setDismissed(false)
+          setHighlighted(0)
+        }}
+        onKeyDown={(event) => {
+          if (!suggestions.length) return
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setHighlighted((current) => (current + 1) % suggestions.length)
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setHighlighted((current) => (current - 1 + suggestions.length) % suggestions.length)
+          } else if (event.key === 'Enter') {
+            const choice = suggestions[highlighted]
+            if (choice) {
+              event.preventDefault()
+              pick(choice)
+            }
+          } else if (event.key === 'Escape') {
+            setDismissed(true)
+          }
+        }}
+        placeholder='Search, or tag it: col:"In progress"  who:Aditi  blk:  hld:'
+        aria-label="Search tasks"
+        aria-autocomplete="list"
+        aria-expanded={suggestions.length > 0}
+      />
+      {suggestions.length ? (
+        <ul className={styles.suggestions} role="listbox">
+          {suggestions.map((suggestion, index) => (
+            <li key={`${suggestion.kind}:${suggestion.value}`} role="presentation">
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === highlighted}
+                className={index === highlighted ? styles.suggestionActive : ''}
+                // mousedown, not click: click fires after the input's blur, by
+                // which point the list has already unmounted for having lost
+                // focus, and the pick never happens.
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  pick(suggestion)
+                }}
+              >
+                <span className={styles.suggestionKind}>
+                  {suggestion.kind === 'column' ? 'Column' : 'Assignee'}
+                </span>
+                {suggestion.value}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   )
 }
 
