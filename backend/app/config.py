@@ -14,7 +14,7 @@ from fastapi import Request
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-Environment = Literal["dev", "test", "staging", "prod"]
+Environment = Literal["dev", "test", "preview", "staging", "prod"]
 
 
 class Settings(BaseSettings):
@@ -81,14 +81,21 @@ class Settings(BaseSettings):
     def is_deployed(self) -> bool:
         """Whether this is a deployed stack rather than someone's machine.
 
-        Staging and production differ in which data they hold, not in how they
-        are run: both are one container behind ``tailscale serve``, reached over
-        HTTPS, holding rows someone would miss. The decisions that turn on that
-        — issuing the session cookie ``Secure``, refusing to seed fictional
-        data over the top — belong here rather than on
-        :attr:`is_production`, which stays a question about which stack this is.
+        Preview, staging and production differ in which data they hold, not in
+        how they are run: all three are one container behind ``tailscale
+        serve``, reached over HTTPS, holding rows someone would miss. The
+        decisions that turn on that — issuing the session cookie ``Secure``,
+        refusing to seed fictional data over the top — belong here rather than
+        on :attr:`is_production`, which stays a question about which stack this
+        is.
+
+        ``"dev"`` stays out of this set on purpose: it is the default for
+        someone's own machine, where neither of those protections should apply.
+        The environment this property calls "preview" is a real deployment
+        (see DEPLOY.md's Dev section) — it is just not called ``"dev"`` in
+        ``CYLIST_ENVIRONMENT``, to avoid exactly this collision.
         """
-        return self.environment in ("staging", "prod")
+        return self.environment in ("preview", "staging", "prod")
 
 
 @lru_cache(maxsize=1)

@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
+from app.core.metrics import Metrics, MetricsMiddleware
 from app.db import Database
 from app.routers import api_router
 from app.spa import mount_spa
@@ -73,6 +74,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Set eagerly, not in the lifespan: tests build an app without running the
     # lifespan, and every request needs to reach this configuration.
     app.state.settings = settings
+
+    # Read by GET /health/metrics. Set on app.state, not module-level, so each
+    # app built by the test suite starts its own counters.
+    app.state.metrics = Metrics()
+    app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)
 
     if settings.cors_origins:
         app.add_middleware(

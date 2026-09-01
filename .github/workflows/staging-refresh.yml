@@ -1,0 +1,21 @@
+name: Refresh staging from production
+
+# Manual only. This drops everything staging holds and reloads it from a
+# fresh production dump, so it does not belong on any push trigger — see
+# scripts/staging-refresh.sh for what actually happens.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    name: Refresh staging
+    runs-on: [self-hosted, cylist]
+    environment:
+      name: staging
+      url: https://dnu-home-1.tail222f46.ts.net:8443
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Refresh
+        run: scripts/staging-refresh.sh --yes

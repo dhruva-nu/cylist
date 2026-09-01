@@ -246,6 +246,125 @@ sudo tailscale serve --bg --https 8443 http://127.0.0.1:8001
 `serve` and not `funnel`: staging is reachable from your devices, and from
 nowhere else.
 
+## Dev
+
+Dev runs on the same machine, on **:8002**, served at
+<https://dnu-home-1.tail222f46.ts.net:9443>, tailnet only — the same as
+staging, except for one thing: it is not tied to a branch.
+
+The workflow is [`.github/workflows/deploy-dev.yml`](.github/workflows/deploy-dev.yml),
+triggered by hand from the Actions tab (`workflow_dispatch`). GitHub's own
+"Run workflow" dropdown lets you pick any branch, and the checkout step
+follows whatever you picked — so the loop is: push work to a branch, run this
+workflow against that branch, poke at it on the tailnet, and only once it
+looks right does it earn a place on `staging`.
+
+It does not wait on CI's test jobs the way the `main` and `staging` deploys
+do. That is deliberate — dev exists so half-finished work can be looked at
+before it is finished, not after it has already cleared the bar staging
+demands.
+
+```bash
+make dev-deploy   # build, migrate, restart          (scripts/deploy.sh dev)
+make dev-logs     # follow it
+make dev-ps       # what is running
+make dev-down     # stop it (volumes kept)
+```
+
+### What differs from staging, and why
+
+| | staging | dev |
+| --- | --- | --- |
+| compose project | `cylist-staging` | `cylist-dev` |
+| image tag | `cylist:staging` | `cylist:dev` |
+| port | `127.0.0.1:8001` | `127.0.0.1:8002` |
+| served at | `:8443` | `:9443` |
+| secrets | `~/cylist-staging` | `~/cylist-dev` |
+| deploy trigger | push to `staging` | manual, any branch |
+| data | copied from production | its own, empty to start |
+| `CYLIST_ENVIRONMENT` | `staging` | `preview` |
+
+**`CYLIST_ENVIRONMENT=preview`, not `dev`.** `CYLIST_ENVIRONMENT` already means
+something in the app: the literal value `"dev"` is what `Settings` defaults to
+on someone's own machine, where the session cookie is *not* `Secure` and
+`make seed` is allowed to run — see `Settings.is_deployed` in
+`backend/app/config.py`. Setting the real value to `"dev"` here would have
+quietly picked up that machine's behavior on a stack that is, in every way
+that matters, a deployment: one container behind `tailscale serve`, reached
+over HTTPS. `"preview"` gets it into `is_deployed` alongside staging and
+production without touching what `"dev"` means anywhere else.
+
+### One-time setup
+
+```
+~/cylist-dev/
+  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY
+  postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+  backups/       the dumps dev deploys leave behind
+```
+
+Both files `chmod 600`. Dev starts from an empty database — it is never
+restored from production, so unlike staging's `app.env` it needs only its own
+`CYLIST_VAULT_KEY` (`make vault-key`), not production's.
+
+```bash
+sudo tailscale serve --bg --https 9443 http://127.0.0.1:8002
+```
+
+`serve`, not `funnel`, exactly as staging: reachable from your devices, and
+from nowhere else.
+
+## Dashboard
+
+A one-page status view of all three environments, at
+<https://dnu-home-1.tail222f46.ts.net:7443> — tailnet only, same as staging and
+dev.
+
+[`scripts/dashboard/server.py`](scripts/dashboard/server.py) is stdlib-only
+Python: no dependencies to install, no build step. It answers `/` with a
+static page and `/api/status` with, per environment:
+
+* **container state and uptime** — `docker inspect` on `cylist-<env>-app-1`.
+* **health and request counts** — the app's own `/api/v1/health` and
+  `/api/v1/health/requests` (added in `backend/app/routers/health.py`,
+  counted by an in-process middleware that resets on every restart — see
+  `backend/app/core/metrics.py`), read over loopback. That is also why there
+  is no CORS to configure: the browser only ever talks to this process, never
+  to the three apps directly.
+* **whether it is actually being served** — a real HTTP round trip to the
+  address a browser would use, not a proxy for it. For staging and dev that
+  is a direct request to their `tailscale serve` address; for production it
+  goes further and forces the request through the public Funnel ingress with
+  `curl --resolve`, the same check `~/.claude/CLAUDE.md` documents as the only
+  one that catches the one outage already seen here — everything on-box
+  correct, the ingress-side registration silently stale. This is slow enough
+  (a real Tokyo round trip) that it runs on its own 45-second timer rather
+  than blocking the page's poll.
+* **last backup age** — the newest file in `~/cylist-<env>/backups`.
+
+Machine-wide, it also reports disk usage. The page polls `/api/status` every
+eight seconds; the slower public-reachability check updates independently in
+the background and is served from cache.
+
+It is not deployed by CI. `scripts/cylist-dashboard.service` runs it from
+`~/cylist-dashboard`, deliberately *not* from a checkout: the self-hosted
+runner's working directory can be pointed at any branch by the dev workflow,
+and this service must not have its own code swapped out from under it because
+someone deployed something unrelated.
+
+### One-time setup
+
+```bash
+make dashboard-sync                                    # copies the two files into place
+sudo cp scripts/cylist-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cylist-dashboard
+sudo tailscale serve --bg --https 7443 http://127.0.0.1:8090
+```
+
+To pick up a change to `server.py` or `index.html`: `make dashboard-sync`,
+then `sudo systemctl restart cylist-dashboard`.
+
 ## Deploying by hand
 
 ```bash

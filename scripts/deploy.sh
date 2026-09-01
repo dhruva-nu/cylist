@@ -8,14 +8,15 @@
 #
 #   scripts/deploy.sh            production, on :8000   (the default)
 #   scripts/deploy.sh staging    staging, on :8001
+#   scripts/deploy.sh dev        dev, on :8002
 #
-# One script rather than two, because the interesting part is the order of the
-# steps and that order is not something staging should get a second, drifting
-# copy of. Only the four values below differ between the environments.
+# One script rather than three, because the interesting part is the order of
+# the steps and that order is not something staging or dev should get their own,
+# drifting copy of. Only the four values below differ between the environments.
 #
 # Reads the secrets that must not live in the repository from
-# CYLIST_PROD_DIR (default ~/cylist-prod) or CYLIST_STAGING_DIR
-# (default ~/cylist-staging):
+# CYLIST_PROD_DIR (default ~/cylist-prod), CYLIST_STAGING_DIR
+# (default ~/cylist-staging), or CYLIST_DEV_DIR (default ~/cylist-dev):
 #
 #   $SECRETS_DIR/app.env       CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH,
 #                              CYLIST_VAULT_KEY
@@ -46,8 +47,14 @@ case "$ENVIRONMENT" in
     DEFAULT_SECRETS_DIR="$HOME/cylist-staging"
     PORT=8001
     ;;
+  dev)
+    COMPOSE_FILE="docker-compose.dev.yml"
+    SECRETS_VAR="CYLIST_DEV_DIR"
+    DEFAULT_SECRETS_DIR="$HOME/cylist-dev"
+    PORT=8002
+    ;;
   *)
-    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging]" >&2
+    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging|dev]" >&2
     exit 2
     ;;
 esac

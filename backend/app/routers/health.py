@@ -7,9 +7,10 @@ process can talk to its database.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,15 @@ router = APIRouter(tags=["health"])
 class Health(Schema):
     status: Literal["ok", "degraded"]
     database: Literal["up", "down"]
+
+
+class RequestCounts(Schema):
+    since: datetime
+    total: int
+    status_2xx: int
+    status_3xx: int
+    status_4xx: int
+    status_5xx: int
 
 
 @router.get("/health", response_model=Health, summary="Service health")
@@ -41,3 +51,22 @@ async def health(
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return Health(status="degraded", database="down")
     return Health(status="ok", database="up")
+
+
+@router.get("/health/requests", response_model=RequestCounts, summary="Request counters")
+async def request_counts(request: Request) -> RequestCounts:
+    """Responses served since this process started, by status class.
+
+    Unauthenticated, like ``/health``: it reveals traffic volume and nothing
+    about its content. Counts reset on every restart — read alongside
+    ``since``, not as a running total across deploys.
+    """
+    metrics = request.app.state.metrics
+    return RequestCounts(
+        since=metrics.since,
+        total=metrics.total,
+        status_2xx=metrics.status_2xx,
+        status_3xx=metrics.status_3xx,
+        status_4xx=metrics.status_4xx,
+        status_5xx=metrics.status_5xx,
+    )
