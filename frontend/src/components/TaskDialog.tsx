@@ -1,6 +1,23 @@
 /**
  * The task dialog: every field of a card, plus its timeline.
  *
+ * Opening a card lands on a detail view. Every field of the card is text
+ * there — no input, select or textarea is rendered for any of them — so a card
+ * can be read, and read out, with no way to change it by accident. Editing is
+ * behind the pencil in the header (and the Edit button beside it in the
+ * footer); pressing either swaps the same dialog over to the form below.
+ * Cancel, Escape and the backdrop go back to the detail view rather than
+ * throwing the whole dialog away, so a mis-click costs one keystroke instead
+ * of your place on the board. A new task has nothing to read yet, so it opens
+ * straight on the form.
+ *
+ * The one control on the detail view that is not Edit or Close is the tick box
+ * beside a sub-task, and the line it sits on the right side of is *what a
+ * control changes*, not whether one exists: ticking a sub-task off settles a
+ * different item, and making that go through the pencil would mean opening a
+ * form over every field of the parent to finish something that is not the
+ * parent.
+ *
  * The status control is the interesting part. Choosing On hold or Blocked
  * reveals a reason box and a picker of people to tag, and neither the button
  * nor the server will let the change through without a reason — a red card
@@ -9,14 +26,26 @@
  * Saving may be several requests: the fields, then a move, then the status
  * change, then a comment. They go in that order so the status entry lands on a
  * card that already reads the way it will after the save.
+ *
+ * Sub-tasks come in two kinds, and both are ticked off in place — from either
+ * half of the dialog — rather than on the Save button: a checkbox that only
+ * takes effect when you remember to press Save is a checkbox that lies. A tick
+ * box settles itself; a sub-task with a card of its own is settled by being
+ * moved to the board's last column, since "done" is a place on the board. What
+ * a sub-task card's *fields* say is never edited here: "Split into a sub-task"
+ * hands the job back to the board, which opens a second dialog for the new
+ * card.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { useState, type KeyboardEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
   type BoardColumn,
+  type ChecklistItem,
+  type ChecklistState,
   type Person,
+  type Task,
   type TaskComment,
   type TaskDetail,
   type TaskInput,
@@ -24,13 +53,14 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner } from './ui'
+import { Avatar, Button, ErrorBanner, TaskRef } from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'hold', label: 'On hold' },
   { value: 'blocked', label: 'Blocked' },
+  { value: 'cancelled', label: 'Cancelled' },
 ]
 
 const TYPES: TaskType[] = ['feature', 'bug', 'chore']
@@ -39,8 +69,17 @@ interface DialogProps {
   projectKey: string
   /** Null opens the dialog for a new task, which is locked to the first column. */
   taskId: string | null
+  /**
+   * Set on a new task to make it a sub-task of that reference. Ignored when
+   * `taskId` is set: a card's parentage is decided when it is created.
+   */
+  parentRef?: string | null
   columns: BoardColumn[]
   firstColumn: BoardColumn
+  /** Opens another card in this dialog's place — a sub-task, from the list. */
+  onOpenTask?: ((taskRef: string) => void) | undefined
+  /** Asks the board to open a new-sub-task dialog under this reference. */
+  onSplit?: ((parentRef: string) => void) | undefined
   /**
    * Where to say what happened. The dialog closes on success, taking any live
    * region inside it with it before a screen reader could read one, so the
@@ -81,28 +120,210 @@ export function TaskDialog(props: DialogProps) {
     )
   }
 
-  // Remounting per task keeps the form's initial state honest: a dialog opened
-  // on a different card must not inherit the last one's half-typed edits.
-  return (
-    <TaskForm
-      key={taskId ?? 'new'}
-      {...props}
-      task={task.data ?? null}
-      members={members.data.members}
-    />
+  // Remounting per task keeps the state honest: a dialog opened on a different
+  // card must not inherit the last one's half-typed edits, nor its edit mode.
+  const detail = task.data ?? null
+  if (detail === null) {
+    return (
+      <TaskForm
+        key="new"
+        {...props}
+        task={null}
+        members={members.data.members}
+        onCancel={onClose}
+      />
+    )
+  }
+
+  return <TaskPanel key={detail.id} {...props} task={detail} members={members.data.members} />
+}
+
+/**
+ * One card: read it, then choose to edit it.
+ *
+ * The mode lives here rather than in either half, so that leaving the form
+ * unmounts it — cancelling really does discard the edits rather than leaving
+ * them parked behind a flag.
+ */
+function TaskPanel(props: DialogProps & { task: TaskDetail; members: Person[] }) {
+  const [editing, setEditing] = useState(false)
+
+  if (editing) return <TaskForm {...props} onCancel={() => setEditing(false)} />
+  return <TaskDetailView {...props} onEdit={() => setEditing(true)} />
+}
+
+/**
+ * The detail view of a card: read it, and tick its sub-tasks off.
+ *
+ * Deliberately plain markup: a card's own fields are text here, not disabled
+ * inputs. A disabled input still looks like somewhere to type and still has to
+ * be kept in sync with a form; text cannot be saved by mistake at all. Nothing
+ * on this view can alter a field of this card — Edit, Close, and the sub-task
+ * list, which finishes work that belongs to other cards. See `SubtasksRead`.
+ */
+function TaskDetailView({
+  task,
+  members,
+  columns,
+  onOpenTask,
+  announce,
+  onDone,
+  onEdit,
+  onClose,
+}: DialogProps & { task: TaskDetail; members: Person[]; onEdit: () => void }) {
+  const column = columns.find((candidate) => candidate.id === task.column_id)
+  const late = isOverdue(task.due_date)
+  const statusLabel = STATUSES.find((option) => option.value === task.status)?.label ?? task.status
+
+  const edit = (
+    <Button variant="ghost" small onClick={onEdit} aria-label="Edit task" title="Edit task">
+      ✎
+    </Button>
   )
+
+  return (
+    <Modal
+      title={task.reference}
+      onClose={onClose}
+      headerActions={edit}
+      footer={
+        <>
+          <Button onClick={onClose}>Close</Button>
+          <Button variant="go" onClick={onEdit}>
+            ✎ Edit
+          </Button>
+        </>
+      }
+    >
+      <ModalBody>
+        <h3 className={styles.readTitle}>{task.title}</h3>
+
+        <div className={styles.chips}>
+          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>
+        </div>
+
+        <ReadField label="Description">
+          <p className={styles.prose}>{task.description}</p>
+        </ReadField>
+
+        <div className={styles.readPair}>
+          <ReadField label="Assignee">
+            <span className={styles.person}>
+              <Avatar name={task.assignee.name} colour={task.assignee.colour} />
+              {task.assignee.name}
+              <span className={styles.role}>· {task.assignee.role.split(',')[0]}</span>
+            </span>
+          </ReadField>
+          <ReadField label="Due date">
+            <span className={late ? styles.late : ''}>
+              {late ? '⚠ ' : ''}
+              {formatDue(task.due_date)}
+            </span>
+          </ReadField>
+        </div>
+
+        <div className={styles.readPair}>
+          <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+          <ReadField label="Waiting on">
+            {task.waiting_on.length ? task.waiting_on.map((person) => person.name).join(', ') : '—'}
+          </ReadField>
+        </div>
+
+        {task.jira_ref || task.pr_ref ? (
+          <div className={styles.readPair}>
+            <ReadField label="Jira">
+              {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : '—'}
+            </ReadField>
+            <ReadField label="Pull request">
+              {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : '—'}
+            </ReadField>
+          </div>
+        ) : null}
+
+        <ReadField label="Sub-tasks">
+          <SubtasksRead
+            task={task}
+            columns={columns}
+            onOpenTask={onOpenTask}
+            announce={announce}
+            onDone={onDone}
+          />
+        </ReadField>
+
+        <ReadField label="Timeline">
+          <div className={styles.timeline}>
+            {task.comments.length ? (
+              task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
+            ) : (
+              <span className={styles.empty}>Nothing has happened to this card yet.</span>
+            )}
+          </div>
+        </ReadField>
+      </ModalBody>
+    </Modal>
+  )
+}
+
+/** A labelled row of the detail view. The `Field` twin for text with no input. */
+function ReadField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className={styles.readField}>
+      <span className={styles.readLabel}>{label}</span>
+      <div className={styles.readValue}>{children}</div>
+    </div>
+  )
+}
+
+/**
+ * Parse a plain `YYYY-MM-DD` as a local date.
+ *
+ * `new Date(iso)` reads it as UTC midnight, which shows as the previous day
+ * anywhere west of Greenwich — and a due date off by one is worse than none.
+ */
+function localDate(iso: string): Date {
+  const [year = 1970, month = 1, day = 1] = iso.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function formatDue(iso: string): string {
+  if (!iso) return '—'
+  return localDate(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function isOverdue(iso: string): boolean {
+  if (!iso) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return localDate(iso) < today
 }
 
 function TaskForm({
   projectKey,
+  parentRef,
   columns,
   firstColumn,
   task,
   members,
   announce,
+  onOpenTask,
+  onSplit,
   onDone,
   onClose,
-}: DialogProps & { task: TaskDetail | null; members: Person[] }) {
+  onCancel,
+}: DialogProps & {
+  task: TaskDetail | null
+  members: Person[]
+  /**
+   * Leaving the form without saving. On an existing card that is a step back
+   * to the detail view; on a new one there is nothing behind it, so it closes.
+   */
+  onCancel: () => void
+}) {
   const [form, setForm] = useState<TaskInput>({
     title: task?.title ?? '',
     description: task?.description ?? '',
@@ -134,7 +355,9 @@ function TaskForm({
       }
       const saved = task
         ? await api.updateTask(task.id, payload)
-        : await api.createTask(projectKey, payload)
+        : parentRef
+          ? await api.createSubtask(parentRef, payload)
+          : await api.createTask(projectKey, payload)
 
       // Top of the column rather than the bottom: a card moved from a dialog
       // has no place on the board the reader is already looking at.
@@ -217,8 +440,16 @@ function TaskForm({
 
   return (
     <Modal
-      title={task ? task.reference : 'New task'}
-      onClose={onClose}
+      // Escape and the backdrop mean "stop editing", which on an existing card
+      // is the detail view rather than the board.
+      title={
+        task
+          ? `${task.reference} · editing`
+          : parentRef
+            ? `New sub-task of ${parentRef}`
+            : 'New task'
+      }
+      onClose={onCancel}
       footer={
         <>
           {task ? (
@@ -232,9 +463,15 @@ function TaskForm({
               Delete
             </Button>
           ) : null}
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onCancel}>Cancel</Button>
           <Button variant="go" disabled={save.isPending || !complete} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving…' : task ? 'Save changes' : 'Create task'}
+            {save.isPending
+              ? 'Saving…'
+              : task
+                ? 'Save changes'
+                : parentRef
+                  ? 'Create sub-task'
+                  : 'Create task'}
           </Button>
         </>
       }
@@ -316,7 +553,7 @@ function TaskForm({
             <input
               value={form.jira_ref ?? ''}
               onChange={(event) => setForm({ ...form, jira_ref: event.target.value })}
-              placeholder="ATL-00"
+              placeholder="ATL-00 or a URL"
             />
           </Field>
           <Field label="Pull request">
@@ -381,6 +618,17 @@ function TaskForm({
               @name&rdquo;.
             </small>
           </div>
+        ) : null}
+
+        {task ? (
+          <Subtasks
+            task={task}
+            columns={columns}
+            onOpenTask={onOpenTask}
+            onSplit={onSplit}
+            announce={announce}
+            onDone={onDone}
+          />
         ) : null}
 
         <Field label="Comments">
@@ -478,6 +726,406 @@ function Entry({ entry, members }: { entry: TaskComment; members: Person[] }) {
         </div>
         {entry.body}
       </div>
+    </div>
+  )
+}
+
+const CHECKLIST_LABELS: Record<ChecklistState, string> = {
+  open: 'Open',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
+
+/**
+ * Ticking a sub-task off, shared by the detail view and the form.
+ *
+ * Two kinds of sub-task settle two different ways. A tick box has a state of
+ * its own. A sub-task with a card is finished by being moved to the board's
+ * last column, because "done" is a place on this board and not a field — the
+ * same rule the server enforces when it refuses a parent whose sub-tasks are
+ * still open.
+ *
+ * One hook rather than a copy in each list, so the two cannot drift: whichever
+ * half of the dialog you are looking at, ticking means the same thing.
+ */
+function useSubtaskTicking({
+  task,
+  announce,
+  onDone,
+}: {
+  task: TaskDetail
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const queryClient = useQueryClient()
+
+  async function refresh() {
+    await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    await onDone()
+  }
+
+  const setState = useMutation({
+    mutationFn: ({ id, state }: { id: string; state: ChecklistState }) =>
+      api.updateChecklistItem(id, { state }),
+    onSuccess: async (item) => {
+      announce(`${item.title} is ${CHECKLIST_LABELS[item.state].toLowerCase()}.`)
+      await refresh()
+    },
+  })
+
+  // Position 0, as every move made from a dialog is: a card dropped at the
+  // bottom of a column lands somewhere the reader cannot see.
+  const setColumn = useMutation({
+    mutationFn: ({ child, column }: { child: Task; column: BoardColumn }) =>
+      api.moveTask(child.id, column.id, 0),
+    onSuccess: async (moved, { column }) => {
+      announce(`${moved.reference} moved to ${column.name}.`)
+      await refresh()
+    },
+  })
+
+  return { refresh, setState, setColumn }
+}
+
+/**
+ * One sub-task that has a card of its own, in either list.
+ *
+ * The tick box is the point of it: the reason to be looking at this list is to
+ * see what is left, and a list you have to leave in order to finish anything
+ * is a list that gets left. Ticking is a move, so the label names the column —
+ * a checkbox that silently relocates a card on the board behind the dialog
+ * would be worse than no checkbox at all. Unticking returns the card to the
+ * first column, which is the only honest destination: where it sat before it
+ * was ticked is recorded nowhere.
+ */
+function SubtaskCardRow({
+  child,
+  column,
+  finishedColumn,
+  firstColumn,
+  busy,
+  onOpen,
+  onMove,
+}: {
+  child: Task
+  /** The column the card is in now, if the board still has it. */
+  column: BoardColumn | undefined
+  finishedColumn: BoardColumn | undefined
+  firstColumn: BoardColumn | undefined
+  busy: boolean
+  onOpen: () => void
+  onMove: (column: BoardColumn) => void
+}) {
+  const finished = finishedColumn !== undefined && child.column_id === finishedColumn.id
+  const target = finished ? firstColumn : finishedColumn
+  const status = STATUSES.find((option) => option.value === child.status)
+
+  return (
+    <div className={`${styles.subtaskRow} ${finished ? styles.settled : ''}`}>
+      <input
+        type="checkbox"
+        checked={finished}
+        disabled={busy || target === undefined}
+        aria-label={
+          target === undefined
+            ? `${child.reference} cannot be moved`
+            : finished
+              ? `${child.reference} is done. Reopen it into ${target.name}.`
+              : `Mark ${child.reference} done by moving it to ${target.name}.`
+        }
+        onChange={() => {
+          if (target) onMove(target)
+        }}
+      />
+      {/* The button is the whole of the rest of the row rather than the
+          reference alone: the title is what the eye lands on, and a link you
+          have to aim at is a link you misclick. It cannot wrap the tick box —
+          one control does not go inside another. */}
+      <button type="button" className={styles.subOpen} onClick={onOpen}>
+        <span className={styles.subRef}>{child.reference}</span>
+        <span className={styles.subTitle}>{child.title}</span>
+      </button>
+      {/* The column, because that is what the tick box just changed — the
+          status only replaces it when it is the more urgent of the two. */}
+      <span className={styles.subState}>
+        {child.status === 'active' ? column?.name : status?.label}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Both kinds of sub-task, on the card they belong to.
+ *
+ * The tick boxes save on the spot rather than on the dialog's Save button: a
+ * checkbox that quietly waits for a second, unrelated button is a checkbox
+ * that has already lied to whoever ticked it. The cards do not save here at
+ * all — splitting hands the job back to the board, which opens a fresh dialog
+ * for the new card, because a sub-task needs every field a card needs.
+ */
+function Subtasks({
+  task,
+  columns,
+  onOpenTask,
+  onSplit,
+  announce,
+  onDone,
+}: {
+  task: TaskDetail
+  /** The board's columns, in order — the last of them is what "done" means. */
+  columns: BoardColumn[]
+  onOpenTask?: ((taskRef: string) => void) | undefined
+  onSplit?: ((parentRef: string) => void) | undefined
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const [title, setTitle] = useState('')
+  const { refresh, setState, setColumn } = useSubtaskTicking({ task, announce, onDone })
+
+  const add = useMutation({
+    mutationFn: (text: string) => api.addChecklistItem(task.id, text),
+    onSuccess: async (item) => {
+      announce(`Added ${item.title} to the checklist.`)
+      setTitle('')
+      await refresh()
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteChecklistItem(id),
+    onSuccess: refresh,
+  })
+
+  const error = add.error ?? setState.error ?? remove.error ?? setColumn.error
+  const outstanding = task.open_subtask_count
+  const busy = setState.isPending || setColumn.isPending || remove.isPending
+  const finishedColumn = columns[columns.length - 1]
+  const firstColumn = columns[0]
+
+  return (
+    <Field label="Sub-tasks">
+      {error ? <ErrorBanner>{error.message}</ErrorBanner> : null}
+
+      <div className={styles.subtasks}>
+        {task.subtasks.map((child) => (
+          <SubtaskCardRow
+            key={child.id}
+            child={child}
+            column={columns.find((option) => option.id === child.column_id)}
+            finishedColumn={finishedColumn}
+            firstColumn={firstColumn}
+            busy={busy}
+            onOpen={() => onOpenTask?.(child.reference)}
+            onMove={(column) => setColumn.mutate({ child, column })}
+          />
+        ))}
+
+        {task.checklist.map((item) => (
+          <ChecklistRow
+            key={item.id}
+            item={item}
+            busy={busy}
+            onSetState={(state) => setState.mutate({ id: item.id, state })}
+            onRemove={() => remove.mutate(item.id)}
+          />
+        ))}
+
+        {task.subtasks.length === 0 && task.checklist.length === 0 ? (
+          <span className={styles.empty}>No sub-tasks.</span>
+        ) : null}
+
+        <div className={styles.composer}>
+          <input
+            value={title}
+            aria-label="Add a checklist item"
+            maxLength={200}
+            onChange={(event) => setTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && title.trim()) {
+                event.preventDefault()
+                add.mutate(title.trim())
+              }
+            }}
+            placeholder="Add a checklist item…"
+          />
+          <Button
+            small
+            disabled={!title.trim() || add.isPending}
+            onClick={() => add.mutate(title.trim())}
+          >
+            Add
+          </Button>
+        </div>
+
+        {/* A sub-task cannot be split again: the board would stop being one. */}
+        {task.parent_id === null ? (
+          <Button small variant="ghost" onClick={() => onSplit?.(task.reference)}>
+            + Split into a sub-task with its own card
+          </Button>
+        ) : (
+          <small>
+            A sub-task of{' '}
+            <button
+              type="button"
+              className={styles.parentLink}
+              onClick={() => onOpenTask?.(task.parent_reference ?? '')}
+            >
+              {task.parent_reference}
+            </button>
+            . Sub-tasks go one level deep.
+          </small>
+        )}
+
+        {outstanding ? (
+          <small className={styles.gate}>
+            {outstanding} still open. Every sub-task has to be finished or cancelled before this
+            card can move to {'the board’s last column'}.
+          </small>
+        ) : null}
+      </div>
+    </Field>
+  )
+}
+
+/**
+ * Both kinds of sub-task, on the detail view.
+ *
+ * The twin of `Subtasks`, and it ticks. Everything else here is text, because
+ * a card should be readable without being editable — but finishing a sub-task
+ * is not editing this card. It is settling a different item, which is the
+ * whole reason to be looking at the list, and requiring the pencil for it
+ * would mean opening a form over every field of the parent in order to tick
+ * one box that belongs to something else.
+ *
+ * So the line is drawn at what a control changes rather than at whether there
+ * is one: nothing on this view can alter the card's own fields, and the two
+ * things it can do — tick a sub-task off, open one — are both about the
+ * sub-tasks. Adding, retitling, cancelling and deleting them stay behind the
+ * pencil with everything else.
+ */
+function SubtasksRead({
+  task,
+  columns,
+  onOpenTask,
+  announce,
+  onDone,
+}: {
+  task: TaskDetail
+  /** The board's columns, in order — the last of them is what "done" means. */
+  columns: BoardColumn[]
+  onOpenTask?: ((taskRef: string) => void) | undefined
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const { setState, setColumn } = useSubtaskTicking({ task, announce, onDone })
+
+  const outstanding = task.open_subtask_count
+  const error = setState.error ?? setColumn.error
+  const busy = setState.isPending || setColumn.isPending
+  const finishedColumn = columns[columns.length - 1]
+  const firstColumn = columns[0]
+
+  return (
+    <div className={styles.subtasks}>
+      {error ? <ErrorBanner>{error.message}</ErrorBanner> : null}
+
+      {task.subtasks.map((child) => (
+        <SubtaskCardRow
+          key={child.id}
+          child={child}
+          column={columns.find((option) => option.id === child.column_id)}
+          finishedColumn={finishedColumn}
+          firstColumn={firstColumn}
+          busy={busy}
+          onOpen={() => onOpenTask?.(child.reference)}
+          onMove={(column) => setColumn.mutate({ child, column })}
+        />
+      ))}
+
+      {task.checklist.map((item) => (
+        <ChecklistRow
+          key={item.id}
+          item={item}
+          busy={busy}
+          onSetState={(state) => setState.mutate({ id: item.id, state })}
+        />
+      ))}
+
+      {task.subtasks.length === 0 && task.checklist.length === 0 ? (
+        <span className={styles.empty}>No sub-tasks.</span>
+      ) : null}
+
+      {task.parent_id === null ? null : (
+        <small>
+          A sub-task of{' '}
+          <button
+            type="button"
+            className={styles.parentLink}
+            onClick={() => onOpenTask?.(task.parent_reference ?? '')}
+          >
+            {task.parent_reference}
+          </button>
+          . Sub-tasks go one level deep.
+        </small>
+      )}
+
+      {outstanding ? (
+        <small className={styles.gate}>
+          {outstanding} still open. Every sub-task has to be finished or cancelled before this card
+          can move to {'the board\u2019s last column'}.
+        </small>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * One tick box: ticked, cancelled, put back, or removed outright.
+ *
+ * Without `onRemove` it is only the tick box — which is the detail view, where
+ * settling an item is fair game and rewriting the list is not.
+ */
+function ChecklistRow({
+  item,
+  busy,
+  onSetState,
+  onRemove,
+}: {
+  item: ChecklistItem
+  busy: boolean
+  onSetState: (state: ChecklistState) => void
+  onRemove?: (() => void) | undefined
+}) {
+  const settled = item.state !== 'open'
+
+  return (
+    <div className={`${styles.checkRow} ${settled ? styles.settled : ''}`}>
+      <label className={styles.checkLabel}>
+        <input
+          type="checkbox"
+          checked={item.state === 'done'}
+          disabled={busy}
+          onChange={(event) => onSetState(event.target.checked ? 'done' : 'open')}
+        />
+        <span className={item.state === 'cancelled' ? styles.struck : ''}>{item.title}</span>
+      </label>
+      {onRemove ? (
+        <span className={styles.checkActions}>
+          <Button
+            small
+            variant="ghost"
+            disabled={busy}
+            onClick={() => onSetState(item.state === 'cancelled' ? 'open' : 'cancelled')}
+          >
+            {item.state === 'cancelled' ? 'Reopen' : 'Cancel'}
+          </Button>
+          <Button small variant="ghost" danger disabled={busy} onClick={onRemove}>
+            Delete
+          </Button>
+        </span>
+      ) : (
+        <span className={styles.subState}>{CHECKLIST_LABELS[item.state]}</span>
+      )}
     </div>
   )
 }

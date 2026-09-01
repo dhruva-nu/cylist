@@ -196,6 +196,20 @@
   background: var(--blocked);
 }
 
+/* No tint and a grey rail: a cancelled card is finished with, not urgent. */
+.cancelled {
+  background: var(--paper-2);
+}
+
+.cancelled::before {
+  background: var(--ink-3);
+}
+
+.cancelled .title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
 .taskRow {
   display: flex;
   gap: 8px;
@@ -212,6 +226,27 @@
   font-family: var(--font-mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+/* The card's own reference and its parent's, together at the head of the card.
+   Sub-tasks are the only cards with two, so the pair only ever appears where
+   it means something. */
+.refs {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+/* --ink-2 like .reference, and for the same reason: this rides on cards that
+   may be tinted amber or red, where the quietest ink stops clearing AA. The
+   word "of" carries the relationship, so the colour does not have to. */
+.parent {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .title {
@@ -265,6 +300,10 @@
   color: var(--blocked);
 }
 
+.pill_cancelled {
+  color: var(--ink-3);
+}
+
 .waiting {
   display: flex;
   flex-wrap: wrap;
@@ -286,6 +325,13 @@
   /* Tinted cards again — see .reference. */
   color: var(--ink-2);
   font-size: 12px;
+}
+
+/* Amber, because this is the number that will refuse the card at the last
+   column — the only count on a card that is a rule rather than a fact. */
+.open {
+  color: var(--hold);
+  font-weight: 600;
 }
 
 .trailing {

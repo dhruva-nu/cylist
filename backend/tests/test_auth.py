@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
 
 from app.auth.dependencies import SESSION_COOKIE
 from app.auth.passwords import hash_password, needs_rehash, verify_password
-from tests.conftest import OWNER_PASSWORD
+from app.config import Settings
+from app.db import Database
+from tests.conftest import OWNER_PASSWORD, client_for
 
 
 class TestPasswordHashing:
@@ -58,6 +61,31 @@ class TestLogin:
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "validation_failed"
+
+    @pytest.mark.parametrize(
+        ("environment", "secure"),
+        [("dev", False), ("test", False), ("staging", True), ("prod", True)],
+    )
+    async def test_marks_the_cookie_secure_wherever_https_terminates(
+        self,
+        settings: Settings,
+        database: Database,
+        environment: str,
+        secure: bool,
+    ) -> None:
+        """Staging is served over HTTPS like production, so it is Secure too.
+
+        Getting this wrong fails silently in the direction that matters: a
+        Secure cookie sent over plain HTTP is dropped by the browser, and the
+        only symptom is a login that returns 200 and then does not stick.
+        """
+        deployed = settings.model_copy(update={"environment": environment})
+
+        async with client_for(deployed, database) as http:
+            response = await http.post("/auth/login", json={"password": OWNER_PASSWORD})
+
+        assert response.status_code == 200
+        assert ("secure" in response.headers["set-cookie"].lower()) is secure
 
 
 class TestIdentity:

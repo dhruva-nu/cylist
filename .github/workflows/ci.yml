@@ -2,15 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Superseded pull request runs are worth cancelling. A run on main is not: it
-  # ends in a deploy, and a deploy cancelled between `alembic upgrade` and the
-  # container restart leaves the server in a state nobody chose.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Superseded pull request runs are worth cancelling. A run that ends in a
+  # deploy is not: a deploy cancelled between `alembic upgrade` and the
+  # container restart leaves the server in a state nobody chose. That is as true
+  # of staging as of main.
+  cancel-in-progress: >-
+    ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging' }}
 
 env:
   CYLIST_DATABASE_URL: postgresql+asyncpg://cylist:cylist@localhost:5432/cylist_test
@@ -160,3 +162,23 @@ jobs:
       # waits for /api/v1/health. The same script deploys by hand over SSH.
       - name: Deploy
         run: scripts/deploy.sh
+
+  # Staging, from the `staging` branch, onto the same machine on :8001. The same
+  # script and the same steps as production — only the argument differs, so the
+  # thing staging rehearses is the deploy production will actually get.
+  deploy-staging:
+    name: Deploy staging to dnu-home-1
+    needs: [backend, agents, frontend]
+    # Only the staging branch, and only a real push: a pull request targeting
+    # staging must not put anything on the server.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: [self-hosted, cylist]
+    environment:
+      name: staging
+      url: https://dnu-home-1.tail222f46.ts.net:8443
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Deploy
+        run: scripts/deploy.sh staging

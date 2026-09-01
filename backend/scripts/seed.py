@@ -72,13 +72,20 @@ from app.db import Database
 from app.models.file import Blob, FileItem, Folder, ItemSource
 from app.models.person import Person, PersonKind
 from app.models.project import Project
-from app.models.task import Task, TaskStatus, TaskType
+from app.models.task import ChecklistState, Task, TaskStatus, TaskType
 from app.models.vault import VaultNodeKind, VaultSecret, VaultTree
 from app.schemas.columns import ColumnCreate, ColumnUpdate
 from app.schemas.files import FolderCreate, LinkCreate
 from app.schemas.people import PersonCreate
 from app.schemas.projects import ProjectCreate
-from app.schemas.tasks import CommentCreate, TaskCreate, TaskMove, TaskStatusChange
+from app.schemas.tasks import (
+    ChecklistItemCreate,
+    ChecklistItemUpdate,
+    CommentCreate,
+    TaskCreate,
+    TaskMove,
+    TaskStatusChange,
+)
 from app.schemas.vault import SecretCreate, VaultNodeCreate, VaultTreeCreate
 from app.services import columns, files, people, projects, tasks, vault
 from app.storage import BlobStore, LocalBlobStore
@@ -107,6 +114,20 @@ class PersonSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SubtaskSpec:
+    """A sub-task with a card of its own, numbered under its parent."""
+
+    title: str
+    description: str
+    type: TaskType
+    due_date: date
+    assignee: str
+    column: int
+    status: TaskStatus = TaskStatus.ACTIVE
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class TaskSpec:
     number: int
     title: str
@@ -123,6 +144,12 @@ class TaskSpec:
     comments: tuple[tuple[str, str], ...] = ()
     """``(author handle, body)``, added after any status change, which is the
     order the mock shows them in."""
+
+    subtasks: tuple[SubtaskSpec, ...] = ()
+    """Sub-tasks with their own cards, in the order they are numbered."""
+
+    checklist: tuple[tuple[str, ChecklistState], ...] = ()
+    """``(title, state)`` tick boxes, top to bottom."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +333,10 @@ ATLAS = ProjectSpec(
             column=0,
             jira_ref="ATL-41",
             comments=(("ak", "Can we keep amounts as integer minor units?"),),
+            checklist=(
+                ("Agree the amount representation with finance", ChecklistState.OPEN),
+                ("Write the schema down in the runbook", ChecklistState.OPEN),
+            ),
         ),
         TaskSpec(
             number=38,
@@ -331,6 +362,32 @@ ATLAS = ProjectSpec(
             jira_ref="ATL-35",
             pr_ref="#212",
             comments=(("dn", "Repro is in the ticket, happens on retries after 5xx."),),
+            # Two kinds of sub-task on one card, which is the point of them:
+            # the dedupe store needs an owner and a date, telling support does
+            # not. Neither lets ATL-35 reach Done until it is settled.
+            subtasks=(
+                SubtaskSpec(
+                    title="Event id store with a 30-day window",
+                    description="Persist delivered event ids and reject a repeat inside 30 days.",
+                    type=TaskType.FEATURE,
+                    due_date=date(2026, 8, 26),
+                    assignee="ak",
+                    column=1,
+                ),
+                SubtaskSpec(
+                    title="Replay the four double-charged invoices",
+                    description="Credit the duplicates found in the August reconciliation.",
+                    type=TaskType.CHORE,
+                    due_date=date(2026, 8, 28),
+                    assignee="rs",
+                    column=2,
+                ),
+            ),
+            checklist=(
+                ("Tell support before the fix ships", ChecklistState.DONE),
+                ("Add the dedupe counter to the Grafana board", ChecklistState.OPEN),
+                ("Backport to the 2.3 branch", ChecklistState.CANCELLED),
+            ),
         ),
         TaskSpec(
             number=33,
@@ -972,6 +1029,13 @@ async def _write_tasks(
         )
         filled[task_spec.column] = position + 1
 
+    # After the parents are placed, so a sub-task never lands on top of the
+    # card it belongs to.
+    for task_spec in spec.tasks:
+        await _write_subtasks(
+            session, project, created[task_spec.number], task_spec, board, directory, summary
+        )
+
 
 async def _write_task(
     session: AsyncSession,
@@ -1017,8 +1081,53 @@ async def _write_task(
     for author, body in spec.comments:
         await tasks.comment(session, task, CommentCreate(body=body, author_id=directory[author]))
 
+    for title, state in spec.checklist:
+        item = await tasks.add_checklist_item(session, task, ChecklistItemCreate(title=title))
+        if state is not ChecklistState.OPEN:
+            await tasks.update_checklist_item(session, item, ChecklistItemUpdate(state=state))
+
     summary.tasks += 1
     return task
+
+
+async def _write_subtasks(
+    session: AsyncSession,
+    project: Project,
+    parent: Task,
+    spec: TaskSpec,
+    board: list[UUID],
+    directory: dict[str, UUID],
+    summary: Summary,
+) -> None:
+    """Give a card its own cards, numbered ATL-35-1, ATL-35-2, …
+
+    Moved to the bottom of their column rather than to a chosen position: they
+    are drawn wherever the board has room for them, and the mock has no opinion
+    about where a sub-task sits among its parent's neighbours.
+    """
+    for sub_spec in spec.subtasks:
+        subtask = await tasks.create(
+            session,
+            project,
+            TaskCreate(
+                title=sub_spec.title,
+                description=sub_spec.description,
+                type=sub_spec.type,
+                due_date=sub_spec.due_date,
+                assignee_id=directory[sub_spec.assignee],
+            ),
+            parent=parent,
+        )
+        if sub_spec.status is not TaskStatus.ACTIVE:
+            await tasks.change_status(
+                session,
+                subtask,
+                TaskStatusChange(status=sub_spec.status, reason=sub_spec.reason),
+            )
+        await tasks.move(
+            session, subtask, TaskMove(column_id=board[sub_spec.column], position=10_000)
+        )
+        summary.tasks += 1
 
 
 async def _write_files(
@@ -1163,10 +1272,11 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
     name = make_url(url).database or "?"
     print(f"Seeding {_redacted(url)}")
 
-    if settings.is_production:
+    if settings.is_deployed:
         print(
-            "\nThis is a production environment (CYLIST_ENVIRONMENT=prod). The seed "
-            "writes fictional projects and credentials, so it refuses to run here.",
+            f"\nThis is a deployed environment (CYLIST_ENVIRONMENT={settings.environment}). "
+            "The seed writes fictional projects and credentials, so it refuses to "
+            "run here.",
             file=sys.stderr,
         )
         return 1

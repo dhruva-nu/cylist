@@ -44,7 +44,15 @@ import { api, type Board, type BoardColumn, type ColumnInput, type Task } from '
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
-import { Avatar, Button, EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../components/ui'
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  ErrorBanner,
+  LiveRegion,
+  TaskRef,
+  useAnnouncer,
+} from '../components/ui'
 import styles from './ProjectBoard.module.css'
 
 /**
@@ -176,6 +184,8 @@ export function ProjectBoard() {
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [creatingTask, setCreatingTask] = useState(false)
+  /** The parent a new sub-task is being written under, if one is. */
+  const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
   const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
@@ -330,6 +340,22 @@ export function ProjectBoard() {
         />
       ) : null}
 
+      {/* One dialog at a time, never stacked: the sub-task's card needs every
+          field a card needs, and a form drawn on top of the form it came from
+          is two Save buttons with no way to tell which one is which. */}
+      {splitting && firstColumn ? (
+        <TaskDialog
+          projectKey={projectKey}
+          taskId={null}
+          parentRef={splitting}
+          columns={columns}
+          firstColumn={firstColumn}
+          announce={announce}
+          onDone={refresh}
+          onClose={() => setSplitting(null)}
+        />
+      ) : null}
+
       {openTaskId && firstColumn ? (
         <TaskDialog
           projectKey={projectKey}
@@ -337,6 +363,11 @@ export function ProjectBoard() {
           columns={columns}
           firstColumn={firstColumn}
           announce={announce}
+          onOpenTask={setOpenTaskId}
+          onSplit={(parentRef) => {
+            setOpenTaskId(null)
+            setSplitting(parentRef)
+          }}
           onDone={refresh}
           onClose={() => setOpenTaskId(null)}
         />
@@ -448,7 +479,12 @@ function Column({
   )
 }
 
-const STATUS_LABELS = { active: 'Active', hold: 'On hold', blocked: 'Blocked' } as const
+const STATUS_LABELS = {
+  active: 'Active',
+  hold: 'On hold',
+  blocked: 'Blocked',
+  cancelled: 'Cancelled',
+} as const
 
 function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
@@ -472,14 +508,29 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
         }
         listeners?.onKeyDown?.(event)
       }}
-      aria-label={`${task.reference}: ${task.title}`}
+      aria-label={
+        task.parent_reference
+          ? `${task.reference}: ${task.title}, a sub-task of ${task.parent_reference}`
+          : `${task.reference}: ${task.title}`
+      }
       style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : {}}
       className={[styles.task, styles[task.status], isDragging && styles.dragging]
         .filter(Boolean)
         .join(' ')}
     >
       <div className={styles.taskRow}>
-        <span className={styles.reference}>{task.reference}</span>
+        <span className={styles.refs}>
+          <span className={styles.reference}>{task.reference}</span>
+          {/* A sub-task's own reference already carries its parent's number,
+              but `ATL-41-2` only says so to a reader who knows the scheme —
+              and on a board, where the two cards may be columns apart, the
+              parent is the thing you need to recognise the card at all. */}
+          {task.parent_reference ? (
+            <span className={styles.parent} title={`Sub-task of ${task.parent_reference}`}>
+              of {task.parent_reference}
+            </span>
+          ) : null}
+        </span>
         {task.status === 'active' ? (
           <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
         ) : (
@@ -504,9 +555,16 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
 
       <div className={styles.taskRow}>
         <div className={styles.links}>
-          {task.jira_ref ? <span>⌗ {task.jira_ref}</span> : null}
-          {task.pr_ref ? <span>⎇ {task.pr_ref}</span> : null}
+          {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : null}
+          {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : null}
           {task.comment_count ? <span>✎ {task.comment_count}</span> : null}
+          {/* The one number on a card that can stop it moving: while it is
+              above zero the server refuses the last column. */}
+          {task.open_subtask_count ? (
+            <span className={styles.open} title={`${task.open_subtask_count} sub-tasks still open`}>
+              ☑ {task.open_subtask_count}
+            </span>
+          ) : null}
         </div>
         <span className={styles.trailing}>
           <span className={`${styles.due} ${late ? styles.late : ''}`}>

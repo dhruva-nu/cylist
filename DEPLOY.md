@@ -160,6 +160,92 @@ happening again.
 still serving. Fix the migration and deploy again, or restore the dump
 `deploy.sh` took moments earlier; see *Rolling back*.
 
+## Staging
+
+Staging runs on the same machine, from the **`staging` branch**, on **:8001** —
+served at <https://dnu-home-1.tail222f46.ts.net:8443>, on the tailnet only. It
+is not funnelled to the public internet the way production is.
+
+It is deliberately production's shape, not development's: the same
+`backend/Dockerfile` `runtime` image, the same one-container deploy, the same
+`scripts/deploy.sh` — only the argument differs.
+
+```bash
+make staging-deploy     # build, migrate, restart          (scripts/deploy.sh staging)
+make staging-refresh    # reload it from production's data
+make staging-logs       # follow it
+make staging-ps         # what is running
+```
+
+Push to `staging` and CI does the deploy for you, on the same self-hosted
+runner, gated on the same three test jobs.
+
+### What differs from production, and why
+
+| | production | staging |
+| --- | --- | --- |
+| compose project | `cylist-prod` | `cylist-staging` |
+| image tag | `cylist:latest` | `cylist:staging` |
+| port | `127.0.0.1:8000` | `127.0.0.1:8001` |
+| served at | `:443`, funnelled publicly | `:8443`, tailnet only |
+| secrets | `~/cylist-prod` | `~/cylist-staging` |
+| `CYLIST_ENVIRONMENT` | `prod` | `staging` |
+
+Two of those are load-bearing rather than cosmetic:
+
+**The image tag.** Staging builds `cylist:staging`, never `cylist:latest`. If
+both wrote the same tag, a staging build would move the tag production restarts
+from, and the next `docker compose up` in production would silently adopt
+staging's code.
+
+**`CYLIST_ENVIRONMENT=staging`.** The app treats `staging` and `prod` alike
+wherever being *deployed* is what matters — `Settings.is_deployed`. It issues
+the session cookie `Secure`, because both sit behind `tailscale serve` and are
+reached over HTTPS; and `make seed` refuses to run, because staging holds real
+rows. Only `Settings.is_production` still means production alone.
+
+> A `Secure` cookie is dropped by the browser over plain HTTP, and the symptom
+> is a login that returns 200 and then does not stick. Reach staging through
+> its HTTPS address, not `http://127.0.0.1:8001` directly.
+
+### Staging holds production's data
+
+`make staging-refresh` replaces staging's database *and* its uploaded blobs with
+a copy taken from production at that moment — the two move together, or staging
+ends up with file rows pointing at blobs it does not have. Production is only
+read: `pg_dump`, and a read-only mount of its data volume.
+
+That has a consequence worth being explicit about:
+
+> **Staging's secrets are production's secrets.** The dump carries real vault
+> ciphertext, so `~/cylist-staging/app.env` must hold the **production**
+> `CYLIST_VAULT_KEY` for any of it to decrypt. That irreplaceable key now exists
+> in two directories on this machine. Staging's password hash and database
+> password are its own; the vault key cannot be.
+
+If you would rather staging not hold real secrets, give it its own vault key and
+seed it instead of refreshing — `make seed` against a staging database with
+`CYLIST_ENVIRONMENT=dev`. Then vault entries restored from production will not
+decrypt, which is the trade.
+
+### One-time setup
+
+```
+~/cylist-staging/
+  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY
+  postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+  backups/       the dumps staging deploys leave behind
+```
+
+Both files `chmod 600`, as production's are. Then put it on the tailnet:
+
+```bash
+sudo tailscale serve --bg --https 8443 http://127.0.0.1:8001
+```
+
+`serve` and not `funnel`: staging is reachable from your devices, and from
+nowhere else.
+
 ## Deploying by hand
 
 ```bash

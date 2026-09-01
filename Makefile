@@ -12,8 +12,10 @@ UV       := uv --project $(BACKEND)
 
 .DEFAULT_GOAL := help
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
-        up down logs image deploy prod-logs prod-ps migrate-check test lint \
-        format typecheck check seed backup hash-password vault-key clean
+        up down logs image deploy prod-logs prod-ps staging-deploy \
+        staging-refresh staging-logs staging-ps staging-down migrate-check \
+        test lint format typecheck check seed backup hash-password vault-key \
+        clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -69,6 +71,33 @@ prod-logs: ## Follow the production app's logs
 
 prod-ps: ## Show what the production stack is running
 	$(PROD) ps
+
+# --- Staging, on the same machine -------------------------------------------
+# Staging is production's shape with production's data: the same image built the
+# same way, the same one-container deploy, restored from a production dump by
+# `staging-refresh`. It listens on :8001, and CI deploys it on every push to the
+# `staging` branch.
+#
+# Because it is restored from production it holds real vault ciphertext, and its
+# app.env carries the production vault key. Its secrets are production secrets.
+
+CYLIST_STAGING_DIR ?= $(HOME)/cylist-staging
+STAGING := CYLIST_STAGING_DIR=$(CYLIST_STAGING_DIR) docker compose -f docker-compose.staging.yml
+
+staging-deploy: ## Build, migrate and restart the staging stack on this machine
+	scripts/deploy.sh staging
+
+staging-refresh: ## Replace staging's database and files with a copy of production
+	scripts/staging-refresh.sh
+
+staging-logs: ## Follow the staging app's logs
+	$(STAGING) logs -f app
+
+staging-ps: ## Show what the staging stack is running
+	$(STAGING) ps
+
+staging-down: ## Stop the staging stack and remove its containers (volumes kept)
+	$(STAGING) down
 
 migrate-check: ## Prove migrations match the models and reverse cleanly
 	cd $(BACKEND) && CYLIST_DATABASE_URL=$(TEST_DATABASE_URL) \

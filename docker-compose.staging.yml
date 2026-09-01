@@ -1,0 +1,83 @@
+# The staging stack, alongside production on dnu-home-1.
+#
+#   scripts/deploy.sh staging     builds, migrates and restarts it
+#   make staging-refresh          reloads it from the latest production dump
+#   make staging-logs             follows it
+#
+# The same two containers as production, and deliberately the same shape: one
+# image serving the API and the built SPA, Postgres with no published port. A
+# staging environment that is not built like production tests the wrong thing.
+#
+# What differs from docker-compose.prod.yml is only what has to:
+#
+#   * the compose project name, so the two stacks' containers and volumes never
+#     collide on a machine that runs both;
+#   * the image tag — `cylist:staging`, not `cylist:latest`. Building staging
+#     must not move the tag production restarts from, or the next `docker
+#     compose up` in production would silently adopt staging's code;
+#   * port 8001, because production holds 8000;
+#   * CYLIST_ENVIRONMENT=staging, which the app treats as deployed: the session
+#     cookie is issued Secure, and `make seed` refuses to run.
+#
+# Staging is restored from production dumps, so it holds real vault ciphertext
+# and needs the *production* vault key to read it. Its secrets are no less
+# sensitive than production's — see DEPLOY.md.
+
+name: cylist-staging
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      # POSTGRES_PASSWORD, and the user and database the app connects as.
+      - ${CYLIST_STAGING_DIR:?set CYLIST_STAGING_DIR to the directory holding app.env and postgres.env}/postgres.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      # The root, because this image builds the SPA as well as the API.
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    # Not cylist:latest. See the note at the top of this file.
+    image: cylist:staging
+    env_file:
+      # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY.
+      #
+      # Raw, because an argon2 hash is full of `$` and compose would otherwise
+      # read `$argon2id$v=19$...` as three empty variables and blank the
+      # password out from under you.
+      - path: ${CYLIST_STAGING_DIR:?set CYLIST_STAGING_DIR to the directory holding app.env and postgres.env}/app.env
+        format: raw
+    environment:
+      CYLIST_ENVIRONMENT: staging
+      CYLIST_DATA_DIR: /data
+      CYLIST_WEB_DIR: /app/web
+      # Empty on purpose, as in production: the SPA is served by this same
+      # process, so every request is same-origin and no CORS middleware is
+      # installed at all.
+      CYLIST_CORS_ORIGINS: "[]"
+    ports:
+      # Loopback only, and 8001 rather than production's 8000. `tailscale serve
+      # --https 8443` terminates HTTPS in front of it; nothing else should reach
+      # it directly.
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - cylist-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  # Named for this project (cylist-staging), so production's data is a
+  # different volume entirely and no staging command can reach it.
+  postgres-data:
+  cylist-data:

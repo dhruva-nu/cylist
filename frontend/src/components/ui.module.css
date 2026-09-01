@@ -145,3 +145,14 @@
   color: var(--blocked);
   font-size: 14px;
 }
+
+/* Underlined, not just tinted: this sits in a row of plain counts on a card
+   that may be tinted amber or red, and --link is not far enough from --ink-2
+   there to be the only thing saying which one you can follow. */
+.taskRef {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
