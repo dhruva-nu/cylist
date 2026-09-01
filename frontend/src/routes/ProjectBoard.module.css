@@ -105,6 +105,33 @@
   justify-content: space-between;
 }
 
+/* Grip rather than the whole header: buttons inside the header still need to
+   be their own click targets, not the start of a drag. */
+.dragHandle {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragHandle:hover {
+  color: var(--ink-2);
+  background: var(--paper-2);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.columnDragging {
+  opacity: 0.5;
+}
+
 .headRow h3 {
   font-size: 17px;
 }

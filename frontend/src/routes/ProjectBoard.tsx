@@ -228,6 +228,29 @@ export function ProjectBoard() {
     onSettled: refresh,
   })
 
+  const boardKey = ['board', projectKey]
+
+  const reorderColumns = useMutation<Board, Error, string[], { previous: Board | undefined }>({
+    mutationFn: (columnIds) => api.reorderColumns(projectKey, columnIds),
+    onMutate: async (columnIds) => {
+      await queryClient.cancelQueries({ queryKey: boardKey })
+      const previous = queryClient.getQueryData<Board>(boardKey)
+      queryClient.setQueryData<Board>(boardKey, (current) => {
+        if (!current) return current
+        const byId = new Map(current.columns.map((column) => [column.id, column]))
+        const reordered = columnIds
+          .map((id) => byId.get(id))
+          .filter((column): column is BoardColumn => column !== undefined)
+        return { ...current, columns: reordered }
+      })
+      return { previous }
+    },
+    onError: (_error, _columnIds, context) => {
+      queryClient.setQueryData(boardKey, context?.previous)
+    },
+    onSettled: refresh,
+  })
+
   // A short drag threshold so a card can still be clicked open: without it
   // every press would start a drag and no click would ever land.
   const sensors = useSensors(
@@ -244,33 +267,66 @@ export function ProjectBoard() {
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
   for (const task of tasks.data) byColumn.get(task.column_id)?.push(task)
 
-  const nameOfTask = (id: UniqueIdentifier) =>
-    tasks.data?.find((task) => task.id === id)?.title ?? 'the card'
+  // A column's own draggable id is prefixed to keep it out of the task id
+  // namespace — the two are otherwise both plain UUIDs.
+  const columnDragPrefix = 'column:'
+  const isColumnDrag = (id: UniqueIdentifier) =>
+    typeof id === 'string' && id.startsWith(columnDragPrefix)
+
+  const nameOfDragged = (id: UniqueIdentifier) =>
+    isColumnDrag(id)
+      ? nameOfColumnId(String(id).slice(columnDragPrefix.length))
+      : (tasks.data?.find((task) => task.id === id)?.title ?? 'the card')
+  const nameOfColumnId = (id: string) =>
+    columns.find((column) => column.id === id)?.name ?? 'the column'
   const nameOfColumn = (id: UniqueIdentifier | undefined) =>
-    columns.find((column) => column.id === id)?.name ?? 'nowhere'
+    typeof id === 'string' ? nameOfColumnId(id) : 'nowhere'
 
   // Spoken by dnd-kit's own live region, so a keyboard drag is followed rather
-  // than merely performed.
+  // than merely performed. Shared between task cards and column handles: both
+  // drag over the same set of column drop targets, so one set of wording
+  // covers either, naming whichever is actually being moved.
   const announcements: Announcements = {
     onDragStart: ({ active }) =>
-      `Picked up ${nameOfTask(active.id)}. Use the left and right arrow keys to choose a column.`,
+      `Picked up ${nameOfDragged(active.id)}. Use the left and right arrow keys to choose a column.`,
     onDragOver: ({ active, over }) =>
-      over ? `${nameOfTask(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
+      over ? `${nameOfDragged(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
     onDragEnd: ({ active, over }) =>
       over
-        ? `Dropped ${nameOfTask(active.id)} into ${nameOfColumn(over.id)}.`
-        : `${nameOfTask(active.id)} was left where it was.`,
-    onDragCancel: ({ active }) => `Cancelled. ${nameOfTask(active.id)} is back where it was.`,
+        ? isColumnDrag(active.id)
+          ? `${nameOfDragged(active.id)} moved next to ${nameOfColumn(over.id)}.`
+          : `Dropped ${nameOfDragged(active.id)} into ${nameOfColumn(over.id)}.`
+        : `${nameOfDragged(active.id)} was left where it was.`,
+    onDragCancel: ({ active }) => `Cancelled. ${nameOfDragged(active.id)} is back where it was.`,
+  }
+
+  function moveColumnTo(fromIndex: number, toIndex: number) {
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= columns.length || fromIndex === toIndex) return
+    const reordered = [...columns]
+    const [moved] = reordered.splice(fromIndex, 1)
+    if (!moved) return
+    reordered.splice(toIndex, 0, moved)
+    reorderColumns.mutate(reordered.map((column) => column.id))
+    announce(`${moved.name} moved ${toIndex < fromIndex ? 'left' : 'right'}.`)
   }
 
   function onDragEnd(event: DragEndEvent) {
-    const columnId = event.over?.id
-    if (typeof columnId !== 'string') return
+    const overId = event.over?.id
+    if (typeof overId !== 'string') return
+
+    if (isColumnDrag(event.active.id)) {
+      const columnId = String(event.active.id).slice(columnDragPrefix.length)
+      moveColumnTo(
+        columns.findIndex((column) => column.id === columnId),
+        columns.findIndex((column) => column.id === overId),
+      )
+      return
+    }
 
     const task = tasks.data?.find((candidate) => candidate.id === event.active.id)
-    if (!task || task.column_id === columnId) return
+    if (!task || task.column_id === overId) return
 
-    move.mutate({ taskId: task.id, columnId, position: byColumn.get(columnId)?.length ?? 0 })
+    move.mutate({ taskId: task.id, columnId: overId, position: byColumn.get(overId)?.length ?? 0 })
   }
 
   return (
@@ -278,6 +334,7 @@ export function ProjectBoard() {
       <PageHead title="Kanban board">
         Cards enter at the first column and move wherever the work does. Colour flags anything on
         hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys.
+        Drag a column by its ⠿ handle to reorder it, or use the ← → buttons in its header.
       </PageHead>
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
@@ -293,12 +350,13 @@ export function ProjectBoard() {
         onDragEnd={onDragEnd}
       >
         <div className={styles.board}>
-          {columns.map((column) => (
+          {columns.map((column, index) => (
             <Column
               key={column.id}
               column={column}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
+              isLast={index === columns.length - 1}
               collapsed={collapsed.includes(column.id)}
               onToggleCollapse={() => {
                 toggle(column.id)
@@ -311,6 +369,8 @@ export function ProjectBoard() {
               onOpenTask={setOpenTaskId}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
+              onMoveLeft={() => moveColumnTo(index, index - 1)}
+              onMoveRight={() => moveColumnTo(index, index + 1)}
             />
           ))}
           <AddColumnTile board={board.data} onClick={() => setColumnDialog('new')} />
@@ -386,28 +446,52 @@ function Column({
   column,
   tasks,
   isFirst,
+  isLast,
   collapsed,
   onToggleCollapse,
   onOpenTask,
   onAddTask,
   onEdit,
+  onMoveLeft,
+  onMoveRight,
 }: {
   column: BoardColumn
   tasks: Task[]
   isFirst: boolean
+  isLast: boolean
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onAddTask: () => void
   onEdit: () => void
+  onMoveLeft: () => void
+  onMoveRight: () => void
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id })
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
+  // A column is draggable on the whole card (so it visually moves as one
+  // piece) but only the handle carries the listeners — otherwise every
+  // button in the header would start a drag instead of doing its own job.
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: `column:${column.id}` })
   const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
+
+  const setRefs = (node: HTMLElement | null) => {
+    setDropRef(node)
+    setDragRef(node)
+  }
+  const dragStyle = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : undefined
 
   if (collapsed) {
     return (
       <section
-        ref={setNodeRef}
+        ref={setDropRef}
         className={`${styles.rail} ${isOver ? styles.over : ''}`}
         aria-label={`${column.name}, ${counted}, collapsed`}
       >
@@ -436,15 +520,46 @@ function Column({
 
   return (
     <section
-      ref={setNodeRef}
-      className={`${styles.column} ${isOver ? styles.over : ''}`}
+      ref={setRefs}
+      style={dragStyle}
+      className={[styles.column, isOver && styles.over, isDragging && styles.columnDragging]
+        .filter(Boolean)
+        .join(' ')}
       aria-label={`${column.name}, ${counted}`}
     >
       <div className={styles.head}>
         <div className={styles.headRow}>
+          <button
+            type="button"
+            className={styles.dragHandle}
+            {...attributes}
+            {...listeners}
+            aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
+            title="Drag to reorder"
+          >
+            ⠿
+          </button>
           <h3>{column.name}</h3>
           <span className={styles.headActions}>
             <span className={styles.count}>{tasks.length}</span>
+            <Button
+              variant="ghost"
+              small
+              disabled={isFirst}
+              onClick={onMoveLeft}
+              aria-label={`Move ${column.name} left`}
+            >
+              ←
+            </Button>
+            <Button
+              variant="ghost"
+              small
+              disabled={isLast}
+              onClick={onMoveRight}
+              aria-label={`Move ${column.name} right`}
+            >
+              →
+            </Button>
             <Button
               variant="ghost"
               small
