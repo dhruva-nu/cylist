@@ -205,18 +205,28 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Fixed height, tall enough for the thumb: the row must not jump as the
-   current stage moves along it. */
+/* Fixed height, so the row does not jump as the current stage moves along it,
+   and 20px of it, because a 4px bar is not something anyone can be asked to
+   hit. The segment is the target and takes the track's whole height; the bar
+   you can see is drawn inside it. */
 .subStatusTrack {
   display: flex;
   gap: 3px;
   align-items: center;
-  height: 12px;
+  height: 20px;
 }
 
 .subStatusSegment {
+  display: flex;
   flex: 1;
+  align-items: center;
   min-width: 5px;
+  height: 100%;
+}
+
+.subStatusSegment::before {
+  content: '';
+  width: 100%;
   height: 4px;
   border-radius: 999px;
   background: var(--line-2);
@@ -225,19 +235,27 @@
     background-color 120ms ease;
 }
 
-.subStatusDone {
+/* Finished. Without a colour ramp — every finished stage is the same green,
+   because "done" is not a matter of degree. */
+.subStatusDone::before {
   background: var(--go);
 }
 
 /*
  * The thumb: a slider's handle, stretched to the width of the stage it sits
- * on. One segment taller than the rest is the whole of what the bar has to
- * say, and it says it without a colour ramp — every finished stage is the
- * same green, because "done" is not a matter of degree.
+ * on. Ink rather than the green behind it, because the stage in hand is the
+ * one being worked, not one finished — a green thumb said a card had already
+ * done the stage it had only just reached, and said it loudest on a new card,
+ * where the very first stage came up looking complete.
+ *
+ * Ink rather than an accent, too: every other colour on a card means a status,
+ * and gold next to amber "on hold" would be a fourth thing to learn. A dark
+ * marker on a track that runs green behind it and grey ahead of it needs no
+ * learning at all.
  */
-.subStatusHere {
+.subStatusHere::before {
   height: 12px;
-  background: var(--go);
+  background: var(--ink);
 }
 
 .subStatusTrackLive .subStatusSegment {
@@ -246,16 +264,20 @@
 
 /* Half-way to the thumb's height: enough to say "this one would take the
    handle" without pretending it already has. */
-.subStatusTrackLive .subStatusSegment:hover {
+.subStatusTrackLive .subStatusSegment:hover::before {
   height: 8px;
 }
 
-/* The thumb is already as tall as it gets — it only darkens, to say that
-   clicking the stage you are on is a no-op rather than a dead control. */
-.subStatusTrackLive .subStatusDone:hover,
-.subStatusTrackLive .subStatusHere:hover {
+/* Already as tall as they get. Done darkens, to say that clicking a stage
+   behind you is a real move back; the thumb does not, because clicking where
+   you already are is a no-op. */
+.subStatusTrackLive .subStatusDone:hover::before {
   height: 12px;
   background: var(--go-hover);
+}
+
+.subStatusTrackLive .subStatusHere:hover::before {
+  height: 12px;
 }
 
 /*
@@ -264,7 +286,7 @@
  * takes it. Half strength rather than a second hue, because there is no third
  * state to name — this is the same green, not yet earned.
  */
-.subStatusTrackLive .subStatusAhead {
+.subStatusTrackLive .subStatusAhead::before {
   height: 8px;
   background: var(--go);
   opacity: 0.45;
