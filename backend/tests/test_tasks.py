@@ -70,6 +70,29 @@ class TestCreating:
         assert task["assignee"]["name"] == "Aditi K"
         assert task["comments"] == []
 
+    async def test_priority_defaults_to_someday(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person)
+
+        assert task["priority"] == "someday"
+
+    async def test_priority_can_be_set_on_creation(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person, priority="urgent")
+
+        assert task["priority"] == "urgent"
+
+    async def test_an_unknown_priority_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks", json=_task(person, priority="whenever")
+        )
+
+        assert response.status_code == 422
+
     async def test_lands_in_the_first_column(self, signed_in: AsyncClient) -> None:
         """Work enters a board at one end. Only moving is unrestricted."""
         person = await _setup(signed_in)
@@ -278,6 +301,15 @@ class TestUpdating:
 
         assert updated["title"] == "Dedupe webhooks"
         assert updated["description"] == task["description"]
+
+    async def test_priority_can_be_changed(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        assert task["priority"] == "someday"
+
+        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"priority": "asap"})).json()
+
+        assert updated["priority"] == "asap"
 
     async def test_the_assignee_can_be_handed_over(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

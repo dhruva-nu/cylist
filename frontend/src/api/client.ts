@@ -75,6 +75,8 @@ export interface ProjectSummary extends Project {
 }
 
 export type TaskType = 'feature' | 'bug' | 'chore'
+/** How soon a task needs attention. `urgent` is 0, `someday` is 3 — the default. */
+export type TaskPriority = 'urgent' | 'asap' | 'week' | 'someday'
 export type TaskStatus = 'active' | 'hold' | 'blocked' | 'cancelled'
 /** Where one tick-box sub-task has got to. `done` and `cancelled` both settle it. */
 export type ChecklistState = 'open' | 'done' | 'cancelled'
@@ -147,6 +149,7 @@ export interface Task {
   title: string
   description: string
   type: TaskType
+  priority: TaskPriority
   due_date: string
   assignee: Person
   status: TaskStatus
@@ -174,6 +177,7 @@ export interface TaskInput {
   title: string
   description: string
   type: TaskType
+  priority: TaskPriority
   due_date: string
   assignee_id: string
   jira_ref: string | null

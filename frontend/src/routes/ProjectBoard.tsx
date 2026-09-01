@@ -40,7 +40,23 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Board, type BoardColumn, type ColumnInput, type Task } from '../api/client'
+import {
+  api,
+  type Board,
+  type BoardColumn,
+  type ColumnInput,
+  type Person,
+  type Task,
+} from '../api/client'
+import {
+  activeToken,
+  applySuggestion,
+  filterTasks,
+  parseQuery,
+  suggestionsFor,
+  tokenize,
+  type Suggestion,
+} from './boardSearch'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
@@ -187,6 +203,7 @@ export function ProjectBoard() {
   /** The parent a new sub-task is being written under, if one is. */
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
+  const [search, setSearch] = useState('')
   const { collapsed, toggle } = useCollapsedColumns(projectKey)
   const { message, announce } = useAnnouncer()
 
@@ -197,6 +214,12 @@ export function ProjectBoard() {
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
     queryFn: () => api.listTasks(projectKey),
+  })
+  // Needed for `who:` search matches and its autocomplete, not for rendering
+  // the board itself — every card already carries its own assignee.
+  const members = useQuery({
+    queryKey: ['members', projectKey],
+    queryFn: () => api.listMembers(projectKey),
   })
 
   const tasksKey = ['tasks', projectKey]
@@ -228,6 +251,29 @@ export function ProjectBoard() {
     onSettled: refresh,
   })
 
+  const boardKey = ['board', projectKey]
+
+  const reorderColumns = useMutation<Board, Error, string[], { previous: Board | undefined }>({
+    mutationFn: (columnIds) => api.reorderColumns(projectKey, columnIds),
+    onMutate: async (columnIds) => {
+      await queryClient.cancelQueries({ queryKey: boardKey })
+      const previous = queryClient.getQueryData<Board>(boardKey)
+      queryClient.setQueryData<Board>(boardKey, (current) => {
+        if (!current) return current
+        const byId = new Map(current.columns.map((column) => [column.id, column]))
+        const reordered = columnIds
+          .map((id) => byId.get(id))
+          .filter((column): column is BoardColumn => column !== undefined)
+        return { ...current, columns: reordered }
+      })
+      return { previous }
+    },
+    onError: (_error, _columnIds, context) => {
+      queryClient.setQueryData(boardKey, context?.previous)
+    },
+    onSettled: refresh,
+  })
+
   // A short drag threshold so a card can still be clicked open: without it
   // every press would start a drag and no click would ever land.
   const sensors = useSensors(
@@ -241,36 +287,75 @@ export function ProjectBoard() {
 
   const columns = board.data.columns
   const firstColumn = columns[0]
-  const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
-  for (const task of tasks.data) byColumn.get(task.column_id)?.push(task)
+  const memberList = members.data?.members ?? []
 
-  const nameOfTask = (id: UniqueIdentifier) =>
-    tasks.data?.find((task) => task.id === id)?.title ?? 'the card'
+  // Client-side, over what's already fetched: the board holds every task in
+  // memory regardless, and a search endpoint would be a second way to ask a
+  // question this data already answers.
+  const visibleTasks = filterTasks(tasks.data, parseQuery(tokenize(search)), columns, memberList)
+  const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
+  for (const task of visibleTasks) byColumn.get(task.column_id)?.push(task)
+
+  // A column's own draggable id is prefixed to keep it out of the task id
+  // namespace — the two are otherwise both plain UUIDs.
+  const columnDragPrefix = 'column:'
+  const isColumnDrag = (id: UniqueIdentifier) =>
+    typeof id === 'string' && id.startsWith(columnDragPrefix)
+
+  const nameOfDragged = (id: UniqueIdentifier) =>
+    isColumnDrag(id)
+      ? nameOfColumnId(String(id).slice(columnDragPrefix.length))
+      : (tasks.data?.find((task) => task.id === id)?.title ?? 'the card')
+  const nameOfColumnId = (id: string) =>
+    columns.find((column) => column.id === id)?.name ?? 'the column'
   const nameOfColumn = (id: UniqueIdentifier | undefined) =>
-    columns.find((column) => column.id === id)?.name ?? 'nowhere'
+    typeof id === 'string' ? nameOfColumnId(id) : 'nowhere'
 
   // Spoken by dnd-kit's own live region, so a keyboard drag is followed rather
-  // than merely performed.
+  // than merely performed. Shared between task cards and column handles: both
+  // drag over the same set of column drop targets, so one set of wording
+  // covers either, naming whichever is actually being moved.
   const announcements: Announcements = {
     onDragStart: ({ active }) =>
-      `Picked up ${nameOfTask(active.id)}. Use the left and right arrow keys to choose a column.`,
+      `Picked up ${nameOfDragged(active.id)}. Use the left and right arrow keys to choose a column.`,
     onDragOver: ({ active, over }) =>
-      over ? `${nameOfTask(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
+      over ? `${nameOfDragged(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
     onDragEnd: ({ active, over }) =>
       over
-        ? `Dropped ${nameOfTask(active.id)} into ${nameOfColumn(over.id)}.`
-        : `${nameOfTask(active.id)} was left where it was.`,
-    onDragCancel: ({ active }) => `Cancelled. ${nameOfTask(active.id)} is back where it was.`,
+        ? isColumnDrag(active.id)
+          ? `${nameOfDragged(active.id)} moved next to ${nameOfColumn(over.id)}.`
+          : `Dropped ${nameOfDragged(active.id)} into ${nameOfColumn(over.id)}.`
+        : `${nameOfDragged(active.id)} was left where it was.`,
+    onDragCancel: ({ active }) => `Cancelled. ${nameOfDragged(active.id)} is back where it was.`,
+  }
+
+  function moveColumnTo(fromIndex: number, toIndex: number) {
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= columns.length || fromIndex === toIndex) return
+    const reordered = [...columns]
+    const [moved] = reordered.splice(fromIndex, 1)
+    if (!moved) return
+    reordered.splice(toIndex, 0, moved)
+    reorderColumns.mutate(reordered.map((column) => column.id))
+    announce(`${moved.name} moved ${toIndex < fromIndex ? 'left' : 'right'}.`)
   }
 
   function onDragEnd(event: DragEndEvent) {
-    const columnId = event.over?.id
-    if (typeof columnId !== 'string') return
+    const overId = event.over?.id
+    if (typeof overId !== 'string') return
+
+    if (isColumnDrag(event.active.id)) {
+      const columnId = String(event.active.id).slice(columnDragPrefix.length)
+      moveColumnTo(
+        columns.findIndex((column) => column.id === columnId),
+        columns.findIndex((column) => column.id === overId),
+      )
+      return
+    }
 
     const task = tasks.data?.find((candidate) => candidate.id === event.active.id)
-    if (!task || task.column_id === columnId) return
+    if (!task || task.column_id === overId) return
 
-    move.mutate({ taskId: task.id, columnId, position: byColumn.get(columnId)?.length ?? 0 })
+    move.mutate({ taskId: task.id, columnId: overId, position: byColumn.get(overId)?.length ?? 0 })
   }
 
   return (
@@ -278,10 +363,13 @@ export function ProjectBoard() {
       <PageHead title="Kanban board">
         Cards enter at the first column and move wherever the work does. Colour flags anything on
         hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys.
+        Drag a column by its ⠿ handle to reorder it, or use the ← → buttons in its header.
       </PageHead>
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
+
+      <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
 
       <DndContext
         sensors={sensors}
@@ -293,12 +381,13 @@ export function ProjectBoard() {
         onDragEnd={onDragEnd}
       >
         <div className={styles.board}>
-          {columns.map((column) => (
+          {columns.map((column, index) => (
             <Column
               key={column.id}
               column={column}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
+              isLast={index === columns.length - 1}
               collapsed={collapsed.includes(column.id)}
               onToggleCollapse={() => {
                 toggle(column.id)
@@ -311,6 +400,8 @@ export function ProjectBoard() {
               onOpenTask={setOpenTaskId}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
+              onMoveLeft={() => moveColumnTo(index, index - 1)}
+              onMoveRight={() => moveColumnTo(index, index + 1)}
             />
           ))}
           <AddColumnTile board={board.data} onClick={() => setColumnDialog('new')} />
@@ -376,6 +467,96 @@ export function ProjectBoard() {
   )
 }
 
+/**
+ * The board's search box: free text plus `col:`, `who:`, `blk:` and `hld:`
+ * tags (see `boardSearch.ts`). Typing `col:` or `who:` opens a suggestion
+ * list of the matching columns or people — arrow keys to move through it,
+ * enter or a click to accept, escape to dismiss it without losing the token
+ * being typed.
+ */
+function SearchBar({
+  query,
+  onChange,
+  columns,
+  members,
+}: {
+  query: string
+  onChange: (query: string) => void
+  columns: BoardColumn[]
+  members: Person[]
+}) {
+  const [highlighted, setHighlighted] = useState(0)
+  const [dismissed, setDismissed] = useState(false)
+  const suggestions = dismissed ? [] : suggestionsFor(activeToken(query), columns, members)
+
+  function pick(suggestion: Suggestion) {
+    onChange(applySuggestion(query, suggestion))
+    setHighlighted(0)
+  }
+
+  return (
+    <div className={styles.search}>
+      <input
+        type="text"
+        value={query}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setDismissed(false)
+          setHighlighted(0)
+        }}
+        onKeyDown={(event) => {
+          if (!suggestions.length) return
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setHighlighted((current) => (current + 1) % suggestions.length)
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setHighlighted((current) => (current - 1 + suggestions.length) % suggestions.length)
+          } else if (event.key === 'Enter') {
+            const choice = suggestions[highlighted]
+            if (choice) {
+              event.preventDefault()
+              pick(choice)
+            }
+          } else if (event.key === 'Escape') {
+            setDismissed(true)
+          }
+        }}
+        placeholder='Search, or tag it: col:"In progress"  who:Aditi  blk:  hld:'
+        aria-label="Search tasks"
+        aria-autocomplete="list"
+        aria-expanded={suggestions.length > 0}
+      />
+      {suggestions.length ? (
+        <ul className={styles.suggestions} role="listbox">
+          {suggestions.map((suggestion, index) => (
+            <li key={`${suggestion.kind}:${suggestion.value}`} role="presentation">
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === highlighted}
+                className={index === highlighted ? styles.suggestionActive : ''}
+                // mousedown, not click: click fires after the input's blur, by
+                // which point the list has already unmounted for having lost
+                // focus, and the pick never happens.
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  pick(suggestion)
+                }}
+              >
+                <span className={styles.suggestionKind}>
+                  {suggestion.kind === 'column' ? 'Column' : 'Assignee'}
+                </span>
+                {suggestion.value}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 interface Move {
   taskId: string
   columnId: string
@@ -386,28 +567,52 @@ function Column({
   column,
   tasks,
   isFirst,
+  isLast,
   collapsed,
   onToggleCollapse,
   onOpenTask,
   onAddTask,
   onEdit,
+  onMoveLeft,
+  onMoveRight,
 }: {
   column: BoardColumn
   tasks: Task[]
   isFirst: boolean
+  isLast: boolean
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onAddTask: () => void
   onEdit: () => void
+  onMoveLeft: () => void
+  onMoveRight: () => void
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id })
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
+  // A column is draggable on the whole card (so it visually moves as one
+  // piece) but only the handle carries the listeners — otherwise every
+  // button in the header would start a drag instead of doing its own job.
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: `column:${column.id}` })
   const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
+
+  const setRefs = (node: HTMLElement | null) => {
+    setDropRef(node)
+    setDragRef(node)
+  }
+  const dragStyle = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : undefined
 
   if (collapsed) {
     return (
       <section
-        ref={setNodeRef}
+        ref={setDropRef}
         className={`${styles.rail} ${isOver ? styles.over : ''}`}
         aria-label={`${column.name}, ${counted}, collapsed`}
       >
@@ -436,15 +641,46 @@ function Column({
 
   return (
     <section
-      ref={setNodeRef}
-      className={`${styles.column} ${isOver ? styles.over : ''}`}
+      ref={setRefs}
+      style={dragStyle}
+      className={[styles.column, isOver && styles.over, isDragging && styles.columnDragging]
+        .filter(Boolean)
+        .join(' ')}
       aria-label={`${column.name}, ${counted}`}
     >
       <div className={styles.head}>
         <div className={styles.headRow}>
+          <button
+            type="button"
+            className={styles.dragHandle}
+            {...attributes}
+            {...listeners}
+            aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
+            title="Drag to reorder"
+          >
+            ⠿
+          </button>
           <h3>{column.name}</h3>
           <span className={styles.headActions}>
             <span className={styles.count}>{tasks.length}</span>
+            <Button
+              variant="ghost"
+              small
+              disabled={isFirst}
+              onClick={onMoveLeft}
+              aria-label={`Move ${column.name} left`}
+            >
+              ←
+            </Button>
+            <Button
+              variant="ghost"
+              small
+              disabled={isLast}
+              onClick={onMoveRight}
+              aria-label={`Move ${column.name} right`}
+            >
+              →
+            </Button>
             <Button
               variant="ghost"
               small
@@ -484,6 +720,13 @@ const STATUS_LABELS = {
   hold: 'On hold',
   blocked: 'Blocked',
   cancelled: 'Cancelled',
+} as const
+
+const PRIORITY_LABELS = {
+  urgent: 'Urgent',
+  asap: 'ASAP',
+  week: 'This week',
+  someday: 'Someday',
 } as const
 
 function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
@@ -531,13 +774,23 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
             </span>
           ) : null}
         </span>
-        {task.status === 'active' ? (
-          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
-        ) : (
-          <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
-            {STATUS_LABELS[task.status]}
-          </span>
-        )}
+        <span className={styles.badges}>
+          {/* Someday is the baseline every card starts on, so flagging it too
+              would just be noise on every single card — the same reasoning
+              that keeps the status pill off an active task. */}
+          {task.priority !== 'someday' ? (
+            <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
+              {PRIORITY_LABELS[task.priority]}
+            </span>
+          ) : null}
+          {task.status === 'active' ? (
+            <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          ) : (
+            <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
+              {STATUS_LABELS[task.status]}
+            </span>
+          )}
+        </span>
       </div>
 
       <div className={styles.title}>{task.title}</div>

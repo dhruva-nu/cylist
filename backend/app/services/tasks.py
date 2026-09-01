@@ -88,6 +88,7 @@ async def create(
         title=data.title,
         description=data.description,
         type=data.type,
+        priority=data.priority,
         due_date=data.due_date,
         assignee_id=data.assignee_id,
         status=TaskStatus.ACTIVE,

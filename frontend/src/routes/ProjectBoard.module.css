@@ -1,3 +1,66 @@
+.search {
+  position: relative;
+  width: min(420px, 100%);
+  margin: 0 6px 12px;
+}
+
+.search input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.suggestions {
+  position: absolute;
+  z-index: 5;
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+
+  /* Long enough to need it, short enough that the list never reaches past
+     the fold on a small window. */
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.suggestions button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestions button:hover,
+.suggestionActive {
+  background: var(--brand-soft);
+}
+
+.suggestionKind {
+  padding: 1px 7px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .board {
   display: flex;
   gap: 16px;
@@ -103,6 +166,33 @@
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Grip rather than the whole header: buttons inside the header still need to
+   be their own click targets, not the start of a drag. */
+.dragHandle {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragHandle:hover {
+  color: var(--ink-2);
+  background: var(--paper-2);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.columnDragging {
+  opacity: 0.5;
 }
 
 .headRow h3 {
@@ -279,6 +369,27 @@
 
 .type_chore {
   color: var(--ink-2);
+}
+
+/* The type/status chip's neighbour on the right of a card, and the priority
+   chip beside it when there is one. */
+.badges {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.priority_urgent {
+  color: var(--priority-urgent);
+}
+
+.priority_asap {
+  color: var(--priority-asap);
+}
+
+.priority_week {
+  color: var(--priority-week);
 }
 
 /* Deliberately paper-backed rather than tinted: the card behind it is already

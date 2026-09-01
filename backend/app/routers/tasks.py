@@ -89,6 +89,7 @@ def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
         title=task.title,
         description=task.description,
         type=task.type,
+        priority=task.priority,
         due_date=task.due_date,
         assignee=PersonRead.model_validate(task.assignee),
         status=task.status,

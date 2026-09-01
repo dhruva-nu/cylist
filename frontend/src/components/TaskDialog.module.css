@@ -239,6 +239,22 @@
   color: var(--ink-2);
 }
 
+.priority_urgent {
+  color: var(--priority-urgent);
+}
+
+.priority_asap {
+  color: var(--priority-asap);
+}
+
+.priority_week {
+  color: var(--priority-week);
+}
+
+.priority_someday {
+  color: var(--priority-someday);
+}
+
 .state_active {
   border-color: var(--ok);
   background: var(--ok-soft);
