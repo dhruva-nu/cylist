@@ -125,6 +125,16 @@ def test_task_show_renders_the_timeline_with_names_not_ids(run: Runner) -> None:
     assert fake_api.LENA_ID not in result.out
 
 
+def test_task_history_says_what_changed_and_who_changed_it(run: Runner) -> None:
+    result = run("task", "history", "ATL-2")
+    assert result.code == 0
+    assert "Changed the due date and assignee." in result.out
+    assert "due date: 2026-03-01 -> 2026-04-01" in result.out
+    # An agent's work must not read as a person's.
+    assert "board-tidy agent (agent)" in result.out
+    assert "Web session\n" in result.out
+
+
 def test_task_new_resolves_the_assignee_and_normalises_the_date(
     run: Runner, recorder: fake_api.Recorder
 ) -> None:

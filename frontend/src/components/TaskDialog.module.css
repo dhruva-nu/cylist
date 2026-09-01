@@ -498,3 +498,125 @@
   color: var(--hold);
   font-weight: 600;
 }
+
+/* --- The card's history -----------------------------------------------------
+   Quieter than the timeline above it, and set apart from it: the timeline is
+   the conversation, and this is the record. Somebody reading a card wants the
+   first; somebody checking a card wants the second. */
+
+.history {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* Left as a `list-item` on purpose: giving a summary any other display drops
+   the disclosure triangle in Chrome and Safari, and a section that opens with
+   no sign that it opens is a section nobody opens. */
+.historySummary {
+  cursor: pointer;
+}
+
+.historyTitle {
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.historyHint {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.historyEntry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 11px;
+  border-left: 2px solid var(--line-2);
+  font-size: 14px;
+}
+
+.historyLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
+}
+
+/* The sentence wraps; the timestamp does not. A date broken over two lines
+   costs more width than it saves. */
+.historyLine .when {
+  flex: none;
+  white-space: nowrap;
+}
+
+.historyWho {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+/* An agent acts through the same API as the browser, so the record is the only
+   thing that can say a person did not do this. */
+.agent {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+}
+
+.change {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.change dt {
+  flex: none;
+  min-width: 92px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-weight: 700;
+}
+
+.change dd {
+  margin: 0;
+  /* A long value wraps rather than widening the dialog: the record is read
+     down the left edge, and a line that runs off the side is not read at all. */
+  overflow-wrap: anywhere;
+}
+
+.was {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.now {
+  color: var(--ink);
+  font-weight: 600;
+}

@@ -193,6 +193,33 @@ TIMELINE = [
     },
 ]
 
+TASK_HISTORY = [
+    {
+        "id": "0192f3c4-0011-7000-8000-000000000001",
+        "occurred_at": "2026-02-06T09:15:00Z",
+        "actor_label": "board-tidy agent",
+        "channel": "api",
+        "verb": "task.updated",
+        "summary": "Changed the due date and assignee.",
+        "changes": [
+            {"field": "due_date", "label": "due date", "from": "2026-03-01", "to": "2026-04-01"},
+            {"field": "assignee", "label": "assignee", "from": "Aditi K", "to": "Rohan S"},
+        ],
+        "payload": {"reference": "ATL-2"},
+    },
+    {
+        "id": "0192f3c4-0011-7000-8000-000000000002",
+        "occurred_at": "2026-02-05T08:00:00Z",
+        "actor_label": "Web session",
+        "channel": "web",
+        "verb": "task.created",
+        "summary": "Created this task.",
+        "changes": [],
+        "payload": {"reference": "ATL-2"},
+    },
+]
+
+
 FOLDER_TREE = [
     {
         "id": CONTRACTS_ID,
@@ -390,6 +417,8 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         created = {**TASK_ONE, "title": body["title"], "comments": []}
         return httpx.Response(201, json=created)
 
+    if path.endswith("/history") and method == "GET":
+        return httpx.Response(200, json=TASK_HISTORY)
     if path in {"/tasks/ATL-1", f"/tasks/{TASK_ONE_ID}"}:
         return httpx.Response(200, json={**TASK_ONE, "comments": []})
     if path in {"/tasks/ATL-2", f"/tasks/{TASK_TWO_ID}"}:

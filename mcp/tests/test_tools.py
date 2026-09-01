@@ -18,6 +18,7 @@ EXPECTED_TOOLS = {
     "get_project",
     "list_tasks",
     "get_task",
+    "read_task_history",
     "create_task",
     "create_subtask",
     "add_checklist_item",
@@ -126,6 +127,19 @@ async def test_list_files_walks_a_path(server: MCPServer) -> None:
     result = await call(server, "list_files", project="ATL", path="Contracts/2026")
     assert not result.is_error
     assert result.data["items"][0]["name"] == "Signed MSA"
+
+
+async def test_read_task_history_says_what_changed_and_who_changed_it(
+    server: MCPServer,
+) -> None:
+    result = await call(server, "read_task_history", task="ATL-2")
+
+    assert not result.is_error
+    entry = result.data["history"][0]
+    assert entry["summary"] == "Moved from To do to In progress."
+    assert entry["actor_label"] == "board-tidy agent"
+    assert entry["channel"] == "api"
+    assert entry["changes"][0]["from"] == "To do"
 
 
 async def test_read_activity_passes_the_project_key_straight_through(

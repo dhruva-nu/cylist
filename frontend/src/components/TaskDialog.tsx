@@ -27,6 +27,10 @@
  * change, then a comment. They go in that order so the status entry lands on a
  * card that already reads the way it will after the save.
  *
+ * Under the timeline sits the card's history: what was changed, when, and who
+ * changed it. Closed until asked for, and read from the server's own wording
+ * rather than reconstructed here — see `History`.
+ *
  * Sub-tasks come in two kinds, and both are ticked off in place — from either
  * half of the dialog — rather than on the Save button: a checkbox that only
  * takes effect when you remember to press Save is a checkbox that lies. A tick
@@ -48,6 +52,7 @@ import {
   type Task,
   type TaskComment,
   type TaskDetail,
+  type TaskHistoryEntry,
   type TaskInput,
   type TaskPriority,
   type TaskStatus,
@@ -280,13 +285,125 @@ function TaskDetailView({
             {task.comments.length ? (
               task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
             ) : (
-              <span className={styles.empty}>Nothing has happened to this card yet.</span>
+              <span className={styles.empty}>Nothing has been said about this card yet.</span>
             )}
           </div>
         </ReadField>
+
+        <History taskId={task.id} />
       </ModalBody>
     </Modal>
   )
+}
+
+/**
+ * What has been done to this card: every change, when, and who made it.
+ *
+ * The counterpart to the timeline above it, and deliberately not merged into
+ * it. The timeline is what people *said*; this is what was *done* — and the
+ * two are read for different reasons. Someone scrolling a card to catch up
+ * wants the conversation; someone asking "why does this say Thursday now?"
+ * wants the record, and interleaving the two buries each in the other.
+ *
+ * Closed to begin with, and not fetched until it is opened. A card that has
+ * been worked on for a month carries a long record that nobody opened the
+ * dialog to read, and paying for it on every open would slow down the common
+ * case to serve the rare one.
+ *
+ * The wording comes from the server rather than from a verb-to-sentence map
+ * here, so the board, the CLI and an agent reading the API all tell the same
+ * story. This side only decides what the record looks like.
+ */
+function History({ taskId }: { taskId: string }) {
+  const [open, setOpen] = useState(false)
+
+  const history = useQuery({
+    queryKey: ['task-history', taskId],
+    queryFn: () => api.getTaskHistory(taskId),
+    enabled: open,
+  })
+
+  return (
+    <details
+      className={styles.history}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className={styles.historySummary}>
+        <span className={styles.historyTitle}>History</span>
+        <span className={styles.historyHint}>what changed, and who changed it</span>
+      </summary>
+
+      {history.error ? <ErrorBanner>{history.error.message}</ErrorBanner> : null}
+
+      <div className={styles.historyList}>
+        {history.isPending ? <span className={styles.empty}>Loading…</span> : null}
+        {history.data?.length === 0 ? (
+          <span className={styles.empty}>Nothing has happened to this card yet.</span>
+        ) : null}
+        {history.data?.map((entry) => (
+          <HistoryEntry key={entry.id} entry={entry} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+/** One thing that happened, and the fields it moved. */
+function HistoryEntry({ entry }: { entry: TaskHistoryEntry }) {
+  const when = new Date(entry.occurred_at).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return (
+    <div className={styles.historyEntry}>
+      <div className={styles.historyLine}>
+        <span>{entry.summary}</span>
+        <span className={styles.when}>{when}</span>
+      </div>
+      <div className={styles.historyWho}>
+        {entry.actor_label}
+        {/* Agents act through the same API as the browser, so the record is
+            the only place that says a person did not do this. */}
+        {entry.channel === 'api' ? <span className={styles.agent}>agent</span> : null}
+      </div>
+      {entry.changes.length ? (
+        <dl className={styles.changes}>
+          {entry.changes.map((change) => (
+            <div key={change.field} className={styles.change}>
+              <dt>{change.label}</dt>
+              <dd>
+                <span className={styles.was}>{shown(change.from)}</span>
+                <span aria-hidden="true"> → </span>
+                <span className="visually-hidden"> became </span>
+                <span className={styles.now}>{shown(change.to)}</span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  )
+}
+
+/** How much of a changed value the record shows before it gets in the way. */
+const LONGEST = 90
+
+/**
+ * A field's value as one short line.
+ *
+ * Truncated, because a description is a paragraph and a history that prints
+ * two of them per edit is a history you have to scroll past rather than read.
+ * The full text is on the card itself, which is the thing this is a record of.
+ */
+function shown(value: string | number | string[] | null): string {
+  if (value === null || value === '') return '—'
+  const text = Array.isArray(value) ? value.join(' · ') : String(value)
+  return text.length > LONGEST ? `${text.slice(0, LONGEST - 1)}…` : text
 }
 
 /** A labelled row of the detail view. The `Field` twin for text with no input. */
@@ -919,6 +1036,9 @@ function useSubtaskTicking({
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    // Ticking a box is itself a change to the card, so the history under it
+    // is now one entry out of date.
+    await queryClient.invalidateQueries({ queryKey: ['task-history', task.id] })
     await onDone()
   }
 

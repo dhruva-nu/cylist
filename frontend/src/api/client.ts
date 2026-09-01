@@ -131,6 +131,40 @@ export interface ChecklistItem {
   created_at: string
 }
 
+/** One field of a card, as it read before and after somebody touched it. */
+export interface FieldChange {
+  /** The field's name on the task, e.g. `due_date`. */
+  field: string
+  /** How to word it, e.g. `due date`. */
+  label: string
+  /** What it said before, already rendered — a person by name, a date as
+   * `YYYY-MM-DD`. Null when it was not set. */
+  from: string | number | string[] | null
+  to: string | number | string[] | null
+}
+
+/**
+ * One thing that happened to a task: what changed, when, and who did it.
+ *
+ * The counterpart to `TaskComment`. A comment is what somebody *said* about
+ * the card; this is what was *done* to it, whether by a person in the browser
+ * or by an agent through the API — which is what `channel` distinguishes.
+ */
+export interface TaskHistoryEntry {
+  id: string
+  occurred_at: string
+  /** A token's name, or `Web session` for somebody working in the browser. */
+  actor_label: string
+  channel: 'web' | 'api'
+  /** Dotted past-tense event name, e.g. `task.moved`. */
+  verb: string
+  /** The same thing as one readable sentence, worded by the server so the
+   * board, the CLI and an agent all tell the same story. */
+  summary: string
+  /** Field-by-field detail, where the event has any. Empty otherwise. */
+  changes: FieldChange[]
+}
+
 export interface Task {
   id: string
   project_id: string
@@ -464,6 +498,8 @@ export const api = {
 
   listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
+  /** What has been done to a card — every edit, move and tick — newest first. */
+  getTaskHistory: (taskRef: string) => request<TaskHistoryEntry[]>(`/tasks/${taskRef}/history`),
   createTask: (ref: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */
