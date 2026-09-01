@@ -273,6 +273,22 @@
   color: var(--blocked);
 }
 
+.subStatusEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subStatusEditorRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.subStatusEditorRow input {
+  flex: 1;
+}
+
 .readField {
   display: flex;
   flex-direction: column;

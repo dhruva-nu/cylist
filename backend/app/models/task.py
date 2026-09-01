@@ -146,6 +146,21 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "AND (parent_id IS NULL) = (sub_number IS NULL)",
             name="numbered_by_parentage",
         ),
+        # A card can be split into at most 4 stages — enough to read as a
+        # gradient, not so many the board has to render a fifth colour.
+        CheckConstraint("cardinality(sub_statuses) <= 4", name="sub_status_max_four"),
+        # The pointer exists exactly when there is something for it to point
+        # at: no stage list means nothing is "current", and any stage list has
+        # exactly one.
+        CheckConstraint(
+            "(sub_status_index IS NULL) = (cardinality(sub_statuses) = 0)",
+            name="sub_status_index_matches_list",
+        ),
+        CheckConstraint(
+            "sub_status_index IS NULL "
+            "OR (sub_status_index >= 0 AND sub_status_index < cardinality(sub_statuses))",
+            name="sub_status_index_in_range",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -187,6 +202,24 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=TaskPriority.SOMEDAY,
         server_default=sql_text("'someday'"),
     )
+
+    sub_statuses: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(60)),
+        nullable=False,
+        default=list,
+        server_default=sql_text("'{}'"),
+    )
+    """Up to 4 short stage labels, left to right — a progress bar within a
+    column rather than the column itself. Empty means the card does not use
+    the feature at all."""
+
+    sub_status_index: Mapped[int | None] = mapped_column(Integer)
+    """Which of ``sub_statuses`` is current. Null exactly when the list is
+    empty — see ``sub_status_index_matches_list``. Not itself a field a client
+    can set: it moves one stage at a time through
+    :func:`app.services.tasks.advance_sub_status` (the board card's own
+    control), and is kept in range by the service whenever ``sub_statuses``
+    is edited out from under it."""
 
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
 

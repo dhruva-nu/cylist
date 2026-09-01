@@ -89,6 +89,8 @@ async def create(
         description=data.description,
         type=data.type,
         priority=data.priority,
+        sub_statuses=data.sub_statuses,
+        sub_status_index=0 if data.sub_statuses else None,
         due_date=data.due_date,
         assignee_id=data.assignee_id,
         status=TaskStatus.ACTIVE,
@@ -176,11 +178,42 @@ async def update(session: AsyncSession, task: Task, data: TaskUpdate) -> Task:
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
 
+    if "sub_statuses" in fields:
+        new_statuses = fields.pop("sub_statuses")
+        if not new_statuses:
+            task.sub_status_index = None
+        elif task.sub_status_index is None:
+            task.sub_status_index = 0
+        else:
+            # Preserve how far along the card was rather than restarting it —
+            # only pulled back as far as the shorter list requires.
+            task.sub_status_index = min(task.sub_status_index, len(new_statuses) - 1)
+        task.sub_statuses = new_statuses
+
     for field, value in fields.items():
         setattr(task, field, value)
 
     await session.flush()
     await session.refresh(task, ["assignee"])
+    return task
+
+
+async def advance_sub_status(session: AsyncSession, task: Task) -> Task:
+    """Move a task to its next sub-status, one stage at a time.
+
+    Stops at the last stage rather than wrapping back to the first — a fifth
+    click meaning "start over" is not something the board card can say without
+    a label to say it.
+
+    Raises:
+        UnprocessableRequestError: if the task has no sub-statuses set.
+    """
+    if not task.sub_statuses:
+        raise UnprocessableRequestError(
+            f"{task.reference} has no sub-statuses set. Add some before advancing.",
+        )
+    task.sub_status_index = min((task.sub_status_index or 0) + 1, len(task.sub_statuses) - 1)
+    await session.flush()
     return task
 
 

@@ -150,6 +150,10 @@ export interface Task {
   description: string
   type: TaskType
   priority: TaskPriority
+  /** Up to 4 stage labels, left to right. Empty if the card doesn't use this. */
+  sub_statuses: string[]
+  /** Index into `sub_statuses` of the current stage. Null when the list is empty. */
+  sub_status_index: number | null
   due_date: string
   assignee: Person
   status: TaskStatus
@@ -178,6 +182,8 @@ export interface TaskInput {
   description: string
   type: TaskType
   priority: TaskPriority
+  /** Up to 4 short stage labels. Advancing through them happens on the board. */
+  sub_statuses: string[]
   due_date: string
   assignee_id: string
   jira_ref: string | null
@@ -471,6 +477,9 @@ export const api = {
     }),
   setTaskStatus: (taskRef: string, change: StatusChange) =>
     request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: body(change) }),
+  /** Steps a task's sub-status forward one stage. Stops at the last one. */
+  advanceSubStatus: (taskRef: string) =>
+    request<TaskDetail>(`/tasks/${taskRef}/advance-sub-status`, { method: 'POST' }),
   addComment: (taskRef: string, text: string, authorId: string | null) =>
     request<TaskComment>(`/tasks/${taskRef}/comments`, {
       method: 'POST',

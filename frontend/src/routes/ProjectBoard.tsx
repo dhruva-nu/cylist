@@ -66,6 +66,7 @@ import {
   EmptyState,
   ErrorBanner,
   LiveRegion,
+  SubStatusChips,
   TaskRef,
   useAnnouncer,
 } from '../components/ui'
@@ -251,6 +252,29 @@ export function ProjectBoard() {
     onSettled: refresh,
   })
 
+  const advanceSubStatus = useMutation<Task, Error, string, { previous: Task[] | undefined }>({
+    mutationFn: (taskId) => api.advanceSubStatus(taskId),
+    onMutate: async (taskId) => {
+      await queryClient.cancelQueries({ queryKey: tasksKey })
+      const previous = queryClient.getQueryData<Task[]>(tasksKey)
+      queryClient.setQueryData<Task[]>(tasksKey, (current) =>
+        current?.map((task) =>
+          task.id === taskId && task.sub_status_index !== null
+            ? {
+                ...task,
+                sub_status_index: Math.min(task.sub_status_index + 1, task.sub_statuses.length - 1),
+              }
+            : task,
+        ),
+      )
+      return { previous }
+    },
+    onError: (_error, _taskId, context) => {
+      queryClient.setQueryData(tasksKey, context?.previous)
+    },
+    onSettled: refresh,
+  })
+
   const boardKey = ['board', projectKey]
 
   const reorderColumns = useMutation<Board, Error, string[], { previous: Board | undefined }>({
@@ -398,6 +422,7 @@ export function ProjectBoard() {
                 )
               }}
               onOpenTask={setOpenTaskId}
+              onAdvanceSubStatus={(taskId) => advanceSubStatus.mutate(taskId)}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
               onMoveLeft={() => moveColumnTo(index, index - 1)}
@@ -571,6 +596,7 @@ function Column({
   collapsed,
   onToggleCollapse,
   onOpenTask,
+  onAdvanceSubStatus,
   onAddTask,
   onEdit,
   onMoveLeft,
@@ -583,6 +609,7 @@ function Column({
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
+  onAdvanceSubStatus: (taskId: string) => void
   onAddTask: () => void
   onEdit: () => void
   onMoveLeft: () => void
@@ -700,7 +727,12 @@ function Column({
 
       <div className={styles.cards}>
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} onOpen={() => onOpenTask(task.id)} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            onOpen={() => onOpenTask(task.id)}
+            onAdvanceSubStatus={() => onAdvanceSubStatus(task.id)}
+          />
         ))}
       </div>
 
@@ -729,7 +761,15 @@ const PRIORITY_LABELS = {
   someday: 'Someday',
 } as const
 
-function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
+function TaskCard({
+  task,
+  onOpen,
+  onAdvanceSubStatus,
+}: {
+  task: Task
+  onOpen: () => void
+  onAdvanceSubStatus: () => void
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id })
   const late = isOverdue(task.due_date)
 
@@ -795,6 +835,14 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
 
       <div className={styles.title}>{task.title}</div>
 
+      {task.sub_statuses.length ? (
+        <SubStatusButton
+          labels={task.sub_statuses}
+          index={task.sub_status_index ?? 0}
+          onAdvance={onAdvanceSubStatus}
+        />
+      ) : null}
+
       {task.waiting_on.length ? (
         <div className={styles.waiting}>
           Waiting on{' '}
@@ -828,6 +876,50 @@ function TaskCard({ task, onOpen }: { task: Task; onOpen: () => void }) {
         </span>
       </div>
     </article>
+  )
+}
+
+/**
+ * The one control that changes a card without opening it: click to advance
+ * one sub-status stage.
+ *
+ * `stopPropagation` on every event is what makes this safe to drop on a task
+ * card — the card is both the drag handle and the button that opens the
+ * dialog, so a click left to bubble would do one of those instead of
+ * advancing the stage.
+ */
+function SubStatusButton({
+  labels,
+  index,
+  onAdvance,
+}: {
+  labels: string[]
+  index: number
+  onAdvance: () => void
+}) {
+  const atLast = index >= labels.length - 1
+  const next = atLast ? null : labels[index + 1]
+
+  return (
+    <button
+      type="button"
+      className={styles.subStatus}
+      disabled={atLast}
+      onClick={(event) => {
+        event.stopPropagation()
+        onAdvance()
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      aria-label={
+        atLast
+          ? `Sub-status: ${labels[index]}, the last stage`
+          : `Sub-status: ${labels[index]}. Click to advance to ${next}`
+      }
+      title={atLast ? undefined : `Advance to ${next}`}
+    >
+      <SubStatusChips labels={labels} index={index} />
+    </button>
   )
 }
 

@@ -54,7 +54,7 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner, TaskRef } from './ui'
+import { Avatar, Button, ErrorBanner, SubStatusChips, TaskRef } from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -214,6 +214,12 @@ function TaskDetailView({
           <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>
         </div>
 
+        {task.sub_statuses.length ? (
+          <ReadField label="Sub-status">
+            <SubStatusChips labels={task.sub_statuses} index={task.sub_status_index ?? 0} />
+          </ReadField>
+        ) : null}
+
         <ReadField label="Description">
           <p className={styles.prose}>{task.description}</p>
         </ReadField>
@@ -340,6 +346,7 @@ function TaskForm({
     description: task?.description ?? '',
     type: task?.type ?? 'feature',
     priority: task?.priority ?? 'someday',
+    sub_statuses: task?.sub_statuses ?? [],
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
     jira_ref: task?.jira_ref ?? '',
@@ -362,6 +369,7 @@ function TaskForm({
     mutationFn: async () => {
       const payload = {
         ...form,
+        sub_statuses: form.sub_statuses.map((label) => label.trim()),
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
@@ -414,6 +422,7 @@ function TaskForm({
     form.description.trim() &&
     form.due_date &&
     form.assignee_id &&
+    form.sub_statuses.every((label) => label.trim()) &&
     (!stalling || reason.trim())
 
   const error = save.error ?? remove.error
@@ -549,6 +558,16 @@ function TaskForm({
               </option>
             ))}
           </select>
+        </Field>
+
+        <Field
+          label="Sub-status"
+          hint="Up to 4 short stages, left to right. Advancing through them happens on the board."
+        >
+          <SubStatusListEditor
+            value={form.sub_statuses}
+            onChange={(sub_statuses) => setForm({ ...form, sub_statuses })}
+          />
         </Field>
 
         <FieldPair>
@@ -687,6 +706,53 @@ function TaskForm({
         </Field>
       </ModalBody>
     </Modal>
+  )
+}
+
+/**
+ * Up to 4 short stage labels, added, retitled and removed by hand.
+ *
+ * Order is the gradient's left-to-right axis, so there is no reordering
+ * control beyond delete-and-re-add: a label's position is its meaning.
+ */
+function SubStatusListEditor({
+  value,
+  onChange,
+}: {
+  value: string[]
+  onChange: (value: string[]) => void
+}) {
+  return (
+    <div className={styles.subStatusEditor}>
+      {value.map((label, index) => (
+        <div key={index} className={styles.subStatusEditorRow}>
+          <input
+            value={label}
+            maxLength={60}
+            placeholder={`Stage ${index + 1}`}
+            aria-label={`Sub-status stage ${index + 1}`}
+            onChange={(event) => {
+              const next = [...value]
+              next[index] = event.target.value
+              onChange(next)
+            }}
+          />
+          <Button
+            variant="ghost"
+            small
+            aria-label={`Remove stage ${index + 1}`}
+            onClick={() => onChange(value.filter((_, position) => position !== index))}
+          >
+            ×
+          </Button>
+        </div>
+      ))}
+      {value.length < 4 ? (
+        <Button variant="ghost" small onClick={() => onChange([...value, ''])}>
+          + Add stage
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

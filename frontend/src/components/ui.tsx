@@ -67,6 +67,56 @@ export function readableInkOn(colour: string): string {
   return luminance > 0.19 ? 'var(--on-accent-dark)' : 'var(--on-accent)'
 }
 
+/** The pale and deep ends of the sub-status gradient — light green to a deep,
+ * confident green, standing in for "just started" to "nearly there". */
+const SUB_STATUS_LIGHT = { r: 0xcf, g: 0xe9, b: 0xd8 }
+const SUB_STATUS_DEEP = { r: 0x1d, g: 0x5c, b: 0x38 }
+
+/**
+ * A sub-status stage's fill colour, as a hex string `readableInkOn` can read.
+ *
+ * Interpolated across however many stages the task actually has, so the same
+ * index means a different shade depending on the count: stage 1 of 2 sits
+ * halfway down the gradient, stage 1 of 4 barely off the pale end. A single
+ * stage is drawn at the deep end — nothing to gradient across, and the one
+ * stage there is always "current".
+ */
+export function subStatusColor(index: number, count: number): string {
+  const t = count <= 1 ? 1 : index / (count - 1)
+  const mix = (from: number, to: number) => Math.round(from + (to - from) * t)
+  const channel = (value: number) => value.toString(16).padStart(2, '0')
+  return `#${channel(mix(SUB_STATUS_LIGHT.r, SUB_STATUS_DEEP.r))}${channel(
+    mix(SUB_STATUS_LIGHT.g, SUB_STATUS_DEEP.g),
+  )}${channel(mix(SUB_STATUS_LIGHT.b, SUB_STATUS_DEEP.b))}`
+}
+
+/**
+ * A task's sub-status stages as a row of chips: stages up to and including
+ * the current one filled in the green gradient, later ones left muted.
+ *
+ * Read-only — the board card wraps this in a button of its own so a click
+ * advances the task; nothing here reacts to one.
+ */
+export function SubStatusChips({ labels, index }: { labels: string[]; index: number }) {
+  return (
+    <span className={styles.subStatusChips}>
+      {labels.map((label, position) => {
+        const filled = position <= index
+        const colour = filled ? subStatusColor(position, labels.length) : undefined
+        return (
+          <span
+            key={position}
+            className={`${styles.subStatusChip} ${filled ? styles.subStatusChipFilled : ''}`}
+            style={colour ? { background: colour, color: readableInkOn(colour) } : undefined}
+          >
+            {label}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
 export function Avatar({
   name,
   colour,

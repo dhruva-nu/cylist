@@ -146,6 +146,30 @@
   font-size: 14px;
 }
 
+.subStatusChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.subStatusChip {
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Background and text colour come from the gradient inline — see
+   subStatusColor() — so this only has to drop the muted border. */
+.subStatusChipFilled {
+  border-color: transparent;
+}
+
 /* Underlined, not just tinted: this sits in a row of plain counts on a card
    that may be tinted amber or red, and --link is not far enough from --ink-2
    there to be the only thing saying which one you can follow. */

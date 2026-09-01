@@ -90,6 +90,8 @@ def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
         description=task.description,
         type=task.type,
         priority=task.priority,
+        sub_statuses=task.sub_statuses,
+        sub_status_index=task.sub_status_index,
         due_date=task.due_date,
         assignee=PersonRead.model_validate(task.assignee),
         status=task.status,
@@ -278,6 +280,35 @@ async def move_task(
         },
     )
     return await _detail(session, moved)
+
+
+@router.post(
+    "/tasks/{task_ref}/advance-sub-status",
+    response_model=TaskDetail,
+    summary="Advance a task's sub-status",
+    responses={422: {"description": "The task has no sub-statuses set."}},
+)
+async def advance_sub_status(
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> TaskDetail:
+    """Move a task to its next sub-status. Stops at the last one.
+
+    This is what the board card's own sub-status control calls: one click
+    steps a card forward a stage without opening it.
+    """
+    updated = await tasks.advance_sub_status(session, task)
+    await activity.record(
+        session,
+        principal,
+        "task.sub_status_advanced",
+        entity_type="task",
+        entity_id=updated.id,
+        project_id=updated.project_id,
+        payload={"reference": updated.reference, "sub_status_index": updated.sub_status_index},
+    )
+    return await _detail(session, updated)
 
 
 @router.post(
