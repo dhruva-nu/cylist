@@ -423,11 +423,12 @@ export function ProjectBoard() {
 
   return (
     <>
-      <PageHead title="Kanban board">
-        Cards enter at the first column and move wherever the work does. Colour flags anything on
-        hold or blocked. Drag a card, or focus one and press space to move it with the arrow keys. A
-        column moves the same way, by its ⠿ handle.
-      </PageHead>
+      {/* No standing paragraph of instructions. What it said, the board says
+          better by being used: cards enter at the first column because that is
+          the only one with a "+", and a card is dragged by dragging it. The
+          keyboard's share of it is the part that is not self-evident, and that
+          is spoken by SCREEN_READER_INSTRUCTIONS to the people it is for. */}
+      <PageHead title="Kanban board" />
 
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />

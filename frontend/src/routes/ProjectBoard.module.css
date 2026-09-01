@@ -104,14 +104,19 @@
    board when three columns are showing and shrinks when eight are. Between a
    floor and a ceiling: a card stops being readable under about 280px, and past
    400px a column is mostly the empty right-hand side of its own cards. Past
-   the floor the board scrolls rather than squeezing any further. */
+   the floor the board scrolls rather than squeezing any further.
+
+   170px is what the page spends above the board: the top bar, the heading and
+   the toolbar. It was 250 while a paragraph of instructions stood under the
+   heading — three lines at 16px and the 8px above them — and came down by
+   exactly that when the paragraph went. */
 .column {
   display: flex;
   flex: 1 1 320px;
   flex-direction: column;
   min-width: 280px;
   max-width: 400px;
-  height: calc(100vh - 250px);
+  height: calc(100vh - 170px);
   min-height: 320px;
   border: 2px solid transparent;
   border-radius: 16px;
