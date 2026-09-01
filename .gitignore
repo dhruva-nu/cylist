@@ -24,6 +24,9 @@ bun.lock
 data/
 *.log
 
+# Holds a live Cylist API token
+.mcp.json
+
 # Editors / OS
 .DS_Store
 .idea/
