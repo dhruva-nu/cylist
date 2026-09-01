@@ -26,6 +26,7 @@ from app.schemas.tasks import (
     ChecklistItemUpdate,
     CommentCreate,
     CommentRead,
+    SubStatusMove,
     SubtaskCreate,
     TaskCreate,
     TaskDetail,
@@ -90,6 +91,8 @@ def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
         description=task.description,
         type=task.type,
         priority=task.priority,
+        sub_statuses=task.sub_statuses,
+        sub_status_index=task.sub_status_index,
         due_date=task.due_date,
         assignee=PersonRead.model_validate(task.assignee),
         status=task.status,
@@ -278,6 +281,42 @@ async def move_task(
         },
     )
     return await _detail(session, moved)
+
+
+@router.post(
+    "/tasks/{task_ref}/sub-status",
+    response_model=TaskDetail,
+    summary="Move a task's sub-status",
+    responses={
+        422: {"description": "The task has no sub-statuses set, or there is no such stage."}
+    },
+)
+async def set_sub_status(
+    body: SubStatusMove,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> TaskDetail:
+    """Move a task to one of its sub-status stages, forwards or back.
+
+    This is what the board card's own sub-status slider calls: one click puts
+    a card on the stage under the cursor without opening it.
+    """
+    updated = await tasks.set_sub_status(session, task, body.index)
+    await activity.record(
+        session,
+        principal,
+        "task.sub_status_moved",
+        entity_type="task",
+        entity_id=updated.id,
+        project_id=updated.project_id,
+        payload={
+            "reference": updated.reference,
+            "sub_status_index": updated.sub_status_index,
+            "sub_status": updated.sub_statuses[body.index],
+        },
+    )
+    return await _detail(session, updated)
 
 
 @router.post(
