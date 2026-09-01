@@ -1,19 +1,28 @@
-/* Search dead centre with the add-column button beside it. A grid rather than
-   a centred flex row, so the box sits on the board's midline whatever is to
-   the right of it — with a flex row it would be pushed off centre by exactly
-   half the button. */
+/* Two tracks: the search takes the row, the button takes what it needs at the
+   end of it. It was three, with the search boxed into the middle one and empty
+   space either side holding it on the board's midline — but a box this wide
+   has no side left to be off, and those tracks were only ever there to centre
+   it. It is centred now by spanning.
+
+   `1fr` on the search's track rather than `auto`, so the width below resolves
+   against a track that has already been given a size rather than against one
+   still being sized by what is in it. */
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: center;
   margin: 0 6px 14px;
 }
 
+/* The cap only bites on a display wider than about 3000px; on anything
+   narrower this is the whole row, less the button. Centred in its track for
+   the displays where it does bite. */
 .search {
   position: relative;
-  grid-column: 2;
-  width: min(960px, 100%);
+  grid-column: 1;
+  justify-self: center;
+  width: min(2880px, 100%);
 }
 
 .search input {
@@ -604,10 +613,10 @@
   height: 10px;
 }
 
-/* Sits in the toolbar's right-hand track, hard against the search box rather
-   than out at the board's edge, so the pair reads as one strip of controls. */
+/* The toolbar's second track, hard against the end of the search box, so the
+   pair reads as one strip of controls. */
 .addColumn {
-  grid-column: 3;
+  grid-column: 2;
   justify-self: start;
   white-space: nowrap;
 }
