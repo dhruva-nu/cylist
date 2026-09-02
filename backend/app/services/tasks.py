@@ -48,8 +48,12 @@ from app.schemas.tasks import (
 )
 from app.services import columns, projects
 
-_CLEARABLE = frozenset({"jira_ref", "pr_ref"})
-"""The only task fields a ``PATCH`` may set back to null."""
+_CLEARABLE = frozenset({"jira_ref", "pr_ref", "due_date"})
+"""The only task fields a ``PATCH`` may set back to null.
+
+Everything else reads a null as a client echoing back a field it never filled
+in. These three are the fields a card can genuinely be without, so for them a
+null is the request it looks like: take the date off, drop the link."""
 
 _TRACKED: dict[str, str] = {
     "title": "title",
@@ -202,7 +206,7 @@ async def update(
     """
     before = _snapshot(task)
 
-    # Only the two external refs can be cleared. A null anywhere else is a
+    # Only the fields in _CLEARABLE can be emptied. A null anywhere else is a
     # client sending back a field it never filled in, not a request to erase a
     # title or unassign the work.
     fields = {

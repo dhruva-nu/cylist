@@ -61,7 +61,9 @@ def register(subparsers: Any) -> None:
         "--description", required=True, help="What done looks like. The API requires it."
     )
     new.add_argument("--type", required=True, choices=TASK_TYPES)
-    new.add_argument("--due", required=True, metavar="YYYY-MM-DD")
+    new.add_argument(
+        "--due", metavar="YYYY-MM-DD", help="Optional. Left off, the card has no due date."
+    )
     new.add_argument("--assignee", required=True, metavar="NAME", help="A member of the project.")
     new.add_argument("--jira", metavar="REF")
     new.add_argument("--pr", metavar="REF")
@@ -138,7 +140,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
             str(task["status"]),
             columns.get(str(task["column_id"]), "?"),
             str((task.get("assignee") or {}).get("name", "")),
-            str(task["due_date"]),
+            str(task["due_date"] or ""),
         ]
         for task in tasks
     ]
@@ -206,7 +208,7 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
             ("Status", str(task["status"])),
             ("Column", column),
             ("Type", str(task["type"])),
-            ("Due", str(task["due_date"])),
+            ("Due", str(task["due_date"] or "")),
             ("Assignee", str((task.get("assignee") or {}).get("name", ""))),
             ("Waiting on", waiting),
             ("Jira", str(task.get("jira_ref") or "")),
@@ -329,9 +331,10 @@ def _new(args: argparse.Namespace, ctx: Context) -> None:
         "title": args.title,
         "description": args.description,
         "type": args.type,
-        "due_date": _due(args.due),
         "assignee_id": resolve.person_id(ctx.client, args.assignee, project_ref=args.project),
     }
+    if args.due:
+        body["due_date"] = _due(args.due)
     if args.jira:
         body["jira_ref"] = args.jira
     if args.pr:

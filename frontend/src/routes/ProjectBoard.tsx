@@ -966,10 +966,14 @@ function TaskCardBody({
           ) : null}
         </div>
         <span className={styles.trailing}>
-          <span className={`${styles.due} ${late ? styles.late : ''}`}>
-            {late ? '⚠ ' : ''}
-            {formatDue(task.due_date)}
-          </span>
+          {/* No date, no chip. A dash where a date goes reads as a date that
+              failed to load; the absence of one says it plainly. */}
+          {task.due_date ? (
+            <span className={`${styles.due} ${late ? styles.late : ''}`}>
+              {late ? '⚠ ' : ''}
+              {formatDue(task.due_date)}
+            </span>
+          ) : null}
           <Avatar name={task.assignee.name} colour={task.assignee.colour} />
         </span>
       </div>
@@ -1127,7 +1131,9 @@ function formatDue(iso: string): string {
   return localDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-function isOverdue(iso: string): boolean {
+/** A card with no date is never late: there is no day it was wanted by. */
+function isOverdue(iso: string | null): boolean {
+  if (!iso) return false
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   return localDate(iso) < today

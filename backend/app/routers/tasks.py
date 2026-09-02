@@ -458,7 +458,7 @@ async def create_subtask(
 ) -> TaskDetail:
     """Add a sub-task that gets its own card on the board.
 
-    It is a task in every respect — first column, owner, due date — except its
+    It is a task in every respect — first column, owner, own due date — except its
     reference, which is numbered under its parent: `ATL-41-2`. Sub-tasks go one
     level deep; splitting a sub-task again is a 422.
 
