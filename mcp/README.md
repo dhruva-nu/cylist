@@ -111,6 +111,7 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `add_link` | file a URL into a folder |
 | `list_vault` | trees and structure — never a value |
 | `read_activity` | the audit feed |
+| `day_report` | what was done on a project on one day, with a paste-ready note |
 | `reveal_secret` | decrypt one credential — **only with `vault:reveal`** |
 
 Two conveniences worth knowing, both described in the tool schemas themselves:

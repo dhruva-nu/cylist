@@ -26,12 +26,10 @@ from app.schemas.tasks import (
     ChecklistItemUpdate,
     CommentCreate,
     CommentRead,
-    FieldChange,
     SubStatusMove,
     SubtaskCreate,
     TaskCreate,
     TaskDetail,
-    TaskHistoryEntry,
     TaskHistoryPage,
     TaskMove,
     TaskRead,
@@ -220,22 +218,7 @@ async def task_history(
         session, "task", task.id, limit=per_page, offset=(page - 1) * per_page
     )
     return TaskHistoryPage(
-        entries=[
-            TaskHistoryEntry(
-                id=entry.id,
-                occurred_at=entry.occurred_at,
-                actor_label=entry.actor_label,
-                channel=entry.channel,
-                verb=entry.verb,
-                summary=activity.describe(entry),
-                changes=[
-                    FieldChange.model_validate(change)
-                    for change in entry.payload.get("changes") or []
-                ],
-                payload=entry.payload,
-            )
-            for entry in entries
-        ],
+        entries=[activity.entry_of(entry) for entry in entries],
         total=total,
         page=page,
         # At least one page, so "page 1 of 1" reads correctly on an empty

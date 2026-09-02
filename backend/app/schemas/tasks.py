@@ -6,10 +6,10 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-from app.models.activity import Channel
 from app.models.task import ChecklistState, CommentKind, TaskPriority, TaskStatus, TaskType
+from app.schemas.activity import HistoryEntry
 from app.schemas.common import Schema
 from app.schemas.people import PersonRead
 
@@ -290,40 +290,6 @@ class TaskDetail(TaskRead):
     )
 
 
-class FieldChange(Schema):
-    """One field of a card, before and after somebody touched it."""
-
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-    field: str = Field(description="The field's name on the task, e.g. `due_date`.")
-    label: str = Field(description="How to word it, e.g. `due date`.")
-    before: Any = Field(
-        default=None,
-        alias="from",
-        description="What it said before, rendered the way the card renders it — "
-        "an assignee by name, a date as `YYYY-MM-DD`. Null if it was not set.",
-    )
-    after: Any = Field(default=None, alias="to", description="What it says now.")
-
-
-class TaskHistoryEntry(Schema):
-    """One thing that happened to a task: what changed, when, and who did it."""
-
-    id: UUID
-    occurred_at: datetime
-    actor_label: str = Field(
-        description="Who did it — a token's name, or `Web session` for the browser."
-    )
-    channel: Channel = Field(description="`web` if a person did it, `api` if an agent did.")
-    verb: str = Field(description="Dotted past-tense event name, e.g. `task.moved`.")
-    summary: str = Field(description="The same thing as one readable sentence.")
-    changes: list[FieldChange] = Field(
-        default_factory=list,
-        description="Field-by-field detail, where the event has any. Empty otherwise.",
-    )
-    payload: dict[str, Any] = Field(description="Everything the entry recorded, unabridged.")
-
-
 class TaskHistoryPage(Schema):
     """One page of a task's history, and enough to ask for the next.
 
@@ -331,9 +297,13 @@ class TaskHistoryPage(Schema):
     beside the number it is ten of: without ``pages`` a client cannot draw a
     pager, and without ``total`` it cannot say whether it is showing all of a
     short history or the tip of a long one.
+
+    The entries are plain :class:`~app.schemas.activity.HistoryEntry` rows: a
+    card's history and a day's report are the same trail read two ways, and a
+    task adds nothing of its own to an entry of it.
     """
 
-    entries: list[TaskHistoryEntry]
+    entries: list[HistoryEntry]
     total: int = Field(description="How many entries the whole history holds.")
     page: int = Field(description="Which page this is, counting from 1.")
     pages: int = Field(description="How many pages there are. At least 1, even when empty.")

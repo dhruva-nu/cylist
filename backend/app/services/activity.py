@@ -3,22 +3,28 @@
 Call :func:`record` from the service that performed the change, never from a
 router — that way an action logged once is logged however it was triggered.
 
-Reading is the other half: :func:`for_entity` narrows the trail to one thing,
-which is how a card answers "what happened to me". :func:`describe` turns a
-verb and its payload into a sentence, in one place, so the board, the CLI and
-an agent reading the API are all told the same story in the same words.
+Reading is the other half, and it is asked in two shapes. :func:`for_entity`
+narrows the trail to one thing, which is how a card answers "what happened to
+me"; :func:`between` narrows it to one project over a stretch of time, which is
+how a day answers "what did I do". Both hand their rows to :func:`entry_of`,
+and :func:`describe` turns a verb and its payload into a sentence, in one
+place, so the board, the day's report, the CLI and an agent reading the API are
+all told the same story in the same words.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.models.activity import Activity
+from app.schemas.activity import FieldChange, HistoryEntry
 
 
 async def record(
@@ -81,10 +87,7 @@ async def for_entity(
     where = (
         Activity.entity_type == entity_type,
         Activity.entity_id == entity_id,
-        # ``->`` gives SQL NULL for a payload with no ``changes`` at all, which
-        # coalesces to "something happened" — an entry written before changes
-        # were recorded is not evidence that nothing changed.
-        func.coalesce(func.jsonb_array_length(Activity.payload["changes"]), 1) > 0,
+        changed_something(),
     )
     total = await session.scalar(select(func.count()).select_from(Activity).where(*where))
     entries = await session.scalars(
@@ -97,12 +100,81 @@ async def for_entity(
     return list(entries), total or 0
 
 
+def changed_something() -> ColumnElement[bool]:
+    """Whether an entry altered the thing it names, as a WHERE clause.
+
+    Dragging a card up its own column, or saving a form without touching a
+    field, is a request the server handled rather than something that happened
+    to the work. Every reader that tells a story — a card's history, a day's
+    report — leaves those out; the raw feed at ``/activity``, which answers
+    "who touched what", keeps them.
+
+    ``->`` gives SQL NULL for a payload with no ``changes`` at all, which
+    coalesces to "something happened": an entry written before old and new
+    values were recorded is not evidence that nothing changed.
+    """
+    return func.coalesce(func.jsonb_array_length(Activity.payload["changes"]), 1) > 0
+
+
+async def between(
+    session: AsyncSession,
+    project_id: UUID,
+    start: datetime,
+    end: datetime,
+) -> list[Activity]:
+    """Everything that changed one project between two moments, oldest first.
+
+    Half-open — ``start`` included, ``end`` excluded — so consecutive windows
+    tile a week without an entry landing in two of them or in neither.
+
+    Oldest first because this is read as a narrative rather than searched for
+    the latest thing: a day is recounted in the order it happened.
+    """
+    entries = await session.scalars(
+        select(Activity)
+        .where(
+            Activity.project_id == project_id,
+            Activity.occurred_at >= start,
+            Activity.occurred_at < end,
+            changed_something(),
+        )
+        .order_by(Activity.occurred_at, Activity.id)
+    )
+    return list(entries)
+
+
+def entry_of(entry: Activity) -> HistoryEntry:
+    """One audit row as a readable entry: the sentence, and the detail behind it.
+
+    The one place a stored row becomes something to show, so a card's history
+    and a day's report cannot drift into wording the same event differently.
+    """
+    return HistoryEntry(
+        id=entry.id,
+        occurred_at=entry.occurred_at,
+        actor_label=entry.actor_label,
+        channel=entry.channel,
+        verb=entry.verb,
+        summary=describe(entry),
+        changes=[
+            FieldChange.model_validate(change) for change in entry.payload.get("changes") or []
+        ],
+        payload=entry.payload,
+    )
+
+
 def describe(entry: Activity) -> str:
     """One sentence saying what an entry did, with no ids in it.
 
     Written from the payload rather than from the row it changed, so an entry
     still reads correctly years later — "moved to Review" stays true even after
     the column is renamed, because that is what happened at the time.
+
+    A task's own events are worded here at length, because they are the ones a
+    card's history is made of and the only ones carrying old and new values.
+    Everything else a project can do — a file uploaded, a column added, a
+    secret revealed — is worded by ``_ELSEWHERE``, which is what a day's report
+    needs to say more than "Uploaded.".
     """
     payload = entry.payload
     changes = payload.get("changes") or []
@@ -140,6 +212,10 @@ def describe(entry: Activity) -> str:
     if entry.verb == "task.checklist_deleted":
         return f"Removed {_quoted(payload.get('title'))} from the checklist."
 
+    written = _ELSEWHERE.get(entry.verb)
+    if written is not None:
+        return written(payload)
+
     # An entry this function has not been taught about is still worth showing:
     # a history with a gap in it is worse than one worded a little stiffly.
     return entry.verb.split(".")[-1].replace("_", " ").capitalize() + "."
@@ -165,3 +241,77 @@ def _listed(words: Any) -> str:
     if len(items) <= 1:
         return items[0] if items else ""
     return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _worded(kind: Any) -> str:
+    """A stored enum value as a word: ``gdrive`` reads as Google Drive."""
+    return _WORDS.get(str(kind), str(kind).replace("_", " "))
+
+
+_WORDS = {
+    "sharepoint": "SharePoint",
+    "gdrive": "Google Drive",
+    "upload": "an upload",
+    "other": "elsewhere",
+    "branch": "branch",
+    "secret": "secret",
+    "team": "team member",
+    "client": "client",
+}
+
+_ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
+    # --- The project itself -------------------------------------------------
+    "project.created": lambda p: f"Started the project {p.get('name') or p.get('key')}.",
+    "project.updated": lambda p: f"Changed the project's {_fields(p)}.",
+    "project.archived": lambda p: "Archived the project.",
+    "project.members_changed": lambda p: (
+        f"Set the project's membership to {p.get('member_count', 0)} "
+        f"{'person' if p.get('member_count') == 1 else 'people'}."
+    ),
+    # --- The board's columns ------------------------------------------------
+    "column.created": lambda p: f"Added the column {_quoted(p.get('name'))}.",
+    "column.updated": lambda p: f"Changed a column's {_fields(p)}.",
+    "column.deleted": lambda p: f"Deleted the column {_quoted(p.get('name'))}.",
+    "column.reordered": lambda p: "Reordered the board's columns.",
+    # --- Files --------------------------------------------------------------
+    "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
+    "folder.updated": lambda p: f"Changed the folder {_quoted(p.get('name'))}'s {_fields(p)}.",
+    "folder.deleted": lambda p: f"Deleted the folder {_quoted(p.get('name'))}.",
+    "file.uploaded": lambda p: f"Uploaded {_quoted(p.get('name'))}.",
+    "link.added": lambda p: f"Linked {_quoted(p.get('name'))} from {_worded(p.get('source'))}.",
+    "item.updated": lambda p: f"Changed {_quoted(p.get('name'))}'s {_fields(p)}.",
+    "item.deleted": lambda p: f"Deleted {_quoted(p.get('name'))}.",
+    # --- The vault. Names and structure only; never a value -----------------
+    "vault.tree_created": lambda p: f"Created the vault tree {_quoted(p.get('name'))}.",
+    "vault.tree_updated": lambda p: f"Changed the vault tree {_quoted(p.get('name'))}.",
+    "vault.tree_deleted": lambda p: f"Deleted the vault tree {_quoted(p.get('name'))}.",
+    "vault.node_created": lambda p: (
+        f"Added the {_worded(p.get('kind'))} {_quoted(p.get('name'))} to {p.get('tree')}."
+    ),
+    "vault.node_updated": lambda p: f"Changed the vault entry {_quoted(p.get('name'))}.",
+    "vault.node_deleted": lambda p: (
+        f"Deleted the {_worded(p.get('kind'))} {_quoted(p.get('name'))} from {p.get('tree')}."
+    ),
+    "vault.node_moved": lambda p: f"Moved the vault entry {_quoted(p.get('name'))}.",
+    "vault.secret_revealed": lambda p: (
+        f"Revealed the secret {_quoted(p.get('name'))} in {p.get('tree')}."
+    ),
+    # --- The directory, tokens, and coming in through the front door --------
+    "person.added": lambda p: f"Added {p.get('name')} as a {_worded(p.get('kind'))}.",
+    "person.updated": lambda p: f"Changed a person's {_fields(p)}.",
+    "person.archived": lambda p: f"Archived {p.get('name')}.",
+    "token.issued": lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
+    "token.revoked": lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
+    "session.started": lambda p: "Signed in.",
+}
+
+
+def _fields(payload: dict[str, Any]) -> str:
+    """The field names an entry recorded, worded: ``due_date`` reads as due date.
+
+    Only the older ``fields`` shape needs this. Anything writing ``changes``
+    carries a ``label`` already fit to print, and is worded above.
+    """
+    fields = payload.get("fields") or []
+    listed = _listed(str(field).replace("_", " ") for field in fields)
+    return listed or "details"
