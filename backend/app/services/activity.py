@@ -14,7 +14,7 @@ all told the same story in the same words.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -143,11 +143,14 @@ async def between(
     return list(entries)
 
 
-def entry_of(entry: Activity) -> HistoryEntry:
+def entry_of(entry: Activity, columns: Mapping[str, str] | None = None) -> HistoryEntry:
     """One audit row as a readable entry: the sentence, and the detail behind it.
 
     The one place a stored row becomes something to show, so a card's history
     and a day's report cannot drift into wording the same event differently.
+
+    ``columns`` maps a board column's id to its name, and is only consulted for
+    entries too old to have recorded names themselves — see :func:`describe`.
     """
     return HistoryEntry(
         id=entry.id,
@@ -155,7 +158,7 @@ def entry_of(entry: Activity) -> HistoryEntry:
         actor_label=entry.actor_label,
         channel=entry.channel,
         verb=entry.verb,
-        summary=describe(entry),
+        summary=describe(entry, columns),
         changes=[
             FieldChange.model_validate(change) for change in entry.payload.get("changes") or []
         ],
@@ -163,12 +166,19 @@ def entry_of(entry: Activity) -> HistoryEntry:
     )
 
 
-def describe(entry: Activity) -> str:
+def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     """One sentence saying what an entry did, with no ids in it.
 
     Written from the payload rather than from the row it changed, so an entry
     still reads correctly years later — "moved to Review" stays true even after
     the column is renamed, because that is what happened at the time.
+
+    ``columns`` is the exception, and only for moves recorded before CYLIST-8:
+    those rows kept the destination's *id* and neither column's name, so
+    without a board to look the id up in there is nothing to say but "Moved.".
+    Passing today's names recovers half the sentence — where the card went —
+    at the cost of naming that column as it is called now. Given for a column
+    since deleted, or not given at all, the bare sentence stands.
 
     A task's own events are worded here at length, because they are the ones a
     card's history is made of and the only ones carrying old and new values.
@@ -194,7 +204,10 @@ def describe(entry: Activity) -> str:
         return f"Changed the {_listed(str(field) for field in fields)}." if fields else "Updated."
     if entry.verb == "task.moved":
         column = next((change for change in changes if change["field"] == "column"), None)
-        return f"Moved from {column['from']} to {column['to']}." if column else "Moved."
+        if column is not None:
+            return f"Moved from {column['from']} to {column['to']}."
+        arrived = (columns or {}).get(str(payload.get("column_id")))
+        return f"Moved to {arrived}." if arrived else "Moved."
     if entry.verb == "task.sub_status_moved":
         stage = payload.get("sub_status")
         return f"Sub-status set to {stage}." if stage else "Sub-status moved."

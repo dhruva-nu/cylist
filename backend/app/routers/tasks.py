@@ -36,7 +36,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import activity, tasks
+from app.services import activity, columns, tasks
 
 router = APIRouter(tags=["tasks"])
 
@@ -217,8 +217,13 @@ async def task_history(
     entries, total = await activity.for_entity(
         session, "task", task.id, limit=per_page, offset=(page - 1) * per_page
     )
+    # Only the oldest entries need this — a move has recorded both column names
+    # itself since CYLIST-8 — but a board is a handful of rows, and a history
+    # that says "Moved." and nothing else is the record failing at its one job.
+    board = await columns.list_for_project(session, task.project)
+    named = {str(column.id): column.name for column in board}
     return TaskHistoryPage(
-        entries=[activity.entry_of(entry) for entry in entries],
+        entries=[activity.entry_of(entry, named) for entry in entries],
         total=total,
         page=page,
         # At least one page, so "page 1 of 1" reads correctly on an empty

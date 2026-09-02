@@ -90,6 +90,9 @@ async def for_day(
     board = await columns.list_for_project(session, project)
     last_column = board[-1].id if board else None
     column_names = {column.id: column.name for column in board}
+    # Keyed by the string a payload stores, for the moves too old to have
+    # recorded a column's name themselves — see `activity.describe`.
+    named = {str(column.id): column.name for column in board}
     cards = {card.reference: card for card in await tasks.list_for_project(session, project)}
 
     # Insertion order is chronological, because the entries are: a day reads
@@ -99,12 +102,12 @@ async def for_day(
     for entry in entries:
         reference = _card_reference(entry)
         if reference is None:
-            elsewhere.append(activity.entry_of(entry))
+            elsewhere.append(activity.entry_of(entry, named))
         else:
             by_card.setdefault(reference, []).append(entry)
 
     touched = [
-        _task_day(reference, rows, cards, column_names, last_column)
+        _task_day(reference, rows, cards, column_names, last_column, named)
         for reference, rows in by_card.items()
     ]
     finished = [card.reference for card in touched if card.finished]
@@ -158,6 +161,7 @@ def _task_day(
     cards: dict[str, Task],
     column_names: dict[UUID, str],
     last_column: UUID | None,
+    named: dict[str, str],
 ) -> TaskDay:
     """One card's entries, with where the card stands now."""
     card = cards.get(reference)
@@ -180,7 +184,7 @@ def _task_day(
             column=None,
             status=None,
             finished=finished,
-            entries=[activity.entry_of(row) for row in rows],
+            entries=[activity.entry_of(row, named) for row in rows],
         )
 
     return TaskDay(
@@ -189,7 +193,7 @@ def _task_day(
         column=column_names.get(card.column_id),
         status=card.status,
         finished=finished,
-        entries=[activity.entry_of(row) for row in rows],
+        entries=[activity.entry_of(row, named) for row in rows],
     )
 
 
