@@ -139,8 +139,9 @@ dev-web: ## Run the web app with reload on :5173
 dev: ## Run the API and the web app together
 	@$(MAKE) -j2 dev-api dev-web
 
-test: ## Run the backend test suite (starts an embedded database if needed)
+test: ## Run both test suites (starts an embedded database if needed)
 	cd $(BACKEND) && uv run pytest -q
+	npm --prefix $(FRONTEND) test
 
 lint: ## Lint both sides
 	cd $(BACKEND) && uv run ruff check . && uv run ruff format --check .

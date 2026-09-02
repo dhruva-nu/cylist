@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "api:types": "openapi-typescript http://localhost:8000/api/v1/openapi.json -o src/api/schema.d.ts"
@@ -33,7 +34,8 @@
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "vitest": "^3.2.7"
   },
   "allowScripts": {
     "esbuild@0.25.12": true

@@ -190,8 +190,9 @@
   max-width: 40%;
 }
 
-.composer input {
+.composer .grow {
   flex: 1;
+  min-width: 0;
 }
 
 .spacer {
@@ -288,7 +289,9 @@
   align-items: center;
 }
 
-.subStatusEditorRow input {
+/* The stage's box, which holds the input and the `@` suggestion list under
+   it. The wrapper is the flex item, so it is the wrapper that stretches. */
+.subStatusEditorRow .grow {
   flex: 1;
   min-width: 0;
 }

@@ -354,3 +354,23 @@
   display: block;
   flex: none;
 }
+
+/* Whatever the author wrote, laid out as they wrote it: a description is
+   paragraphs, and a tag inside one must not break the line it sits in. */
+.tagged {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* `.mention`, not `.tag`: this file's `.tag` is the TEAM/CLIENT pill, and a
+   name is written the way its owner writes it rather than shouted in caps.
+
+   Enough to pick a name out of a paragraph, not so much that a sentence with
+   three of them in it becomes a row of buttons. */
+.mention {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
