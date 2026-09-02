@@ -15,11 +15,20 @@
   cursor: pointer;
 }
 
-.button:hover:not(:disabled) {
+.button:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--ink-3);
 }
 
 .button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A button refusing rather than absent. aria-disabled keeps it focusable, for
+   the buttons whose whole job at the limit is to say what the limit is — it
+   has to be reachable to be read. It greys the same way :disabled does, so the
+   two are not two different kinds of "no". */
+.button[aria-disabled='true'] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -30,7 +39,7 @@
   color: var(--go-ink);
 }
 
-.go:hover:not(:disabled) {
+.go:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--go-hover);
   background: var(--go-hover);
 }
@@ -41,7 +50,7 @@
   color: var(--ink-2);
 }
 
-.ghost:hover:not(:disabled) {
+.ghost:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--paper-2);
   color: var(--ink);
 }
@@ -146,6 +155,188 @@
   font-size: 14px;
 }
 
+/*
+ * Sub-status: a segmented slider, not a row of labelled chips.
+ *
+ * A stage label can be a sentence — four of them side by side either wrap a
+ * board card into a paragraph or truncate down to nothing anyone can read. So
+ * the bar carries position only, one segment per stage, and the words live
+ * where there is room for them: the current stage on the head line, and
+ * whichever stage you point at in the hover tip, wrapped and in full. Nothing
+ * on the bar has to fit.
+ */
+.subStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.subStatusHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* --ink-2 rather than --ink-3: this rides on board cards that may be tinted
+   amber or red, where the quietest ink stops clearing AA. */
+.subStatusNow {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subStatusNowWrapped {
+  overflow: visible;
+  white-space: normal;
+}
+
+.subStatusCount {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fixed height, so the row does not jump as the current stage moves along it,
+   and 20px of it, because a 4px bar is not something anyone can be asked to
+   hit. The segment is the target and takes the track's whole height; the bar
+   you can see is drawn inside it. */
+.subStatusTrack {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  height: 20px;
+}
+
+.subStatusSegment {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 5px;
+  height: 100%;
+}
+
+.subStatusSegment::before {
+  content: '';
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-2);
+  transition:
+    height 120ms ease,
+    background-color 120ms ease;
+}
+
+/* Finished. Without a colour ramp — every finished stage is the same green,
+   because "done" is not a matter of degree. */
+.subStatusDone::before {
+  background: var(--go);
+}
+
+/*
+ * The thumb: a slider's handle, stretched to the width of the stage it sits
+ * on. Ink rather than the green behind it, because the stage in hand is the
+ * one being worked, not one finished — a green thumb said a card had already
+ * done the stage it had only just reached, and said it loudest on a new card,
+ * where the very first stage came up looking complete.
+ *
+ * Ink rather than an accent, too: every other colour on a card means a status,
+ * and gold next to amber "on hold" would be a fourth thing to learn. A dark
+ * marker on a track that runs green behind it and grey ahead of it needs no
+ * learning at all.
+ */
+.subStatusHere::before {
+  height: 12px;
+  background: var(--ink);
+}
+
+.subStatusTrackLive .subStatusSegment {
+  cursor: pointer;
+}
+
+/* Half-way to the thumb's height: enough to say "this one would take the
+   handle" without pretending it already has. */
+.subStatusTrackLive .subStatusSegment:hover::before {
+  height: 8px;
+}
+
+/* Already as tall as they get. Done darkens, to say that clicking a stage
+   behind you is a real move back; the thumb does not, because clicking where
+   you already are is a no-op. */
+.subStatusTrackLive .subStatusDone:hover::before {
+  height: 12px;
+  background: var(--go-hover);
+}
+
+.subStatusTrackLive .subStatusHere:hover::before {
+  height: 12px;
+}
+
+/*
+ * Stages between the current one and the one under the cursor: filled at half
+ * strength, so the bar shows where a click would take the card before it
+ * takes it. Half strength rather than a second hue, because there is no third
+ * state to name — this is the same green, not yet earned.
+ */
+.subStatusTrackLive .subStatusAhead::before {
+  height: 8px;
+  background: var(--go);
+  opacity: 0.45;
+}
+
+/*
+ * The hover tip. Above everything — the modal sits at 20, the shell header at
+ * 30 — because it is used inside the task dialog as well as on the board.
+ *
+ * --ink on --paper is the inverse of body text in both themes, so it reads as
+ * an overlay rather than another panel. Positioned by the component; the
+ * transform is what makes those coordinates mean "centred, just clear of the
+ * anchor".
+ */
+.tip {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  transform: translate(-50%, calc(-100% - 8px));
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.tipBelow {
+  transform: translate(-50%, 8px);
+}
+
+.tipText {
+  font-weight: 600;
+}
+
+/* The same ink at 70%: a second line that reads as an aside rather than as
+   part of the label above it, without introducing a colour that would have to
+   be checked against two themes. */
+.tipNote {
+  opacity: 0.72;
+  font-size: 11px;
+}
+
 /* Underlined, not just tinted: this sits in a row of plain counts on a card
    that may be tinted amber or red, and --link is not far enough from --ink-2
    there to be the only thing saying which one you can follow. */
@@ -155,4 +346,11 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
   white-space: nowrap;
+}
+
+/* The type and priority glyphs. `block` so the line box around them does not
+   add a descender's worth of height to whatever chip they sit in. */
+.glyph {
+  display: block;
+  flex: none;
 }

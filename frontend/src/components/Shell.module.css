@@ -157,14 +157,44 @@
   color: var(--ink-3);
 }
 
+/* Where a page longer than the window scrolls, now that `#root` is exactly the
+   window's height rather than at least it. The bar above stays put because it
+   sits outside this box, not because it is sticky. `min-height: 0` so this may
+   be shorter than what it holds, which is what makes it the thing that
+   scrolls; both axes named, because a lone `overflow-y` computes the other to
+   `auto` anyway and it may as well say so. */
 .wrap {
+  flex: 1;
+  min-height: 0;
   max-width: 1180px;
   margin: 0 auto;
   padding: 22px 24px 60px;
+  overflow: auto;
 }
 
+/* The board: full width, and a column of its own so the board inside it can
+   take whatever height is left under the bar and the heading by asking for it.
+   `min-height: 0` because a flex item will not shrink below its content
+   without it, which is how a board that scrolls its own columns ends up
+   pushing the page down instead of scrolling.
+
+   Less room underneath than a reading page gets. The 60px there is the runway
+   under text that ends mid-scroll; a board that reaches the bottom of the
+   window on purpose only wants the edge back. */
 .wide {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Sideways too, and the pair of them is what pins this box to the window.
+     `.wrap` centres itself with automatic margins, which turns off a flex
+     item's stretching and leaves it sized by what it holds — so a row of
+     columns wider than the window widened the page, heading and toolbar and
+     all, instead of scrolling inside the board. A stated width takes the
+     question away, and `min-width: 0` lets the box honour it. */
+  width: 100%;
+  min-width: 0;
   max-width: none;
+  padding-bottom: 24px;
 }
 
 .head {

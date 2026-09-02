@@ -146,6 +146,22 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "AND (parent_id IS NULL) = (sub_number IS NULL)",
             name="numbered_by_parentage",
         ),
+        # A card can be split into at most 4 stages — enough to read as a
+        # position along a bar, not so many that a segment on a board card is
+        # too narrow to point at.
+        CheckConstraint("cardinality(sub_statuses) <= 4", name="sub_status_max_four"),
+        # The pointer exists exactly when there is something for it to point
+        # at: no stage list means nothing is "current", and any stage list has
+        # exactly one.
+        CheckConstraint(
+            "(sub_status_index IS NULL) = (cardinality(sub_statuses) = 0)",
+            name="sub_status_index_matches_list",
+        ),
+        CheckConstraint(
+            "sub_status_index IS NULL "
+            "OR (sub_status_index >= 0 AND sub_status_index < cardinality(sub_statuses))",
+            name="sub_status_index_in_range",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -187,6 +203,27 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default=TaskPriority.SOMEDAY,
         server_default=sql_text("'someday'"),
     )
+
+    sub_statuses: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(60)),
+        nullable=False,
+        default=list,
+        server_default=sql_text("'{}'"),
+    )
+    """Up to 4 stage labels, left to right — a progress bar within a column
+    rather than the column itself, which is why :func:`app.services.tasks.move`
+    starts them again when a card changes column. Empty means the card does not
+    use the feature at all. Long labels are fine: the board draws position, not
+    words, and shows the words on hover."""
+
+    sub_status_index: Mapped[int | None] = mapped_column(Integer)
+    """Which of ``sub_statuses`` is current — the stage in hand, not one
+    finished. Null exactly when the list is empty — see
+    ``sub_status_index_matches_list``. Moved by
+    :func:`app.services.tasks.set_sub_status` (the board card's slider), reset
+    to the first stage by :func:`app.services.tasks.move` when the card changes
+    column, and kept in range by the service whenever ``sub_statuses`` is
+    edited out from under it."""
 
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
 

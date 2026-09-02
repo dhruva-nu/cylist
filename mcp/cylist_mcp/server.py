@@ -20,7 +20,9 @@ mistake it made.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
@@ -160,6 +162,33 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
             return {"task": await client.get(f"/tasks/{task}")}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="read_task_history",
+        description=(
+            "Read what has been done to one task, newest first: every field "
+            "edit with its old and new value, every move between columns, every "
+            "sub-status step, every checklist item ticked — each with the moment "
+            "it happened and who did it. Distinct from get_task's timeline, "
+            "which is what people said about the card rather than what was done "
+            "to it. 'channel' is 'web' if a person did it and 'api' if an agent "
+            "did. A sub-task keeps its own history rather than appearing in its "
+            "parent's. Comes a page at a time: the reply carries 'total' and "
+            "'pages', so ask for the next page only if you still need it."
+        ),
+    )
+    async def read_task_history(
+        task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
+        page: Annotated[int, Field(description="Which page, counting from 1.", ge=1)] = 1,
+        per_page: Annotated[
+            int, Field(description="Entries per page. Default 10, maximum 100.", ge=1, le=100)
+        ] = 10,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            history = await client.get(f"/tasks/{task}/history", page=page, per_page=per_page)
+            return {"history": history}
 
         return await _guard(call)
 
@@ -561,6 +590,48 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
 
         return await _guard(call)
 
+    @server.tool(
+        name="day_report",
+        description=(
+            "Report what was done on one project on one day: every card that was "
+            "touched, what happened to it in order, which cards reached the "
+            "board's last column, and what happened away from the board — files, "
+            "columns, the vault. This is the tool for 'what did I do today', a "
+            "stand-up note, or a end-of-day summary. The reply carries 'markdown', "
+            "the whole report already worded and ready to paste; prefer quoting "
+            "that over rewriting it from the structured fields, so the note reads "
+            "the same however it was asked for. A day means midnight to midnight "
+            "in 'timezone', which defaults to this machine's own zone rather than "
+            "UTC. An entry whose channel is 'api' was an agent's work, not the "
+            "person's."
+        ),
+    )
+    async def day_report(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        date: Annotated[
+            str | None,
+            Field(description="Which day, as 'YYYY-MM-DD'. Defaults to today in `timezone`."),
+        ] = None,
+        timezone: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "IANA zone the day is cut by, e.g. 'Asia/Kolkata'. Defaults to "
+                    "the zone this machine is set to."
+                )
+            ),
+        ] = None,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            report = await client.get(
+                f"/projects/{project}/reports/day",
+                date=date,
+                timezone=timezone or local_timezone(),
+            )
+            return {"report": report}
+
+        return await _guard(call)
+
     if VAULT_REVEAL in scopes:
         _register_reveal(server, client)
 
@@ -602,6 +673,33 @@ def _register_reveal(server: MCPServer, client: ApiClient) -> None:
 
 
 # --- Plumbing --------------------------------------------------------------
+
+
+def local_timezone() -> str | None:
+    """The IANA zone this machine is set to, or None if it cannot be named.
+
+    A day report is cut at local midnight, and the local day is the one the
+    person asking has just lived — this server runs beside them, so its own
+    zone is a far better default than the API's UTC.
+
+    Asked of the system rather than of ``datetime``, because what is needed is
+    a *name*: ``now().astimezone().tzname()`` gives "IST", which no zone
+    database can be looked up by. ``TZ`` first, since that is what anything
+    setting a zone deliberately sets; then the symlink Linux and macOS keep at
+    ``/etc/localtime``. When neither answers, None lets the server apply its
+    own default rather than this guessing one.
+    """
+    configured = os.environ.get("TZ", "").lstrip(":").strip()
+    if configured:
+        return configured
+
+    try:
+        parts = Path("/etc/localtime").resolve().parts
+    except OSError:  # pragma: no cover - an unreadable /etc is not worth faking
+        return None
+    if "zoneinfo" in parts:
+        return "/".join(parts[parts.index("zoneinfo") + 1 :])
+    return None
 
 
 async def _guard(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResult:

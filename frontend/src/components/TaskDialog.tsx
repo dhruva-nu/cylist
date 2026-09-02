@@ -27,6 +27,10 @@
  * change, then a comment. They go in that order so the status entry lands on a
  * card that already reads the way it will after the save.
  *
+ * Under the timeline sits the card's history: what was changed, when, and who
+ * changed it. Closed until asked for, and read from the server's own wording
+ * rather than reconstructed here — see `History`.
+ *
  * Sub-tasks come in two kinds, and both are ticked off in place — from either
  * half of the dialog — rather than on the Save button: a checkbox that only
  * takes effect when you remember to press Save is a checkbox that lies. A tick
@@ -37,7 +41,7 @@
  * card.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
@@ -48,13 +52,14 @@ import {
   type Task,
   type TaskComment,
   type TaskDetail,
+  type TaskHistoryEntry,
   type TaskInput,
   type TaskPriority,
   type TaskStatus,
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner, TaskRef } from './ui'
+import { Avatar, Button, ErrorBanner, PriorityIcon, SubStatusBar, TaskRef, TypeIcon } from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -207,12 +212,25 @@ function TaskDetailView({
         <h3 className={styles.readTitle}>{task.title}</h3>
 
         <div className={styles.chips}>
-          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>{task.type}</span>
+          {/* The same two icons the board card carries, with the words kept:
+              a dialog has the room the card does not, and this is where you
+              come to read the card rather than scan it. */}
+          <span className={`${styles.chip} ${styles[`type_${task.type}`]}`}>
+            <TypeIcon type={task.type} />
+            {task.type}
+          </span>
           <span className={`${styles.chip} ${styles[`priority_${task.priority}`]}`}>
+            <PriorityIcon priority={task.priority} />
             {PRIORITIES.find((option) => option.value === task.priority)?.label ?? task.priority}
           </span>
           <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>
         </div>
+
+        {task.sub_statuses.length ? (
+          <ReadField label="Sub-status">
+            <SubStatusBar labels={task.sub_statuses} index={task.sub_status_index ?? 0} wrap />
+          </ReadField>
+        ) : null}
 
         <ReadField label="Description">
           <p className={styles.prose}>{task.description}</p>
@@ -267,13 +285,230 @@ function TaskDetailView({
             {task.comments.length ? (
               task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
             ) : (
-              <span className={styles.empty}>Nothing has happened to this card yet.</span>
+              <span className={styles.empty}>Nothing has been said about this card yet.</span>
             )}
           </div>
         </ReadField>
+
+        <History taskId={task.id} />
       </ModalBody>
     </Modal>
   )
+}
+
+/**
+ * What has been done to this card: every change, when, and who made it.
+ *
+ * The counterpart to the timeline above it, and deliberately not merged into
+ * it. The timeline is what people *said*; this is what was *done* — and the
+ * two are read for different reasons. Someone scrolling a card to catch up
+ * wants the conversation; someone asking "why does this say Thursday now?"
+ * wants the record, and interleaving the two buries each in the other.
+ *
+ * Closed to begin with, fetched only when it is opened, and then ten entries
+ * at a time. A card worked on for a month carries a long record that nobody
+ * opened the dialog to read: loading it on every open would slow the common
+ * case to serve the rare one, and loading all of it at once would bury the
+ * only part most readers want — the last thing that happened.
+ *
+ * The wording comes from the server rather than from a verb-to-sentence map
+ * here, so the board, the CLI and an agent reading the API all tell the same
+ * story. This side only decides what the record looks like.
+ */
+function History({ taskId }: { taskId: string }) {
+  const [open, setOpen] = useState(false)
+  const [page, setPage] = useState(1)
+
+  const history = useQuery({
+    queryKey: ['task-history', taskId, page],
+    queryFn: () => api.getTaskHistory(taskId, page),
+    enabled: open,
+    // The previous page stays on screen while the next one loads. A pager that
+    // empties itself between clicks makes the dialog jump under the cursor.
+    placeholderData: keepPreviousData,
+  })
+
+  const shown = history.data
+
+  return (
+    <details
+      className={styles.history}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className={styles.historySummary}>
+        <span className={styles.historyTitle}>History</span>
+        <span className={styles.historyHint}>what changed, and who changed it</span>
+      </summary>
+
+      {history.error ? <ErrorBanner>{history.error.message}</ErrorBanner> : null}
+
+      <div className={styles.historyList}>
+        {shown === undefined && history.isFetching ? (
+          <span className={styles.empty}>Loading…</span>
+        ) : null}
+        {shown?.total === 0 ? (
+          <span className={styles.empty}>Nothing has happened to this card yet.</span>
+        ) : null}
+        {shown?.entries.map((entry) => (
+          <HistoryEntry key={entry.id} entry={entry} />
+        ))}
+      </div>
+
+      {shown && shown.pages > 1 ? (
+        <Pager page={shown.page} pages={shown.pages} total={shown.total} onGo={setPage} />
+      ) : null}
+    </details>
+  )
+}
+
+/**
+ * Which page of the history is showing, and how to reach the others.
+ *
+ * Every page is a numbered button rather than only Previous and Next: a record
+ * is usually read for a particular moment — "what did it look like in March" —
+ * and stepping there one page at a time means loading everything in between.
+ * A history long enough for that to become a wall of numbers is one nobody
+ * navigates by number anyway, so past nine pages the middle is elided.
+ */
+function Pager({
+  page,
+  pages,
+  total,
+  onGo,
+}: {
+  page: number
+  pages: number
+  total: number
+  onGo: (page: number) => void
+}) {
+  return (
+    <nav className={styles.pager} aria-label="History pages">
+      <Button
+        small
+        variant="ghost"
+        disabled={page === 1}
+        aria-label="Previous page"
+        onClick={() => onGo(page - 1)}
+      >
+        ‹
+      </Button>
+
+      {pageNumbers(page, pages).map((number, index) =>
+        number === null ? (
+          <span key={`gap-${index}`} className={styles.pagerGap} aria-hidden="true">
+            …
+          </span>
+        ) : (
+          <button
+            key={number}
+            type="button"
+            className={number === page ? styles.pageOn : styles.page}
+            aria-label={`Page ${number} of ${pages}`}
+            aria-current={number === page ? 'page' : undefined}
+            onClick={() => onGo(number)}
+          >
+            {number}
+          </button>
+        ),
+      )}
+
+      <Button
+        small
+        variant="ghost"
+        disabled={page === pages}
+        aria-label="Next page"
+        onClick={() => onGo(page + 1)}
+      >
+        ›
+      </Button>
+
+      <span className={styles.pagerCount}>{total} entries</span>
+    </nav>
+  )
+}
+
+/** How many page buttons fit before the middle has to be elided. */
+const PAGER_WIDTH = 9
+
+/**
+ * The page numbers to draw, with `null` standing for an elision.
+ *
+ * The first and last are always reachable — the beginning and the end of a
+ * record are the two moments anybody jumps to — and the rest of the room goes
+ * to the pages either side of where you are.
+ */
+function pageNumbers(page: number, pages: number): (number | null)[] {
+  if (pages <= PAGER_WIDTH) return Array.from({ length: pages }, (_, index) => index + 1)
+
+  const span = PAGER_WIDTH - 4 // first, last, and an elision at each end
+  const first = Math.min(Math.max(page - (span >> 1), 2), pages - span)
+  const middle = Array.from({ length: span }, (_, index) => first + index)
+
+  return [
+    1,
+    ...(first > 2 ? [null] : []),
+    ...middle,
+    ...(first + span <= pages - 1 ? [null] : []),
+    pages,
+  ]
+}
+
+/** One thing that happened, and the fields it moved. */
+function HistoryEntry({ entry }: { entry: TaskHistoryEntry }) {
+  const when = new Date(entry.occurred_at).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return (
+    <div className={styles.historyEntry}>
+      <div className={styles.historyLine}>
+        <span>{entry.summary}</span>
+        <span className={styles.when}>{when}</span>
+      </div>
+      <div className={styles.historyWho}>
+        {entry.actor_label}
+        {/* Agents act through the same API as the browser, so the record is
+            the only place that says a person did not do this. */}
+        {entry.channel === 'api' ? <span className={styles.agent}>agent</span> : null}
+      </div>
+      {entry.changes.length ? (
+        <dl className={styles.changes}>
+          {entry.changes.map((change) => (
+            <div key={change.field} className={styles.change}>
+              <dt>{change.label}</dt>
+              <dd>
+                <span className={styles.was}>{shown(change.from)}</span>
+                <span aria-hidden="true"> → </span>
+                <span className="visually-hidden"> became </span>
+                <span className={styles.now}>{shown(change.to)}</span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  )
+}
+
+/** How much of a changed value the record shows before it gets in the way. */
+const LONGEST = 90
+
+/**
+ * A field's value as one short line.
+ *
+ * Truncated, because a description is a paragraph and a history that prints
+ * two of them per edit is a history you have to scroll past rather than read.
+ * The full text is on the card itself, which is the thing this is a record of.
+ */
+function shown(value: string | number | string[] | null): string {
+  if (value === null || value === '') return '—'
+  const text = Array.isArray(value) ? value.join(' · ') : String(value)
+  return text.length > LONGEST ? `${text.slice(0, LONGEST - 1)}…` : text
 }
 
 /** A labelled row of the detail view. The `Field` twin for text with no input. */
@@ -340,11 +575,19 @@ function TaskForm({
     description: task?.description ?? '',
     type: task?.type ?? 'feature',
     priority: task?.priority ?? 'someday',
+    sub_statuses: task?.sub_statuses ?? [],
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
     jira_ref: task?.jira_ref ?? '',
     pr_ref: task?.pr_ref ?? '',
   })
+  /**
+   * Which stage the card is on. Held apart from `form` because creating a card
+   * cannot say it — a new one starts on its first stage — while editing can:
+   * reordering or removing a stage moves the marker, and this form is the only
+   * thing that knows where it went.
+   */
+  const [subStatusIndex, setSubStatusIndex] = useState(task?.sub_status_index ?? 0)
   const [columnId, setColumnId] = useState(task?.column_id ?? firstColumn.id)
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'active')
   const [reason, setReason] = useState('')
@@ -362,11 +605,12 @@ function TaskForm({
     mutationFn: async () => {
       const payload = {
         ...form,
+        sub_statuses: form.sub_statuses.map((label) => label.trim()),
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
       const saved = task
-        ? await api.updateTask(task.id, payload)
+        ? await api.updateTask(task.id, { ...payload, sub_status_index: subStatusIndex })
         : parentRef
           ? await api.createSubtask(parentRef, payload)
           : await api.createTask(projectKey, payload)
@@ -414,6 +658,7 @@ function TaskForm({
     form.description.trim() &&
     form.due_date &&
     form.assignee_id &&
+    form.sub_statuses.every((label) => label.trim()) &&
     (!stalling || reason.trim())
 
   const error = save.error ?? remove.error
@@ -549,6 +794,20 @@ function TaskForm({
               </option>
             ))}
           </select>
+        </Field>
+
+        <Field
+          label="Sub-status"
+          hint="Up to 4 stages, in order. Moving the card between them happens on the board."
+        >
+          <SubStatusListEditor
+            value={form.sub_statuses}
+            current={subStatusIndex}
+            onChange={(sub_statuses, current) => {
+              setForm({ ...form, sub_statuses })
+              setSubStatusIndex(current)
+            }}
+          />
         </Field>
 
         <FieldPair>
@@ -691,6 +950,102 @@ function TaskForm({
 }
 
 /**
+ * The stage list, edited by hand: renamed in place, reordered, removed, added.
+ *
+ * Order is the axis the board's slider slides along, so moving a stage is a
+ * real edit rather than delete-and-retype. The current stage travels with its
+ * label — move "Review" up and the card is still on "Review" — which is why
+ * this owns the marker as well as the words.
+ */
+function SubStatusListEditor({
+  value,
+  current,
+  onChange,
+}: {
+  value: string[]
+  current: number
+  onChange: (value: string[], current: number) => void
+}) {
+  /** Swap two neighbours, taking the marker along if it is on one of them. */
+  const swap = (a: number, b: number) => {
+    const next = [...value]
+    next[a] = value[b] as string
+    next[b] = value[a] as string
+    onChange(next, current === a ? b : current === b ? a : current)
+  }
+
+  const remove = (index: number) => {
+    const next = value.filter((_, position) => position !== index)
+    // The marker follows what is left: a stage taken from behind it pulls it
+    // back one, and taking the current stage leaves the marker on whatever
+    // has moved up into its place — or on the new last stage if nothing has.
+    onChange(next, index < current ? current - 1 : Math.min(current, Math.max(next.length - 1, 0)))
+  }
+
+  return (
+    <div className={styles.subStatusEditor}>
+      {value.map((label, index) => (
+        <div key={index} className={styles.subStatusEditorRow}>
+          <span
+            className={`${styles.subStatusEditorNumber} ${
+              index === current ? styles.subStatusEditorNow : ''
+            }`}
+            title={index === current ? 'The stage this card is on' : `Stage ${index + 1}`}
+          >
+            {index + 1}
+          </span>
+          <input
+            value={label}
+            maxLength={60}
+            placeholder={`Stage ${index + 1}`}
+            aria-label={`Sub-status stage ${index + 1}`}
+            onChange={(event) => {
+              const next = [...value]
+              next[index] = event.target.value
+              onChange(next, current)
+            }}
+          />
+          <Button
+            variant="ghost"
+            small
+            disabled={index === 0}
+            aria-label={`Move stage ${index + 1} up`}
+            title="Move up"
+            onClick={() => swap(index, index - 1)}
+          >
+            ↑
+          </Button>
+          <Button
+            variant="ghost"
+            small
+            disabled={index === value.length - 1}
+            aria-label={`Move stage ${index + 1} down`}
+            title="Move down"
+            onClick={() => swap(index, index + 1)}
+          >
+            ↓
+          </Button>
+          <Button
+            variant="ghost"
+            small
+            aria-label={`Remove stage ${index + 1}`}
+            title="Remove"
+            onClick={() => remove(index)}
+          >
+            ×
+          </Button>
+        </div>
+      ))}
+      {value.length < 4 ? (
+        <Button variant="ghost" small onClick={() => onChange([...value, ''], current)}>
+          + Add stage
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
  * One sentence covering everything a save did.
  *
  * A save is up to four requests, and hearing four separate confirmations of
@@ -786,6 +1141,9 @@ function useSubtaskTicking({
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    // Ticking a box is itself a change to the card, so the history under it
+    // is now one entry out of date.
+    await queryClient.invalidateQueries({ queryKey: ['task-history', task.id] })
     await onDone()
   }
 

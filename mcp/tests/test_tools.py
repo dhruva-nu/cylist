@@ -9,7 +9,7 @@ import pytest
 from mcp.server.mcpserver import MCPServer
 
 from cylist_mcp.client import ApiClient
-from cylist_mcp.server import build_server
+from cylist_mcp.server import build_server, local_timezone
 from tests import fake_api
 from tests.conftest import call
 
@@ -18,6 +18,7 @@ EXPECTED_TOOLS = {
     "get_project",
     "list_tasks",
     "get_task",
+    "read_task_history",
     "create_task",
     "create_subtask",
     "add_checklist_item",
@@ -30,6 +31,7 @@ EXPECTED_TOOLS = {
     "add_link",
     "list_vault",
     "read_activity",
+    "day_report",
 }
 
 
@@ -128,6 +130,20 @@ async def test_list_files_walks_a_path(server: MCPServer) -> None:
     assert result.data["items"][0]["name"] == "Signed MSA"
 
 
+async def test_read_task_history_says_what_changed_and_who_changed_it(
+    server: MCPServer,
+) -> None:
+    result = await call(server, "read_task_history", task="ATL-2")
+
+    assert not result.is_error
+    entry = result.data["history"]["entries"][0]
+    assert entry["summary"] == "Moved from To do to In progress."
+    assert entry["actor_label"] == "board-tidy agent"
+    assert entry["channel"] == "api"
+    assert entry["changes"][0]["from"] == "To do"
+    assert result.data["history"]["pages"] == 1
+
+
 async def test_read_activity_passes_the_project_key_straight_through(
     server: MCPServer, recorder: fake_api.Recorder
 ) -> None:
@@ -138,6 +154,64 @@ async def test_read_activity_passes_the_project_key_straight_through(
     assert query["project"] == "ATL"
     assert query["limit"] == "5"
     assert recorder.count("GET", "/projects/ATL") == 0
+
+
+async def test_day_report_asks_for_the_day_in_a_named_zone(
+    server: MCPServer, recorder: fake_api.Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+
+    result = await call(server, "day_report", project="ATL", date="2026-02-03")
+
+    assert not result.is_error
+    query = recorder.sent("GET", "/projects/ATL/reports/day").url.params
+    assert query["date"] == "2026-02-03"
+    assert query["timezone"] == "Asia/Kolkata"
+    assert result.data["report"]["finished"] == ["ATL-2"]
+
+
+async def test_day_report_prefers_the_zone_it_was_given(
+    server: MCPServer, recorder: fake_api.Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The machine's zone is a default, not a rule: an agent may be asked for
+    the day as somebody else lived it."""
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+
+    result = await call(server, "day_report", project="ATL", timezone="Europe/Berlin")
+
+    assert not result.is_error
+    assert recorder.sent("GET", "/projects/ATL/reports/day").url.params["timezone"] == (
+        "Europe/Berlin"
+    )
+
+
+async def test_day_report_carries_the_note_the_server_wrote(server: MCPServer) -> None:
+    """The wording is the server's, so every client tells the same story."""
+    result = await call(server, "day_report", project="ATL")
+
+    assert result.data["report"]["markdown"].startswith("# Atlas migration")
+
+
+async def test_the_local_zone_comes_from_tz_when_it_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A leading colon is legal in TZ and is not part of the name."""
+    monkeypatch.setenv("TZ", ":Europe/Berlin")
+
+    assert local_timezone() == "Europe/Berlin"
+
+
+def test_the_local_zone_is_read_off_etc_localtime_without_tz(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`tzname()` would say "IST", which no zone database can be looked up by."""
+    monkeypatch.delenv("TZ", raising=False)
+
+    zone = local_timezone()
+
+    # Whatever this machine is set to, it is either a nameable zone or nothing
+    # at all — never an abbreviation, and never a path.
+    assert zone is None or ("/" in zone or zone.isalpha())
 
 
 # --- Writing ---------------------------------------------------------------

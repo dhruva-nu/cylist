@@ -98,6 +98,7 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `get_project` | one project's numbers **and its board's columns** |
 | `list_tasks` | the cards on a board, filterable by status or assignee |
 | `get_task` | one card with its whole timeline |
+| `read_task_history` | what has been *done* to one card, and by whom — paged |
 | `create_task` | add a card to the first column |
 | `create_subtask` | split a card into one of its own, `ATL-41-2` |
 | `add_checklist_item` | add a tick-box sub-task to a card |
@@ -110,6 +111,7 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `add_link` | file a URL into a folder |
 | `list_vault` | trees and structure — never a value |
 | `read_activity` | the audit feed |
+| `day_report` | what was done on a project on one day, with a paste-ready note |
 | `reveal_secret` | decrypt one credential — **only with `vault:reveal`** |
 
 Two conveniences worth knowing, both described in the tool schemas themselves:

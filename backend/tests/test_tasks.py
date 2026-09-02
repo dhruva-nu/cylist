@@ -93,6 +93,41 @@ class TestCreating:
 
         assert response.status_code == 422
 
+    async def test_sub_statuses_default_to_empty(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person)
+
+        assert task["sub_statuses"] == []
+        assert task["sub_status_index"] is None
+
+    async def test_sub_statuses_can_be_set_on_creation(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Done"])
+
+        assert task["sub_statuses"] == ["Draft", "Review", "Done"]
+        assert task["sub_status_index"] == 0
+
+    async def test_more_than_four_sub_statuses_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks",
+            json=_task(person, sub_statuses=["A", "B", "C", "D", "E"]),
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_blank_sub_status_label_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks", json=_task(person, sub_statuses=["Draft", "  "])
+        )
+
+        assert response.status_code == 422
+
     async def test_lands_in_the_first_column(self, signed_in: AsyncClient) -> None:
         """Work enters a board at one end. Only moving is unrestricted."""
         person = await _setup(signed_in)
@@ -311,6 +346,105 @@ class TestUpdating:
 
         assert updated["priority"] == "asap"
 
+    async def test_sub_statuses_can_be_added(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+
+        updated = (
+            await signed_in.patch(
+                f"/tasks/{task['id']}", json={"sub_statuses": ["Draft", "Review"]}
+            )
+        ).json()
+
+        assert updated["sub_statuses"] == ["Draft", "Review"]
+        assert updated["sub_status_index"] == 0
+
+    async def test_sub_statuses_can_be_cleared(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review"])
+
+        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"sub_statuses": []})).json()
+
+        assert updated["sub_statuses"] == []
+        assert updated["sub_status_index"] is None
+
+    async def test_shrinking_the_list_pulls_the_current_stage_back(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Testing", "Done"])
+        far_along = (
+            await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+        ).json()
+        assert far_along["sub_status_index"] == 2
+
+        updated = (
+            await signed_in.patch(
+                f"/tasks/{task['id']}", json={"sub_statuses": ["Draft", "Review"]}
+            )
+        ).json()
+
+        assert updated["sub_statuses"] == ["Draft", "Review"]
+        assert updated["sub_status_index"] == 1
+
+    async def test_reordering_stages_can_take_the_current_one_with_it(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Done"])
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 1})
+
+        updated = (
+            await signed_in.patch(
+                f"/tasks/{task['id']}",
+                json={"sub_statuses": ["Review", "Draft", "Done"], "sub_status_index": 0},
+            )
+        ).json()
+
+        assert updated["sub_statuses"] == ["Review", "Draft", "Done"]
+        assert updated["sub_status_index"] == 0
+
+    async def test_the_current_stage_can_be_set_without_touching_the_labels(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Done"])
+
+        updated = (
+            await signed_in.patch(f"/tasks/{task['id']}", json={"sub_status_index": 2})
+        ).json()
+
+        assert updated["sub_statuses"] == ["Draft", "Review", "Done"]
+        assert updated["sub_status_index"] == 2
+
+    async def test_a_current_stage_past_the_new_list_is_refused(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Done"])
+
+        response = await signed_in.patch(
+            f"/tasks/{task['id']}",
+            json={"sub_statuses": ["Draft", "Review"], "sub_status_index": 2},
+        )
+
+        assert response.status_code == 422
+
+    async def test_clearing_the_stages_ignores_a_current_stage_sent_with_it(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review"])
+
+        updated = (
+            await signed_in.patch(
+                f"/tasks/{task['id']}", json={"sub_statuses": [], "sub_status_index": 0}
+            )
+        ).json()
+
+        assert updated["sub_statuses"] == []
+        assert updated["sub_status_index"] is None
+
     async def test_the_assignee_can_be_handed_over(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         rohan = (await signed_in.post("/people", json=ROHAN)).json()["id"]
@@ -362,6 +496,51 @@ class TestUpdating:
         updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"status": "blocked"})).json()
 
         assert updated["status"] == "active"
+
+
+class TestSubStatus:
+    async def test_moving_forwards_lands_on_the_stage_asked_for(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Done"])
+
+        moved = (await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})).json()
+
+        assert moved["sub_status_index"] == 2
+
+    async def test_moving_backwards_is_allowed(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Done"])
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+
+        back = (await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 0})).json()
+
+        assert back["sub_status_index"] == 0
+
+    async def test_a_stage_past_the_end_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Done"])
+
+        response = await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+
+        assert response.status_code == 422
+
+    async def test_a_negative_stage_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Done"])
+
+        response = await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": -1})
+
+        assert response.status_code == 422
+
+    async def test_moving_without_sub_statuses_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+
+        response = await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 0})
+
+        assert response.status_code == 422
 
 
 class TestDeleting:
@@ -424,6 +603,51 @@ class TestMoving:
         ).json()
 
         assert moved["column_id"] == todo
+
+    async def test_changing_column_starts_the_stages_again(self, signed_in: AsyncClient) -> None:
+        """Stages are progress through a column, so a new column has none yet."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Merged"])
+        done = (await _columns(signed_in))[1]["id"]
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()
+
+        assert moved["sub_status_index"] == 0
+
+    async def test_moving_within_a_column_keeps_the_stage(self, signed_in: AsyncClient) -> None:
+        """Nothing has been arrived at, so there is nothing to start again."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review", "Merged"])
+        todo = (await _columns(signed_in))[0]["id"]
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 2})
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": todo, "position": 0}
+            )
+        ).json()
+
+        assert moved["sub_status_index"] == 2
+
+    async def test_a_card_without_stages_is_unaffected_by_a_move(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        done = (await _columns(signed_in))[1]["id"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()
+
+        assert moved["sub_status_index"] is None
 
     async def test_inserting_pushes_the_cards_below_it_down(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

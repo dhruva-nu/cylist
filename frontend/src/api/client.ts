@@ -131,6 +131,99 @@ export interface ChecklistItem {
   created_at: string
 }
 
+/** One field of a card, as it read before and after somebody touched it. */
+export interface FieldChange {
+  /** The field's name on the task, e.g. `due_date`. */
+  field: string
+  /** How to word it, e.g. `due date`. */
+  label: string
+  /** What it said before, already rendered — a person by name, a date as
+   * `YYYY-MM-DD`. Null when it was not set. */
+  from: string | number | string[] | null
+  to: string | number | string[] | null
+}
+
+/**
+ * One thing that happened to a task: what changed, when, and who did it.
+ *
+ * The counterpart to `TaskComment`. A comment is what somebody *said* about
+ * the card; this is what was *done* to it, whether by a person in the browser
+ * or by an agent through the API — which is what `channel` distinguishes.
+ */
+export interface TaskHistoryEntry {
+  id: string
+  occurred_at: string
+  /** A token's name, or `Web session` for somebody working in the browser. */
+  actor_label: string
+  channel: 'web' | 'api'
+  /** Dotted past-tense event name, e.g. `task.moved`. */
+  verb: string
+  /** The same thing as one readable sentence, worded by the server so the
+   * board, the CLI and an agent all tell the same story. */
+  summary: string
+  /** Field-by-field detail, where the event has any. Empty otherwise. */
+  changes: FieldChange[]
+}
+
+/** How many history entries a page holds. The server's default, said out loud
+ * so the board can size its pager without a round trip to find out. */
+export const HISTORY_PER_PAGE = 10
+
+/** One page of a card's history, and enough to draw a pager for the rest. */
+export interface TaskHistoryPage {
+  entries: TaskHistoryEntry[]
+  /** How many entries the whole history holds. */
+  total: number
+  /** Which page this is, counting from 1. */
+  page: number
+  /** How many pages there are. At least 1, even when the history is empty. */
+  pages: number
+  per_page: number
+}
+
+/** One card's share of a day: everything that happened to it, oldest first. */
+export interface TaskDay {
+  /** `ATL-41`, or `ATL-41-2` for a sub-task. */
+  reference: string
+  /** Its title now — or the one it had at the time, if it has since been deleted. */
+  title: string
+  /** Which column it sits in now. Null if the card no longer exists. */
+  column: string | null
+  status: TaskStatus | null
+  /** Whether it reached the board's last column on this day. */
+  finished: boolean
+  entries: TaskHistoryEntry[]
+}
+
+/**
+ * What one project's day amounted to.
+ *
+ * The same audit entries a card's history is made of, cut at the boundaries of
+ * one local day and grouped by the card they happened to. `markdown` is the
+ * whole thing already worded, so a note pasted out of the browser and one an
+ * agent writes say the same.
+ */
+export interface DayReport {
+  project_key: string
+  project_name: string
+  /** The day reported on, as `YYYY-MM-DD` in `timezone`. */
+  day: string
+  timezone: string
+  /** Midnight that began the day, in UTC. */
+  starts_at: string
+  /** Midnight that ended it, in UTC. Exclusive. */
+  ends_at: string
+  entry_count: number
+  /** References of the cards that reached the board's last column. */
+  finished: string[]
+  /** The cards touched, in the order they were first touched. */
+  tasks: TaskDay[]
+  /** Changes that were not to a card — files, columns, the vault, the project. */
+  elsewhere: TaskHistoryEntry[]
+  headline: string
+  markdown: string
+}
+
 export interface Task {
   id: string
   project_id: string
@@ -150,6 +243,10 @@ export interface Task {
   description: string
   type: TaskType
   priority: TaskPriority
+  /** Up to 4 stage labels, left to right. Empty if the card doesn't use this. */
+  sub_statuses: string[]
+  /** Index into `sub_statuses` of the current stage. Null when the list is empty. */
+  sub_status_index: number | null
   due_date: string
   assignee: Person
   status: TaskStatus
@@ -178,10 +275,24 @@ export interface TaskInput {
   description: string
   type: TaskType
   priority: TaskPriority
+  /** Up to 4 short stage labels. Moving between them happens on the board. */
+  sub_statuses: string[]
   due_date: string
   assignee_id: string
   jira_ref: string | null
   pr_ref: string | null
+}
+
+/**
+ * A partial edit of a task.
+ *
+ * `sub_status_index` is not part of `TaskInput` because creating a card cannot
+ * say it — a new card starts on its first stage. Editing one can: reordering
+ * or deleting a stage moves the current marker, and the form doing the
+ * reordering is the only thing that knows where it ended up.
+ */
+export interface TaskPatch extends Partial<TaskInput> {
+  sub_status_index?: number
 }
 
 export interface StatusChange {
@@ -396,6 +507,17 @@ export const api = {
   listProjects: () => request<Project[]>('/projects'),
   getProject: (ref: string) => request<Project>(`/projects/${ref}`),
   getProjectSummary: (ref: string) => request<ProjectSummary>(`/projects/${ref}/summary`),
+  /**
+   * What was done on a project on one day.
+   *
+   * The zone is the caller's to name and is not optional here: the server
+   * falls back to UTC, and a change made at 9pm in Kolkata would then land in
+   * tomorrow's report.
+   */
+  getDayReport: (ref: string, day: string, timezone: string) =>
+    request<DayReport>(
+      `/projects/${ref}/reports/day?${new URLSearchParams({ date: day, timezone })}`,
+    ),
   createProject: (input: ProjectInput) =>
     request<Project>('/projects', { method: 'POST', body: body(input) }),
   updateProject: (ref: string, input: Partial<ProjectInput>) =>
@@ -446,6 +568,12 @@ export const api = {
 
   listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
+  /**
+   * One page of what has been done to a card — every edit, move and tick —
+   * newest first. Its own request, made only when somebody asks to see it.
+   */
+  getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
+    request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
   createTask: (ref: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */
@@ -460,7 +588,7 @@ export const api = {
     request<ChecklistItem>(`/checklist/${itemId}`, { method: 'PATCH', body: body(input) }),
   deleteChecklistItem: (itemId: string) =>
     request<{ ok: boolean }>(`/checklist/${itemId}`, { method: 'DELETE' }),
-  updateTask: (taskRef: string, input: Partial<TaskInput>) =>
+  updateTask: (taskRef: string, input: TaskPatch) =>
     request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: body(input) }),
   deleteTask: (taskRef: string) =>
     request<{ ok: boolean }>(`/tasks/${taskRef}`, { method: 'DELETE' }),
@@ -471,6 +599,10 @@ export const api = {
     }),
   setTaskStatus: (taskRef: string, change: StatusChange) =>
     request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: body(change) }),
+  /** Moves a task to one of its sub-status stages — backwards as readily as
+   * forwards, which is what makes the board's control a slider. */
+  setSubStatus: (taskRef: string, index: number) =>
+    request<TaskDetail>(`/tasks/${taskRef}/sub-status`, { method: 'POST', body: body({ index }) }),
   addComment: (taskRef: string, text: string, authorId: string | null) =>
     request<TaskComment>(`/tasks/${taskRef}/comments`, {
       method: 'POST',

@@ -1,17 +1,39 @@
+/* Two tracks: the search takes the row, the button takes what it needs at the
+   end of it. It was three, with the search boxed into the middle one and empty
+   space either side holding it on the board's midline — but a box this wide
+   has no side left to be off, and those tracks were only ever there to centre
+   it. It is centred now by spanning.
+
+   `1fr` on the search's track rather than `auto`, so the width below resolves
+   against a track that has already been given a size rather than against one
+   still being sized by what is in it. */
+.toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0 6px 14px;
+}
+
+/* The cap only bites on a display wider than about 3000px; on anything
+   narrower this is the whole row, less the button. Centred in its track for
+   the displays where it does bite. */
 .search {
   position: relative;
-  width: min(420px, 100%);
-  margin: 0 6px 12px;
+  grid-column: 1;
+  justify-self: center;
+  width: min(2880px, 100%);
 }
 
 .search input {
   width: 100%;
-  padding: 9px 12px;
+  padding: 13px 22px;
+  font-size: 15px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
-  font: inherit;
+  font-family: inherit;
 }
 
 .suggestions {
@@ -22,7 +44,7 @@
   padding: 6px;
   list-style: none;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--paper);
   box-shadow: var(--shadow-lg);
 
@@ -61,27 +83,85 @@
   font-weight: 700;
 }
 
+/* `safe center` rather than plain `center`: this row scrolls, and a centred
+   flex row that overflows spills equally off both ends — the leftmost column
+   ends up behind the start of the scroll range, where nothing can reach it.
+   `safe` centres while the columns fit and falls back to the left edge the
+   moment they do not. */
 .board {
   display: flex;
+  flex: 1;
   gap: 16px;
-  align-items: flex-start;
-  min-height: 60vh;
+
+  /* The columns take the board's height rather than naming one of their own,
+     which is what makes the board exactly as tall as the window leaves it. */
+  align-items: stretch;
+  justify-content: safe center;
+  min-height: 0;
+  /* The pair of `min-height: 0`: a flex item will not shrink below its content
+     on either axis without being told it may, and a board that cannot be
+     narrower than its columns cannot scroll them. */
+  min-width: 0;
 
   /* Wide enough for a focus ring: this scrolls, so anything nearer the edge
      than the ring is thick gets clipped rather than merely crowded. */
   padding: 6px 6px 20px;
+
+  /* Both axes named, as in `.cards`: a lone `overflow-x` computes the other to
+     `auto` too, and it may as well say which one it means. Sideways to reach a
+     column past the edge; downwards only on a window too short for the floor a
+     column stops shrinking at. */
   overflow-x: auto;
+  overflow-y: auto;
 }
 
+/* One height for every column, and a width that shares out the row.
+
+   The height comes from the board, which takes what the window leaves under
+   the bar and the heading. It used to be `100vh` less a number standing for
+   everything above it, which is a number that is wrong the day anything up
+   there changes — as it was the day the heading lost its paragraph.
+
+   What matters is only that the height does not answer to the cards: a column
+   sized to its own changed height every time one was dropped, and moved every
+   neighbour on the row while the pointer was still over it. The cards scroll
+   inside instead.
+
+   The width has no such problem, because it answers to how many columns are
+   open rather than to what any of them is holding — so it grows to fill the
+   board when three columns are showing and shrinks when eight are. Between a
+   floor and a ceiling: a card stops being readable under about 280px, and past
+   400px a column is mostly the empty right-hand side of its own cards. Past
+   the floor the board scrolls rather than squeezing any further. */
 .column {
   display: flex;
-  flex: 0 0 300px;
+  flex: 1 1 320px;
   flex-direction: column;
-  max-height: calc(100vh - 260px);
+  min-width: 280px;
+  max-width: 400px;
+  min-height: 320px;
   border: 2px solid transparent;
   border-radius: 16px;
   background: var(--paper);
   box-shadow: var(--shadow);
+
+  /* So a fold wipes rather than spills: while the box is narrowing, whatever
+     is inside it is still laid out at its own width. */
+  overflow: hidden;
+  transition:
+    flex-basis 240ms ease,
+    min-width 240ms ease,
+    max-width 240ms ease;
+}
+
+/* Folded. All three widths move together and land on the same number, and
+   they have to: min-width beats max-width in the cascade, so animating one
+   without the other would hold the column open at 280px for the whole of a
+   fold that is supposedly closing it. */
+.collapsed {
+  flex-basis: 52px;
+  min-width: 52px;
+  max-width: 52px;
 }
 
 .over {
@@ -89,23 +169,53 @@
   background: var(--brand-soft);
 }
 
-/* A folded column: the same card, narrowed to what you need to recognise it
-   and to drop onto it. Its own flex basis rather than a width, so it sits in
-   the same row as the columns either side of it. */
+/* What a folded column holds: narrowed to what you need to recognise it and
+   to drop onto it. The box around it keeps the row's height, so folding a
+   column changes its width and nothing else — which is the whole of what
+   there is to animate.
+
+   Both fillings are sized in their own right rather than to the box, so
+   neither reflows while the box is on its way between the two widths: the
+   rail is 52px throughout, and the unfolded column never narrows past the
+   width it would be readable at anyway. What is too wide to fit yet is
+   clipped, so a fold reads as a wipe. */
 .rail {
   display: flex;
-  flex: 0 0 52px;
+  flex: 1;
   flex-direction: column;
   align-items: stretch;
+  width: 52px;
+  min-height: 0;
+}
 
-  /* Tall enough to read the name down and to be an easy drop target, and no
-     taller: a rail that stretched to the board's full height would be the
-     largest thing on a screen it is meant to be getting out of the way of. */
-  min-height: 240px;
-  border: 2px solid transparent;
-  border-radius: 16px;
-  background: var(--paper);
-  box-shadow: var(--shadow);
+/* `flex: 1` rather than `height: 100%`, for both: the column no longer names a
+   height of its own — it takes the board's — and a percentage wants a number
+   to be a percentage of. */
+.unfolded {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-width: 280px;
+  min-height: 0;
+}
+
+/* The two fillings are a swap, and a swap in the middle of a resize is a
+   flicker unless it is faded. Keyed in the markup so React remounts them,
+   which is what runs this again on every fold rather than only the first. */
+.rail,
+.unfolded {
+  animation: unfurl 240ms ease;
+}
+
+@keyframes unfurl {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .railBody {
@@ -220,6 +330,9 @@
   font-size: 13px;
 }
 
+/* Both axes named. A lone `overflow-y` computes the other axis to `auto` as
+   well, which gave a column a sideways scrollbar of its own and let its cards
+   be dragged out of view inside it. */
 .cards {
   display: flex;
   flex: 1;
@@ -227,6 +340,7 @@
   gap: 10px;
   min-height: 60px;
   padding: 4px 12px 12px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -266,6 +380,15 @@
 
 .dragging {
   opacity: 0.4;
+}
+
+/* The overlay's copy: the same card, picked up. Full width of the overlay,
+   which dnd-kit has already sized to the card this was lifted from, so it
+   neither grows nor shrinks on the way out of the column. */
+.lifted {
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  cursor: grabbing;
 }
 
 .hold {
@@ -357,6 +480,12 @@
   color: var(--ink-2);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* An icon-only chip: square-ish padding, since there is no text to sit beside
+   and a pill's side padding would leave the glyph adrift in it. */
+.icon {
+  padding: 3px 6px;
 }
 
 .type_feature {
@@ -488,42 +617,20 @@
   height: 10px;
 }
 
+/* The toolbar's second track, hard against the end of the search box, so the
+   pair reads as one strip of controls. */
 .addColumn {
-  display: flex;
-  flex: 0 0 300px;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  min-height: 130px;
-  padding: 24px;
-  border: 2px dashed var(--line-2);
-  border-radius: 16px;
-  background: transparent;
-  color: var(--ink-3);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
+  grid-column: 2;
+  justify-self: start;
+  white-space: nowrap;
 }
 
-.addColumn:hover:not([aria-disabled='true']) {
-  border-color: var(--brand-ink);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
-}
-
-/* aria-disabled rather than :disabled, because the tile stays focusable: it is
-   where the eight-column limit is explained, and a control the keyboard cannot
-   reach cannot explain anything. */
-.addColumn[aria-disabled='true'] {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
+/* The count that turns the button into the place the limit is stated. */
 .hint {
-  font-size: 13px;
-  font-weight: 400;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 .note {

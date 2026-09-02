@@ -3,14 +3,19 @@
  *
  * All four are live: the board, the file store, the vault and the people on
  * the project, each summarised by the counts behind its card.
+ *
+ * The day report sits beside the title rather than becoming a fifth card. The
+ * four cards are places you go and stay; a report is something you take away,
+ * so it opens over the hub and closes again.
  */
 
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { api } from '../api/client'
+import { DayReportDialog } from '../components/DayReportDialog'
 import { PageHead } from '../components/Shell'
-import { EmptyState, ErrorBanner, Eyebrow, cardStyles } from '../components/ui'
+import { Button, EmptyState, ErrorBanner, Eyebrow, cardStyles } from '../components/ui'
 import styles from './ProjectHub.module.css'
 
 const ICONS = {
@@ -45,6 +50,7 @@ const ICONS = {
 
 export function ProjectHub() {
   const { projectKey } = useParams({ from: '/p/$projectKey' })
+  const [reporting, setReporting] = useState(false)
   const summary = useQuery({
     queryKey: ['project-summary', projectKey],
     queryFn: () => api.getProjectSummary(projectKey),
@@ -57,9 +63,21 @@ export function ProjectHub() {
 
   return (
     <>
-      <PageHead eyebrow={<Eyebrow>{project.key}</Eyebrow>} title={project.name}>
+      <PageHead
+        eyebrow={<Eyebrow>{project.key}</Eyebrow>}
+        title={project.name}
+        actions={
+          <Button variant="go" onClick={() => setReporting(true)}>
+            Day report
+          </Button>
+        }
+      >
         {project.description || 'No description yet.'}
       </PageHead>
+
+      {reporting ? (
+        <DayReportDialog projectKey={projectKey} onClose={() => setReporting(false)} />
+      ) : null}
 
       <div className={styles.grid}>
         <Tool

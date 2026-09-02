@@ -225,6 +225,26 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* A column exactly the height of the window, so a screen that wants to fill it
+   can say so with `flex: 1` instead of subtracting the header from 100vh and
+   hoping the two stay in step.
+
+   `height`, not `min-height`. A minimum is a floor and nothing more: an
+   auto-height flex container is still sized by its contents, so a board with
+   more cards than fit grew the page instead of scrolling its own columns, and
+   `flex: 1` further down handed out a share of a height that had no end. The
+   height is claimed here and the scrolling moves inside — `.wrap` in
+   Shell.module.css is what the long pages scroll in now.
+
+   `dvh` because on a phone `vh` is the window with the browser's own bars
+   pretended away, which puts the bottom of any full-height screen underneath
+   them. */
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
 h1,
 h2,
 h3 {
