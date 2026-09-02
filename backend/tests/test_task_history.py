@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID, uuid4
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.activity import Activity, Channel
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -404,3 +408,53 @@ class TestPaging:
         response = await signed_in.get(f"/tasks/{task['reference']}/history", params={"page": 0})
 
         assert response.status_code == 422
+
+
+class TestEntriesOlderThanTheRecord:
+    """Moves written before a history existed, read back through today's board.
+
+    Those rows kept the destination column's id and neither column's name — the
+    shape no endpoint produces any more, which is why these tests write it by
+    hand. Left alone they read "Moved." and say nothing at all.
+    """
+
+    async def test_a_move_recorded_before_the_names_were_says_where_it_went(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        done = (await _columns(signed_in))[-1]
+        await _record_old_move(session, task, column_id=done["id"])
+
+        entries = await _history(signed_in, task["reference"])
+
+        assert entries[0]["summary"] == f"Moved to {done['name']}."
+
+    async def test_a_move_into_a_column_since_deleted_still_says_it_moved(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Half a sentence is recovered where it can be. Where it cannot, the
+        record does not invent the other half."""
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        await _record_old_move(session, task, column_id=str(uuid4()))
+
+        entries = await _history(signed_in, task["reference"])
+
+        assert entries[0]["summary"] == "Moved."
+
+
+async def _record_old_move(session: AsyncSession, task: dict[str, Any], *, column_id: str) -> None:
+    """Write the payload a move used to leave behind, before CYLIST-8."""
+    session.add(
+        Activity(
+            actor_label="Web session",
+            channel=Channel.WEB,
+            verb="task.moved",
+            entity_type="task",
+            entity_id=UUID(task["id"]),
+            project_id=UUID(task["project_id"]),
+            payload={"reference": task["reference"], "column_id": column_id, "position": 0},
+        )
+    )
+    await session.commit()

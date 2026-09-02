@@ -181,6 +181,49 @@ export interface TaskHistoryPage {
   per_page: number
 }
 
+/** One card's share of a day: everything that happened to it, oldest first. */
+export interface TaskDay {
+  /** `ATL-41`, or `ATL-41-2` for a sub-task. */
+  reference: string
+  /** Its title now — or the one it had at the time, if it has since been deleted. */
+  title: string
+  /** Which column it sits in now. Null if the card no longer exists. */
+  column: string | null
+  status: TaskStatus | null
+  /** Whether it reached the board's last column on this day. */
+  finished: boolean
+  entries: TaskHistoryEntry[]
+}
+
+/**
+ * What one project's day amounted to.
+ *
+ * The same audit entries a card's history is made of, cut at the boundaries of
+ * one local day and grouped by the card they happened to. `markdown` is the
+ * whole thing already worded, so a note pasted out of the browser and one an
+ * agent writes say the same.
+ */
+export interface DayReport {
+  project_key: string
+  project_name: string
+  /** The day reported on, as `YYYY-MM-DD` in `timezone`. */
+  day: string
+  timezone: string
+  /** Midnight that began the day, in UTC. */
+  starts_at: string
+  /** Midnight that ended it, in UTC. Exclusive. */
+  ends_at: string
+  entry_count: number
+  /** References of the cards that reached the board's last column. */
+  finished: string[]
+  /** The cards touched, in the order they were first touched. */
+  tasks: TaskDay[]
+  /** Changes that were not to a card — files, columns, the vault, the project. */
+  elsewhere: TaskHistoryEntry[]
+  headline: string
+  markdown: string
+}
+
 export interface Task {
   id: string
   project_id: string
@@ -464,6 +507,17 @@ export const api = {
   listProjects: () => request<Project[]>('/projects'),
   getProject: (ref: string) => request<Project>(`/projects/${ref}`),
   getProjectSummary: (ref: string) => request<ProjectSummary>(`/projects/${ref}/summary`),
+  /**
+   * What was done on a project on one day.
+   *
+   * The zone is the caller's to name and is not optional here: the server
+   * falls back to UTC, and a change made at 9pm in Kolkata would then land in
+   * tomorrow's report.
+   */
+  getDayReport: (ref: string, day: string, timezone: string) =>
+    request<DayReport>(
+      `/projects/${ref}/reports/day?${new URLSearchParams({ date: day, timezone })}`,
+    ),
   createProject: (input: ProjectInput) =>
     request<Project>('/projects', { method: 'POST', body: body(input) }),
   updateProject: (ref: string, input: Partial<ProjectInput>) =>

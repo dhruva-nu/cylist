@@ -1,0 +1,143 @@
+.picker {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.dayField input {
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-ui);
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.headline {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.section {
+  margin: 0 0 10px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.finished {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  line-height: 1.7;
+}
+
+.finished b {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* A card and its day: the heading is the card, the lines under it are the day. */
+.card {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.card:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.cardHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.reference {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.title {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-weight: 700;
+}
+
+/* Where the card stands now — the column it is in, or that it is gone. */
+.where,
+.done {
+  margin-left: auto;
+  padding: 1px 9px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.entry {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.at {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent {
+  flex: 0 0 auto;
+  padding: 0 7px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Which window the report covered, kept beside the button that copies it. */
+.zone {
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+  align-self: center;
+}

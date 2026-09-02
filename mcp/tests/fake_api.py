@@ -236,6 +236,30 @@ TASK_HISTORY = {
     "per_page": 10,
 }
 
+DAY_REPORT = {
+    "project_key": "ATL",
+    "project_name": "Atlas migration",
+    "day": "2026-02-03",
+    "timezone": "Asia/Kolkata",
+    "starts_at": "2026-02-02T18:30:00Z",
+    "ends_at": "2026-02-03T18:30:00Z",
+    "entry_count": 1,
+    "finished": ["ATL-2"],
+    "tasks": [
+        {
+            "reference": "ATL-2",
+            "title": "Stripe webhook idempotency",
+            "column": "In progress",
+            "status": "active",
+            "finished": True,
+            "entries": TASK_HISTORY_ENTRIES,
+        }
+    ],
+    "elsewhere": [],
+    "headline": "1 change across 1 card, 1 of them finished.",
+    "markdown": "# Atlas migration — Tuesday 3 February 2026\n",
+}
+
 ACTIVITY = [
     {
         "id": "0192f3c4-0009-7000-8000-000000000001",
@@ -426,6 +450,8 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
 
     if path == "/activity":
         return httpx.Response(200, json=ACTIVITY)
+    if path == "/projects/ATL/reports/day":
+        return httpx.Response(200, json=DAY_REPORT)
 
     return httpx.Response(
         404,

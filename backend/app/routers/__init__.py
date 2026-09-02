@@ -15,6 +15,7 @@ from app.routers import (
     health,
     people,
     projects,
+    reports,
     tasks,
     tokens,
     vault,
@@ -28,6 +29,7 @@ api_router.include_router(projects.router)
 # Registered after `projects` so `/projects/{project_ref}/vault/trees` resolves
 # against the same `{project_ref}` the rest of that prefix uses.
 api_router.include_router(vault.project_router)
+api_router.include_router(reports.router)
 api_router.include_router(vault.router)
 api_router.include_router(people.router)
 api_router.include_router(columns.router)

@@ -93,6 +93,13 @@ Every mutation writes a row to `activity` recording who did it, what changed,
 and whether it came through the browser or the API. `GET /activity` answers
 "what did the CLI change at 3am?".
 
+That trail is read back two ways. A card's own history —
+`GET /tasks/{ref}/history` — is what has been done to one piece of work.
+`GET /projects/{ref}/reports/day` is the other cut: one day of it, grouped by
+card, with a paste-ready Markdown note for a stand-up. The day is midnight to
+midnight in whichever zone the caller names, so an evening's work stays in the
+evening it happened.
+
 ## Secrets and backups
 
 `CYLIST_VAULT_KEY` encrypts every vault secret with AES-256-GCM. **If you lose
