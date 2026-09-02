@@ -98,6 +98,10 @@
   align-items: stretch;
   justify-content: safe center;
   min-height: 0;
+  /* The pair of `min-height: 0`: a flex item will not shrink below its content
+     on either axis without being told it may, and a board that cannot be
+     narrower than its columns cannot scroll them. */
+  min-width: 0;
 
   /* Wide enough for a focus ring: this scrolls, so anything nearer the edge
      than the ring is thick gets clipped rather than merely crowded. */
