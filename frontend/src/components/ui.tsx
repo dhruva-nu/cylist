@@ -2,7 +2,8 @@
 
 import { useCallback, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { PersonKind, TaskPriority, TaskType } from '../api/client'
+import type { Person, PersonKind, TaskPriority, TaskType } from '../api/client'
+import { splitMentions } from './mentions'
 import styles from './ui.module.css'
 
 type ButtonVariant = 'plain' | 'go' | 'ghost'
@@ -137,6 +138,34 @@ function Tip({ tip }: { tip: TipState | null }) {
  * at in full. Labels can be a sentence long, so no part of the design asks
  * one to fit inside a fixed width.
  */
+/**
+ * Text with its `@` tags drawn as tags — see `mentions.ts` for what counts as
+ * one. Used wherever somebody's prose is read back: a description, a comment,
+ * the label on a stage.
+ *
+ * Whitespace is the author's. A description is written in paragraphs, and
+ * reading it back as one run-on line would lose what they wrote.
+ */
+export function Tagged({ text, members }: { text: string; members: readonly Person[] }) {
+  return (
+    <span className={styles.tagged}>
+      {splitMentions(text, members).map((run, index) =>
+        run.kind === 'mention' ? (
+          <span
+            key={index}
+            className={styles.mention}
+            title={`${run.person.name} — ${run.person.role}`}
+          >
+            {run.text}
+          </span>
+        ) : (
+          <span key={index}>{run.text}</span>
+        ),
+      )}
+    </span>
+  )
+}
+
 interface SubStatusProps {
   labels: string[]
   index: number
@@ -153,6 +182,12 @@ interface SubStatusProps {
    * instead, and leaves the rest to the tip.
    */
   wrap?: boolean
+  /**
+   * The project's people, for drawing an `@` tag in a stage label. Omitted
+   * where they are not to hand, which only costs the label its highlight —
+   * the words are the words either way.
+   */
+  members?: readonly Person[]
 }
 
 /**
@@ -164,7 +199,7 @@ interface SubStatusProps {
  * segments themselves are not focus stops; the track is, and carries the
  * value, so tabbing through a board card is one stop rather than four.
  */
-export function SubStatusBar({ labels, index, onMove, wrap = false }: SubStatusProps) {
+export function SubStatusBar({ labels, index, onMove, wrap = false, members }: SubStatusProps) {
   const tip = useTip()
   /**
    * The stage under the cursor, when it is ahead of the current one. Fills the
@@ -189,7 +224,7 @@ export function SubStatusBar({ labels, index, onMove, wrap = false }: SubStatusP
           onPointerEnter={(event) => tip.show(event, current, noteFor(index))}
           onPointerLeave={tip.hide}
         >
-          {current}
+          {members ? <Tagged text={current} members={members} /> : current}
         </span>
         <span className={styles.subStatusCount}>
           {index + 1}/{labels.length}

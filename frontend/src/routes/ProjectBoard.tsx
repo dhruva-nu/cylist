@@ -237,8 +237,9 @@ export function ProjectBoard() {
     queryKey: ['tasks', projectKey],
     queryFn: () => api.listTasks(projectKey),
   })
-  // Needed for `who:` search matches and its autocomplete, not for rendering
-  // the board itself — every card already carries its own assignee.
+  // Needed for `who:` search matches and its autocomplete, and for the `@`
+  // tags in a stage label — not for the assignee on a card, which every card
+  // already carries.
   const members = useQuery({
     queryKey: ['members', projectKey],
     queryFn: () => api.listMembers(projectKey),
@@ -475,6 +476,7 @@ export function ProjectBoard() {
               onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
               onAddTask={() => setCreatingTask(true)}
               onEdit={() => setColumnDialog(column)}
+              members={memberList}
             />
           ))}
         </div>
@@ -491,7 +493,7 @@ export function ProjectBoard() {
                 .filter(Boolean)
                 .join(' ')}
             >
-              <TaskCardBody task={draggedTask} />
+              <TaskCardBody task={draggedTask} members={memberList} />
             </article>
           ) : null}
         </DragOverlay>
@@ -662,6 +664,7 @@ function Column({
   onMoveSubStatus,
   onAddTask,
   onEdit,
+  members,
 }: {
   column: BoardColumn
   tasks: Task[]
@@ -672,6 +675,8 @@ function Column({
   onMoveSubStatus: (taskId: string, index: number) => void
   onAddTask: () => void
   onEdit: () => void
+  /** The project's people, for the `@` tags in a stage label. */
+  members: Person[]
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
   // A column is draggable on the whole card (so it visually moves as one
@@ -776,6 +781,7 @@ function Column({
               <TaskCard
                 key={task.id}
                 task={task}
+                members={members}
                 onOpen={() => onOpenTask(task.id)}
                 onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
               />
@@ -817,10 +823,12 @@ const PRIORITY_LABELS = {
 
 function TaskCard({
   task,
+  members,
   onOpen,
   onMoveSubStatus,
 }: {
   task: Task
+  members: Person[]
   onOpen: () => void
   onMoveSubStatus: (index: number) => void
 }) {
@@ -855,7 +863,7 @@ function TaskCard({
         .filter(Boolean)
         .join(' ')}
     >
-      <TaskCardBody task={task} onMoveSubStatus={onMoveSubStatus} />
+      <TaskCardBody task={task} members={members} onMoveSubStatus={onMoveSubStatus} />
     </article>
   )
 }
@@ -873,9 +881,11 @@ function TaskCard({
  */
 function TaskCardBody({
   task,
+  members,
   onMoveSubStatus,
 }: {
   task: Task
+  members: Person[]
   onMoveSubStatus?: (index: number) => void
 }) {
   const late = isOverdue(task.due_date)
@@ -937,6 +947,7 @@ function TaskCardBody({
         <SubStatusBar
           labels={task.sub_statuses}
           index={task.sub_status_index ?? 0}
+          members={members}
           onMove={onMoveSubStatus}
         />
       ) : null}
