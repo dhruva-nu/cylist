@@ -47,7 +47,11 @@ class DayReport(Schema):
     project_key: str
     project_name: str
     day: date = Field(description="The day this reports on, in `timezone`.")
-    timezone: str = Field(description="The IANA zone the day was cut by, e.g. `Asia/Kolkata`.")
+    timezone: str = Field(
+        description="The IANA zone the day was cut by, e.g. `Asia/Kolkata`. The zone "
+        "the request settled on, which for a loosely spelled one is not the name it "
+        "asked with — this is the one to trust."
+    )
     starts_at: datetime = Field(description="Midnight that began the day, in UTC.")
     ends_at: datetime = Field(
         description="Midnight that ended it, in UTC. Exclusive: an entry at "

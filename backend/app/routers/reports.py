@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core import timezones
 from app.db import SessionDependency
 from app.models.project import Project
 from app.routers.projects import resolved_project
@@ -28,7 +29,9 @@ router = APIRouter(prefix="/projects", tags=["reports"])
     "/{project_ref}/reports/day",
     response_model=DayReport,
     summary="A day's report",
-    responses={422: {"description": "That is not a time zone this server knows."}},
+    responses={
+        422: {"description": "No time zone this server knows is close enough to that name."}
+    },
 )
 async def day_report(
     project: Project = Depends(resolved_project),
@@ -44,7 +47,10 @@ async def day_report(
         default=None,
         description=(
             "IANA zone the day is cut by, e.g. `Asia/Kolkata`. Defaults to UTC — "
-            "pass the caller's own zone, or a 9pm change lands in tomorrow's report."
+            "pass the caller's own zone, or a 9pm change lands in tomorrow's report. "
+            "A near miss is read as what it meant: case, spaces for underscores and "
+            "an obvious typo are all forgiven, and `timezone` in the reply says which "
+            "zone it settled on."
         ),
         examples=["Asia/Kolkata"],
     ),
@@ -75,5 +81,5 @@ async def day_report(
     saved without an edit — are left out, exactly as they are in a card's
     history. `/activity` remains the place that answers "who touched what".
     """
-    zone = reports.zone_for(timezone)
+    zone = timezones.zone_for(timezone)
     return await reports.for_day(session, project, day=day or reports.today_in(zone), zone=zone)
