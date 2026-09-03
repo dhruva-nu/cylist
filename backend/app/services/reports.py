@@ -16,6 +16,13 @@ for last Tuesday is cut the same way whenever it is asked for, DST included.
 :func:`app.services.activity.describe`, so a card's history and this report
 never word the same event differently, and there is one place to fix when they
 would.
+
+**A day of moves is one move.** A card dragged To do → In progress → Dev
+between breakfast and dinner is, by the end of the day, a card that got from
+To do to Dev; the columns it passed through on the way are not three things
+somebody did. So the report collapses a card's moves to where it started and
+where it ended — see :func:`_condensed`. The card's own history, which is the
+full record, still keeps every one of them.
 """
 
 from __future__ import annotations
@@ -30,7 +37,7 @@ from app.core.errors import UnprocessableRequestError
 from app.models.activity import Activity
 from app.models.project import Project
 from app.models.task import Task
-from app.schemas.activity import HistoryEntry
+from app.schemas.activity import FieldChange, HistoryEntry
 from app.schemas.reports import DayReport, TaskDay
 from app.services import activity, columns, tasks
 
@@ -111,9 +118,13 @@ async def for_day(
         for reference, rows in by_card.items()
     ]
     finished = [card.reference for card in touched if card.finished]
+    # What the report holds, rather than what the trail does: a card's day of
+    # moves has been collapsed to one line by now, and a count that disagreed
+    # with the lines under it would just look like a bug.
+    shown = sum(len(card.entries) for card in touched) + len(elsewhere)
 
     headline = _headline(
-        changes=len(entries),
+        changes=shown,
         cards=len(touched),
         finished=len(finished),
         elsewhere=len(elsewhere),
@@ -126,7 +137,7 @@ async def for_day(
         timezone=str(zone),
         starts_at=starts_at,
         ends_at=ends_at,
-        entry_count=len(entries),
+        entry_count=shown,
         finished=finished,
         tasks=touched,
         elsewhere=elsewhere,
@@ -165,10 +176,8 @@ def _task_day(
 ) -> TaskDay:
     """One card's entries, with where the card stands now."""
     card = cards.get(reference)
-    finished = last_column is not None and any(
-        row.verb == "task.moved" and row.payload.get("column_id") == str(last_column)
-        for row in rows
-    )
+    entries = _condensed([activity.entry_of(row, named) for row in rows])
+    finished = _ended_in(rows, last_column)
 
     if card is None:
         # Deleted, or created under a reference the board no longer holds. The
@@ -184,7 +193,7 @@ def _task_day(
             column=None,
             status=None,
             finished=finished,
-            entries=[activity.entry_of(row, named) for row in rows],
+            entries=entries,
         )
 
     return TaskDay(
@@ -193,7 +202,83 @@ def _task_day(
         column=column_names.get(card.column_id),
         status=card.status,
         finished=finished,
-        entries=[activity.entry_of(row, named) for row in rows],
+        entries=entries,
+    )
+
+
+def _ended_in(rows: list[Activity], column_id: UUID | None) -> bool:
+    """Whether the card's last move of the day put it in ``column_id``.
+
+    The last move rather than any move: a card dropped in Done and pulled back
+    out an hour later did not finish today, whatever the middle of the
+    afternoon looked like. Same reading of the day as :func:`_condensed` — what
+    the card ended up as, not everywhere it has been.
+    """
+    if column_id is None:
+        return False
+    arrived = next((row for row in reversed(rows) if row.verb == "task.moved"), None)
+    return arrived is not None and arrived.payload.get("column_id") == str(column_id)
+
+
+def _condensed(entries: list[HistoryEntry]) -> list[HistoryEntry]:
+    """One card's day with its moves collapsed to the one they amounted to.
+
+    To do → In progress → Dev is a card that got from To do to Dev; the column
+    it stopped in on the way is where it was passing through, not something
+    that was done to it. The collapsed line keeps the last move's moment and
+    actor — the day's work was finished when the card arrived — and is reworded
+    to name the column the day started in.
+
+    Only moves collapse. Two edits an hour apart are two things done, and a day
+    that reported them as one would be hiding half of itself.
+
+    A card that went somewhere and came back keeps a line of its own rather
+    than being dropped: it is one line either way, and a day where nothing is
+    said about a card that moved reads as a day the card sat still.
+    """
+    moves = [entry for entry in entries if entry.verb == "task.moved"]
+    if len(moves) < 2:
+        return entries
+
+    first, last = moves[0], moves[-1]
+    started_in, _ = _column_ends(first)
+    _, ended_in = _column_ends(last)
+    kept = [entry for entry in entries if entry.verb != "task.moved" or entry is last]
+
+    if ended_in is None:
+        # A move recorded before CYLIST-8 kept the destination's id and neither
+        # column's name, so there is no pair of ends to restate. The last
+        # move's own line stands for the day, and the ones before it still go.
+        return kept
+
+    collapsed = last.model_copy(
+        update={
+            "summary": activity.moved(started_in, ended_in),
+            "changes": [
+                FieldChange(field="column", label="column", before=started_in, after=ended_in),
+                # A move can also put a card back to its first sub-status, and
+                # that is still true of the collapsed one.
+                *[change for change in last.changes if change.field != "column"],
+            ],
+            "payload": {**last.payload, "moves": len(moves)},
+        }
+    )
+    return [collapsed if entry is last else entry for entry in kept]
+
+
+def _column_ends(entry: HistoryEntry) -> tuple[str | None, str | None]:
+    """The columns a move was between, as it recorded them.
+
+    Both None for a move written before CYLIST-8: those rows kept the
+    destination's id and neither column's name, which is not enough to restate
+    one end of a day against another.
+    """
+    change = next((change for change in entry.changes if change.field == "column"), None)
+    if change is None:
+        return None, None
+    return (
+        str(change.before) if change.before else None,
+        str(change.after) if change.after else None,
     )
 
 

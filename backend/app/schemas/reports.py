@@ -23,8 +23,15 @@ class TaskDay(Schema):
         description="Which column the card sits in now. Null if it no longer exists."
     )
     status: TaskStatus | None = Field(description="Its status now. Null if it no longer exists.")
-    finished: bool = Field(description="Whether it reached the board's last column on this day.")
-    entries: list[HistoryEntry] = Field(description="What happened to it, oldest first.")
+    finished: bool = Field(
+        description="Whether the card's last move of the day put it in the board's "
+        "last column. False for one dropped there and pulled back out again."
+    )
+    entries: list[HistoryEntry] = Field(
+        description="What happened to it, oldest first. Its moves appear as the one "
+        "move they amounted to — from the column the day started in to the one it "
+        "ended in — carrying `moves` in the payload to say how many there were."
+    )
 
 
 class DayReport(Schema):
@@ -32,7 +39,9 @@ class DayReport(Schema):
 
     Grouped by card rather than left as a flat feed, because a day spent on
     four cards is four pieces of work and thirty audit rows — the grouping is
-    the part that turns the record into a report.
+    the part that turns the record into a report. Condensed for the same
+    reason: a card's moves collapse to where it started and where it ended, so
+    a card walked across the board reads as one step rather than four.
     """
 
     project_key: str
@@ -44,9 +53,12 @@ class DayReport(Schema):
         description="Midnight that ended it, in UTC. Exclusive: an entry at "
         "exactly this moment belongs to the next day."
     )
-    entry_count: int = Field(description="How many changes the day holds in total.")
+    entry_count: int = Field(
+        description="How many lines the report holds — a card's day of moves counting "
+        "as the one move it amounted to, not as each drag."
+    )
     finished: list[str] = Field(
-        description="References of the cards that reached the board's last column today."
+        description="References of the cards that ended the day in the board's last column."
     )
     tasks: list[TaskDay] = Field(
         description="The cards touched today, in the order they were first touched."

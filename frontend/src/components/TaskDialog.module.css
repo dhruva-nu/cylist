@@ -561,6 +561,13 @@
   white-space: nowrap;
 }
 
+/* A line quoting a comment can carry a URL somebody pasted, and a word with no
+   spaces in it would otherwise push the timestamp off the dialog. */
+.historyLine > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .historyWho {
   display: flex;
   align-items: center;

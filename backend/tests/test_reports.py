@@ -58,6 +58,27 @@ async def make_task(client: AsyncClient, project: str, title: str = "Wire up bil
     return str(created.json()["reference"])
 
 
+async def widen_board(client: AsyncClient, project: str) -> list[dict[str, str]]:
+    """A board with somewhere to pass through: To do, In progress, Dev, Done.
+
+    A new board is two columns wide, and a card cannot be walked across a
+    board that has no middle.
+    """
+    board = (await client.get(f"/projects/{project}/columns")).json()["columns"]
+    done = board[-1]["id"]
+    for name in ("In progress", "Dev"):
+        added = await client.post(
+            f"/projects/{project}/columns", json={"name": name, "description": f"In {name}."}
+        )
+        assert added.status_code == 201, added.text
+    # A column is added on the right, so Done needs putting back at the end.
+    widened = (await client.get(f"/projects/{project}/columns")).json()["columns"]
+    order = [column["id"] for column in widened if column["id"] != done] + [done]
+    reordered = await client.put(f"/projects/{project}/columns/order", json={"column_ids": order})
+    assert reordered.status_code == 200, reordered.text
+    return list(reordered.json()["columns"])
+
+
 async def move_everything_to(session: AsyncSession, moment: datetime) -> None:
     """Put every entry recorded so far at one instant.
 
@@ -174,6 +195,137 @@ async def test_a_deleted_card_keeps_the_title_it_had(signed_in: AsyncClient, pro
     assert card["reference"] == reference
     assert card["title"] == "Abandoned idea"
     assert card["column"] is None
+
+
+# --- What it leaves out ----------------------------------------------------
+
+
+async def test_a_days_moves_read_as_the_one_move_they_amounted_to(
+    signed_in: AsyncClient, project: str
+) -> None:
+    """A card walked across the board is one step forward, not three."""
+    board = await widen_board(signed_in, project)
+    reference = await make_task(signed_in, project)
+    for column in board[1:3]:  # To do → In progress → Dev
+        await signed_in.post(
+            f"/tasks/{reference}/move", json={"column_id": column["id"], "position": 0}
+        )
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    (card,) = report["tasks"]
+    assert [entry["summary"] for entry in card["entries"]] == [
+        "Created this task.",
+        "Moved from To do to Dev.",
+    ]
+    moved = card["entries"][-1]
+    assert moved["payload"]["moves"] == 2
+    assert moved["changes"] == [
+        {"field": "column", "label": "column", "from": "To do", "to": "Dev"}
+    ]
+
+
+async def test_the_card_keeps_every_move_in_its_own_history(
+    signed_in: AsyncClient, project: str
+) -> None:
+    """The report is an account of the day; the history is the record."""
+    board = await widen_board(signed_in, project)
+    reference = await make_task(signed_in, project)
+    for column in board[1:3]:
+        await signed_in.post(
+            f"/tasks/{reference}/move", json={"column_id": column["id"], "position": 0}
+        )
+
+    history = (await signed_in.get(f"/tasks/{reference}/history")).json()
+
+    assert [entry["summary"] for entry in history["entries"]] == [
+        "Moved from In progress to Dev.",
+        "Moved from To do to In progress.",
+        "Created this task.",
+    ]
+
+
+async def test_a_card_that_went_somewhere_and_came_back_says_so(
+    signed_in: AsyncClient, project: str
+) -> None:
+    """One line either way, and silence would read as a card that sat still."""
+    board = (await signed_in.get(f"/projects/{project}/columns")).json()["columns"]
+    reference = await make_task(signed_in, project)
+    for column in (board[-1], board[0]):
+        await signed_in.post(
+            f"/tasks/{reference}/move", json={"column_id": column["id"], "position": 0}
+        )
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    (card,) = report["tasks"]
+    assert card["entries"][-1]["summary"] == "Moved out and back to To do."
+
+
+async def test_a_card_pulled_back_out_of_the_last_column_did_not_finish(
+    signed_in: AsyncClient, project: str
+) -> None:
+    board = await widen_board(signed_in, project)
+    reference = await make_task(signed_in, project)
+    for column in (board[-1], board[1]):  # into Done, then back to In progress
+        await signed_in.post(
+            f"/tasks/{reference}/move", json={"column_id": column["id"], "position": 0}
+        )
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    assert report["finished"] == []
+    assert [card["finished"] for card in report["tasks"]] == [False]
+    assert report["tasks"][0]["entries"][-1]["summary"] == "Moved from To do to In progress."
+
+
+async def test_two_edits_an_hour_apart_are_still_two_things(
+    signed_in: AsyncClient, project: str
+) -> None:
+    """Only moves collapse. A day that reported every save as one would hide
+    half of itself."""
+    reference = await make_task(signed_in, project)
+    await signed_in.patch(f"/tasks/{reference}", json={"title": "Wire up billing properly"})
+    await signed_in.patch(f"/tasks/{reference}", json={"priority": "urgent"})
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    assert [entry["summary"] for entry in report["tasks"][0]["entries"]] == [
+        "Created this task.",
+        "Changed the title.",
+        "Changed the priority.",
+    ]
+
+
+async def test_the_headline_counts_the_lines_it_shows(signed_in: AsyncClient, project: str) -> None:
+    """A count that disagreed with the lines under it would look like a bug."""
+    board = (await signed_in.get(f"/projects/{project}/columns")).json()["columns"]
+    reference = await make_task(signed_in, project)
+    for column in (board[-1], board[0]):
+        await signed_in.post(
+            f"/tasks/{reference}/move", json={"column_id": column["id"], "position": 0}
+        )
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    shown = sum(len(card["entries"]) for card in report["tasks"]) + len(report["elsewhere"])
+    assert shown == SETUP_ENTRIES + 2  # the card, and the two moves as one
+    assert report["entry_count"] == shown
+    assert report["headline"] == "4 changes across 1 card, and 2 elsewhere on the project."
+
+
+async def test_a_comment_is_quoted_in_the_note(signed_in: AsyncClient, project: str) -> None:
+    """ "Added a comment." is a line that sends you back to the card."""
+    reference = await make_task(signed_in, project)
+    members = (await signed_in.get(f"/projects/{project}/members")).json()["members"]
+    await signed_in.post(
+        f"/tasks/{reference}/comments",
+        json={"body": "Waiting on the sandbox key.", "author_id": members[0]["id"]},
+    )
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    assert "Commented: \u201cWaiting on the sandbox key.\u201d" in report["markdown"]
 
 
 # --- Where the day starts and ends -----------------------------------------

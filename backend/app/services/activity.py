@@ -166,6 +166,39 @@ def entry_of(entry: Activity, columns: Mapping[str, str] | None = None) -> Histo
     )
 
 
+def moved(before: Any, after: Any) -> str:
+    """How a move reads: where the card came from, and where it got to.
+
+    Its own function because a card is moved twice over — once when it happens,
+    and once more when a day's report collapses an afternoon of dragging into
+    the one move it amounted to. Both say it the same way.
+
+    ``before == after`` only happens to a collapsed move, a card that went
+    somewhere and came back; a single move within one column changes nothing
+    and is never written down at all.
+    """
+    if before and after:
+        return (
+            f"Moved from {before} to {after}."
+            if before != after
+            else f"Moved out and back to {after}."
+        )
+    return f"Moved to {after}." if after else "Moved."
+
+
+def excerpt(text: str, limit: int = 200) -> str:
+    """What somebody wrote, short enough to be one line of a report.
+
+    The trail keeps the words themselves, not just the fact that words were
+    written — "Added a comment." is a line nobody learns anything from. It
+    keeps only the opening of a long one, on one line, because a history and a
+    day's note are lists of what happened rather than the conversation itself:
+    the comment is still on the card, in full, when that is what is wanted.
+    """
+    said = " ".join(text.split())
+    return said if len(said) <= limit else said[: limit - 1].rstrip() + "…"
+
+
 def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     """One sentence saying what an entry did, with no ids in it.
 
@@ -205,9 +238,8 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     if entry.verb == "task.moved":
         column = next((change for change in changes if change["field"] == "column"), None)
         if column is not None:
-            return f"Moved from {column['from']} to {column['to']}."
-        arrived = (columns or {}).get(str(payload.get("column_id")))
-        return f"Moved to {arrived}." if arrived else "Moved."
+            return moved(column["from"], column["to"])
+        return moved(None, (columns or {}).get(str(payload.get("column_id"))))
     if entry.verb == "task.sub_status_moved":
         stage = payload.get("sub_status")
         return f"Sub-status set to {stage}." if stage else "Sub-status moved."
@@ -216,7 +248,8 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
         label = _STATUS_WORDS.get(str(payload.get("to")), str(payload.get("to")))
         return f"Status {label} — {reason}" if reason else f"Status {label}."
     if entry.verb == "task.commented":
-        return "Added a comment."
+        said = str(payload.get("comment") or "").strip()
+        return f"Commented: {_quoted(said)}" if said else "Added a comment."
     if entry.verb == "task.checklist_added":
         return f"Added {_quoted(payload.get('title'))} to the checklist."
     if entry.verb == "task.checklist_updated":

@@ -594,16 +594,18 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         name="day_report",
         description=(
             "Report what was done on one project on one day: every card that was "
-            "touched, what happened to it in order, which cards reached the "
-            "board's last column, and what happened away from the board — files, "
+            "touched, what happened to it in order, which cards ended the day in "
+            "the board's last column, and what happened away from the board — files, "
             "columns, the vault. This is the tool for 'what did I do today', a "
             "stand-up note, or a end-of-day summary. The reply carries 'markdown', "
             "the whole report already worded and ready to paste; prefer quoting "
             "that over rewriting it from the structured fields, so the note reads "
             "the same however it was asked for. A day means midnight to midnight "
             "in 'timezone', which defaults to this machine's own zone rather than "
-            "UTC. An entry whose channel is 'api' was an agent's work, not the "
-            "person's."
+            "UTC. The report is deliberately concise: a card's moves appear as the "
+            "one move they amounted to, from the column the day started in to the "
+            "one it ended in, and a comment's line quotes what was said. An entry "
+            "whose channel is 'api' was an agent's work, not the person's."
         ),
     )
     async def day_report(
