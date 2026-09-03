@@ -59,7 +59,17 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner, PriorityIcon, SubStatusBar, TaskRef, TypeIcon } from './ui'
+import { MentionBox } from './Mentions'
+import {
+  Avatar,
+  Button,
+  ErrorBanner,
+  PriorityIcon,
+  SubStatusBar,
+  Tagged,
+  TaskRef,
+  TypeIcon,
+} from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -228,12 +238,19 @@ function TaskDetailView({
 
         {task.sub_statuses.length ? (
           <ReadField label="Sub-status">
-            <SubStatusBar labels={task.sub_statuses} index={task.sub_status_index ?? 0} wrap />
+            <SubStatusBar
+              labels={task.sub_statuses}
+              index={task.sub_status_index ?? 0}
+              members={members}
+              wrap
+            />
           </ReadField>
         ) : null}
 
         <ReadField label="Description">
-          <p className={styles.prose}>{task.description}</p>
+          <p className={styles.prose}>
+            <Tagged text={task.description} members={members} />
+          </p>
         </ReadField>
 
         <div className={styles.readPair}>
@@ -745,10 +762,12 @@ function TaskForm({
           />
         </Field>
 
-        <Field label="Description" required>
-          <textarea
+        <Field label="Description" required hint="Type @ to tag someone on the project.">
+          <MentionBox
+            multiline
             value={form.description}
-            onChange={(event) => setForm({ ...form, description: event.target.value })}
+            onChange={(description) => setForm({ ...form, description })}
+            members={members}
             placeholder="What done looks like"
           />
         </Field>
@@ -798,11 +817,12 @@ function TaskForm({
 
         <Field
           label="Sub-status"
-          hint="Up to 4 stages, in order. Moving the card between them happens on the board."
+          hint="Up to 4 stages, in order. Moving the card between them happens on the board. Type @ to tag someone."
         >
           <SubStatusListEditor
             value={form.sub_statuses}
             current={subStatusIndex}
+            members={members}
             onChange={(sub_statuses, current) => {
               setForm({ ...form, sub_statuses })
               setSubStatusIndex(current)
@@ -935,11 +955,13 @@ function TaskForm({
                   </option>
                 ))}
               </select>
-              <input
+              <MentionBox
                 value={comment}
+                onChange={setComment}
+                members={members}
+                className={styles.grow}
                 aria-label="Add a comment"
-                onChange={(event) => setComment(event.target.value)}
-                placeholder="Add a comment…"
+                placeholder="Add a comment, @ to tag someone…"
               />
             </div>
           </div>
@@ -960,10 +982,12 @@ function TaskForm({
 function SubStatusListEditor({
   value,
   current,
+  members,
   onChange,
 }: {
   value: string[]
   current: number
+  members: Person[]
   onChange: (value: string[], current: number) => void
 }) {
   /** Swap two neighbours, taking the marker along if it is on one of them. */
@@ -994,14 +1018,16 @@ function SubStatusListEditor({
           >
             {index + 1}
           </span>
-          <input
+          <MentionBox
             value={label}
+            members={members}
+            className={styles.grow}
             maxLength={60}
             placeholder={`Stage ${index + 1}`}
             aria-label={`Sub-status stage ${index + 1}`}
-            onChange={(event) => {
+            onChange={(text) => {
               const next = [...value]
-              next[index] = event.target.value
+              next[index] = text
               onChange(next, current)
             }}
           />
@@ -1104,7 +1130,7 @@ function Entry({ entry, members }: { entry: TaskComment; members: Person[] }) {
           {entry.author?.name ?? 'Unattributed'}
           <span>{when}</span>
         </div>
-        {entry.body}
+        <Tagged text={entry.body} members={members} />
       </div>
     </div>
   )

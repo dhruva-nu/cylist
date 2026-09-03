@@ -1,0 +1,55 @@
+/* Tagging a person with `@`. Reads from the tokens in theme/tokens.css. */
+
+.box {
+  position: relative;
+}
+
+.box input,
+.box textarea {
+  width: 100%;
+  font: inherit;
+}
+
+.suggestions {
+  position: absolute;
+  z-index: 5;
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+
+  /* Long enough to need scrolling on a big directory, short enough that the
+     list never reaches past the fold on a small window. */
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.suggestions button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestions button:hover,
+.suggestionActive {
+  background: var(--brand-soft);
+}
+
+.suggestionRole {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+}
