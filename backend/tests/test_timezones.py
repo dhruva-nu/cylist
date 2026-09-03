@@ -9,6 +9,8 @@ name that could mean two places quietly coming back as one of them.
 
 from __future__ import annotations
 
+from importlib.util import find_spec
+
 import pytest
 
 from app.core.errors import UnprocessableRequestError
@@ -19,9 +21,30 @@ def test_a_name_the_database_holds_is_used_as_given() -> None:
     assert str(zone_for("Asia/Kolkata")) == "Asia/Kolkata"
 
 
-def test_a_link_is_a_name_the_database_holds() -> None:
-    """``Asia/Calcutta`` is what a browser hands over, and it is a real key."""
-    assert str(zone_for("Asia/Calcutta")) == "Asia/Calcutta"
+def test_the_whole_database_is_carried_not_borrowed() -> None:
+    """The zones a deployment knows must not depend on its base image.
+
+    A developer's machine has the full database in ``/usr/share/zoneinfo``, so
+    the links below resolve there whether or not anything is declared — which
+    is exactly how they came to 422 in a container and not on a laptop. This
+    asserts the dependency itself, where no system database can stand in for
+    it.
+    """
+    assert find_spec("tzdata") is not None, "the backend must depend on tzdata"
+
+
+@pytest.mark.parametrize("link", ["Asia/Calcutta", "US/Pacific", "Asia/Macao", "Hongkong", "Zulu"])
+def test_a_compatibility_link_is_a_name_the_database_holds(link: str) -> None:
+    """The old names are names, because clients still send them.
+
+    ``Asia/Calcutta`` is what a good many browsers report for India. Every name
+    here exists only as a link in the tz database's ``backward`` file, and
+    `python:3.12-slim` — what the image is built on — ships the canonical zones
+    without them. These pass because the backend depends on ``tzdata`` and
+    carries the whole database itself; drop that dependency and this is the
+    test that says so.
+    """
+    assert str(zone_for(link)) == link
 
 
 def test_no_zone_asked_for_means_utc() -> None:

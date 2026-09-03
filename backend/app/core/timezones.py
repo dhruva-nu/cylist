@@ -8,6 +8,14 @@ because that leading colon is POSIX's own; a person types ``asia/kolkata`` or
 ``Asia/Cacutta``. Only some of those are keys :mod:`zoneinfo` will open, and
 the rest used to cost a whole report a 422 over the spelling of its window.
 
+The first thing that takes is having the whole database to look in.
+``Asia/Calcutta`` is a real IANA name — a link kept in its ``backward`` file —
+but the slim base image the container is built on ships only the canonical
+zones, so on a deployment it was not a key at all while on a developer's
+machine it was. That is why the backend depends on ``tzdata``: zoneinfo falls
+back to the package for whatever it cannot find on TZPATH, and the zones a
+deployment knows become the lockfile's business rather than the image's.
+
 So the name is widened in steps, and the first step that lands wins:
 
 1. the name as given — a key the database holds, links like ``Asia/Calcutta``
