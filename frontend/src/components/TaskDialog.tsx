@@ -59,7 +59,17 @@ import {
   type TaskType,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Avatar, Button, ErrorBanner, PriorityIcon, SubStatusBar, TaskRef, TypeIcon } from './ui'
+import { MentionBox } from './Mentions'
+import {
+  Avatar,
+  Button,
+  ErrorBanner,
+  PriorityIcon,
+  SubStatusBar,
+  Tagged,
+  TaskRef,
+  TypeIcon,
+} from './ui'
 import styles from './TaskDialog.module.css'
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
@@ -228,12 +238,19 @@ function TaskDetailView({
 
         {task.sub_statuses.length ? (
           <ReadField label="Sub-status">
-            <SubStatusBar labels={task.sub_statuses} index={task.sub_status_index ?? 0} wrap />
+            <SubStatusBar
+              labels={task.sub_statuses}
+              index={task.sub_status_index ?? 0}
+              members={members}
+              wrap
+            />
           </ReadField>
         ) : null}
 
         <ReadField label="Description">
-          <p className={styles.prose}>{task.description}</p>
+          <p className={styles.prose}>
+            <Tagged text={task.description} members={members} />
+          </p>
         </ReadField>
 
         <div className={styles.readPair}>
@@ -532,7 +549,7 @@ function localDate(iso: string): Date {
   return new Date(year, month - 1, day)
 }
 
-function formatDue(iso: string): string {
+function formatDue(iso: string | null): string {
   if (!iso) return '—'
   return localDate(iso).toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -541,7 +558,8 @@ function formatDue(iso: string): string {
   })
 }
 
-function isOverdue(iso: string): boolean {
+/** A card with no date is never late: there is no day it was wanted by. */
+function isOverdue(iso: string | null): boolean {
   if (!iso) return false
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -576,6 +594,8 @@ function TaskForm({
     type: task?.type ?? 'feature',
     priority: task?.priority ?? 'someday',
     sub_statuses: task?.sub_statuses ?? [],
+    // The date input's empty value is '', not null; the mutation turns it back
+    // into the null the API reads as "no date".
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
     jira_ref: task?.jira_ref ?? '',
@@ -606,6 +626,7 @@ function TaskForm({
       const payload = {
         ...form,
         sub_statuses: form.sub_statuses.map((label) => label.trim()),
+        due_date: form.due_date || null,
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
@@ -656,7 +677,6 @@ function TaskForm({
   const complete =
     form.title.trim() &&
     form.description.trim() &&
-    form.due_date &&
     form.assignee_id &&
     form.sub_statuses.every((label) => label.trim()) &&
     (!stalling || reason.trim())
@@ -745,10 +765,12 @@ function TaskForm({
           />
         </Field>
 
-        <Field label="Description" required>
-          <textarea
+        <Field label="Description" required hint="Type @ to tag someone on the project.">
+          <MentionBox
+            multiline
             value={form.description}
-            onChange={(event) => setForm({ ...form, description: event.target.value })}
+            onChange={(description) => setForm({ ...form, description })}
+            members={members}
             placeholder="What done looks like"
           />
         </Field>
@@ -798,11 +820,12 @@ function TaskForm({
 
         <Field
           label="Sub-status"
-          hint="Up to 4 stages, in order. Moving the card between them happens on the board."
+          hint="Up to 4 stages, in order. Moving the card between them happens on the board. Type @ to tag someone."
         >
           <SubStatusListEditor
             value={form.sub_statuses}
             current={subStatusIndex}
+            members={members}
             onChange={(sub_statuses, current) => {
               setForm({ ...form, sub_statuses })
               setSubStatusIndex(current)
@@ -811,10 +834,10 @@ function TaskForm({
         </Field>
 
         <FieldPair>
-          <Field label="Due date" required>
+          <Field label="Due date">
             <input
               type="date"
-              value={form.due_date}
+              value={form.due_date ?? ''}
               onChange={(event) => setForm({ ...form, due_date: event.target.value })}
             />
           </Field>
@@ -935,11 +958,13 @@ function TaskForm({
                   </option>
                 ))}
               </select>
-              <input
+              <MentionBox
                 value={comment}
+                onChange={setComment}
+                members={members}
+                className={styles.grow}
                 aria-label="Add a comment"
-                onChange={(event) => setComment(event.target.value)}
-                placeholder="Add a comment…"
+                placeholder="Add a comment, @ to tag someone…"
               />
             </div>
           </div>
@@ -960,10 +985,12 @@ function TaskForm({
 function SubStatusListEditor({
   value,
   current,
+  members,
   onChange,
 }: {
   value: string[]
   current: number
+  members: Person[]
   onChange: (value: string[], current: number) => void
 }) {
   /** Swap two neighbours, taking the marker along if it is on one of them. */
@@ -994,14 +1021,16 @@ function SubStatusListEditor({
           >
             {index + 1}
           </span>
-          <input
+          <MentionBox
             value={label}
+            members={members}
+            className={styles.grow}
             maxLength={60}
             placeholder={`Stage ${index + 1}`}
             aria-label={`Sub-status stage ${index + 1}`}
-            onChange={(event) => {
+            onChange={(text) => {
               const next = [...value]
-              next[index] = event.target.value
+              next[index] = text
               onChange(next, current)
             }}
           />
@@ -1104,7 +1133,7 @@ function Entry({ entry, members }: { entry: TaskComment; members: Person[] }) {
           {entry.author?.name ?? 'Unattributed'}
           <span>{when}</span>
         </div>
-        {entry.body}
+        <Tagged text={entry.body} members={members} />
       </div>
     </div>
   )

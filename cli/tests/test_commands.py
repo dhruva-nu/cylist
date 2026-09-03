@@ -161,6 +161,25 @@ def test_task_new_resolves_the_assignee_and_normalises_the_date(
     assert body["type"] == "chore"
 
 
+def test_task_new_without_a_due_date_omits_it(run: Runner, recorder: fake_api.Recorder) -> None:
+    """CYLIST-17. No --due means an undated card, not a date the CLI picked."""
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "Draft the cutover plan",
+        "--description",
+        "A written plan with dates.",
+        "--type",
+        "chore",
+        "--assignee",
+        "Aditi K",
+    )
+    assert result.code == 0
+    assert "due_date" not in recorder.body("POST", "/tasks")
+
+
 def test_task_new_rejects_a_date_that_is_not_a_date(run: Runner) -> None:
     result = run(
         "task",

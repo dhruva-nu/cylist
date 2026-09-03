@@ -172,10 +172,10 @@ class TestCreating:
             await signed_in.post("/projects/ATL/tasks", json=_task(UNKNOWN_ID))
         ).status_code == 422
 
-    async def test_every_field_but_the_two_refs_is_required(self, signed_in: AsyncClient) -> None:
+    async def test_what_a_card_cannot_be_created_without(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
 
-        for field in ("title", "description", "type", "due_date", "assignee_id"):
+        for field in ("title", "description", "type", "assignee_id"):
             body = _task(person)
             del body[field]
 
@@ -190,6 +190,27 @@ class TestCreating:
 
         assert task["jira_ref"] is None
         assert task["pr_ref"] is None
+
+    async def test_a_card_can_be_created_with_no_due_date(self, signed_in: AsyncClient) -> None:
+        """CYLIST-17. A date nobody chose is worse than no date at all."""
+        person = await _setup(signed_in)
+        body = _task(person)
+        del body["due_date"]
+
+        response = await signed_in.post("/projects/ATL/tasks", json=body)
+
+        assert response.status_code == 201, response.text
+        assert response.json()["due_date"] is None
+
+    async def test_an_explicit_null_due_date_is_taken_as_no_date(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """A form that sends every field sends the empty one too."""
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person, due_date=None)
+
+        assert task["due_date"] is None
 
     async def test_an_empty_ref_is_stored_as_nothing_at_all(self, signed_in: AsyncClient) -> None:
         """An untouched form field must not become an empty Jira reference."""
@@ -475,6 +496,28 @@ class TestUpdating:
         updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"jira_ref": None})).json()
 
         assert updated["jira_ref"] is None
+
+    async def test_a_due_date_can_be_cleared(self, signed_in: AsyncClient) -> None:
+        """CYLIST-17. Unlike a title, a date is a thing a card can be without."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        assert task["due_date"] == "2026-09-01"
+
+        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"due_date": None})).json()
+
+        assert updated["due_date"] is None
+
+    async def test_a_due_date_can_be_put_on_a_card_that_had_none(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, due_date=None)
+
+        updated = (
+            await signed_in.patch(f"/tasks/{task['id']}", json={"due_date": "2026-10-01"})
+        ).json()
+
+        assert updated["due_date"] == "2026-10-01"
 
     async def test_a_null_required_field_leaves_it_alone(self, signed_in: AsyncClient) -> None:
         """A client echoing a field back as null wanted no change, not an empty title."""

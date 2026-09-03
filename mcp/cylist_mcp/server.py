@@ -197,9 +197,11 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         description=(
             "Add a task to a project's board. It always lands at the bottom of "
             "the board's first column; call move_task afterwards if it belongs "
-            "elsewhere. Every argument except jira_ref and pr_ref is required by "
-            "the server: a card with no description, due date or owner is the "
-            "kind that goes stale. The assignee must already be a member of the "
+            "elsewhere. Title, description, type and assignee are required by the "
+            "server: a card with no description or owner is the kind that goes "
+            "stale. A due date is optional — leave it off rather than inventing "
+            "one, because a card is only ever overdue against a date somebody "
+            "actually chose. The assignee must already be a member of the "
             "project. Returns the created task, including its new reference."
         ),
     )
@@ -208,8 +210,11 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         title: Annotated[str, Field(description="One line naming the work.")],
         description: Annotated[str, Field(description="What done looks like.")],
         task_type: Annotated[str, Field(description="One of 'feature', 'bug' or 'chore'.")],
-        due_date: Annotated[str, Field(description="ISO date, e.g. '2026-03-31'.")],
         assignee: Annotated[str, Field(description="Who owns it: a project member's name or id.")],
+        due_date: Annotated[
+            str | None,
+            Field(description="ISO date, e.g. '2026-03-31'. Omit for a card with no date."),
+        ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
         pr_ref: Annotated[str | None, Field(description="Pull request URL, if any.")] = None,
     ) -> CallToolResult:
@@ -219,9 +224,10 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                 "title": title,
                 "description": description,
                 "type": task_type,
-                "due_date": due_date,
                 "assignee_id": await resolve.person_id(client, assignee, project_ref=project),
             }
+            if due_date:
+                body["due_date"] = due_date
             if jira_ref:
                 body["jira_ref"] = jira_ref
             if pr_ref:
@@ -234,8 +240,8 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         name="create_subtask",
         description=(
             "Split a task into a sub-task that gets its own card on the board. "
-            "It is a task in every respect — first column, owner, due date — "
-            "except its reference, which is numbered under its parent: a "
+            "It is a task in every respect — first column, owner, its own due "
+            "date — except its reference, which is numbered under its parent: a "
             "sub-task of ATL-41 is ATL-41-2, and is addressable by that "
             "everywhere a task reference is taken. Sub-tasks go one level deep, "
             "so splitting a sub-task again is refused. Use add_checklist_item "
@@ -250,8 +256,11 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         title: Annotated[str, Field(description="One line naming the work.")],
         description: Annotated[str, Field(description="What done looks like.")],
         task_type: Annotated[str, Field(description="One of 'feature', 'bug' or 'chore'.")],
-        due_date: Annotated[str, Field(description="ISO date, e.g. '2026-03-31'.")],
         assignee: Annotated[str, Field(description="Who owns it: a project member's name or id.")],
+        due_date: Annotated[
+            str | None,
+            Field(description="ISO date, e.g. '2026-03-31'. Omit for a card with no date."),
+        ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
         pr_ref: Annotated[str | None, Field(description="Pull request URL, if any.")] = None,
     ) -> CallToolResult:
@@ -263,9 +272,10 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                 "title": title,
                 "description": description,
                 "type": task_type,
-                "due_date": due_date,
                 "assignee_id": await resolve.person_id(client, assignee, project_ref=project_ref),
             }
+            if due_date:
+                body["due_date"] = due_date
             if jira_ref:
                 body["jira_ref"] = jira_ref
             if pr_ref:
@@ -594,16 +604,18 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         name="day_report",
         description=(
             "Report what was done on one project on one day: every card that was "
-            "touched, what happened to it in order, which cards reached the "
-            "board's last column, and what happened away from the board — files, "
+            "touched, what happened to it in order, which cards ended the day in "
+            "the board's last column, and what happened away from the board — files, "
             "columns, the vault. This is the tool for 'what did I do today', a "
             "stand-up note, or a end-of-day summary. The reply carries 'markdown', "
             "the whole report already worded and ready to paste; prefer quoting "
             "that over rewriting it from the structured fields, so the note reads "
             "the same however it was asked for. A day means midnight to midnight "
             "in 'timezone', which defaults to this machine's own zone rather than "
-            "UTC. An entry whose channel is 'api' was an agent's work, not the "
-            "person's."
+            "UTC. The report is deliberately concise: a card's moves appear as the "
+            "one move they amounted to, from the column the day started in to the "
+            "one it ended in, and a comment's line quotes what was said. An entry "
+            "whose channel is 'api' was an agent's work, not the person's."
         ),
     )
     async def day_report(

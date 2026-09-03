@@ -458,7 +458,7 @@ async def create_subtask(
 ) -> TaskDetail:
     """Add a sub-task that gets its own card on the board.
 
-    It is a task in every respect — first column, owner, due date — except its
+    It is a task in every respect — first column, owner, own due date — except its
     reference, which is numbered under its parent: `ATL-41-2`. Sub-tasks go one
     level deep; splitting a sub-task again is a 422.
 
@@ -611,6 +611,14 @@ async def add_comment(
         entity_type="task",
         entity_id=task.id,
         project_id=task.project_id,
-        payload={"reference": task.reference, "comment_id": str(entry.id)},
+        payload={
+            "reference": task.reference,
+            "comment_id": str(entry.id),
+            # The words, not just the fact of them: a history line reading
+            # "Added a comment." sends you to the card to find out what for.
+            # Kept in the entry rather than looked up through `comment_id`, so
+            # the record still says what was said after the comment is edited.
+            "comment": activity.excerpt(entry.body),
+        },
     )
     return _comment(entry)

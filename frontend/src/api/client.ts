@@ -190,8 +190,14 @@ export interface TaskDay {
   /** Which column it sits in now. Null if the card no longer exists. */
   column: string | null
   status: TaskStatus | null
-  /** Whether it reached the board's last column on this day. */
+  /** Whether its last move of the day put it in the board's last column. */
   finished: boolean
+  /**
+   * What happened to it, oldest first — with its moves collapsed to the one
+   * they amounted to. A card walked To do → In progress → Dev in a day got
+   * from To do to Dev; `payload.moves` on that entry says how many drags it
+   * stands for, and the card's own history still holds each of them.
+   */
   entries: TaskHistoryEntry[]
 }
 
@@ -199,7 +205,8 @@ export interface TaskDay {
  * What one project's day amounted to.
  *
  * The same audit entries a card's history is made of, cut at the boundaries of
- * one local day and grouped by the card they happened to. `markdown` is the
+ * one local day and grouped by the card they happened to, and condensed: a
+ * card's moves arrive as the one move they amounted to. `markdown` is the
  * whole thing already worded, so a note pasted out of the browser and one an
  * agent writes say the same.
  */
@@ -213,8 +220,9 @@ export interface DayReport {
   starts_at: string
   /** Midnight that ended it, in UTC. Exclusive. */
   ends_at: string
+  /** How many lines the report holds, a card's day of moves counting as one. */
   entry_count: number
-  /** References of the cards that reached the board's last column. */
+  /** References of the cards that ended the day in the board's last column. */
   finished: string[]
   /** The cards touched, in the order they were first touched. */
   tasks: TaskDay[]
@@ -247,7 +255,8 @@ export interface Task {
   sub_statuses: string[]
   /** Index into `sub_statuses` of the current stage. Null when the list is empty. */
   sub_status_index: number | null
-  due_date: string
+  /** When it is wanted by, `YYYY-MM-DD`. Null when the card has no date. */
+  due_date: string | null
   assignee: Person
   status: TaskStatus
   jira_ref: string | null
@@ -277,7 +286,8 @@ export interface TaskInput {
   priority: TaskPriority
   /** Up to 4 short stage labels. Moving between them happens on the board. */
   sub_statuses: string[]
-  due_date: string
+  /** `YYYY-MM-DD`, or null for a card with no date. */
+  due_date: string | null
   assignee_id: string
   jira_ref: string | null
   pr_ref: string | null

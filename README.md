@@ -41,16 +41,21 @@ The API's interactive docs are at <http://localhost:8000/api/v1/docs>.
 
 ```bash
 make check          # lint, type-check, test, verify migrations — what CI runs
-make test           # backend test suite
+make test           # both test suites: pytest, then vitest
 make revision m="add projects"   # autogenerate a migration from the models
 make help           # every target
 ```
 
-`make test` needs no setup at all: with no `CYLIST_TEST_DATABASE_URL` in the
-environment it starts an **embedded PostgreSQL**, uses it, and throws it away.
-Point that variable at a running database to use that one instead — which is
-what CI does. Either way the tests run against real PostgreSQL, because the
-schema leans on `ARRAY`, `JSONB` and timezone-aware timestamps.
+The backend half of `make test` needs no setup at all: with no
+`CYLIST_TEST_DATABASE_URL` in the environment it starts an **embedded
+PostgreSQL**, uses it, and throws it away. Point that variable at a running
+database to use that one instead — which is what CI does. Either way the tests
+run against real PostgreSQL, because the schema leans on `ARRAY`, `JSONB` and
+timezone-aware timestamps.
+
+The frontend half is Vitest over the parts of the UI that are plain functions
+rather than components — the `@`-tag matcher in `components/mentions.ts` — which
+is where a wrong answer is possible without anything looking broken.
 
 ## How it is put together
 
@@ -94,11 +99,16 @@ and whether it came through the browser or the API. `GET /activity` answers
 "what did the CLI change at 3am?".
 
 That trail is read back two ways. A card's own history —
-`GET /tasks/{ref}/history` — is what has been done to one piece of work.
-`GET /projects/{ref}/reports/day` is the other cut: one day of it, grouped by
-card, with a paste-ready Markdown note for a stand-up. The day is midnight to
-midnight in whichever zone the caller names, so an evening's work stays in the
-evening it happened.
+`GET /tasks/{ref}/history` — is the full record of what has been done to one
+piece of work. `GET /projects/{ref}/reports/day` is the other cut: one day of
+it, grouped by card, with a paste-ready Markdown note for a stand-up. The day
+is midnight to midnight in whichever zone the caller names, so an evening's
+work stays in the evening it happened.
+
+The report is deliberately shorter than the record. A card dragged To do → In
+progress → Dev in one day arrives as the one move it amounted to, and a
+comment's line quotes what was said rather than reporting that something was
+said.
 
 ## Secrets and backups
 

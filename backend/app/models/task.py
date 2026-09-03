@@ -225,7 +225,13 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     column, and kept in range by the service whenever ``sub_statuses`` is
     edited out from under it."""
 
-    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    """When the work is wanted by, or null when nobody has said.
+
+    Optional because a date invented to get past a form is worse than no date
+    at all: it makes the card overdue on a day nobody chose, and an overdue
+    marker that fires on a guess is one the board learns to ignore. A card
+    without one is simply not dated — it never reads as late."""
 
     assignee_id: Mapped[UUID] = mapped_column(
         postgresql.UUID(as_uuid=True),

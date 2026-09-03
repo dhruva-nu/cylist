@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -404,3 +405,106 @@ class TestUndoingRootFolders:
 
         with pytest.raises(RuntimeError, match="sit directly in a project root"):
             await rewind(BEFORE_ROOTS)
+
+
+DATED = "0011"
+OPTIONALLY_DATED = "0012"
+
+
+async def seed_a_task(connection: AsyncConnection, *, due_date: date | None) -> None:
+    """One project, one person, one column, one card on it.
+
+    The smallest database revision 0012 has anything to say about: it changes
+    exactly one column on exactly one table, and the only question worth asking
+    of it is what happens to a card that has no date when the schema goes back
+    to demanding one.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 1)"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO person (id, name, kind, role, responsibilities, colour)"
+            " VALUES (gen_random_uuid(), 'Aditi K', 'team', 'Backend engineer', '', '#1D7D46')"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO board_column (id, project_id, name, description, position)"
+            " SELECT gen_random_uuid(), project.id, 'To do', '', 0 FROM project"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO task (id, project_id, number, column_id, position, title,"
+            " description, type, due_date, assignee_id, status)"
+            " SELECT gen_random_uuid(), project.id, 1, board_column.id, 0,"
+            " 'Stripe webhook idempotency', 'Dedupe on event id.', 'bug', :due,"
+            " person.id, 'active'"
+            " FROM project, board_column, person"
+        ),
+        {"due": due_date},
+    )
+
+
+async def due_dates(connection: AsyncConnection) -> list[Any]:
+    return list((await connection.execute(text("SELECT due_date FROM task"))).scalars())
+
+
+class TestMakingTheDueDateOptional:
+    async def test_leaves_the_dates_already_there(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Nothing is back-filled and nothing is cleared: every date already on
+        a card was a date somebody meant."""
+        await migrate(DATED)
+        await seed_a_task(connection, due_date=date(2026, 9, 1))
+
+        await migrate(OPTIONALLY_DATED)
+
+        assert [str(due) for due in await due_dates(connection)] == ["2026-09-01"]
+
+    async def test_then_accepts_a_card_with_no_date(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(OPTIONALLY_DATED)
+
+        await seed_a_task(connection, due_date=None)
+
+        assert await due_dates(connection) == [None]
+
+
+class TestUndoingTheOptionalDueDate:
+    async def test_puts_a_dated_card_back_untouched(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(OPTIONALLY_DATED)
+        await seed_a_task(connection, due_date=date(2026, 9, 1))
+
+        await rewind(DATED)
+
+        assert [str(due) for due in await due_dates(connection)] == ["2026-09-01"]
+
+    async def test_refuses_while_a_card_has_no_date(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Any date it invented would show on the board as a deadline nobody
+        chose, so it stops and says so instead."""
+        await migrate(OPTIONALLY_DATED)
+        await seed_a_task(connection, due_date=None)
+
+        with pytest.raises(RuntimeError, match="have no due date"):
+            await rewind(DATED)

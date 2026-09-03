@@ -221,7 +221,7 @@ function Entry({ entry }: { entry: TaskHistoryEntry }) {
       <time className={styles.at} dateTime={entry.occurred_at}>
         {at}
       </time>
-      <span>{entry.summary}</span>
+      <span className={styles.what}>{entry.summary}</span>
       {/* Agents act through the same API as the browser, so this is the only
           thing on the line that says the day's work was not all yours. */}
       {entry.channel === 'api' ? <span className={styles.agent}>{entry.actor_label}</span> : null}
