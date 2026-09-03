@@ -177,6 +177,19 @@ class TestWhatChanged:
         assert entry["changes"][0]["from"] == "2026-09-01"
         assert entry["changes"][0]["to"] == "2026-10-01"
 
+    async def test_taking_the_due_date_off_is_recorded(self, signed_in: AsyncClient) -> None:
+        """CYLIST-17. Clearing a date is a change to the work, so it reads as
+        one: the day it was wanted by, and then nothing."""
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+
+        await signed_in.patch(f"/tasks/{task['reference']}", json={"due_date": None})
+
+        entry = (await _history(signed_in, task["reference"]))[0]
+        assert [change["field"] for change in entry["changes"]] == ["due_date"]
+        assert entry["changes"][0]["from"] == "2026-09-01"
+        assert entry["changes"][0]["to"] is None
+
     async def test_a_patch_that_changes_nothing_is_not_history(
         self, signed_in: AsyncClient
     ) -> None:

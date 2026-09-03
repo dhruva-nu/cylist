@@ -50,7 +50,10 @@ class TaskCreate(Schema):
             "Advancing through them happens on the board, not here."
         ),
     )
-    due_date: date
+    due_date: date | None = Field(
+        default=None,
+        description="When it is wanted by. Omit it — or send null — for a card with no date.",
+    )
     assignee_id: UUID = Field(description="Must be a member of the project.")
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
@@ -78,8 +81,8 @@ class SubtaskCreate(TaskCreate):
     """A sub-task that gets its own card on the board.
 
     Same fields as any other task, because that is what it is: it lands in the
-    first column, it has an owner and a due date, and it is numbered under its
-    parent as ``ATL-41-2``.
+    first column, it has an owner, it may have a due date, and it is numbered
+    under its parent as ``ATL-41-2``.
     """
 
 
@@ -147,7 +150,13 @@ class TaskUpdate(Schema):
             "out, the marker stays where it was."
         ),
     )
-    due_date: date | None = None
+    due_date: date | None = Field(
+        default=None,
+        description=(
+            "A new date, or null to take the date off the card. Unlike the other "
+            "fields here, null means clear rather than leave alone."
+        ),
+    )
     assignee_id: UUID | None = None
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
@@ -261,7 +270,7 @@ class TaskRead(Schema):
     sub_status_index: int | None = Field(
         description="Index into `sub_statuses` of the current stage. Null when the list is empty."
     )
-    due_date: date
+    due_date: date | None = Field(description="Null when the card has no date.")
     assignee: PersonRead
     status: TaskStatus
     jira_ref: str | None

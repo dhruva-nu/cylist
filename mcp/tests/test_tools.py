@@ -236,6 +236,40 @@ async def test_create_task_resolves_the_assignee(
     assert body["type"] == "chore"
 
 
+async def test_create_task_omits_a_due_date_it_was_not_given(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """CYLIST-17. An absent date is left out of the body rather than sent as
+    null: the card is simply undated, which is what the caller said."""
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Draft the cutover plan",
+        description="A written plan with dates.",
+        task_type="chore",
+        assignee="Aditi K",
+    )
+    assert not result.is_error
+    assert "due_date" not in recorder.body("POST", "/tasks")
+
+
+async def test_create_subtask_omits_a_due_date_it_was_not_given(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "create_subtask",
+        task="ATL-2",
+        title="Drain the old queue",
+        description="Nothing is left in it before the cutover.",
+        task_type="chore",
+        assignee="Aditi K",
+    )
+    assert not result.is_error
+    assert "due_date" not in recorder.body("POST", "/tasks/ATL-2/subtasks")
+
+
 async def test_create_task_rejects_an_invented_type(server: MCPServer) -> None:
     result = await call(
         server,

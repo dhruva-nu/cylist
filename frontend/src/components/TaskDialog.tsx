@@ -549,7 +549,7 @@ function localDate(iso: string): Date {
   return new Date(year, month - 1, day)
 }
 
-function formatDue(iso: string): string {
+function formatDue(iso: string | null): string {
   if (!iso) return '—'
   return localDate(iso).toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -558,7 +558,8 @@ function formatDue(iso: string): string {
   })
 }
 
-function isOverdue(iso: string): boolean {
+/** A card with no date is never late: there is no day it was wanted by. */
+function isOverdue(iso: string | null): boolean {
   if (!iso) return false
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -593,6 +594,8 @@ function TaskForm({
     type: task?.type ?? 'feature',
     priority: task?.priority ?? 'someday',
     sub_statuses: task?.sub_statuses ?? [],
+    // The date input's empty value is '', not null; the mutation turns it back
+    // into the null the API reads as "no date".
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
     jira_ref: task?.jira_ref ?? '',
@@ -623,6 +626,7 @@ function TaskForm({
       const payload = {
         ...form,
         sub_statuses: form.sub_statuses.map((label) => label.trim()),
+        due_date: form.due_date || null,
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
@@ -673,7 +677,6 @@ function TaskForm({
   const complete =
     form.title.trim() &&
     form.description.trim() &&
-    form.due_date &&
     form.assignee_id &&
     form.sub_statuses.every((label) => label.trim()) &&
     (!stalling || reason.trim())
@@ -831,10 +834,10 @@ function TaskForm({
         </Field>
 
         <FieldPair>
-          <Field label="Due date" required>
+          <Field label="Due date">
             <input
               type="date"
-              value={form.due_date}
+              value={form.due_date ?? ''}
               onChange={(event) => setForm({ ...form, due_date: event.target.value })}
             />
           </Field>

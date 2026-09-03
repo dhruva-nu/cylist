@@ -255,7 +255,8 @@ export interface Task {
   sub_statuses: string[]
   /** Index into `sub_statuses` of the current stage. Null when the list is empty. */
   sub_status_index: number | null
-  due_date: string
+  /** When it is wanted by, `YYYY-MM-DD`. Null when the card has no date. */
+  due_date: string | null
   assignee: Person
   status: TaskStatus
   jira_ref: string | null
@@ -285,7 +286,8 @@ export interface TaskInput {
   priority: TaskPriority
   /** Up to 4 short stage labels. Moving between them happens on the board. */
   sub_statuses: string[]
-  due_date: string
+  /** `YYYY-MM-DD`, or null for a card with no date. */
+  due_date: string | null
   assignee_id: string
   jira_ref: string | null
   pr_ref: string | null
