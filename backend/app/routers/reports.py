@@ -54,7 +54,7 @@ async def day_report(
     Everything here is already in `/activity`; this is that trail cut at the
     boundaries of one local day and turned into an account of the work — each
     card that was touched, what happened to it in order, and which cards
-    reached the board's last column.
+    ended the day in the board's last column.
 
     A day means midnight to midnight in `timezone`, not in UTC, because the day
     being asked about is the one the asker just lived. The window it settled on
@@ -64,6 +64,12 @@ async def day_report(
     `markdown` is the whole report as a paste-ready note. It is written here
     rather than by each client so a stand-up note copied out of the browser and
     one written by an agent say the same thing.
+
+    A card's moves are reported as the one move they amounted to: a card
+    dragged To do → In progress → Dev in a day got from To do to Dev, and the
+    columns in between are where it was passing through. `moves` in that
+    entry's payload says how many drags it stands for, and the card's own
+    `/history` still holds every one of them.
 
     Changes that altered nothing — a card dragged within its own column, a form
     saved without an edit — are left out, exactly as they are in a card's

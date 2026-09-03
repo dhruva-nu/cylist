@@ -611,6 +611,14 @@ async def add_comment(
         entity_type="task",
         entity_id=task.id,
         project_id=task.project_id,
-        payload={"reference": task.reference, "comment_id": str(entry.id)},
+        payload={
+            "reference": task.reference,
+            "comment_id": str(entry.id),
+            # The words, not just the fact of them: a history line reading
+            # "Added a comment." sends you to the card to find out what for.
+            # Kept in the entry rather than looked up through `comment_id`, so
+            # the record still says what was said after the comment is edited.
+            "comment": activity.excerpt(entry.body),
+        },
     )
     return _comment(entry)

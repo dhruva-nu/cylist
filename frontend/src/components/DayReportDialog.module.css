@@ -115,6 +115,15 @@
   line-height: 1.5;
 }
 
+/* What happened takes the room the time and the actor do not. A line quoting a
+   comment can carry a pasted URL, so a word with no spaces in it breaks rather
+   than stretching the report. */
+.what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .at {
   flex: 0 0 auto;
   color: var(--ink-3);
