@@ -97,6 +97,8 @@ def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
         due_date=task.due_date,
         assignee=PersonRead.model_validate(task.assignee),
         status=task.status,
+        template_id=task.template_id,
+        template_name=task.template.name if task.template else None,
         jira_ref=task.jira_ref,
         pr_ref=task.pr_ref,
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
@@ -158,6 +160,12 @@ async def create_task(
     There is no column to choose: work enters a board at one end. Move the card
     with `POST /tasks/{ref}/move` immediately afterwards if it belongs
     elsewhere — moving is unrestricted, entering is not.
+
+    Unless, that is, `template_id` names a template whose stages keep it out
+    of the first column: then the card lands in the leftmost column that
+    template does allow, moving it is restricted to the columns its stages
+    name, and it starts on the sub-stages that landing column's stage sets —
+    its own `sub_statuses`.
     """
     task = await tasks.create(session, project, body)
     await activity.record(

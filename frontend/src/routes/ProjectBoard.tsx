@@ -28,6 +28,12 @@
  * space and walked between columns with the arrow keys, which is the same
  * operation through the same code path — see `DRAG_KEYS` and `moveByColumn`.
  *
+ * A card created from a template goes only where that template allows. While
+ * such a card is in the air the columns it cannot be dropped in are greyed
+ * and refuse the drop, so the rule is visible before the server has to state
+ * it — see `forbiddenFor`. The rule itself lives on the server; this is only
+ * the board saying out loud what it already knows.
+ *
  * Any column folds down to a rail, and which ones are folded is remembered per
  * project. A folded column is still a drop target: "Done" is exactly the
  * column you stop looking at and keep moving cards into, and a board that made
@@ -76,6 +82,7 @@ import {
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
+import { TemplateDialog } from '../components/TemplateDialog'
 import {
   Avatar,
   Button,
@@ -222,6 +229,7 @@ export function ProjectBoard() {
   /** The parent a new sub-task is being written under, if one is. */
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
   const [search, setSearch] = useState('')
   /** What is in the air, so the overlay knows what to draw. */
   const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
@@ -244,6 +252,12 @@ export function ProjectBoard() {
     queryKey: ['members', projectKey],
     queryFn: () => api.listMembers(projectKey),
   })
+  // Needed twice over: the New task form offers them, and the board reads the
+  // columns each one allows to know where a card being dragged may be dropped.
+  const templates = useQuery({
+    queryKey: ['templates', projectKey],
+    queryFn: () => api.listTemplates(projectKey),
+  })
 
   const tasksKey = ['tasks', projectKey]
 
@@ -253,6 +267,7 @@ export function ProjectBoard() {
       queryClient.invalidateQueries({ queryKey: tasksKey }),
       queryClient.invalidateQueries({ queryKey: ['task'] }), // every open card's timeline
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: ['templates', projectKey] }),
     ])
   }
 
@@ -337,6 +352,25 @@ export function ProjectBoard() {
   const columns = board.data.columns
   const firstColumn = columns[0]
   const memberList = members.data?.members ?? []
+  const templateList = templates.data ?? []
+
+  /**
+   * The columns a card may not be dropped in, by its template's own stages.
+   *
+   * Empty for a card with no template, and for one whose template has no
+   * stages: silence is not a ban. Empty is also what an unloaded template
+   * list gives, which is the right failure — the board waves the card through
+   * and the server, which is where the rule actually lives, has the last word.
+   */
+  const forbiddenFor = (task: Task | null | undefined): Set<string> => {
+    const template = templateList.find((candidate) => candidate.id === task?.template_id)
+    if (!template || !template.allowed_column_ids.length) return new Set()
+    return new Set(
+      columns
+        .filter((column) => !template.allowed_column_ids.includes(column.id))
+        .map((column) => column.id),
+    )
+  }
 
   // Client-side, over what's already fetched: the board holds every task in
   // memory regardless, and a search endpoint would be a second way to ask a
@@ -369,12 +403,22 @@ export function ProjectBoard() {
       `Picked up ${nameOfDragged(active.id)}. Use the left and right arrow keys to choose a column.`,
     onDragOver: ({ active, over }) =>
       over ? `${nameOfDragged(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
-    onDragEnd: ({ active, over }) =>
-      over
-        ? isColumnDrag(active.id)
-          ? `${nameOfDragged(active.id)} moved next to ${nameOfColumn(over.id)}.`
-          : `Dropped ${nameOfDragged(active.id)} into ${nameOfColumn(over.id)}.`
-        : `${nameOfDragged(active.id)} was left where it was.`,
+    onDragEnd: ({ active, over }) => {
+      if (!over) return `${nameOfDragged(active.id)} was left where it was.`
+      if (isColumnDrag(active.id)) {
+        return `${nameOfDragged(active.id)} moved next to ${nameOfColumn(over.id)}.`
+      }
+      // A refused drop has to be announced as refused. dnd-kit's own wording
+      // is "dropped into", which is the one thing that did not happen.
+      const card = tasks.data?.find((candidate) => candidate.id === active.id)
+      if (typeof over.id === 'string' && forbiddenFor(card).has(over.id)) {
+        return (
+          `${card?.template_name ?? 'This card'} cards do not go to ${nameOfColumn(over.id)}. ` +
+          `${nameOfDragged(active.id)} is back where it was.`
+        )
+      }
+      return `Dropped ${nameOfDragged(active.id)} into ${nameOfColumn(over.id)}.`
+    },
     onDragCancel: ({ active }) => `Cancelled. ${nameOfDragged(active.id)} is back where it was.`,
   }
 
@@ -394,6 +438,9 @@ export function ProjectBoard() {
     dragging !== null && !isColumnDrag(dragging)
       ? (tasks.data?.find((task) => task.id === dragging) ?? null)
       : null
+
+  /** Greyed while a card is in the air, and empty the rest of the time. */
+  const forbidden = forbiddenFor(draggedTask)
 
   function onDragStart(event: DragStartEvent) {
     setDragging(event.active.id)
@@ -419,6 +466,14 @@ export function ProjectBoard() {
     const task = tasks.data?.find((candidate) => candidate.id === event.active.id)
     if (!task || task.column_id === overId) return
 
+    // Refused here as well as by the server: a card that snaps back with an
+    // error banner is how you find out afterwards, and the column already
+    // greyed itself the moment the card was picked up. Said out loud by
+    // `announcements.onDragEnd` rather than here — dnd-kit speaks on every
+    // drop, and two live regions describing one gesture is one of them
+    // talking over the other.
+    if (forbiddenFor(task).has(overId)) return
+
     move.mutate({ taskId: task.id, columnId: overId, position: byColumn.get(overId)?.length ?? 0 })
   }
 
@@ -436,6 +491,10 @@ export function ProjectBoard() {
 
       <div className={styles.toolbar}>
         <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
+        <Button small onClick={() => setTemplatesOpen(true)}>
+          + Templates
+          <span className={styles.hint}>{templateList.length}</span>
+        </Button>
         <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
       </div>
 
@@ -464,6 +523,7 @@ export function ProjectBoard() {
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
               collapsed={collapsed.includes(column.id)}
+              forbidden={forbidden.has(column.id)}
               onToggleCollapse={() => {
                 toggle(column.id)
                 announce(
@@ -510,12 +570,23 @@ export function ProjectBoard() {
         />
       ) : null}
 
+      {templatesOpen ? (
+        <TemplateDialog
+          projectKey={projectKey}
+          columns={columns}
+          announce={announce}
+          onDone={refresh}
+          onClose={() => setTemplatesOpen(false)}
+        />
+      ) : null}
+
       {creatingTask && firstColumn ? (
         <TaskDialog
           projectKey={projectKey}
           taskId={null}
           columns={columns}
           firstColumn={firstColumn}
+          templates={templateList}
           announce={announce}
           onDone={refresh}
           onClose={() => setCreatingTask(false)}
@@ -532,6 +603,7 @@ export function ProjectBoard() {
           parentRef={splitting}
           columns={columns}
           firstColumn={firstColumn}
+          templates={templateList}
           announce={announce}
           onDone={refresh}
           onClose={() => setSplitting(null)}
@@ -544,6 +616,7 @@ export function ProjectBoard() {
           taskId={openTaskId}
           columns={columns}
           firstColumn={firstColumn}
+          templates={templateList}
           announce={announce}
           onOpenTask={setOpenTaskId}
           onSplit={(parentRef) => {
@@ -659,6 +732,7 @@ function Column({
   tasks,
   isFirst,
   collapsed,
+  forbidden,
   onToggleCollapse,
   onOpenTask,
   onMoveSubStatus,
@@ -670,6 +744,12 @@ function Column({
   tasks: Task[]
   isFirst: boolean
   collapsed: boolean
+  /**
+   * Whether the card currently in the air may not be dropped here — its
+   * template's own stages rule this column out. False the rest of the time,
+   * including while nothing is being dragged.
+   */
+  forbidden: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
@@ -706,7 +786,10 @@ function Column({
       className={[
         styles.column,
         collapsed && styles.collapsed,
-        isOver && styles.over,
+        // Not `over` when the drop would be refused: highlighting a column the
+        // card cannot land in is the board promising something it will not do.
+        isOver && !forbidden && styles.over,
+        forbidden && styles.forbidden,
         isDragging && styles.columnDragging,
       ]
         .filter(Boolean)

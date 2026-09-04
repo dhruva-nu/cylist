@@ -32,7 +32,12 @@ def _clean_sub_statuses(value: list[str]) -> list[str]:
 
 
 class TaskCreate(Schema):
-    """A new card. It always lands in the board's first column."""
+    """A new card. It lands in the board's first column.
+
+    The one exception is a card whose template does not allow that column,
+    which lands in the leftmost one it does allow instead — a card has to be
+    born somewhere its own template permits.
+    """
 
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(
@@ -47,7 +52,8 @@ class TaskCreate(Schema):
         max_length=4,
         description=(
             "Up to 4 short stage labels, left to right. Starts on the first one. "
-            "Advancing through them happens on the board, not here."
+            "Advancing through them happens on the board, not here. Overridden "
+            "by `template_id`'s stage for the landing column, if it names one."
         ),
     )
     due_date: date | None = Field(
@@ -55,6 +61,17 @@ class TaskCreate(Schema):
         description="When it is wanted by. Omit it — or send null — for a card with no date.",
     )
     assignee_id: UUID = Field(description="Must be a member of the project.")
+    template_id: UUID | None = Field(
+        default=None,
+        description=(
+            "What kind of card this is — one of the project's templates. Omit "
+            "it for a card with no template, which may sit in any column and "
+            "starts with whatever `sub_statuses` was sent. A card whose "
+            "template is barred from the board's first column lands in the "
+            "leftmost column its stages do allow, on the sub-stages that "
+            "column's stage names, if any."
+        ),
+    )
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
@@ -158,6 +175,18 @@ class TaskUpdate(Schema):
         ),
     )
     assignee_id: UUID | None = None
+    template_id: UUID | None = Field(
+        default=None,
+        description=(
+            "A different template, or null to take the card out of one "
+            "entirely. Like `due_date`, null here means clear rather than "
+            "leave alone. Refused if the card's current column is one the new "
+            "template does not allow — move it first. The card's current "
+            "`sub_statuses` are left as they are; a new template's stages are "
+            "not retroactively applied, only picked up the next time the card "
+            "lands somewhere new."
+        ),
+    )
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
@@ -173,7 +202,12 @@ class TaskUpdate(Schema):
 
 
 class TaskMove(Schema):
-    """Puts a card in a column at a position. Any column, any time."""
+    """Puts a card in a column at a position.
+
+    Any column at any time, unless the card's template has stages — then,
+    any column one of its stages names. Leaving a column is itself refused
+    until the card is on the last sub-stage its template set for that column.
+    """
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
@@ -273,6 +307,10 @@ class TaskRead(Schema):
     due_date: date | None = Field(description="Null when the card has no date.")
     assignee: PersonRead
     status: TaskStatus
+    template_id: UUID | None = Field(
+        description="The template this card was created from, if any. Null is unrestricted."
+    )
+    template_name: str | None = Field(description="That template's name, so a card reads alone.")
     jira_ref: str | None
     pr_ref: str | None
     waiting_on: list[PersonRead] = Field(

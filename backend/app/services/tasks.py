@@ -6,6 +6,15 @@ than mechanics:
 * a new task lands in the first column and nowhere else — work enters a board
   at one end, and letting a client drop a card straight into "Done" makes the
   board a record of intentions rather than of progress;
+* a card created from a template goes only where that template's stages
+  allow it — see :mod:`app.services.templates`, which owns that rule and is
+  asked about it here twice: once to decide where a new card lands, and once
+  on every move;
+* a card lands on the sub-stages its template set for the column it is in —
+  its own ``sub_statuses``, reloaded from the template every time the card
+  arrives somewhere new — and cannot leave a column while it is short of the
+  last one; see :func:`_refuse_stage_incomplete`. This is checked on every
+  move out of the column, not only into the board's last one;
 * a task cannot go on hold or become blocked without a reason — a red card
   that does not say why is a question, not information;
 * a card with unfinished sub-tasks cannot reach the board's last column —
@@ -37,6 +46,7 @@ from app.models.task import (
     TaskStatus,
     TaskWaitingOn,
 )
+from app.models.template import TaskTemplate
 from app.schemas.tasks import (
     ChecklistItemCreate,
     ChecklistItemUpdate,
@@ -46,14 +56,15 @@ from app.schemas.tasks import (
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import columns, projects
+from app.services import columns, projects, templates
 
-_CLEARABLE = frozenset({"jira_ref", "pr_ref", "due_date"})
+_CLEARABLE = frozenset({"jira_ref", "pr_ref", "due_date", "template_id"})
 """The only task fields a ``PATCH`` may set back to null.
 
 Everything else reads a null as a client echoing back a field it never filled
-in. These three are the fields a card can genuinely be without, so for them a
-null is the request it looks like: take the date off, drop the link."""
+in. These four are the fields a card can genuinely be without, so for them a
+null is the request it looks like: take the date off, drop the link, take the
+card out of its template."""
 
 _TRACKED: dict[str, str] = {
     "title": "title",
@@ -64,6 +75,7 @@ _TRACKED: dict[str, str] = {
     "sub_status_index": "sub-status",
     "due_date": "due date",
     "assignee_id": "assignee",
+    "template_id": "template",
     "jira_ref": "Jira reference",
     "pr_ref": "pull request",
 }
@@ -87,11 +99,18 @@ async def create(
     With ``parent`` the new card is a sub-task of it, numbered ``ATL-41-2``
     rather than taking a project number of its own.
 
+    The column is the first one *this card* may land in: the board's first,
+    unless the card's template is barred from it, in which case the leftmost
+    column that template does allow. A card has to be born somewhere its own
+    template permits.
+
     Raises:
-        UnprocessableRequestError: if the assignee is not a project member, or
-            if ``parent`` is itself a sub-task.
+        UnprocessableRequestError: if the assignee is not a project member, if
+            the template belongs to another project, or if ``parent`` is itself
+            a sub-task.
     """
     await projects.require_members(session, project.id, [data.assignee_id])
+    template = await templates.require_template(session, project.id, data.template_id)
 
     if parent is not None and parent.parent_id is not None:
         raise UnprocessableRequestError(
@@ -100,10 +119,17 @@ async def create(
             details={"parent": parent.reference},
         )
 
-    column = await columns.first(session, project)
+    column = templates.landing_column(template, await columns.first(session, project))
     number = None if parent else await _next_number(session, project)
     sub_number = await _next_sub_number(session, parent) if parent else None
     position = await _length(session, column.id)
+
+    # The template's own sub-stages for the landing column win over whatever
+    # the caller sent — that is the template's whole point — but a column the
+    # template says nothing about leaves the caller's choice alone.
+    sub_statuses = templates.landing_sub_stages(template, column.id)
+    if sub_statuses is None:
+        sub_statuses = data.sub_statuses
 
     task = Task(
         project_id=project.id,
@@ -116,10 +142,11 @@ async def create(
         description=data.description,
         type=data.type,
         priority=data.priority,
-        sub_statuses=data.sub_statuses,
-        sub_status_index=0 if data.sub_statuses else None,
+        sub_statuses=sub_statuses,
+        sub_status_index=0 if sub_statuses else None,
         due_date=data.due_date,
         assignee_id=data.assignee_id,
+        template_id=data.template_id,
         status=TaskStatus.ACTIVE,
         jira_ref=data.jira_ref,
         pr_ref=data.pr_ref,
@@ -129,7 +156,9 @@ async def create(
 
     # Relationships are only populated by a SELECT, and a just-inserted row has
     # not had one. Load them now so callers can read them without lazy IO.
-    await session.refresh(task, ["project", "assignee", "waiting_on", "parent", "checklist"])
+    await session.refresh(
+        task, ["project", "assignee", "template", "waiting_on", "parent", "checklist"]
+    )
     return task
 
 
@@ -202,7 +231,11 @@ async def update(
     even though no client asked for it.
 
     Raises:
-        UnprocessableRequestError: if a new assignee is not a project member.
+        UnprocessableRequestError: if a new assignee is not a project member,
+            or if a new template does not allow the column the card is already
+            sitting in. Retyping a card is not a way to move it, and
+            silently moving it would be worse: the card would leave the column
+            somebody was looking at it in.
     """
     before = _snapshot(task)
 
@@ -217,6 +250,12 @@ async def update(
 
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
+
+    if "template_id" in fields and fields["template_id"] != task.template_id:
+        new_template = await templates.require_template(
+            session, task.project_id, fields["template_id"]
+        )
+        await _refuse_stranded(session, task, new_template)
 
     if "sub_statuses" in fields or "sub_status_index" in fields:
         new_statuses = fields.pop("sub_statuses", task.sub_statuses)
@@ -245,7 +284,7 @@ async def update(
         setattr(task, field, value)
 
     await session.flush()
-    await session.refresh(task, ["assignee"])
+    await session.refresh(task, ["assignee", "template"])
     return task, await _diff(session, before, _snapshot(task))
 
 
@@ -309,14 +348,19 @@ async def move(
 ) -> tuple[Task, list[dict[str, Any]]]:
     """Put a task in a column at a position.
 
-    Unlike creation this is unrestricted: once a card is on the board it may go
-    anywhere, including straight back to the first column.
+    Unlike creation this is unrestricted by direction: once a card is on the
+    board it may go anywhere its template allows, including straight back to
+    the first column. A card whose template has no stages may go anywhere at
+    all.
 
     A card that changes column starts its stages again. ``sub_statuses`` is
     progress through the column the card is in, not through the board — "drafted,
     reviewed, merged" means one thing in Review and another in Done — so a card
-    arriving somewhere new has not begun the stages it keeps there. Moving
-    within one column leaves the stage alone: nothing has been arrived at.
+    arriving somewhere new has not begun the stages it keeps there. If the
+    card's template names sub-stages for the destination column, those replace
+    ``sub_statuses`` outright rather than only resetting the pointer into
+    whatever the card already carried. Moving within one column leaves the
+    stage alone: nothing has been arrived at.
 
     Returns the task and what changed about it, in the same shape
     :func:`update` reports — the column it left and the one it arrived in, and
@@ -325,8 +369,11 @@ async def move(
     about the work.
 
     Raises:
-        UnprocessableRequestError: if the column belongs to another project, or
-            if the destination is the last column and a sub-task is still open.
+        UnprocessableRequestError: if the column belongs to another project, if
+            the card's template is not allowed in it, if the column it is
+            leaving still has the card short of the last sub-stage its
+            template set there, or if the destination is the last column and a
+            sub-task is still open.
     """
     column = await columns.get(session, data.column_id)
     if column.project_id != task.project_id:
@@ -335,6 +382,9 @@ async def move(
             details={"column_id": str(column.id)},
         )
 
+    templates.require_permitted(task, column)
+    if task.column_id != column.id:
+        await _refuse_stage_incomplete(session, task)
     await _refuse_unfinished(session, task, column)
 
     source_id = task.column_id
@@ -347,8 +397,13 @@ async def move(
     siblings.insert(min(data.position, len(siblings)), task)
 
     task.column_id = column.id
-    if source_id != column.id and task.sub_statuses:
-        task.sub_status_index = 0
+    if source_id != column.id:
+        landed_sub_stages = templates.landing_sub_stages(task.template, column.id)
+        if landed_sub_stages is not None:
+            task.sub_statuses = landed_sub_stages
+            task.sub_status_index = 0
+        elif task.sub_statuses:
+            task.sub_status_index = 0
     for position, sibling in enumerate(siblings):
         sibling.position = position
     await session.flush()
@@ -621,6 +676,9 @@ async def _diff(
             # lie about what the value is.
             field = "assignee"
             was, now = await _person_name(session, was), await _person_name(session, now)
+        elif field == "template_id":
+            field = "template"
+            was, now = await _template_name(session, was), await _template_name(session, now)
         elif field == "sub_status_index":
             was = _stage(before["sub_statuses"], was)
             now = _stage(after["sub_statuses"], now)
@@ -642,6 +700,13 @@ async def _person_name(session: AsyncSession, person_id: UUID | None) -> str | N
     return person.name if person else None
 
 
+async def _template_name(session: AsyncSession, template_id: UUID | None) -> str | None:
+    if template_id is None:
+        return None
+    template = await session.get(TaskTemplate, template_id)
+    return template.name if template else None
+
+
 def _plain(value: Any) -> Any:
     """Make a value fit to store in the audit payload, which is JSONB."""
     if isinstance(value, StrEnum):
@@ -653,6 +718,71 @@ def _plain(value: Any) -> Any:
     if isinstance(value, list):
         return [_plain(item) for item in value]
     return value
+
+
+async def _refuse_stranded(
+    session: AsyncSession, task: Task, new_template: TaskTemplate | None
+) -> None:
+    """Stop a card being retyped into a column its new template is barred from.
+
+    Checked against the column the card is *in*, because changing a template is
+    not a move: the alternative is a card that quietly relocates when somebody
+    edits a dropdown, or one left sitting somewhere its new template forbids.
+
+    Raises:
+        UnprocessableRequestError: if the card's current column is not one the
+            new template allows.
+    """
+    permitted = templates.permitted_columns(new_template)
+    if not permitted or any(column.id == task.column_id for column in permitted):
+        return
+
+    here = await columns.get(session, task.column_id)
+    allowed = ", ".join(column.name for column in permitted)
+    raise UnprocessableRequestError(
+        f"{task.reference} is in {here.name}, which that template does not allow. "
+        f"Move it to {allowed} first.",
+        details={
+            "column": here.name,
+            "allowed_columns": [column.name for column in permitted],
+            "allowed_column_ids": [str(column.id) for column in permitted],
+        },
+    )
+
+
+async def _refuse_stage_incomplete(session: AsyncSession, task: Task) -> None:
+    """Stop a card leaving a column before it is on the last sub-stage its
+    template set there.
+
+    Checked on every move out of the column the card sits in, not only into the
+    board's last one: a template's stage is a promise about *this* column, and
+    the only moment to enforce it is the moment the card tries to leave.
+
+    Raises:
+        UnprocessableRequestError: naming the sub-stage still in hand, if the
+            current column has sub-stages the card's template set and the card
+            has not reached the last one.
+    """
+    stage = templates.stage_for_column(task.template, task.column_id)
+    if stage is None or not stage.sub_stage_labels:
+        return
+
+    last = len(stage.sub_stage_labels) - 1
+    index = task.sub_status_index if task.sub_status_index is not None else -1
+    if index == last:
+        return
+
+    here = await columns.get(session, task.column_id)
+    current = stage.sub_stage_labels[index] if index >= 0 else "not yet started"
+    raise UnprocessableRequestError(
+        f'{task.reference} is still on "{current}" in {here.name}. Move it to '
+        f'"{stage.sub_stage_labels[last]}" before moving this card out of {here.name}.',
+        details={
+            "column": here.name,
+            "current_sub_stage": None if index < 0 else current,
+            "target_sub_stage": stage.sub_stage_labels[last],
+        },
+    )
 
 
 async def _refuse_unfinished(session: AsyncSession, task: Task, column: BoardColumn) -> None:

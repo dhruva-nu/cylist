@@ -642,3 +642,11 @@
 .spacer {
   margin-right: auto;
 }
+
+/* A column the card in the air is not allowed in — see `forbiddenFor`. Faded
+   rather than hidden: the board keeps its shape, and a column that vanished
+   mid-drag would move every other one out from under the pointer. */
+.forbidden {
+  opacity: 0.35;
+  filter: saturate(0.4);
+}

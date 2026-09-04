@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.person import Person
 from app.models.project import Project
+from app.models.template import TaskTemplate
 
 
 class TaskType(StrEnum):
@@ -245,6 +246,23 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         _enum(TaskStatus, "task_status"), nullable=False, default=TaskStatus.ACTIVE
     )
 
+    template_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task_template.id"),
+    )
+    """What kind of card this is, if it was created as one.
+
+    Null on a card written before templates existed, and on one created
+    without picking a template — which is unrestricted, not untyped: a
+    template's stages say where its cards may go, and a card with none may
+    go anywhere on its board.
+
+    No ``ondelete``, for the reason ``column_id`` has none: NO ACTION is
+    checked at the end of the statement, so a project still cascades away
+    cleanly while a template a card is using cannot be deleted out from under
+    it.
+    """
+
     jira_ref: Mapped[str | None] = mapped_column(String(200))
     pr_ref: Mapped[str | None] = mapped_column(String(200))
 
@@ -271,6 +289,7 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     project: Mapped[Project] = relationship(lazy="selectin")
     assignee: Mapped[Person] = relationship(lazy="selectin")
+    template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
 
     waiting_on: Mapped[list[Person]] = relationship(
         secondary="task_waiting_on",

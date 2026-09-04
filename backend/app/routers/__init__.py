@@ -17,6 +17,7 @@ from app.routers import (
     projects,
     reports,
     tasks,
+    templates,
     tokens,
     vault,
 )
@@ -33,6 +34,8 @@ api_router.include_router(reports.router)
 api_router.include_router(vault.router)
 api_router.include_router(people.router)
 api_router.include_router(columns.router)
+# After `columns`, whose columns a template's stages name.
+api_router.include_router(templates.router)
 api_router.include_router(tasks.router)
 api_router.include_router(files.router)
 api_router.include_router(activity.router)
