@@ -9,8 +9,9 @@ Two decisions are worth knowing about.
 
 **A day is local.** The trail stores UTC, but "what did I do today" is asked
 about the day the asker just lived, so the window is midnight to midnight in a
-named zone — see :func:`window`. That also makes the answer stable: a report
-for last Tuesday is cut the same way whenever it is asked for, DST included.
+named zone — see :func:`window`, and :mod:`app.core.timezones` for how loosely
+that zone may be named. That also makes the answer stable: a report for last
+Tuesday is cut the same way whenever it is asked for, DST included.
 
 **The wording is the trail's own.** Every line comes from
 :func:`app.services.activity.describe`, so a card's history and this report
@@ -29,42 +30,16 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import UnprocessableRequestError
 from app.models.activity import Activity
 from app.models.project import Project
 from app.models.task import Task
 from app.schemas.activity import FieldChange, HistoryEntry
 from app.schemas.reports import DayReport, TaskDay
 from app.services import activity, columns, tasks
-
-UTC_ZONE = ZoneInfo("UTC")
-
-
-def zone_for(name: str | None) -> ZoneInfo:
-    """The zone a day is being asked about; UTC when the caller does not say.
-
-    UTC as the default rather than the server's own zone: a deployment's
-    ``TZ`` is an accident of how the container was built, and a report that
-    silently changes shape when the image is rebuilt is worse than one that is
-    obviously in UTC until a client says otherwise.
-
-    Raises:
-        UnprocessableRequestError: if the name is not one the system knows.
-    """
-    if name is None:
-        return UTC_ZONE
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise UnprocessableRequestError(
-            f"{name!r} is not a time zone this server knows. Give an IANA name, "
-            "such as 'Asia/Kolkata' or 'UTC'.",
-            details={"timezone": name},
-        ) from exc
 
 
 def today_in(zone: ZoneInfo) -> date:
