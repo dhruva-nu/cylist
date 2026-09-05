@@ -37,6 +37,8 @@ NESTED_ID = "0192f3c4-0004-7000-8000-000000000002"
 MSA_ID = "0192f3c4-0005-7000-8000-000000000001"
 PORTAL_ID = "0192f3c4-0005-7000-8000-000000000002"
 
+GOAL_ID = "0192f3c4-0008-7000-8000-000000000001"
+
 TREE_ID = "0192f3c4-0006-7000-8000-000000000001"
 BILLING_ID = "0192f3c4-0007-7000-8000-000000000001"
 STRIPE_ID = "0192f3c4-0007-7000-8000-000000000002"
@@ -153,6 +155,10 @@ def _task(
         "description": "Some detail about the work.",
         "type": "feature",
         "due_date": "2026-03-31",
+        "goal_id": None,
+        "goal_reference": None,
+        "goal_name": None,
+        "goal_colour": None,
         "assignee": ADITI,
         "status": status,
         "jira_ref": None,
@@ -170,6 +176,29 @@ def _task(
 
 
 TASK_ONE = _task(TASK_ONE_ID, 1, BACKLOG_ID, "Reconcile the ledger export")
+
+GOAL = {
+    "id": GOAL_ID,
+    "project_id": PROJECT_ID,
+    "reference": "ATL-G1",
+    "number": 1,
+    "name": "Ledger cutover",
+    "description": "Every invoice raised through the new ledger.",
+    "colour": "#3B6FC2",
+    "status": "open",
+    "target_date": "2026-06-30",
+    "achieved_at": None,
+    "owner": ADITI,
+    "progress": {
+        "total": 2,
+        "done": 1,
+        "cancelled": 0,
+        "open": 1,
+        "blocked": 1,
+        "on_hold": 0,
+    },
+    "created_at": "2026-02-01T09:00:00Z",
+}
 TASK_TWO = _task(
     TASK_TWO_ID, 2, DOING_ID, "Switch the invoice job over", status="blocked", waiting_on=[LENA]
 )
@@ -436,6 +465,17 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         return httpx.Response(200, json={"members": [ADITI, LENA, LEO]})
     if path.endswith("/members") and method == "PUT":
         return httpx.Response(200, json={"members": [ADITI, LENA]})
+
+    if path.endswith("/goals") and method == "GET":
+        return httpx.Response(200, json=[GOAL])
+    if path.endswith("/goals") and method == "POST":
+        body = json.loads(request.content)
+        return httpx.Response(201, json={**GOAL, "name": body["name"], "tasks": []})
+    if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "GET":
+        return httpx.Response(200, json={**GOAL, "tasks": [TASK_ONE]})
+    if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "PATCH":
+        body = json.loads(request.content)
+        return httpx.Response(200, json={**GOAL, **body, "tasks": []})
 
     if path.endswith("/tasks") and method == "GET":
         return httpx.Response(200, json=[TASK_ONE, TASK_TWO])

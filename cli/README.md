@@ -79,6 +79,11 @@ cylist task move ATL-41 --column "In progress" [--position 0]
 cylist task status ATL-41 blocked --reason "…" --waiting-on "Lena W"
 cylist task comment ATL-41 "…"
 
+cylist goals ls ATL [--open]           cylist goals show ATL-G1
+cylist goals new ATL --name "Search revamp" --owner PERSON_ID [--target 2026-12-01]
+cylist goals link ATL-41 ATL-G1        cylist goals unlink ATL-41
+cylist goals status ATL-G1 achieved
+
 cylist people ls [--kind team|client] [--project ATL]
 cylist people new --name … --kind team --role … --responsibilities …
 

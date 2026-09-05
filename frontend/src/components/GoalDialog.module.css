@@ -1,0 +1,28 @@
+/* Eight swatches on one row at any dialog width worth having, wrapping rather
+   than shrinking below the size of a target you can hit. */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  width: 34px;
+  height: 34px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The ring is drawn in the page's own ink rather than in the swatch's colour:
+   a chosen swatch has to be legible as chosen against seven others that are
+   all equally saturated. The tick inside it says the same thing again, for
+   anyone who cannot tell the ring from the gap. */
+.chosen {
+  border-color: var(--ink);
+  outline: 2px solid var(--paper);
+  outline-offset: -4px;
+}

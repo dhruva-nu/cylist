@@ -20,6 +20,7 @@ from app.models.activity import Activity
 from app.models.api_token import ApiToken, TokenKind
 from app.models.board import BoardColumn
 from app.models.file import Blob, FileItem, Folder, ItemKind
+from app.models.goal import Goal, GoalStatus
 from app.models.person import Person
 from app.models.project import Project
 from app.models.task import (
@@ -182,6 +183,42 @@ class TestWhatItWrites:
             (22, "Done"),
             (19, "Done"),
         ]
+
+    async def test_writes_the_goals_the_board_is_coloured_by(
+        self, session: AsyncSession, seeded: seed.Summary
+    ) -> None:
+        atlas = await project_by(session, "ATL")
+        rows = await session.execute(
+            select(Goal.number, Goal.name, Goal.status)
+            .where(Goal.project_id == atlas.id)
+            .order_by(Goal.number)
+        )
+
+        assert list(rows) == [
+            (1, "Ledger cutover", GoalStatus.OPEN),
+            (2, "Payments hardening", GoalStatus.OPEN),
+            (3, "Billing service foundations", GoalStatus.ACHIEVED),
+        ]
+
+    async def test_leaves_some_cards_on_no_goal_at_all(
+        self, session: AsyncSession, seeded: seed.Summary
+    ) -> None:
+        """Which is the board most projects have, and the one worth sampling:
+        every card under an epic would make the rail say nothing."""
+        rows = await session.execute(
+            select(Task.number, Goal.name)
+            .join(Project, Project.id == Task.project_id)
+            .outerjoin(Goal, Goal.id == Task.goal_id)
+            .where(Project.key == "ATL", Task.parent_id.is_(None))
+            .order_by(Task.number)
+        )
+        by_number = dict(rows.tuples().all())
+
+        assert by_number[41] == "Ledger cutover"
+        assert by_number[35] == "Payments hardening"
+        assert by_number[19] == "Billing service foundations"
+        assert by_number[33] is None
+        assert by_number[27] is None
 
     async def test_splits_a_card_into_sub_tasks(
         self, session: AsyncSession, seeded: seed.Summary

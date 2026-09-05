@@ -38,6 +38,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.goal import Goal
 from app.models.person import Person
 from app.models.project import Project
 from app.models.template import TaskTemplate
@@ -202,6 +203,13 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "OR (sub_status_index >= 0 AND sub_status_index < cardinality(sub_statuses))",
             name="sub_status_index_in_range",
         ),
+        # A goal is what a card is for, and a sub-task's card already answers
+        # that. Letting a sub-task name a goal of its own would put a second
+        # answer under the first, and let the two disagree.
+        CheckConstraint(
+            "goal_id IS NULL OR parent_id IS NULL",
+            name="goal_only_on_cards",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -317,6 +325,22 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     it.
     """
 
+    goal_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("goal.id", ondelete="SET NULL"),
+    )
+    """The goal this card is work towards, if any. Null is not "unclassified" —
+    it is a card that stands on its own, which most cards do.
+
+    ``ON DELETE SET NULL`` where ``template_id`` has no ``ondelete`` at all,
+    because the two mean different things: a template is a rule about where a
+    card may go and cannot be pulled out from under one, while a goal is a
+    label saying what the card is for. A label can be taken off, and taking it
+    off is not a reason to refuse to delete the goal.
+
+    Only a card can carry one — see ``goal_only_on_cards``.
+    """
+
     jira_ref: Mapped[str | None] = mapped_column(String(200))
     pr_ref: Mapped[str | None] = mapped_column(String(200))
 
@@ -344,6 +368,7 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     project: Mapped[Project] = relationship(lazy="selectin")
     assignee: Mapped[Person] = relationship(lazy="selectin")
     template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
+    goal: Mapped[Goal | None] = relationship(lazy="selectin")
 
     waiting_on: Mapped[list[Person]] = relationship(
         secondary="task_waiting_on",

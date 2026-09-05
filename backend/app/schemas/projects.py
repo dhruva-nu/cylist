@@ -90,6 +90,11 @@ class ProjectSummary(ProjectRead):
     )
     on_hold_count: int = Field(description="Tasks deliberately paused, sub-tasks included.")
 
+    goal_count: int = Field(description="Goals on the project, settled ones included.")
+    open_goal_count: int = Field(
+        description="Goals still being worked towards — neither achieved nor dropped."
+    )
+
     folder_count: int
     file_count: int = Field(
         description="Everything in the project's folders — uploads and links alike."

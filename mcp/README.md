@@ -106,6 +106,11 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `set_checklist_item` | tick, cancel, reopen or retitle one |
 | `move_task` | move a card to a named column |
 | `set_task_status` | active / hold / blocked / cancelled, with a reason and tags |
+| `list_goals` | a project's epics, each with the progress counted from its cards |
+| `get_goal` | one goal and every card on it, in board order |
+| `create_goal` | start an epic, with an owner and an optional target date |
+| `set_task_goal` | put a card on a goal, or take it off the one it is on |
+| `set_goal_status` | open / achieved / dropped — achieving is refused over open cards |
 | `add_comment` | write to a card's timeline |
 | `list_people` | the directory, or one project's members |
 | `list_files` | folders and items, by path |
@@ -130,6 +135,10 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
 - **Sub-tasks gate the last column.** Every one of them must be finished or
   cancelled before `move_task` will put the parent in the board's last column;
   the refusal names what is still outstanding.
+- **Goals gate their own closing.** `set_goal_status(..., "achieved")` is
+  refused while a card on the goal is neither in the board's last column nor
+  cancelled, and the refusal names every card holding it open. Dropping a goal
+  is never refused — its cards stay on the board either way.
 
 ### Errors are results, not exceptions
 

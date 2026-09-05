@@ -22,6 +22,7 @@ LENA_ID = "0192f3c4-0002-7000-8000-00000000012a"
 LEO_ID = "0192f3c4-0002-7000-8000-0000000001e0"
 
 TASK_ID = "0192f3c4-0003-7000-8000-000000000002"
+GOAL_ID = "0192f3c4-0008-7000-8000-000000000001"
 SUBTASK_ID = "0192f3c4-0003-7000-8000-000000000003"
 CHECKLIST_ITEM_ID = "0192f3c4-000b-7000-8000-000000000001"
 CONTRACTS_ID = "0192f3c4-0004-7000-8000-000000000001"
@@ -109,6 +110,10 @@ TASK = {
     "description": "Point the nightly job at the new ledger.",
     "type": "feature",
     "due_date": "2026-03-31",
+    "goal_id": None,
+    "goal_reference": None,
+    "goal_name": None,
+    "goal_colour": None,
     "assignee": ADITI,
     "status": "active",
     "jira_ref": None,
@@ -123,6 +128,23 @@ TASK = {
     "created_at": "2026-02-01T09:00:00Z",
     "comments": [],
     "subtasks": [],
+}
+
+GOAL = {
+    "id": GOAL_ID,
+    "project_id": PROJECT_ID,
+    "reference": "ATL-G1",
+    "number": 1,
+    "name": "Ledger cutover",
+    "description": "Every invoice raised through the new ledger.",
+    "colour": "#3B6FC2",
+    "status": "open",
+    "target_date": "2026-06-30",
+    "achieved_at": None,
+    "owner": ADITI,
+    "progress": {"total": 2, "done": 1, "cancelled": 0, "open": 1, "blocked": 0, "on_hold": 0},
+    "created_at": "2026-02-01T09:00:00Z",
+    "tasks": [TASK],
 }
 
 SUBTASK = {
@@ -358,6 +380,17 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
     if path.endswith("/members"):
         return httpx.Response(200, json={"members": [ADITI, LENA, LEO]})
 
+    if path.endswith("/goals") and method == "GET":
+        return httpx.Response(200, json=[GOAL])
+    if path.endswith("/goals") and method == "POST":
+        body = json.loads(request.content)
+        return httpx.Response(201, json={**GOAL, "name": body["name"], "tasks": []})
+    if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "GET":
+        return httpx.Response(200, json=GOAL)
+    if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "PATCH":
+        body = json.loads(request.content)
+        return httpx.Response(200, json={**GOAL, **body, "tasks": []})
+
     if path.endswith("/tasks") and method == "GET":
         return httpx.Response(200, json=[TASK])
     if path.endswith("/tasks") and method == "POST":
@@ -365,6 +398,18 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         return httpx.Response(201, json={**TASK, "title": body["title"]})
     if path.endswith("/history") and method == "GET":
         return httpx.Response(200, json=TASK_HISTORY)
+    if path in {"/tasks/ATL-2", f"/tasks/{TASK_ID}"} and method == "PATCH":
+        linked = json.loads(request.content).get("goal_id")
+        return httpx.Response(
+            200,
+            json={
+                **TASK,
+                "goal_id": linked,
+                "goal_reference": GOAL["reference"] if linked else None,
+                "goal_name": GOAL["name"] if linked else None,
+                "goal_colour": GOAL["colour"] if linked else None,
+            },
+        )
     if path in {"/tasks/ATL-2", f"/tasks/{TASK_ID}"}:
         return httpx.Response(200, json=TASK)
     if path in {"/tasks/ATL-2-1", f"/tasks/{SUBTASK_ID}"}:

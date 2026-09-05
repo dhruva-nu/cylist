@@ -731,3 +731,23 @@
 .panel[hidden] {
   display: none;
 }
+
+/* The goal, on the card that is on it. A row rather than a chip because it is
+   a link out of the dialog, and a link has to look like one. */
+.goalLink {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.goalLink:hover .chipName {
+  text-decoration: underline;
+}
+
+.goalRef {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

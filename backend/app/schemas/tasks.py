@@ -72,6 +72,14 @@ class TaskCreate(Schema):
             "column's stage names, if any."
         ),
     )
+    goal_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The goal this card is work towards — one of the project's goals. "
+            "Omit it for a card that stands on its own, which most cards do. "
+            "The goal's colour becomes the card's rail on the board."
+        ),
+    )
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
@@ -189,6 +197,15 @@ class TaskUpdate(Schema):
             "`sub_statuses` are left as they are; a new template's stages are "
             "not retroactively applied, only picked up the next time the card "
             "lands somewhere new."
+        ),
+    )
+    goal_id: UUID | None = Field(
+        default=None,
+        description=(
+            "A different goal, or null to unlink the card from the one it is "
+            "on. Like `due_date`, null here means clear rather than leave "
+            "alone. Refused on a sub-task: a sub-task belongs to its card, and "
+            "its card is what belongs to a goal."
         ),
     )
     jira_ref: str | None = Field(default=None, max_length=200)
@@ -331,6 +348,15 @@ class TaskRead(Schema):
         description="The template this card was created from, if any. Null is unrestricted."
     )
     template_name: str | None = Field(description="That template's name, so a card reads alone.")
+    goal_id: UUID | None = Field(
+        description="The goal this card is work towards, if any. Null stands on its own."
+    )
+    goal_reference: str | None = Field(description="`ATL-G1`, when the card is on a goal.")
+    goal_name: str | None = Field(description="That goal's name, so a card reads alone.")
+    goal_colour: str | None = Field(
+        description="That goal's six-digit hex — the rail the board draws down the card. Null "
+        "when the card is on no goal, and the board draws its status colour instead."
+    )
     jira_ref: str | None
     pr_ref: str | None
     waiting_on: list[PersonRead] = Field(

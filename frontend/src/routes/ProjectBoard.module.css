@@ -1,33 +1,35 @@
-/* Two tracks: the search takes the row, the button takes what it needs at the
-   end of it. It was three, with the search boxed into the middle one and empty
-   space either side holding it on the board's midline — but a box this wide
-   has no side left to be off, and those tracks were only ever there to centre
-   it. It is centred now by spanning.
-
-   `1fr` on the search's track rather than `auto`, so the width below resolves
-   against a track that has already been given a size rather than against one
-   still being sized by what is in it. */
+/* One row: the search box, then the buttons hard against the end of it.
+   A row rather than the two-cell grid this used to be — that grid had a cell
+   for a search box and a cell for one button, so the second button wrapped to
+   a line of its own and the third stretched across the width of the board. */
 .toolbar {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  /* One height for everything in the row. The search box and the buttons were
+     51px and 27px respectively when they finally shared a line, which read as
+     a control with some decoration beside it rather than as a toolbar. */
+  --control: 44px;
+
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   margin: 0 6px 14px;
 }
 
-/* The cap only bites on a display wider than about 3000px; on anything
-   narrower this is the whole row, less the button. Centred in its track for
-   the displays where it does bite. */
+/* Takes what the buttons leave. The cap only bites on a display wider than
+   about 3000px; on anything narrower this is the whole row, less the buttons.
+   The basis is the width below which the two drop onto separate lines rather
+   than squeezing the box down to nothing. */
 .search {
   position: relative;
-  grid-column: 1;
-  justify-self: center;
-  width: min(2880px, 100%);
+  flex: 1 1 360px;
+  min-width: 0;
+  max-width: 2880px;
 }
 
 .search input {
   width: 100%;
-  padding: 13px 22px;
+  height: var(--control, 44px);
+  padding: 0 20px;
   font-size: 15px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
@@ -363,8 +365,16 @@
   touch-action: none;
 }
 
-/* A colour bar rather than a tinted card alone: the status has to survive
-   being glanced at from across the room. */
+/* A colour bar rather than a tinted card alone: what it stands for has to
+   survive being glanced at from across the room.
+
+   Two things want the rail, and the goal wins. A card on a goal wears that
+   goal's colour, set as `--card-rail` on the card itself; a card on no goal
+   falls back to the status colours below, which is what the rail has always
+   meant. Nothing is lost by the swap: a card that is held or blocked is also
+   tinted, wears a word on a pill and carries its own icon tile, so the status
+   is still on the card three times over — while the goal has nowhere else on
+   a board to be. */
 .task::before {
   content: '';
   position: absolute;
@@ -373,7 +383,7 @@
   left: 0;
   width: 4px;
   border-radius: 0 3px 3px 0;
-  background: var(--ok);
+  background: var(--card-rail, var(--ok));
 }
 
 .task:hover {
@@ -405,7 +415,7 @@
 }
 
 .hold::before {
-  background: var(--hold);
+  background: var(--card-rail, var(--hold));
 }
 
 .blocked {
@@ -416,10 +426,15 @@
 }
 
 .blocked::before {
-  background: var(--blocked);
+  background: var(--card-rail, var(--blocked));
 }
 
-/* No tint and a grey rail: a cancelled card is finished with, not urgent. */
+/* No tint and a grey rail: a cancelled card is finished with, not urgent.
+
+   The one card whose goal does not take the rail. A dropped card still counts
+   towards its goal and still says which one on its chip, but drawing it in
+   the goal's own colour would put it back among the live work at exactly the
+   distance the colour is meant to be read from. */
 .cancelled {
   background: var(--paper-2);
 }
@@ -792,21 +807,10 @@
   font-weight: 500;
 }
 
-/* The slot the next card goes in, drawn as a slot: a dashed outline at the
-   card's own width and corner radius, sitting where the card will sit. It was
-   a line of text under the column, which is a link to somewhere rather than a
-   space to fill.
-
-   The margin matches `.cards`' side padding, so the outline lines up with the
-   cards above it rather than with the column's edge. */
 .addTask {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin: 0 12px 12px;
-  padding: 9px 12px;
-  border: 1px dashed var(--line-2);
-  border-radius: 12px;
+  padding: 8px 18px 14px;
+  border: 0;
+  border-radius: 0 0 16px 16px;
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
@@ -816,25 +820,7 @@
   cursor: pointer;
 }
 
-/* The plus, in the same tile the type marks use at the head of a card — a
-   little smaller, because this one is a control rather than a label. */
-.addTaskMark {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  background: var(--paper-2);
-  color: var(--ink-3);
-}
-
 .addTask:hover {
-  border-color: var(--go);
-  color: var(--go);
-}
-
-.addTask:hover .addTaskMark {
   color: var(--go);
 }
 
@@ -844,252 +830,31 @@
   color: var(--brand-ink);
 }
 
-/*
- * The same slot, opened.
- *
- * Deliberately the card's own box — one pixel of --line-2 where the dashes
- * were, the same 12px corners, the same width, on paper with the card's
- * shadow. The outline was a promise about where the card would go; opening it
- * keeps that promise on screen while the card is written, so nothing jumps
- * when it lands.
- */
-.composer {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0 12px 12px;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--line-2);
-  border-radius: 12px;
-  background: var(--paper);
-  box-shadow: var(--shadow);
-}
-
-/* Set in the face and at the size the card's own title is set in, because that
-   is what this is: the title, being typed where it will be read. */
-.composerTitle {
-  width: 100%;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.composerTitle::placeholder {
-  color: var(--ink-3);
-  font-weight: 500;
-}
-
-.composerTitle:focus-visible {
-  outline: none;
-}
-
-/* A rule rather than a gap between the sentence and the four decisions about
-   it: the title is the card, and these are the labels on it. */
-.composerRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.types {
-  display: flex;
-  gap: 6px;
-}
-
-/* The card's own type tile, made to do the choosing. `.tile` beside this is
-   what gives it its 24px and its corners. */
-.typeToggle {
-  padding: 0;
-  border: 0;
-  cursor: pointer;
-}
-
-/* Not this kind of card. Grey and quiet, so the one tile that is tinted is the
-   answer rather than one of three colours to compare. */
-.tileOff {
-  background: var(--paper-2);
-  color: var(--ink-3);
-}
-
-.typeToggle.tileOff:hover {
-  color: var(--ink-2);
-}
-
-/*
- * A decision that has not been made yet: an outline, a mark and a word.
- *
- * The height is the type tile's, so the row lines up whatever is in it, and
- * the border is the same hairline every unset control on this board wears.
- * Set, the chip takes the colour the card itself will wear — see the states
- * below, which are the priority scale and the due ramp exactly as a card draws
- * them.
- */
-.chip {
-  display: inline-flex;
-  flex: none;
-  gap: 6px;
-  align-items: center;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* The control inside a chip is the chip: no box of its own, no arrow, and the
-   colour and face of whatever state the chip is in. */
-.chipControl {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  appearance: none;
-}
-
-.chipControl:focus-visible {
-  outline: none;
-}
-
-.chip:focus-within {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-}
-
-/* The native picker's own calendar is hidden because the chip already carries
-   one; the label opens the picker instead. The field stays a date field, so it
-   is still typed into and still validated by the browser. */
-.chipDate::-webkit-calendar-picker-indicator {
-  display: none;
-}
-
-.chipDate::-webkit-datetime-edit {
-  padding: 0;
-}
-
-/* Priority, in the steps `.prio` escalates through: a fill for urgent alone,
-   ink for the two below it, nothing at all for someday. */
-.chipUrgent {
-  border-color: transparent;
-  background: var(--blocked-soft);
-  color: var(--priority-urgent);
-}
-
-.chipAsap {
-  border-color: var(--priority-asap);
-  color: var(--priority-asap);
-}
-
-.chipWeek {
-  border-color: var(--priority-week);
-  color: var(--priority-week);
-}
-
-/* The due date, in the five steps a card's own date is drawn in. */
-.chipLate {
-  border-color: transparent;
-  background: var(--blocked-soft);
-  color: var(--blocked);
-}
-
-.chipToday {
-  border-color: transparent;
-  background: var(--hold-soft);
-  color: var(--hold);
-}
-
-.chipTomorrow {
-  border-color: var(--hold);
-  color: var(--hold);
-}
-
-.chipSoon {
-  color: var(--ink-2);
-}
-
-.chipLater {
-  color: var(--ink-3);
-}
-
-/* Who it is for on the left, what to do about it on the right. */
-.composerFoot {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.composerGo {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.composerCancel {
-  padding: 6px 10px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.composerCancel:hover {
-  background: var(--paper-2);
-  color: var(--ink);
-}
-
-.composerAdd {
-  padding: 6px 18px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--go);
-  color: var(--go-ink);
-  font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.composerAdd:hover:not(:disabled) {
-  background: var(--go-hover);
-}
-
-/* Greyed rather than dimmed. A card with no title is not a card, and a button
-   at half opacity says "loading" as readily as it says "not yet"; the flat
-   grey says the second thing only. */
-.composerAdd:disabled {
-  background: var(--line);
-  color: var(--ink-3);
-  cursor: not-allowed;
-}
-
 .foot {
   height: 10px;
 }
 
-/* The toolbar's second track, hard against the end of the search box, so the
-   pair reads as one strip of controls. */
+/* The board's own controls, kept together at the end of the toolbar so they
+   read as one strip rather than as buttons scattered along a row. They wrap as
+   a group, and stay at the end of the row while there is room for them. */
+.tools {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* The height comes from the row rather than from the button, so the strip
+   lines up with the search box beside it whatever is in it. */
+.tools button {
+  min-height: var(--control, 44px);
+  padding-right: 14px;
+  padding-left: 14px;
+}
+
 .addColumn {
-  grid-column: 2;
-  justify-self: start;
   white-space: nowrap;
 }
 
@@ -1117,4 +882,164 @@
 .forbidden {
   opacity: 0.35;
   filter: saturate(0.4);
+}
+
+/* --- Grouped by goal ------------------------------------------------------
+
+   The board, read by goal instead of by column. The columns are still the
+   columns — same order, same fold, same drop rules — but each one is split
+   into a stack of cells, one per goal, with a heading above the lot.
+
+   The whole thing scrolls as one box rather than lane by lane: two rows that
+   scrolled sideways independently would stop being columns the moment either
+   of them moved. */
+.lanes {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 6px 20px;
+  overflow: auto;
+}
+
+/* One grid, shared by the heading row and every lane, so a lane's cells sit
+   under the columns they belong to. The track list is written in by the board
+   from the columns themselves — 52px where one is folded, and a range where it
+   is not — because only the board knows which are folded. */
+.laneRow {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: safe center;
+  min-width: min-content;
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The lane's name, on a bar the width of the board rather than in a rail down
+   the side: a name in the margin is the first thing to scroll out of sight,
+   and the name is the one thing about a lane you always need in view. */
+.laneHead {
+  position: sticky;
+  left: 6px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 4px 12px 4px 10px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+}
+
+/* The lane's fold, at the head of the bar. A hit area the height of the bar
+   rather than the size of the arrow in it: this is the only way back from a
+   folded lane, and a 10px triangle is not a target. */
+.laneFold {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.laneFold:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.laneName {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.laneName:hover {
+  text-decoration: underline;
+}
+
+.laneDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--goal, var(--ink-3));
+}
+
+.laneRef {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* The lane for everything on no goal: an outline rather than a fill, because
+   it is the absence of a goal rather than one more of them. */
+.laneHeadLoose {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* A column drawn in halves. The heading keeps its own box and stops there;
+   a lane's cell has no heading and is as tall as the cards in it, with a
+   floor so an empty lane is still something you can drop a card onto. */
+.headOnly {
+  min-height: 0;
+}
+
+.headOnly .unfolded {
+  flex: none;
+}
+
+.cardsOnly {
+  min-height: 96px;
+}
+
+.cardsOnly .cards {
+  overflow: visible;
+  padding-top: 12px;
+}
+
+/* A folded column's share of a lane: a strip wide enough to drop a card on,
+   with the count of what is already in it. */
+.railCell {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  min-height: 96px;
+  color: var(--ink-3);
+}
+
+/* The lanes toggle, while it is on. Reads as a state rather than as a button
+   about to do something. */
+.groupedOn {
+  border-color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+/* A goal's colour in the search box's suggestions, so picking `goal:` off the
+   list is picking the rail you can see on the board behind it. */
+.suggestionDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
 }

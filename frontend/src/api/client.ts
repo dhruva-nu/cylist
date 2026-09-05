@@ -69,6 +69,10 @@ export interface ProjectSummary extends Project {
   column_count: number
   blocked_count: number
   on_hold_count: number
+  /** Goals on the project, settled ones included. */
+  goal_count: number
+  /** Goals still being worked towards — neither achieved nor dropped. */
+  open_goal_count: number
   vault_tree_count: number
   /** Credentials stored across every tree. */
   vault_secret_count: number
@@ -81,6 +85,71 @@ export type TaskStatus = 'active' | 'hold' | 'blocked' | 'cancelled'
 /** Where one tick-box sub-task has got to. `done` and `cancelled` both settle it. */
 export type ChecklistState = 'open' | 'done' | 'cancelled'
 export type CommentKind = 'comment' | 'status_change'
+
+/** Whether a goal is still being worked towards, and if not, how it ended. */
+export type GoalStatus = 'open' | 'achieved' | 'dropped'
+
+/**
+ * How far along a goal is, counted from the cards linked to it.
+ *
+ * Derived server-side on every read rather than stored: a percentage kept
+ * beside the cards is a number that can disagree with them.
+ */
+export interface GoalProgress {
+  /** Cards linked to this goal, cancelled ones included. */
+  total: number
+  /** Cards in the board's last column. */
+  done: number
+  /** Cards dropped. Settled, but not achieved. */
+  cancelled: number
+  /** Neither done nor cancelled — what is left. */
+  open: number
+  /** Open cards that cannot proceed. */
+  blocked: number
+  /** Open cards deliberately paused. */
+  on_hold: number
+}
+
+/**
+ * An outcome a board's cards are work towards — an epic.
+ *
+ * It is deliberately not a card: no column, no position, no template. A goal
+ * is what the work is for, and its colour is the rail its cards wear.
+ */
+export interface Goal {
+  id: string
+  project_id: string
+  /** `ATL-G1`. Usable in place of the id, and unchanged by a rename. */
+  reference: string
+  number: number
+  name: string
+  description: string
+  /** Six-digit hex — the rail the board draws down this goal's cards. */
+  colour: string
+  status: GoalStatus
+  /** `YYYY-MM-DD`, or null when nobody has said. */
+  target_date: string | null
+  /** When it was reached. Null until it is. */
+  achieved_at: string | null
+  owner: Person
+  progress: GoalProgress
+  created_at: string
+}
+
+export interface GoalDetail extends Goal {
+  /** The cards on this goal, in board order. */
+  tasks: Task[]
+}
+
+export interface GoalInput {
+  name: string
+  description?: string
+  /** Six-digit hex. Omit to take a stable colour from the palette. */
+  colour?: string
+  target_date?: string | null
+  owner_id: string
+  status?: GoalStatus
+}
 
 export interface BoardColumn {
   id: string
@@ -329,6 +398,15 @@ export interface Task {
   template_id: string | null
   /** That template's name, so a card reads without the template list beside it. */
   template_name: string | null
+  /** The goal this card is work towards, if any. Null stands on its own. */
+  goal_id: string | null
+  /** `ATL-G1`, when the card is on a goal. */
+  goal_reference: string | null
+  /** That goal's name, so a card reads without the goal list beside it. */
+  goal_name: string | null
+  /** That goal's hex colour — the rail the board draws. Null when the card is
+   * on no goal, and the board draws its status colour instead. */
+  goal_colour: string | null
   jira_ref: string | null
   pr_ref: string | null
   waiting_on: Person[]
@@ -373,6 +451,8 @@ export interface TaskInput {
   assignee_id: string
   /** One of the project's templates, or null for a card with no template. */
   template_id: string | null
+  /** One of the project's goals, or null for a card that stands on its own. */
+  goal_id: string | null
   jira_ref: string | null
   pr_ref: string | null
 }
@@ -667,6 +747,16 @@ export const api = {
     request<Template>(`/templates/${id}`, { method: 'PATCH', body: body(input) }),
   deleteTemplate: (id: string) =>
     request<{ ok: boolean }>(`/templates/${id}`, { method: 'DELETE' }),
+
+  listGoals: (ref: string, openOnly = false) =>
+    request<Goal[]>(`/projects/${ref}/goals${openOnly ? '?open_only=true' : ''}`),
+  getGoal: (goalRef: string) => request<GoalDetail>(`/goals/${goalRef}`),
+  createGoal: (ref: string, input: GoalInput) =>
+    request<GoalDetail>(`/projects/${ref}/goals`, { method: 'POST', body: JSON.stringify(input) }),
+  updateGoal: (goalRef: string, input: Partial<GoalInput>) =>
+    request<GoalDetail>(`/goals/${goalRef}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deleteGoal: (goalRef: string) =>
+    request<{ ok: boolean }>(`/goals/${goalRef}`, { method: 'DELETE' }),
 
   listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),

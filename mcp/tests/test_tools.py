@@ -26,6 +26,11 @@ EXPECTED_TOOLS = {
     "set_checklist_item",
     "move_task",
     "set_task_status",
+    "list_goals",
+    "get_goal",
+    "create_goal",
+    "set_task_goal",
+    "set_goal_status",
     "add_comment",
     "list_people",
     "list_files",
@@ -613,3 +618,103 @@ async def test_a_name_error_quotes_the_project_key_not_a_uuid(server: MCPServer)
     assert result.is_error
     assert "ATL's board" in result.text
     assert fake_api.PROJECT_ID not in result.text
+
+
+# --- Goals -----------------------------------------------------------------
+
+
+async def test_list_goals_returns_their_progress(server: MCPServer) -> None:
+    result = await call(server, "list_goals", project="ATL")
+    assert not result.is_error
+    goal = result.data["goals"][0]
+    assert goal["reference"] == "ATL-G1"
+    assert goal["progress"]["done"] == 1
+
+
+async def test_list_goals_can_ask_for_the_open_ones(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "list_goals", project="ATL", open_only=True)
+    assert not result.is_error
+    assert recorder.sent("GET", "/goals").url.params["open_only"] == "true"
+
+
+async def test_get_goal_takes_the_name_off_the_screen(server: MCPServer) -> None:
+    """The point of resolving names: a model reads "Ledger cutover" and can
+    use it without first finding a reference."""
+    result = await call(server, "get_goal", project="ATL", goal="Ledger cutover")
+    assert not result.is_error
+    assert result.data["goal"]["reference"] == "ATL-G1"
+    assert result.data["goal"]["tasks"][0]["reference"] == "ATL-2"
+
+
+async def test_get_goal_takes_a_reference_too(server: MCPServer) -> None:
+    result = await call(server, "get_goal", project="ATL", goal="ATL-G1")
+    assert not result.is_error
+    assert result.data["goal"]["name"] == "Ledger cutover"
+
+
+async def test_an_unknown_goal_names_the_ones_that_exist(server: MCPServer) -> None:
+    result = await call(server, "get_goal", project="ATL", goal="Nothing like it")
+    assert result.is_error
+    assert "Ledger cutover" in result.text
+
+
+async def test_create_goal_resolves_the_owner_by_name(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "create_goal", project="ATL", name="Search revamp", owner="Aditi")
+    assert not result.is_error
+    body = recorder.body("POST", "/goals")
+    assert body["owner_id"] == fake_api.ADITI_ID
+    # Nothing invented: no colour, no date, no description sent unasked.
+    assert set(body) == {"name", "owner_id"}
+
+
+async def test_set_task_goal_sends_the_goals_id(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "set_task_goal", task="ATL-2", goal="Ledger cutover")
+    assert not result.is_error
+    assert recorder.body("PATCH", "/tasks/ATL-2") == {"goal_id": fake_api.GOAL_ID}
+    assert result.data["task"]["goal_reference"] == "ATL-G1"
+
+
+async def test_set_task_goal_with_no_goal_takes_the_card_off(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "set_task_goal", task="ATL-2")
+    assert not result.is_error
+    assert recorder.body("PATCH", "/tasks/ATL-2") == {"goal_id": None}
+    assert result.data["task"]["goal_id"] is None
+
+
+async def test_set_goal_status_rejects_a_word_that_is_not_a_status(server: MCPServer) -> None:
+    result = await call(server, "set_goal_status", project="ATL", goal="ATL-G1", status="done")
+    assert result.is_error
+    assert "'open', 'achieved'" in result.text
+
+
+async def test_set_goal_status_sends_the_status(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "set_goal_status", project="ATL", goal="ATL-G1", status="achieved")
+    assert not result.is_error
+    assert recorder.body("PATCH", "/goals/ATL-G1") == {"status": "achieved"}
+
+
+async def test_create_task_can_name_the_goal_it_is_written_under(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Backfill the index",
+        description="So search has something to search.",
+        task_type="chore",
+        assignee="Aditi",
+        goal="Ledger cutover",
+    )
+    assert not result.is_error
+    assert recorder.body("POST", "/tasks")["goal_id"] == fake_api.GOAL_ID

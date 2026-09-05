@@ -24,7 +24,10 @@ than mechanics:
 * a sub-task is not on the board. It has no column, it cannot be moved, and it
   is finished by :func:`set_finished` rather than by being dragged somewhere —
   one piece of work is one card, and a card dealt out across four columns is
-  four things to read where there was one thing to do.
+  four things to read where there was one thing to do;
+* a goal is set on a card, not on a sub-task — see
+  :func:`_refuse_goal_on_subtask`. A sub-task belongs to its card, and its card
+  is what belongs to the goal.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, UnprocessableRequestError
 from app.models.board import BoardColumn
+from app.models.goal import Goal
 from app.models.person import Person
 from app.models.project import Project
 from app.models.task import (
@@ -61,7 +65,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import columns, projects, templates
+from app.services import columns, goals, projects, templates
 
 
 class Split(NamedTuple):
@@ -76,13 +80,13 @@ class Split(NamedTuple):
     open: int
 
 
-_CLEARABLE = frozenset({"jira_ref", "pr_ref", "due_date", "template_id"})
+_CLEARABLE = frozenset({"jira_ref", "pr_ref", "due_date", "template_id", "goal_id"})
 """The only task fields a ``PATCH`` may set back to null.
 
 Everything else reads a null as a client echoing back a field it never filled
-in. These four are the fields a card can genuinely be without, so for them a
+in. These five are the fields a card can genuinely be without, so for them a
 null is the request it looks like: take the date off, drop the link, take the
-card out of its template."""
+card out of its template, take it off its goal."""
 
 _TRACKED: dict[str, str] = {
     "title": "title",
@@ -94,6 +98,7 @@ _TRACKED: dict[str, str] = {
     "due_date": "due date",
     "assignee_id": "assignee",
     "template_id": "template",
+    "goal_id": "goal",
     "jira_ref": "Jira reference",
     "pr_ref": "pull request",
 }
@@ -128,11 +133,19 @@ async def create(
 
     Raises:
         UnprocessableRequestError: if the assignee is not a project member, if
-            the template belongs to another project, or if ``parent`` is itself
-            a sub-task.
+            the template or the goal belongs to another project, if a sub-task
+            is given a goal of its own, or if ``parent`` is itself a sub-task.
     """
     await projects.require_members(session, project.id, [data.assignee_id])
     template = await templates.require_template(session, project.id, data.template_id)
+    await goals.require_goal(session, project.id, data.goal_id)
+
+    if parent is not None and data.goal_id is not None:
+        raise UnprocessableRequestError(
+            f"A sub-task cannot be put on a goal of its own. {parent.reference} is what "
+            "belongs to a goal; this is work on it.",
+            details={"parent": parent.reference, "goal_id": str(data.goal_id)},
+        )
 
     if parent is not None and parent.parent_id is not None:
         raise UnprocessableRequestError(
@@ -176,6 +189,7 @@ async def create(
         due_date=data.due_date,
         assignee_id=data.assignee_id,
         template_id=data.template_id,
+        goal_id=data.goal_id,
         status=TaskStatus.ACTIVE,
         jira_ref=data.jira_ref,
         pr_ref=data.pr_ref,
@@ -186,7 +200,7 @@ async def create(
     # Relationships are only populated by a SELECT, and a just-inserted row has
     # not had one. Load them now so callers can read them without lazy IO.
     await session.refresh(
-        task, ["project", "assignee", "template", "waiting_on", "parent", "checklist"]
+        task, ["project", "assignee", "template", "goal", "waiting_on", "parent", "checklist"]
     )
     return task
 
@@ -299,6 +313,10 @@ async def update(
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
 
+    if "goal_id" in fields and fields["goal_id"] != task.goal_id:
+        await _refuse_goal_on_subtask(task, fields["goal_id"])
+        await goals.require_goal(session, task.project_id, fields["goal_id"])
+
     if "template_id" in fields and fields["template_id"] != task.template_id:
         new_template = await templates.require_template(
             session, task.project_id, fields["template_id"]
@@ -332,7 +350,7 @@ async def update(
         setattr(task, field, value)
 
     await session.flush()
-    await session.refresh(task, ["assignee", "template"])
+    await session.refresh(task, ["assignee", "template", "goal"])
     return task, await _diff(session, before, _snapshot(task))
 
 
@@ -847,6 +865,9 @@ async def _diff(
         elif field == "template_id":
             field = "template"
             was, now = await _template_name(session, was), await _template_name(session, now)
+        elif field == "goal_id":
+            field = "goal"
+            was, now = await _goal_name(session, was), await _goal_name(session, now)
         elif field == "sub_status_index":
             was = _stage(before["sub_statuses"], was)
             now = _stage(after["sub_statuses"], now)
@@ -873,6 +894,33 @@ async def _template_name(session: AsyncSession, template_id: UUID | None) -> str
         return None
     template = await session.get(TaskTemplate, template_id)
     return template.name if template else None
+
+
+async def _goal_name(session: AsyncSession, goal_id: UUID | None) -> str | None:
+    if goal_id is None:
+        return None
+    goal = await session.get(Goal, goal_id)
+    return goal.name if goal else None
+
+
+async def _refuse_goal_on_subtask(task: Task, goal_id: UUID | None) -> None:
+    """Stop a sub-task being put on a goal of its own.
+
+    A sub-task belongs to its card and its card belongs to the goal — see the
+    ``goal_only_on_cards`` constraint, which this refuses in the language of
+    the request rather than as a database error. Unlinking is always allowed,
+    even here: taking a null goal off a sub-task is a no-op, not a rule broken.
+
+    Raises:
+        UnprocessableRequestError: if a sub-task is being given a goal.
+    """
+    if goal_id is None or task.parent_id is None:
+        return
+    raise UnprocessableRequestError(
+        f"{task.reference} is a sub-task, so it cannot be put on a goal of its own. "
+        f"Put {task.parent.reference if task.parent else 'its card'} on the goal instead.",
+        details={"reference": task.reference},
+    )
 
 
 def _plain(value: Any) -> Any:
