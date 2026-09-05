@@ -69,6 +69,8 @@ import {
   type ColumnInput,
   type Person,
   type Task,
+  type TaskPriority,
+  type TaskType,
 } from '../api/client'
 import {
   activeToken,
@@ -84,12 +86,18 @@ import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
 import {
+  AlertIcon,
   Avatar,
   Button,
+  CalendarIcon,
+  ClockIcon,
+  CommentIcon,
   EmptyState,
   ErrorBanner,
   LiveRegion,
+  PlusIcon,
   PriorityIcon,
+  StatusIcon,
   SubStatusBar,
   TaskRef,
   TypeIcon,
@@ -524,6 +532,7 @@ export function ProjectBoard() {
             <Column
               key={column.id}
               column={column}
+              projectKey={projectKey}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
               collapsed={collapsed.includes(column.id)}
@@ -539,8 +548,10 @@ export function ProjectBoard() {
               onOpenTask={setOpenTaskId}
               onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
               onAddTask={() => setCreatingTask(true)}
+              onCreated={refresh}
               onEdit={() => setColumnDialog(column)}
               members={memberList}
+              announce={announce}
             />
           ))}
         </div>
@@ -733,6 +744,7 @@ interface Move {
 
 function Column({
   column,
+  projectKey,
   tasks,
   isFirst,
   collapsed,
@@ -741,10 +753,13 @@ function Column({
   onOpenTask,
   onMoveSubStatus,
   onAddTask,
+  onCreated,
   onEdit,
   members,
+  announce,
 }: {
   column: BoardColumn
+  projectKey: string
   tasks: Task[]
   isFirst: boolean
   collapsed: boolean
@@ -757,10 +772,14 @@ function Column({
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
+  /** The long way round: the whole form, for a column folded away to a rail. */
   onAddTask: () => void
+  /** A card written in the composer has landed; re-read the board. */
+  onCreated: () => Promise<void>
   onEdit: () => void
   /** The project's people, for the `@` tags in a stage label. */
   members: Person[]
+  announce: (message: string) => void
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
   // A column is draggable on the whole card (so it visually moves as one
@@ -876,9 +895,12 @@ function Column({
           </div>
 
           {isFirst ? (
-            <button className={styles.addTask} onClick={onAddTask}>
-              + Add a task
-            </button>
+            <TaskComposer
+              projectKey={projectKey}
+              members={members}
+              announce={announce}
+              onCreated={onCreated}
+            />
           ) : (
             <div className={styles.foot} />
           )}
@@ -975,12 +997,39 @@ function TaskCardBody({
   members: Person[]
   onMoveSubStatus?: (index: number) => void
 }) {
-  const late = isOverdue(task.due_date)
+  const active = task.status === 'active'
+  /* What the tile at the head of the card is standing for. A card that is
+     simply running wears its type there, which is the more useful of the two
+     facts; one that is held, blocked or given up wears that instead, and the
+     word itself stays on the pill across the row. */
+  const tileLabel = active ? TYPE_LABELS[task.type] : STATUS_LABELS[task.status]
 
   return (
     <>
       <div className={styles.taskRow}>
         <span className={styles.refs}>
+          {/* Icons rather than words, with the word each one stands for kept on
+              the tile: as a tooltip, and as text only a screen reader reads.
+              "This week · feature" spelled out was the widest thing on a row
+              that repeats down every card in the column, and the least worth
+              reading twice — but it is still what the mark means, so nothing
+              that cannot see the icon loses it.
+
+              A tinted tile rather than a bordered chip. The type is the one
+              fact on the card that is the same shape on every card, so it is
+              what the eye uses to find its place in a column — and an outline
+              in the row's own ink was not enough to be found by. */}
+          <span
+            className={`${styles.tile} ${active ? styles[`tile_${task.type}`] : styles[`tile_${task.status}`]}`}
+            title={tileLabel}
+          >
+            {active ? (
+              <TypeIcon type={task.type} size={15} />
+            ) : (
+              <StatusIcon status={task.status} size={15} />
+            )}
+            <span className="visually-hidden">{tileLabel}</span>
+          </span>
           <span className={styles.reference}>{task.reference}</span>
           {/* A sub-task's own reference already carries its parent's number,
               but `ATL-41-2` only says so to a reader who knows the scheme —
@@ -993,38 +1042,30 @@ function TaskCardBody({
           ) : null}
         </span>
         <span className={styles.badges}>
-          {/* Icons rather than words, with the word each one stands for kept on
-              the chip: as a tooltip, and as text only a screen reader reads.
-              "This week · feature" spelled out was the widest thing on a row
-              that repeats down every card in the column, and the least worth
-              reading twice — but it is still what the chip means, so nothing
-              that cannot see the icon loses it.
-
-              Someday is the baseline every card starts on, so flagging it too
+          {/* Someday is the baseline every card starts on, so flagging it too
               would be noise on every single card — the same reasoning that
-              keeps the status pill off an active task. */}
+              keeps the status pill off an active task.
+
+              Only urgent gets a filled pill. The four levels escalate in
+              chrome and never in width, so a column of cards keeps one margin
+              down its right-hand side however its work is prioritised. */}
           {task.priority !== 'someday' ? (
             <span
-              className={`${styles.chip} ${styles.icon} ${styles[`priority_${task.priority}`]}`}
+              className={`${styles.prio} ${styles[`priority_${task.priority}`]}`}
               title={PRIORITY_LABELS[task.priority]}
             >
               <PriorityIcon priority={task.priority} />
               <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
             </span>
           ) : null}
-          {task.status === 'active' ? (
-            <span
-              className={`${styles.chip} ${styles.icon} ${styles[`type_${task.type}`]}`}
-              title={TYPE_LABELS[task.type]}
-            >
-              <TypeIcon type={task.type} />
-              <span className="visually-hidden">{TYPE_LABELS[task.type]}</span>
-            </span>
-          ) : (
+          {active ? null : (
             <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
               {STATUS_LABELS[task.status]}
             </span>
           )}
+          {/* No date, no mark. A dash where a date goes reads as a date that
+              failed to load; the absence of one says it plainly. */}
+          <DueMark iso={task.due_date} />
         </span>
       </div>
 
@@ -1039,15 +1080,6 @@ function TaskCardBody({
         />
       ) : null}
 
-      {/* Sits happily under the stage bar when there is one. They are drawn as
-          different things because they are different things: the bar is one
-          journey with a position along it, the dots are a set of items with
-          some of them ticked. A second bar would have read as the first one
-          split in half. */}
-      {task.subtask_count ? (
-        <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
-      ) : null}
-
       {task.waiting_on.length ? (
         <div className={styles.waiting}>
           Waiting on{' '}
@@ -1059,15 +1091,37 @@ function TaskCardBody({
         </div>
       ) : null}
 
+      {/* The card's own small print, all of it on one row: how much has been
+          said about the card, what it is tracked as elsewhere, and how far
+          through its parts it is. Each is a drawn mark and a number, so the
+          row reads as a set of counts rather than as a sentence. */}
       <div className={styles.taskRow}>
         <div className={styles.links}>
+          {task.comment_count ? (
+            <span className={styles.meta} title={`${task.comment_count} comments`}>
+              <CommentIcon />
+              <span className={styles.metaValue} aria-hidden="true">
+                {task.comment_count}
+              </span>
+              <span className="visually-hidden">{task.comment_count} comments</span>
+            </span>
+          ) : null}
           {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : null}
           {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : null}
-          {task.comment_count ? <span>✎ {task.comment_count}</span> : null}
-          {/* Everyone who owes this card something. The board stopped showing
-              where a sub-task is when it stopped putting one in a column, so
-              this is what it shows instead — the assignee at the other end of
-              the row still being whoever owns the card itself. */}
+          {/* Sits in the row rather than above it. The stage bar and these
+              dots are drawn as different things because they are different
+              things — the bar is one journey with a position along it, the
+              dots are a set of items with some of them ticked — but a set of
+              counts is what this row already is, and given a line of its own
+              the set read as a second bar. */}
+          {task.subtask_count ? (
+            <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
+          ) : null}
+        </div>
+        <span className={styles.trailing}>
+          {/* Everyone who owes this card something, beside the person who owns
+              it. The board stopped showing where a sub-task is when it stopped
+              putting one in a column, so this is what it shows instead. */}
           {task.subtask_assignees.length ? (
             <span
               className={styles.owners}
@@ -1078,21 +1132,275 @@ function TaskCardBody({
               ))}
             </span>
           ) : null}
-        </div>
-        <span className={styles.trailing}>
-          {/* No date, no chip. A dash where a date goes reads as a date that
-              failed to load; the absence of one says it plainly. */}
-          {task.due_date ? (
-            <span className={`${styles.due} ${late ? styles.late : ''}`}>
-              {late ? '⚠ ' : ''}
-              {formatDue(task.due_date)}
-            </span>
-          ) : null}
           <Avatar name={task.assignee.name} colour={task.assignee.colour} />
         </span>
       </div>
     </>
   )
+}
+
+/** The three kinds, in the order the tiles are drawn. */
+const TYPES: TaskType[] = ['feature', 'bug', 'chore']
+
+const PRIORITIES: TaskPriority[] = ['urgent', 'asap', 'week', 'someday']
+
+/**
+ * Writing the next card, in the column it is going to land in.
+ *
+ * At rest this is the slot the card will fill: a dashed outline at the card's
+ * own width and radius, sitting exactly where the card will sit. Opened, the
+ * outline becomes the card — same width, same corners, on paper — and what you
+ * type appears on the line the title will occupy. Nothing moves between the two
+ * states except what is inside the box.
+ *
+ * A form on the board rather than the dialog, because the dialog is the wrong
+ * size for the job. Adding a card is a sentence and four small decisions, and
+ * every one of the four has a sensible default; a modal that covers the board
+ * to ask for a title is a lot of ceremony for a line of text, and it hides the
+ * column you are adding to while you decide. The long way round is still there
+ * — the rail's `+` on a folded column opens the full form, which is where a
+ * description, stages, a template and the tracking references live.
+ *
+ * It stays open after a card is added, cleared and focused. Cards arrive in
+ * runs — a standup, a planning session — and closing after each one would make
+ * the second card cost as much as the first.
+ */
+function TaskComposer({
+  projectKey,
+  members,
+  announce,
+  onCreated,
+}: {
+  projectKey: string
+  members: Person[]
+  announce: (message: string) => void
+  onCreated: () => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const [type, setType] = useState<TaskType>('feature')
+  const [priority, setPriority] = useState<TaskPriority>('someday')
+  const [due, setDue] = useState('')
+  const [assigneeId, setAssigneeId] = useState('')
+  const titleField = useRef<HTMLInputElement>(null)
+  const dateField = useRef<HTMLInputElement>(null)
+
+  // Whoever is first in the directory until somebody says otherwise, which is
+  // the same default the full form takes.
+  const assignee = members.find((person) => person.id === assigneeId) ?? members[0] ?? null
+  const ready = title.trim().length > 0 && assignee !== null
+
+  useEffect(() => {
+    if (open) titleField.current?.focus()
+  }, [open])
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.createTask(projectKey, {
+        title: title.trim(),
+        description: '',
+        type,
+        priority,
+        sub_statuses: [],
+        due_date: due || null,
+        assignee_id: assignee?.id ?? '',
+        template_id: null,
+        jira_ref: null,
+        pr_ref: null,
+      }),
+    onSuccess: async (saved) => {
+      announce(`${saved.reference} added.`)
+      // The title alone. The four decisions beside it are usually the same for
+      // the next card in a run — three bugs are three bugs — and re-picking
+      // them each time is the cost the composer exists to remove.
+      setTitle('')
+      await onCreated()
+      titleField.current?.focus()
+    },
+  })
+
+  function close() {
+    setOpen(false)
+    setTitle('')
+    create.reset()
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className={styles.addTask} onClick={() => setOpen(true)}>
+        <span className={styles.addTaskMark}>
+          <PlusIcon />
+        </span>
+        Add a task
+      </button>
+    )
+  }
+
+  return (
+    <form
+      className={styles.composer}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (ready && !create.isPending) create.mutate()
+      }}
+      // Escape closes, and stops there: the board's own key handling would
+      // otherwise take it as cancelling a drag that is not happening.
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.stopPropagation()
+        close()
+      }}
+    >
+      <input
+        ref={titleField}
+        className={styles.composerTitle}
+        value={title}
+        aria-label="Task title"
+        placeholder="What needs doing?"
+        onChange={(event) => setTitle(event.target.value)}
+      />
+
+      <div className={styles.composerRow}>
+        {/* The same tiles the cards wear, doing the choosing instead of the
+            reporting. Selected, a tile takes its type's tint; the other two
+            stay grey, so the row says which kind this is at the same glance
+            the column of cards above it is read with. */}
+        <div className={styles.types} role="group" aria-label="Type">
+          {TYPES.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={type === kind}
+              title={TYPE_LABELS[kind]}
+              className={`${styles.tile} ${styles.typeToggle} ${
+                type === kind ? styles[`tile_${kind}`] : styles.tileOff
+              }`}
+              onClick={() => setType(kind)}
+            >
+              <TypeIcon type={kind} size={15} />
+              <span className="visually-hidden">{TYPE_LABELS[kind]}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Set, each chip takes the colour the card will wear — the urgent
+            fill, the overdue pill — so the form is a preview of the card
+            rather than a description of one. Unset, both are outlines. */}
+        <label className={`${styles.chip} ${priorityChipStyle(priority)}`}>
+          <PriorityIcon priority={priority} size={13} />
+          <span className="visually-hidden">Priority</span>
+          <select
+            className={styles.chipControl}
+            value={priority}
+            onChange={(event) => setPriority(event.target.value as TaskPriority)}
+          >
+            {PRIORITIES.map((level) => (
+              <option key={level} value={level}>
+                {PRIORITY_LABELS[level]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label
+          className={`${styles.chip} ${dueChipStyle(due || null)}`}
+          // The native indicator is hidden — there is already a calendar on
+          // this chip — so the label is what opens the picker. Guarded because
+          // a browser without it, or one that dislikes the gesture, must still
+          // leave a typable date field behind.
+          onClick={() => {
+            try {
+              dateField.current?.showPicker()
+            } catch {
+              dateField.current?.focus()
+            }
+          }}
+        >
+          {dueChipIcon(due || null)}
+          <span className="visually-hidden">Due date</span>
+          <input
+            ref={dateField}
+            type="date"
+            className={`${styles.chipControl} ${styles.chipDate}`}
+            value={due}
+            onChange={(event) => setDue(event.target.value)}
+          />
+        </label>
+      </div>
+
+      {create.error ? <ErrorBanner>{create.error.message}</ErrorBanner> : null}
+
+      <div className={styles.composerFoot}>
+        <label className={styles.chip}>
+          {assignee ? (
+            <Avatar name={assignee.name} colour={assignee.colour} small />
+          ) : (
+            <PlusIcon size={13} />
+          )}
+          <span className="visually-hidden">Assignee</span>
+          <select
+            className={styles.chipControl}
+            value={assignee?.id ?? ''}
+            onChange={(event) => setAssigneeId(event.target.value)}
+          >
+            {members.length === 0 ? <option value="">Nobody on this project</option> : null}
+            {members.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <span className={styles.composerGo}>
+          <button type="button" className={styles.composerCancel} onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className={styles.composerAdd}
+            disabled={!ready || create.isPending}
+          >
+            {create.isPending ? 'Adding…' : 'Add'}
+          </button>
+        </span>
+      </div>
+    </form>
+  )
+}
+
+/** The priority chip's fill, in the four steps `.prio` escalates through. */
+function priorityChipStyle(priority: TaskPriority): string {
+  return (
+    {
+      urgent: styles.chipUrgent,
+      asap: styles.chipAsap,
+      week: styles.chipWeek,
+      someday: '',
+    }[priority] ?? ''
+  )
+}
+
+/** The due chip's fill, in the same five steps a card's own date is drawn in. */
+function dueChipStyle(iso: string | null): string {
+  return (
+    {
+      late: styles.chipLate,
+      today: styles.chipToday,
+      tomorrow: styles.chipTomorrow,
+      soon: styles.chipSoon,
+      later: styles.chipLater,
+      none: '',
+    }[dueBucket(iso).kind] ?? ''
+  )
+}
+
+/** And its mark: the alarm, the clock, or the plain calendar. */
+function dueChipIcon(iso: string | null) {
+  const { kind } = dueBucket(iso)
+  if (kind === 'late') return <AlertIcon size={13} />
+  if (kind === 'today') return <ClockIcon size={13} />
+  return <CalendarIcon size={13} />
 }
 
 /**
@@ -1117,20 +1425,33 @@ function TaskCardBody({
 function SubtaskDots({ total, open }: { total: number; open: number }) {
   const done = total - open
   const label = `${done} of ${total} sub-tasks finished`
+  /* Six, then a number. Past about half a dozen the dots stop being countable
+     at a glance — which is the whole reason they are dots — and a seventh
+     line of them only pushes the row they share wider. The six drawn are the
+     finished ones first, so the mark still says how far along the card is;
+     what the number says is that there is more of this than a card can show,
+     and the place to look at it is the card itself. */
+  const shown = Math.min(total, 6)
+  const rest = total - shown
 
   return (
     // The dots are decoration twice over — they are the label drawn — so the
     // sentence is what is read out and they are passed over in silence.
-    <div className={styles.dots} title={label}>
-      {Array.from({ length: total }, (_, index) => (
+    <span className={styles.dots} title={label}>
+      {Array.from({ length: shown }, (_, index) => (
         <span
           key={index}
           aria-hidden="true"
           className={`${styles.dot} ${index < done ? styles.dotDone : ''}`}
         />
       ))}
+      {rest ? (
+        <span className={styles.dotRest} aria-hidden="true">
+          +{rest}
+        </span>
+      ) : null}
       <span className="visually-hidden">{label}</span>
-    </div>
+    </span>
   )
 }
 
@@ -1284,10 +1605,112 @@ function formatDue(iso: string): string {
   return localDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+/** The same date said in full, for the tooltip on a mark that abbreviates it. */
+function formatDueLong(iso: string): string {
+  return localDate(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+/**
+ * How near a due date is, in the five steps a card draws differently.
+ *
+ * This was a boolean — overdue or not — and a boolean is the wrong shape for
+ * the question. Every date that had not yet passed looked identical, so a card
+ * wanted this afternoon sat in the column looking exactly like one wanted next
+ * month, and the only moment the card ever changed was the moment it was too
+ * late to matter. Five steps put the colour where the urgency is.
+ *
+ * `late` carries its own day count because "how far past" is the part anybody
+ * acts on: a card one day over is a card to finish, and a card three weeks
+ * over is a card to have a conversation about.
+ */
+type DueBucket =
+  | { kind: 'late'; days: number }
+  | { kind: 'today' }
+  | { kind: 'tomorrow' }
+  | { kind: 'soon' }
+  | { kind: 'later' }
+  | { kind: 'none' }
+
 /** A card with no date is never late: there is no day it was wanted by. */
-function isOverdue(iso: string | null): boolean {
-  if (!iso) return false
+function dueBucket(iso: string | null): DueBucket {
+  if (!iso) return { kind: 'none' }
+
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  return localDate(iso) < today
+  // Rounded, not truncated: the two midnights are an hour apart rather than a
+  // whole number of days across a daylight-saving change, and a date that came
+  // out at 6.96 days would otherwise be filed a step nearer than it is.
+  const days = Math.round((localDate(iso).getTime() - today.getTime()) / 86_400_000)
+
+  if (days < 0) return { kind: 'late', days: -days }
+  if (days === 0) return { kind: 'today' }
+  if (days === 1) return { kind: 'tomorrow' }
+  if (days <= 7) return { kind: 'soon' }
+  return { kind: 'later' }
+}
+
+/**
+ * A due date on a card, drawn as near or as far as it is.
+ *
+ * The two ends of the ramp are the design: a date that has passed or is
+ * passing today gets a filled pill and says what it means in words, because it
+ * is asking for something; a date further out is the date itself in quieter
+ * and quieter ink, because it is only telling you. Nothing between them
+ * changes size, so a column of cards keeps one edge down its right-hand side.
+ *
+ * The visible text is abbreviated in four of the five states, so each mark
+ * carries the whole sentence as well — spoken instead of the abbreviation, and
+ * shown on hover.
+ */
+function DueMark({ iso }: { iso: string | null }) {
+  const bucket = dueBucket(iso)
+  if (iso === null || bucket.kind === 'none') return null
+
+  const on = `due ${formatDueLong(iso)}`
+  const { className, icon, text, said } = {
+    late: {
+      className: styles.dueLate,
+      icon: <AlertIcon size={13} />,
+      text: `${'days' in bucket ? bucket.days : 0}d late`,
+      said: `${'days' in bucket ? bucket.days : 0} days late, ${on}`,
+    },
+    today: {
+      className: styles.dueToday,
+      icon: <ClockIcon size={13} />,
+      text: 'Today',
+      said: `Due today, ${formatDueLong(iso)}`,
+    },
+    tomorrow: {
+      className: styles.dueTomorrow,
+      icon: <CalendarIcon size={13} />,
+      text: 'Tomorrow',
+      said: `Due tomorrow, ${formatDueLong(iso)}`,
+    },
+    soon: {
+      className: styles.dueSoon,
+      icon: <CalendarIcon size={13} />,
+      text: formatDue(iso),
+      said: `Due ${formatDueLong(iso)}`,
+    },
+    later: {
+      className: styles.dueLater,
+      icon: <CalendarIcon size={13} />,
+      text: formatDue(iso),
+      said: `Due ${formatDueLong(iso)}`,
+    },
+  }[bucket.kind]
+
+  return (
+    <span className={`${styles.due} ${className}`} title={said}>
+      {icon}
+      <span className={styles.dueText} aria-hidden="true">
+        {text}
+      </span>
+      <span className="visually-hidden">{said}</span>
+    </span>
+  )
 }

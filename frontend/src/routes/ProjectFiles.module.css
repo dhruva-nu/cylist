@@ -131,6 +131,37 @@
   font-size: 14.5px;
 }
 
+/*
+ * Stated widths for the five columns that hold a known kind of thing, so Name
+ * takes everything that is left.
+ *
+ * Auto layout shares a table's spare width out between its columns in
+ * proportion to what they hold, which on a wide page turned "PDF", "1.2 MB"
+ * and a date into three roomy columns and left the file name — the one column
+ * anybody reads — no wider than it had been. These five are as wide as their
+ * contents ever get and not a pixel wider; the width the page gained goes
+ * where the names are.
+ */
+.table th:nth-child(2) {
+  width: 190px;
+}
+
+.table th:nth-child(3) {
+  width: 120px;
+}
+
+.table th:nth-child(4) {
+  width: 230px;
+}
+
+.table th:nth-child(5) {
+  width: 150px;
+}
+
+.table th:nth-child(6) {
+  width: 150px;
+}
+
 .table th {
   padding: 12px 18px;
   border-bottom: 1px solid var(--line);
@@ -250,9 +281,13 @@
   white-space: nowrap;
 }
 
+/* Size and Date, the two columns that are figures. Tabular so the digits line
+   up down the page and a column of sizes can be compared by its shape rather
+   than read one row at a time. */
 .mono {
   font-family: var(--font-mono);
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .who {

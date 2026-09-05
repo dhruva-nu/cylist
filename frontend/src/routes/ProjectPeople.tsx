@@ -20,6 +20,7 @@ import {
   ErrorBanner,
   KindTag,
   LiveRegion,
+  MailIcon,
   cardStyles,
   useAnnouncer,
 } from '../components/ui'
@@ -163,7 +164,12 @@ function Group({
                 <span className={styles.role}>{person.role}</span>
                 <div className={styles.responsibilities}>{person.responsibilities}</div>
                 <div className={styles.contact}>
-                  {person.email ? <span>✉ {person.email}</span> : null}
+                  {person.email ? (
+                    <span className={styles.email}>
+                      <MailIcon />
+                      <span>{person.email}</span>
+                    </span>
+                  ) : null}
                   <Button variant="ghost" small onClick={() => onEdit(person)}>
                     Edit
                   </Button>
