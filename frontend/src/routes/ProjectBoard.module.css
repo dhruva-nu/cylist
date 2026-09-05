@@ -844,6 +844,243 @@
   color: var(--brand-ink);
 }
 
+/*
+ * The same slot, opened.
+ *
+ * Deliberately the card's own box — one pixel of --line-2 where the dashes
+ * were, the same 12px corners, the same width, on paper with the card's
+ * shadow. The outline was a promise about where the card would go; opening it
+ * keeps that promise on screen while the card is written, so nothing jumps
+ * when it lands.
+ */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 12px 12px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+/* Set in the face and at the size the card's own title is set in, because that
+   is what this is: the title, being typed where it will be read. */
+.composerTitle {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.composerTitle::placeholder {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.composerTitle:focus-visible {
+  outline: none;
+}
+
+/* A rule rather than a gap between the sentence and the four decisions about
+   it: the title is the card, and these are the labels on it. */
+.composerRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.types {
+  display: flex;
+  gap: 6px;
+}
+
+/* The card's own type tile, made to do the choosing. `.tile` beside this is
+   what gives it its 24px and its corners. */
+.typeToggle {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Not this kind of card. Grey and quiet, so the one tile that is tinted is the
+   answer rather than one of three colours to compare. */
+.tileOff {
+  background: var(--paper-2);
+  color: var(--ink-3);
+}
+
+.typeToggle.tileOff:hover {
+  color: var(--ink-2);
+}
+
+/*
+ * A decision that has not been made yet: an outline, a mark and a word.
+ *
+ * The height is the type tile's, so the row lines up whatever is in it, and
+ * the border is the same hairline every unset control on this board wears.
+ * Set, the chip takes the colour the card itself will wear — see the states
+ * below, which are the priority scale and the due ramp exactly as a card draws
+ * them.
+ */
+.chip {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The control inside a chip is the chip: no box of its own, no arrow, and the
+   colour and face of whatever state the chip is in. */
+.chipControl {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+
+.chipControl:focus-visible {
+  outline: none;
+}
+
+.chip:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The native picker's own calendar is hidden because the chip already carries
+   one; the label opens the picker instead. The field stays a date field, so it
+   is still typed into and still validated by the browser. */
+.chipDate::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+.chipDate::-webkit-datetime-edit {
+  padding: 0;
+}
+
+/* Priority, in the steps `.prio` escalates through: a fill for urgent alone,
+   ink for the two below it, nothing at all for someday. */
+.chipUrgent {
+  border-color: transparent;
+  background: var(--blocked-soft);
+  color: var(--priority-urgent);
+}
+
+.chipAsap {
+  border-color: var(--priority-asap);
+  color: var(--priority-asap);
+}
+
+.chipWeek {
+  border-color: var(--priority-week);
+  color: var(--priority-week);
+}
+
+/* The due date, in the five steps a card's own date is drawn in. */
+.chipLate {
+  border-color: transparent;
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+.chipToday {
+  border-color: transparent;
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.chipTomorrow {
+  border-color: var(--hold);
+  color: var(--hold);
+}
+
+.chipSoon {
+  color: var(--ink-2);
+}
+
+.chipLater {
+  color: var(--ink-3);
+}
+
+/* Who it is for on the left, what to do about it on the right. */
+.composerFoot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composerGo {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.composerCancel {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.composerCancel:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.composerAdd {
+  padding: 6px 18px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--go);
+  color: var(--go-ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.composerAdd:hover:not(:disabled) {
+  background: var(--go-hover);
+}
+
+/* Greyed rather than dimmed. A card with no title is not a card, and a button
+   at half opacity says "loading" as readily as it says "not yet"; the flat
+   grey says the second thing only. */
+.composerAdd:disabled {
+  background: var(--line);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
 .foot {
   height: 10px;
 }

@@ -577,6 +577,23 @@ export function AlertIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/**
+ * An envelope, for an address.
+ *
+ * The last of the typed characters to go — `✉` was a dingbat sat next to an
+ * email address, and like the four before it, it arrived at whatever weight
+ * and height the reader's font happened to draw it at. Drawn, it is the same
+ * hand as everything else on the row.
+ */
+export function MailIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <rect x="2.4" y="3.6" width="11.2" height="8.8" rx="1.6" />
+      <path d="m2.8 4.6 5.2 3.8 5.2-3.8" />
+    </Glyph>
+  )
+}
+
 /** Add one of whatever the control is next to. */
 export function PlusIcon({ size = 14 }: { size?: number }) {
   return (

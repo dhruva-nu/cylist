@@ -69,6 +69,8 @@ import {
   type ColumnInput,
   type Person,
   type Task,
+  type TaskPriority,
+  type TaskType,
 } from '../api/client'
 import {
   activeToken,
@@ -530,6 +532,7 @@ export function ProjectBoard() {
             <Column
               key={column.id}
               column={column}
+              projectKey={projectKey}
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
               collapsed={collapsed.includes(column.id)}
@@ -545,8 +548,10 @@ export function ProjectBoard() {
               onOpenTask={setOpenTaskId}
               onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
               onAddTask={() => setCreatingTask(true)}
+              onCreated={refresh}
               onEdit={() => setColumnDialog(column)}
               members={memberList}
+              announce={announce}
             />
           ))}
         </div>
@@ -739,6 +744,7 @@ interface Move {
 
 function Column({
   column,
+  projectKey,
   tasks,
   isFirst,
   collapsed,
@@ -747,10 +753,13 @@ function Column({
   onOpenTask,
   onMoveSubStatus,
   onAddTask,
+  onCreated,
   onEdit,
   members,
+  announce,
 }: {
   column: BoardColumn
+  projectKey: string
   tasks: Task[]
   isFirst: boolean
   collapsed: boolean
@@ -763,10 +772,14 @@ function Column({
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
+  /** The long way round: the whole form, for a column folded away to a rail. */
   onAddTask: () => void
+  /** A card written in the composer has landed; re-read the board. */
+  onCreated: () => Promise<void>
   onEdit: () => void
   /** The project's people, for the `@` tags in a stage label. */
   members: Person[]
+  announce: (message: string) => void
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
   // A column is draggable on the whole card (so it visually moves as one
@@ -882,12 +895,12 @@ function Column({
           </div>
 
           {isFirst ? (
-            <button className={styles.addTask} onClick={onAddTask}>
-              <span className={styles.addTaskMark}>
-                <PlusIcon />
-              </span>
-              Add a task
-            </button>
+            <TaskComposer
+              projectKey={projectKey}
+              members={members}
+              announce={announce}
+              onCreated={onCreated}
+            />
           ) : (
             <div className={styles.foot} />
           )}
@@ -1124,6 +1137,270 @@ function TaskCardBody({
       </div>
     </>
   )
+}
+
+/** The three kinds, in the order the tiles are drawn. */
+const TYPES: TaskType[] = ['feature', 'bug', 'chore']
+
+const PRIORITIES: TaskPriority[] = ['urgent', 'asap', 'week', 'someday']
+
+/**
+ * Writing the next card, in the column it is going to land in.
+ *
+ * At rest this is the slot the card will fill: a dashed outline at the card's
+ * own width and radius, sitting exactly where the card will sit. Opened, the
+ * outline becomes the card — same width, same corners, on paper — and what you
+ * type appears on the line the title will occupy. Nothing moves between the two
+ * states except what is inside the box.
+ *
+ * A form on the board rather than the dialog, because the dialog is the wrong
+ * size for the job. Adding a card is a sentence and four small decisions, and
+ * every one of the four has a sensible default; a modal that covers the board
+ * to ask for a title is a lot of ceremony for a line of text, and it hides the
+ * column you are adding to while you decide. The long way round is still there
+ * — the rail's `+` on a folded column opens the full form, which is where a
+ * description, stages, a template and the tracking references live.
+ *
+ * It stays open after a card is added, cleared and focused. Cards arrive in
+ * runs — a standup, a planning session — and closing after each one would make
+ * the second card cost as much as the first.
+ */
+function TaskComposer({
+  projectKey,
+  members,
+  announce,
+  onCreated,
+}: {
+  projectKey: string
+  members: Person[]
+  announce: (message: string) => void
+  onCreated: () => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const [type, setType] = useState<TaskType>('feature')
+  const [priority, setPriority] = useState<TaskPriority>('someday')
+  const [due, setDue] = useState('')
+  const [assigneeId, setAssigneeId] = useState('')
+  const titleField = useRef<HTMLInputElement>(null)
+  const dateField = useRef<HTMLInputElement>(null)
+
+  // Whoever is first in the directory until somebody says otherwise, which is
+  // the same default the full form takes.
+  const assignee = members.find((person) => person.id === assigneeId) ?? members[0] ?? null
+  const ready = title.trim().length > 0 && assignee !== null
+
+  useEffect(() => {
+    if (open) titleField.current?.focus()
+  }, [open])
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.createTask(projectKey, {
+        title: title.trim(),
+        description: '',
+        type,
+        priority,
+        sub_statuses: [],
+        due_date: due || null,
+        assignee_id: assignee?.id ?? '',
+        template_id: null,
+        jira_ref: null,
+        pr_ref: null,
+      }),
+    onSuccess: async (saved) => {
+      announce(`${saved.reference} added.`)
+      // The title alone. The four decisions beside it are usually the same for
+      // the next card in a run — three bugs are three bugs — and re-picking
+      // them each time is the cost the composer exists to remove.
+      setTitle('')
+      await onCreated()
+      titleField.current?.focus()
+    },
+  })
+
+  function close() {
+    setOpen(false)
+    setTitle('')
+    create.reset()
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className={styles.addTask} onClick={() => setOpen(true)}>
+        <span className={styles.addTaskMark}>
+          <PlusIcon />
+        </span>
+        Add a task
+      </button>
+    )
+  }
+
+  return (
+    <form
+      className={styles.composer}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (ready && !create.isPending) create.mutate()
+      }}
+      // Escape closes, and stops there: the board's own key handling would
+      // otherwise take it as cancelling a drag that is not happening.
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.stopPropagation()
+        close()
+      }}
+    >
+      <input
+        ref={titleField}
+        className={styles.composerTitle}
+        value={title}
+        aria-label="Task title"
+        placeholder="What needs doing?"
+        onChange={(event) => setTitle(event.target.value)}
+      />
+
+      <div className={styles.composerRow}>
+        {/* The same tiles the cards wear, doing the choosing instead of the
+            reporting. Selected, a tile takes its type's tint; the other two
+            stay grey, so the row says which kind this is at the same glance
+            the column of cards above it is read with. */}
+        <div className={styles.types} role="group" aria-label="Type">
+          {TYPES.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={type === kind}
+              title={TYPE_LABELS[kind]}
+              className={`${styles.tile} ${styles.typeToggle} ${
+                type === kind ? styles[`tile_${kind}`] : styles.tileOff
+              }`}
+              onClick={() => setType(kind)}
+            >
+              <TypeIcon type={kind} size={15} />
+              <span className="visually-hidden">{TYPE_LABELS[kind]}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Set, each chip takes the colour the card will wear — the urgent
+            fill, the overdue pill — so the form is a preview of the card
+            rather than a description of one. Unset, both are outlines. */}
+        <label className={`${styles.chip} ${priorityChipStyle(priority)}`}>
+          <PriorityIcon priority={priority} size={13} />
+          <span className="visually-hidden">Priority</span>
+          <select
+            className={styles.chipControl}
+            value={priority}
+            onChange={(event) => setPriority(event.target.value as TaskPriority)}
+          >
+            {PRIORITIES.map((level) => (
+              <option key={level} value={level}>
+                {PRIORITY_LABELS[level]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label
+          className={`${styles.chip} ${dueChipStyle(due || null)}`}
+          // The native indicator is hidden — there is already a calendar on
+          // this chip — so the label is what opens the picker. Guarded because
+          // a browser without it, or one that dislikes the gesture, must still
+          // leave a typable date field behind.
+          onClick={() => {
+            try {
+              dateField.current?.showPicker()
+            } catch {
+              dateField.current?.focus()
+            }
+          }}
+        >
+          {dueChipIcon(due || null)}
+          <span className="visually-hidden">Due date</span>
+          <input
+            ref={dateField}
+            type="date"
+            className={`${styles.chipControl} ${styles.chipDate}`}
+            value={due}
+            onChange={(event) => setDue(event.target.value)}
+          />
+        </label>
+      </div>
+
+      {create.error ? <ErrorBanner>{create.error.message}</ErrorBanner> : null}
+
+      <div className={styles.composerFoot}>
+        <label className={styles.chip}>
+          {assignee ? (
+            <Avatar name={assignee.name} colour={assignee.colour} small />
+          ) : (
+            <PlusIcon size={13} />
+          )}
+          <span className="visually-hidden">Assignee</span>
+          <select
+            className={styles.chipControl}
+            value={assignee?.id ?? ''}
+            onChange={(event) => setAssigneeId(event.target.value)}
+          >
+            {members.length === 0 ? <option value="">Nobody on this project</option> : null}
+            {members.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <span className={styles.composerGo}>
+          <button type="button" className={styles.composerCancel} onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className={styles.composerAdd}
+            disabled={!ready || create.isPending}
+          >
+            {create.isPending ? 'Adding…' : 'Add'}
+          </button>
+        </span>
+      </div>
+    </form>
+  )
+}
+
+/** The priority chip's fill, in the four steps `.prio` escalates through. */
+function priorityChipStyle(priority: TaskPriority): string {
+  return (
+    {
+      urgent: styles.chipUrgent,
+      asap: styles.chipAsap,
+      week: styles.chipWeek,
+      someday: '',
+    }[priority] ?? ''
+  )
+}
+
+/** The due chip's fill, in the same five steps a card's own date is drawn in. */
+function dueChipStyle(iso: string | null): string {
+  return (
+    {
+      late: styles.chipLate,
+      today: styles.chipToday,
+      tomorrow: styles.chipTomorrow,
+      soon: styles.chipSoon,
+      later: styles.chipLater,
+      none: '',
+    }[dueBucket(iso).kind] ?? ''
+  )
+}
+
+/** And its mark: the alarm, the clock, or the plain calendar. */
+function dueChipIcon(iso: string | null) {
+  const { kind } = dueBucket(iso)
+  if (kind === 'late') return <AlertIcon size={13} />
+  if (kind === 'today') return <ClockIcon size={13} />
+  return <CalendarIcon size={13} />
 }
 
 /**

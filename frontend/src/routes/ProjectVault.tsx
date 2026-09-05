@@ -534,7 +534,9 @@ function NodeDetail({
       </div>
 
       {node.kind === 'secret' ? (
-        <SecretDetail node={node} announce={announce} />
+        <div className={styles.reading}>
+          <SecretDetail node={node} announce={announce} />
+        </div>
       ) : (
         <div className={styles.cards}>
           {node.children.map((child) => (
