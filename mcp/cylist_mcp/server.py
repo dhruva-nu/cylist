@@ -53,11 +53,14 @@ and `blocked`, and `waiting_on` should name whoever the work is now waiting on.
 The same goes for `cancelled`, which is how work that is not going to happen
 stops holding up the card it belongs to.
 
-A task can be split two ways. `create_subtask` makes a card of its own,
-referenced `ATL-41-2` and addressable like any other task; `add_checklist_item`
-makes a tick box that lives on the parent alone. Either way, every one of them
-has to be finished or cancelled before the parent can be moved into the board's
-last column — `move_task` refuses and names what is still outstanding.
+A task can be split two ways. `create_subtask` makes a sub-task with a
+reference of its own, `ATL-41-2`, addressable like any other task and carrying
+its own owner, due date and timeline; `add_checklist_item` makes a tick box that
+lives on the parent alone. Neither is on the board — a sub-task has no column,
+so `move_task` refuses one and `finish_subtask` is what completes it. Either
+way, every one of them has to be finished or cancelled before the parent can be
+moved into the board's last column, and `move_task` refuses that too, naming
+what is still outstanding.
 """
 
 
@@ -239,14 +242,14 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
     @server.tool(
         name="create_subtask",
         description=(
-            "Split a task into a sub-task that gets its own card on the board. "
-            "It is a task in every respect — first column, owner, its own due "
-            "date — except its reference, which is numbered under its parent: a "
-            "sub-task of ATL-41 is ATL-41-2, and is addressable by that "
-            "everywhere a task reference is taken. Sub-tasks go one level deep, "
-            "so splitting a sub-task again is refused. Use add_checklist_item "
-            "instead when the piece needs no owner and no card of its own. "
-            "Returns the created sub-task."
+            "Split a task into a sub-task with a reference, an owner and a "
+            "timeline of its own. A sub-task of ATL-41 is ATL-41-2, and is "
+            "addressable by that everywhere a task reference is taken. It is not "
+            "on the board: it has no column, it does not appear in list_tasks, "
+            "and finish_subtask is what completes it rather than move_task. "
+            "Sub-tasks go one level deep, so splitting a sub-task again is "
+            "refused. Use add_checklist_item instead when the piece needs no "
+            "owner and no reference of its own. Returns the created sub-task."
         ),
     )
     async def create_subtask(
@@ -281,6 +284,32 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             if pr_ref:
                 body["pr_ref"] = pr_ref
             return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="finish_subtask",
+        description=(
+            "Tick a sub-task off, or put it back. This is the only way a "
+            "sub-task is finished: it is not on the board, so there is no last "
+            "column to move it into. A finished sub-task stops holding its "
+            "parent back, the same way a cancelled one does — cancel it with "
+            "set_task_status when the work is not going to happen, and finish it "
+            "here when it is done. Pass finished=false to reopen one. On a "
+            "top-level card this is refused: a card is finished by move_task "
+            "putting it in the board's last column. Returns the sub-task."
+        ),
+    )
+    async def finish_subtask(
+        task: Annotated[
+            str, Field(description="The sub-task: a reference such as 'ATL-41-2', or its id.")
+        ],
+        finished: Annotated[
+            bool, Field(description="True to tick it off, false to reopen it. Default true.")
+        ] = True,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            return {"task": await client.post(f"/tasks/{task}/finish", {"finished": finished})}
 
         return await _guard(call)
 
@@ -349,7 +378,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "length, so 0 puts the card first and a large number puts it last. "
             "Moving does not change the task's status. A card with a sub-task "
             "still open cannot be moved into the board's last column; that comes "
-            "back as an error naming what is outstanding. Returns the moved task."
+            "back as an error naming what is outstanding. A sub-task cannot be "
+            "moved at all — it is not on the board; finish_subtask is what "
+            "completes one. Returns the moved task."
         ),
     )
     async def move_task(

@@ -320,14 +320,19 @@ export function Avatar({
   name,
   colour,
   large = false,
+  small = false,
 }: {
   name: string
   colour: string
   large?: boolean
+  /** For a row of them, where each face is a hint rather than the subject. */
+  small?: boolean
 }) {
   return (
     <span
-      className={`${styles.avatar} ${large ? styles.avatarLarge : ''}`}
+      className={[styles.avatar, large && styles.avatarLarge, small && styles.avatarSmall]
+        .filter(Boolean)
+        .join(' ')}
       style={{ background: colour, color: readableInkOn(colour) }}
       title={name}
       aria-hidden="true"

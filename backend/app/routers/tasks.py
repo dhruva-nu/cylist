@@ -15,6 +15,7 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
 from app.routers.projects import resolved_project
@@ -30,6 +31,7 @@ from app.schemas.tasks import (
     SubtaskCreate,
     TaskCreate,
     TaskDetail,
+    TaskFinish,
     TaskHistoryPage,
     TaskMove,
     TaskRead,
@@ -77,7 +79,12 @@ def _item(item: TaskChecklistItem) -> ChecklistItemRead:
     )
 
 
-def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
+def _read(
+    task: Task,
+    comment_count: int,
+    split: tasks.Split = tasks.Split(0, 0),
+    owners: list[Person] | None = None,
+) -> TaskRead:
     return TaskRead(
         id=task.id,
         project_id=task.project_id,
@@ -104,7 +111,10 @@ def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
         comment_count=comment_count,
         checklist=[_item(item) for item in task.checklist],
-        open_subtask_count=open_subtasks,
+        finished_at=task.finished_at,
+        open_subtask_count=split.open,
+        subtask_count=split.total,
+        subtask_assignees=[PersonRead.model_validate(person) for person in owners or []],
         created_at=task.created_at,
     )
 
@@ -112,13 +122,22 @@ def _read(task: Task, comment_count: int, open_subtasks: int = 0) -> TaskRead:
 async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     timeline = await tasks.comments(session, task)
     children = await tasks.subtasks(session, task)
-    counts = await tasks.open_subtask_counts(
-        session, task.project_id, [task.id, *(child.id for child in children)]
-    )
+    ids = [task.id, *(child.id for child in children)]
+    counts = await tasks.subtask_counts(session, ids)
+    owners = await tasks.subtask_owners(session, ids)
     return TaskDetail(
-        **_read(task, len(timeline), counts.get(task.id, 0)).model_dump(),
+        **_read(
+            task, len(timeline), counts.get(task.id, tasks.Split(0, 0)), owners.get(task.id)
+        ).model_dump(),
         comments=[_comment(entry) for entry in timeline],
-        subtasks=[_read(child, 0, counts.get(child.id, 0)) for child in children],
+        # A sub-task cannot be split again, so its own counts are always zero —
+        # asked for all the same, because the loop that reads them does not know
+        # which of these is which and a special case here would be a lie waiting
+        # to come true.
+        subtasks=[
+            _read(child, 0, counts.get(child.id, tasks.Split(0, 0)), owners.get(child.id))
+            for child in children
+        ],
     )
 
 
@@ -134,12 +153,26 @@ async def list_tasks(
 
     Group by `column_id` to draw the board; the ordering already matches the
     columns left to right and the cards top to bottom within each.
+
+    Top-level cards only. A sub-task is not on the board — it comes back with
+    the card it belongs to, from `GET /tasks/{ref}`. What a card says about its
+    sub-tasks here is `subtask_count`, `open_subtask_count` and
+    `subtask_assignees`: how many, how many are left, and who is on them.
     """
     found = await tasks.list_for_project(session, project)
     ids = [task.id for task in found]
     counts = await tasks.comment_counts(session, ids)
-    open_subtasks = await tasks.open_subtask_counts(session, project.id, ids)
-    return [_read(task, counts.get(task.id, 0), open_subtasks.get(task.id, 0)) for task in found]
+    split = await tasks.subtask_counts(session, ids)
+    owners = await tasks.subtask_owners(session, ids)
+    return [
+        _read(
+            task,
+            counts.get(task.id, 0),
+            split.get(task.id, tasks.Split(0, 0)),
+            owners.get(task.id),
+        )
+        for task in found
+    ]
 
 
 @router.post(
@@ -302,8 +335,9 @@ async def delete_task(
     responses={
         422: {
             "description": (
-                "That column is on another project's board, or the destination "
-                "is the last column and a sub-task is still open."
+                "The task is a sub-task and is not on the board, that column is "
+                "on another project's board, or the destination is the last "
+                "column and a sub-task is still open."
             )
         }
     },
@@ -319,9 +353,11 @@ async def move_task(
     Any column, in either direction. A position past the end of the column is
     clamped to it, so "drop at the bottom" needs no length lookup first.
 
-    One restriction: a card with an unfinished sub-task — a card of its own not
-    yet in the last column, or a checklist item still open — cannot be moved
-    into the last column. That is a 422 naming what is still outstanding.
+    Two restrictions. A card with an unfinished sub-task — one not yet ticked
+    off, or a checklist item still open — cannot be moved into the last column;
+    that is a 422 naming what is still outstanding. And a sub-task cannot be
+    moved at all: it is not on the board, and `POST /tasks/{ref}/finish` is what
+    finishes one.
     """
     moved, changes = await tasks.move(session, task, body)
     await activity.record(
@@ -375,6 +411,55 @@ async def set_sub_status(
             "changes": changes,
         },
     )
+    return await _detail(session, updated)
+
+
+@router.post(
+    "/tasks/{task_ref}/finish",
+    response_model=TaskDetail,
+    summary="Finish a sub-task, or reopen one",
+    responses={
+        422: {"description": "The task is a card on the board, not a sub-task."},
+    },
+)
+async def finish_task(
+    body: TaskFinish,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> TaskDetail:
+    """Tick a sub-task off, or put it back.
+
+    This is how a sub-task is finished, and the only way: it is not on the
+    board, so there is no last column to drag it into. A finished sub-task stops
+    holding its parent back — the same effect cancelling it has, said about work
+    that happened rather than work that was dropped.
+
+    Send `{"finished": false}` to reopen one. Finishing something already
+    finished is not an error and does not restate the time.
+
+    On a top-level card this is a 422: a card's done is the board's answer, and
+    it is given by moving the card to the last column.
+    """
+    updated, changes = await tasks.set_finished(session, task, finished=body.finished)
+    # Nothing changed means the tick box was already where the caller wants it,
+    # and a history line for that would be a record of a click rather than of
+    # the work.
+    if changes:
+        await activity.record(
+            session,
+            principal,
+            "task.finished",
+            entity_type="task",
+            entity_id=updated.id,
+            project_id=updated.project_id,
+            payload={
+                "reference": updated.reference,
+                "parent": updated.parent.reference if updated.parent else None,
+                "finished": body.finished,
+                "changes": changes,
+            },
+        )
     return await _detail(session, updated)
 
 
@@ -433,23 +518,20 @@ async def list_subtasks(
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
 ) -> list[TaskRead]:
-    """The cards split out of this one, in sub-number order.
+    """The sub-tasks split out of this one, in sub-number order.
 
-    Only the sub-tasks that have a card of their own. The tick-box kind rides
+    Only the sub-tasks with a reference of their own. The tick-box kind rides
     along on the task itself, as `checklist`.
     """
     children = await tasks.subtasks(session, task)
-    counts = await tasks.open_subtask_counts(
-        session, task.project_id, [child.id for child in children]
-    )
-    return [_read(child, 0, counts.get(child.id, 0)) for child in children]
+    return [_read(child, 0) for child in children]
 
 
 @router.post(
     "/tasks/{task_ref}/subtasks",
     response_model=TaskDetail,
     status_code=status.HTTP_201_CREATED,
-    summary="Split a task into a sub-task",
+    summary="Split a task into a sub-task with a reference of its own",
     responses={
         422: {
             "description": (
@@ -464,14 +546,19 @@ async def create_subtask(
     principal: Principal = Depends(require(Scope.WRITE)),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
-    """Add a sub-task that gets its own card on the board.
+    """Add a sub-task with a reference, an owner and a timeline of its own.
 
-    It is a task in every respect — first column, owner, own due date — except its
-    reference, which is numbered under its parent: `ATL-41-2`. Sub-tasks go one
-    level deep; splitting a sub-task again is a 422.
+    It is a task in every respect but placement: an owner, a description, a due
+    date, comments, a history, and a reference numbered under its parent —
+    `ATL-41-2`. What it does not have is a column. A sub-task is work on a card
+    rather than a card on the board, so it is not in `GET
+    /projects/{ref}/tasks`, it cannot be moved, and it is finished with `POST
+    /tasks/{ref}/finish`.
 
-    Until every sub-task is in the board's last column or cancelled, the parent
-    cannot be moved there.
+    Sub-tasks go one level deep; splitting a sub-task again is a 422.
+
+    Until every sub-task is finished or cancelled, the parent cannot be moved to
+    the board's last column.
     """
     subtask = await tasks.create(session, task.project, body, parent=task)
     await activity.record(

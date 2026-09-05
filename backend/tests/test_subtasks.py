@@ -1,4 +1,8 @@
-"""Sub-tasks: the cards under a card, the tick boxes on one, and the gate.
+"""Sub-tasks: the work under a card, the tick boxes on one, and the gate.
+
+Neither kind of sub-task is on the board. A sub-task has a reference, an owner
+and a timeline of its own, but no column: it is finished by being ticked off,
+not by being dragged anywhere.
 
 The gate is the point of the feature: a card whose parts are still open cannot
 reach the board's last column. Both kinds of sub-task hold it back, and both
@@ -67,6 +71,11 @@ async def _finish(client: AsyncClient, task: str) -> None:
     assert response.status_code == 200, response.text
 
 
+async def _tick(client: AsyncClient, task: str, finished: bool = True) -> Any:
+    """Tick a sub-task off, which is the only way one is finished."""
+    return await client.post(f"/tasks/{task}/finish", json={"finished": finished})
+
+
 class TestBoardSubtasks:
     async def test_a_subtask_is_numbered_under_its_parent(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -102,15 +111,46 @@ class TestBoardSubtasks:
 
         assert second["reference"] == "ATL-1-2"
 
-    async def test_a_subtask_lands_on_the_board(self, signed_in: AsyncClient) -> None:
+    async def test_a_subtask_is_not_on_the_board(self, signed_in: AsyncClient) -> None:
+        """One piece of work is one card. The board lists the parent alone."""
         person = await _setup(signed_in)
         parent = await _create(signed_in, person)
 
         subtask = await _subtask(signed_in, parent["reference"], person)
 
         board = (await signed_in.get("/projects/ATL/tasks")).json()
-        assert [task["reference"] for task in board] == ["ATL-1", "ATL-1-1"]
-        assert subtask["column_id"] == (await _columns(signed_in))[0]["id"]
+        assert [task["reference"] for task in board] == ["ATL-1"]
+        assert subtask["column_id"] is None
+        assert subtask["position"] is None
+
+    async def test_a_subtask_cannot_be_moved(self, signed_in: AsyncClient) -> None:
+        """There is nowhere to move it to, and the refusal says where to go."""
+        person = await _setup(signed_in)
+        parent = await _create(signed_in, person)
+        subtask = await _subtask(signed_in, parent["reference"], person)
+
+        response = await _move(
+            signed_in, subtask["reference"], (await _columns(signed_in))[-1]["id"]
+        )
+
+        assert response.status_code == 422, response.text
+        error = response.json()["error"]
+        assert "not on the board" in error["message"]
+        assert error["details"]["parent"] == "ATL-1"
+
+    async def test_splitting_a_card_leaves_the_column_alone(self, signed_in: AsyncClient) -> None:
+        """A card's neighbours keep their positions: nothing was inserted."""
+        person = await _setup(signed_in)
+        first = await _create(signed_in, person, title="One")
+        second = await _create(signed_in, person, title="Two")
+
+        await _subtask(signed_in, first["reference"], person)
+
+        board = {
+            task["reference"]: task for task in (await signed_in.get("/projects/ATL/tasks")).json()
+        }
+        assert board[first["reference"]]["position"] == 0
+        assert board[second["reference"]]["position"] == 1
 
     async def test_a_subtask_is_addressed_by_its_reference(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -304,9 +344,49 @@ class TestTheGate:
         parent = await _create(signed_in, person)
         subtask = await _subtask(signed_in, parent["reference"], person)
 
-        await _finish(signed_in, subtask["reference"])
+        ticked = await _tick(signed_in, subtask["reference"])
+        assert ticked.status_code == 200, ticked.text
+        assert ticked.json()["finished_at"] is not None
 
         await _finish(signed_in, parent["reference"])
+
+    async def test_reopening_the_subtask_shuts_the_gate_again(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        parent = await _create(signed_in, person)
+        subtask = await _subtask(signed_in, parent["reference"], person)
+        await _tick(signed_in, subtask["reference"])
+
+        reopened = await _tick(signed_in, subtask["reference"], finished=False)
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["finished_at"] is None
+
+        response = await _move(
+            signed_in, parent["reference"], (await _columns(signed_in))[-1]["id"]
+        )
+        assert response.status_code == 422, response.text
+
+    async def test_ticking_a_finished_subtask_changes_nothing(self, signed_in: AsyncClient) -> None:
+        """A second click is a client catching up, not a new event."""
+        person = await _setup(signed_in)
+        parent = await _create(signed_in, person)
+        subtask = await _subtask(signed_in, parent["reference"], person)
+
+        first = (await _tick(signed_in, subtask["reference"])).json()
+        again = (await _tick(signed_in, subtask["reference"])).json()
+
+        assert again["finished_at"] == first["finished_at"]
+        history = (await signed_in.get(f"/tasks/{subtask['reference']}/history")).json()
+        assert [entry["verb"] for entry in history["entries"]].count("task.finished") == 1
+
+    async def test_a_card_is_not_finished_by_ticking(self, signed_in: AsyncClient) -> None:
+        """A card's done is the board's answer, and the refusal says so."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+
+        response = await _tick(signed_in, task["reference"])
+
+        assert response.status_code == 422, response.text
+        assert "last column" in response.json()["error"]["message"]
 
     async def test_cancelling_the_subtask_lets_the_parent_through(
         self, signed_in: AsyncClient
@@ -358,14 +438,77 @@ class TestTheGate:
         assert response.status_code == 200, response.text
 
     async def test_the_board_says_how_much_is_open(self, signed_in: AsyncClient) -> None:
+        """Two of three left, on the card, without opening it."""
         person = await _setup(signed_in)
         parent = await _create(signed_in, person)
+        first = await _subtask(signed_in, parent["reference"], person)
         await _subtask(signed_in, parent["reference"], person)
         await signed_in.post(f"/tasks/{parent['reference']}/checklist", json={"title": "Tell QA"})
+        await _tick(signed_in, first["reference"])
 
         board = {
             task["reference"]: task for task in (await signed_in.get("/projects/ATL/tasks")).json()
         }
 
+        assert board["ATL-1"]["subtask_count"] == 3
         assert board["ATL-1"]["open_subtask_count"] == 2
-        assert board["ATL-1-1"]["open_subtask_count"] == 0
+
+    async def test_a_cancelled_subtask_is_counted_in_neither_half(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Two sub-tasks with one dropped is two, not three with one done."""
+        person = await _setup(signed_in)
+        parent = await _create(signed_in, person)
+        dropped = await _subtask(signed_in, parent["reference"], person)
+        await _subtask(signed_in, parent["reference"], person)
+
+        await signed_in.post(
+            f"/tasks/{dropped['reference']}/status",
+            json={"status": "cancelled", "reason": "The vendor withdrew the endpoint."},
+        )
+
+        detail = (await signed_in.get(f"/tasks/{parent['reference']}")).json()
+        assert detail["subtask_count"] == 1
+        assert detail["open_subtask_count"] == 1
+
+    async def test_the_hub_counts_cards_but_flags_a_blocked_subtask(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Two numbers, two questions: how big the board is, and what is stuck."""
+        person = await _setup(signed_in)
+        parent = await _create(signed_in, person)
+        subtask = await _subtask(signed_in, parent["reference"], person)
+        await signed_in.post(
+            f"/tasks/{subtask['reference']}/status",
+            json={"status": "blocked", "reason": "The vendor has not replied."},
+        )
+
+        summary = (await signed_in.get("/projects/ATL/summary")).json()
+
+        assert summary["task_count"] == 1
+        assert summary["blocked_count"] == 1
+
+    async def test_the_card_carries_its_subtasks_owners(self, signed_in: AsyncClient) -> None:
+        """The board no longer says where a sub-task is, so it says who is on it."""
+        person = await _setup(signed_in)
+        other = (
+            await signed_in.post(
+                "/people",
+                json={
+                    "name": "Ravi S",
+                    "kind": "team",
+                    "role": "Frontend engineer",
+                    "responsibilities": "The board.",
+                },
+            )
+        ).json()["id"]
+        await signed_in.put("/projects/ATL/members", json={"person_ids": [person, other]})
+        parent = await _create(signed_in, person)
+        await _subtask(signed_in, parent["reference"], person)
+        await _subtask(signed_in, parent["reference"], other)
+        await _subtask(signed_in, parent["reference"], person)
+
+        board = (await signed_in.get("/projects/ATL/tasks")).json()
+
+        # In sub-number order, and each person once however many they own.
+        assert [owner["name"] for owner in board[0]["subtask_assignees"]] == ["Aditi K", "Ravi S"]

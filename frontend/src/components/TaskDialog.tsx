@@ -46,12 +46,17 @@
  *
  * Sub-tasks come in two kinds, and both are ticked off in place — from either
  * half of the dialog — rather than on the Save button: a checkbox that only
- * takes effect when you remember to press Save is a checkbox that lies. A tick
- * box settles itself; a sub-task with a card of its own is settled by being
- * moved to the board's last column, since "done" is a place on the board. What
- * a sub-task card's *fields* say is never edited here: "Split into a sub-task"
- * hands the job back to the board, which opens a second dialog for the new
- * card.
+ * takes effect when you remember to press Save is a checkbox that lies. Neither
+ * kind is on the board, so neither is finished by going anywhere: a tick box
+ * carries a state, a sub-task carries a finishing time, and one gesture settles
+ * either. What a sub-task's *fields* say is never edited here: "Split into a
+ * sub-task" hands the job back to the board, which opens a second dialog for
+ * it, because a sub-task needs every field a card needs.
+ *
+ * A sub-task opened here is the same dialog with one thing missing — the column
+ * — and one thing in its place: whether it is finished. It is the only field a
+ * card has that a sub-task does not, and the only field a sub-task has that a
+ * card does not.
  */
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -295,7 +300,16 @@ function TaskDetailView({
         </div>
 
         <div className={styles.readPair}>
-          <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+          {/* A sub-task is in no column, so the row that would name one says
+              the thing that answers the same question for it instead. An empty
+              Column would read as one that failed to load. */}
+          {task.parent_id === null ? (
+            <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+          ) : (
+            <ReadField label="Finished">
+              {task.finished_at ? formatDue(task.finished_at.slice(0, 10)) : 'Not yet'}
+            </ReadField>
+          )}
           <ReadField label="Waiting on">
             {task.waiting_on.length ? task.waiting_on.map((person) => person.name).join(', ') : '—'}
           </ReadField>
@@ -313,13 +327,7 @@ function TaskDetailView({
         ) : null}
 
         <ReadField label="Sub-tasks">
-          <SubtasksRead
-            task={task}
-            columns={columns}
-            onOpenTask={onOpenTask}
-            announce={announce}
-            onDone={onDone}
-          />
+          <SubtasksRead task={task} onOpenTask={onOpenTask} announce={announce} onDone={onDone} />
         </ReadField>
 
         <ReadField label="Timeline">
@@ -645,7 +653,9 @@ function TaskForm({
   const was = task?.status ?? 'active'
   const changing = status !== was
   const stalling = changing && status !== 'active'
-  const moving = task !== null && columnId !== task.column_id
+  // Never for a sub-task: it has no column, so `columnId` fell back to the
+  // board's first one and every save would look like a move to it.
+  const moving = task !== null && task.column_id !== null && columnId !== task.column_id
   const destination = columns.find((column) => column.id === columnId)?.name ?? null
   /**
    * Whether this save changes what kind of card it is.
@@ -966,8 +976,13 @@ function TaskForm({
           {/* Neither column nor status is offered on a new card, because
               neither is a choice: work enters the board at the first column and
               starts out active. A control with one possible value is a question
-              that reads as though it had an answer. */}
-          {task ? (
+              that reads as though it had an answer.
+
+              Nor is a column offered on a sub-task, for the stronger reason
+              that it has none: a sub-task is not on the board, and every one of
+              these options would be a move the server refuses. It is finished
+              from its parent's list instead. */}
+          {task && task.parent_id === null ? (
             <Field label="Column" required>
               <select value={columnId} onChange={(event) => setColumnId(event.target.value)}>
                 {columns.map((column) => (
@@ -1064,7 +1079,6 @@ function TaskForm({
           >
             <Subtasks
               task={task}
-              columns={columns}
               onOpenTask={onOpenTask}
               onSplit={onSplit}
               announce={announce}
@@ -1417,11 +1431,10 @@ const CHECKLIST_LABELS: Record<ChecklistState, string> = {
 /**
  * Ticking a sub-task off, shared by the detail view and the form.
  *
- * Two kinds of sub-task settle two different ways. A tick box has a state of
- * its own. A sub-task with a card is finished by being moved to the board's
- * last column, because "done" is a place on this board and not a field — the
- * same rule the server enforces when it refuses a parent whose sub-tasks are
- * still open.
+ * Two kinds of sub-task, one gesture. Neither is on the board, so neither is
+ * finished by going anywhere: a tick box carries a state, a sub-task carries a
+ * finishing time, and ticking either one settles it and stops it holding the
+ * parent back.
  *
  * One hook rather than a copy in each list, so the two cannot drift: whichever
  * half of the dialog you are looking at, ticking means the same thing.
@@ -1454,69 +1467,61 @@ function useSubtaskTicking({
     },
   })
 
-  // Position 0, as every move made from a dialog is: a card dropped at the
-  // bottom of a column lands somewhere the reader cannot see.
-  const setColumn = useMutation({
-    mutationFn: ({ child, column }: { child: Task; column: BoardColumn }) =>
-      api.moveTask(child.id, column.id, 0),
-    onSuccess: async (moved, { column }) => {
-      announce(`${moved.reference} moved to ${column.name}.`)
+  const setFinished = useMutation({
+    mutationFn: ({ child, finished }: { child: Task; finished: boolean }) =>
+      api.finishTask(child.id, finished),
+    onSuccess: async (child, { finished }) => {
+      announce(`${child.reference} is ${finished ? 'finished' : 'open again'}.`)
       await refresh()
     },
   })
 
-  return { refresh, setState, setColumn }
+  return { refresh, setState, setFinished }
 }
 
 /**
- * One sub-task that has a card of its own, in either list.
+ * One sub-task with a reference of its own, in either list.
  *
  * The tick box is the point of it: the reason to be looking at this list is to
- * see what is left, and a list you have to leave in order to finish anything
- * is a list that gets left. Ticking is a move, so the label names the column —
- * a checkbox that silently relocates a card on the board behind the dialog
- * would be worse than no checkbox at all. Unticking returns the card to the
- * first column, which is the only honest destination: where it sat before it
- * was ticked is recorded nowhere.
+ * see what is left, and a list you have to leave in order to finish anything is
+ * a list that gets left. It ticks the sub-task itself — nothing moves on the
+ * board behind the dialog, because a sub-task is not on it.
+ *
+ * The owner is the one thing here a tick box has no equivalent of, and the
+ * reason the two kinds of sub-task both exist: the board no longer shows who is
+ * on a piece of split-out work, so this row does.
  */
 function SubtaskCardRow({
   child,
-  column,
-  finishedColumn,
-  firstColumn,
   busy,
   onOpen,
-  onMove,
+  onFinish,
 }: {
   child: Task
-  /** The column the card is in now, if the board still has it. */
-  column: BoardColumn | undefined
-  finishedColumn: BoardColumn | undefined
-  firstColumn: BoardColumn | undefined
   busy: boolean
   onOpen: () => void
-  onMove: (column: BoardColumn) => void
+  onFinish: (finished: boolean) => void
 }) {
-  const finished = finishedColumn !== undefined && child.column_id === finishedColumn.id
-  const target = finished ? firstColumn : finishedColumn
+  const finished = child.finished_at !== null
+  const cancelled = child.status === 'cancelled'
   const status = STATUSES.find((option) => option.value === child.status)
 
   return (
-    <div className={`${styles.subtaskRow} ${finished ? styles.settled : ''}`}>
+    <div className={`${styles.subtaskRow} ${finished || cancelled ? styles.settled : ''}`}>
       <input
         type="checkbox"
         checked={finished}
-        disabled={busy || target === undefined}
+        // A cancelled sub-task is settled already and ticking it would say the
+        // work happened. Reopen it with the status control on its own card.
+        disabled={busy || cancelled}
         aria-label={
-          target === undefined
-            ? `${child.reference} cannot be moved`
+          cancelled
+            ? `${child.reference} is cancelled`
             : finished
-              ? `${child.reference} is done. Reopen it into ${target.name}.`
-              : `Mark ${child.reference} done by moving it to ${target.name}.`
+              ? `${child.reference} is finished. Reopen it.`
+              : `Finish ${child.reference}.`
         }
-        onChange={() => {
-          if (target) onMove(target)
-        }}
+        onChange={() => onFinish(!finished)}
       />
       {/* The button is the whole of the rest of the row rather than the
           reference alone: the title is what the eye lands on, and a link you
@@ -1526,10 +1531,15 @@ function SubtaskCardRow({
         <span className={styles.subRef}>{child.reference}</span>
         <span className={styles.subTitle}>{child.title}</span>
       </button>
-      {/* The column, because that is what the tick box just changed — the
-          status only replaces it when it is the more urgent of the two. */}
       <span className={styles.subState}>
-        {child.status === 'active' ? column?.name : status?.label}
+        {/* Whichever of the two is the more urgent thing to know. A stalled
+            sub-task says so; anything else is answered by the tick box, so the
+            owner is what the space is better spent on. */}
+        {child.status === 'active' ? (
+          <Avatar name={child.assignee.name} colour={child.assignee.colour} />
+        ) : (
+          status?.label
+        )}
       </span>
     </div>
   )
@@ -1546,22 +1556,19 @@ function SubtaskCardRow({
  */
 function Subtasks({
   task,
-  columns,
   onOpenTask,
   onSplit,
   announce,
   onDone,
 }: {
   task: TaskDetail
-  /** The board's columns, in order — the last of them is what "done" means. */
-  columns: BoardColumn[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   onSplit?: ((parentRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
 }) {
   const [title, setTitle] = useState('')
-  const { refresh, setState, setColumn } = useSubtaskTicking({ task, announce, onDone })
+  const { refresh, setState, setFinished } = useSubtaskTicking({ task, announce, onDone })
 
   const add = useMutation({
     mutationFn: (text: string) => api.addChecklistItem(task.id, text),
@@ -1577,11 +1584,9 @@ function Subtasks({
     onSuccess: refresh,
   })
 
-  const error = add.error ?? setState.error ?? remove.error ?? setColumn.error
+  const error = add.error ?? setState.error ?? remove.error ?? setFinished.error
   const outstanding = task.open_subtask_count
-  const busy = setState.isPending || setColumn.isPending || remove.isPending
-  const finishedColumn = columns[columns.length - 1]
-  const firstColumn = columns[0]
+  const busy = setState.isPending || setFinished.isPending || remove.isPending
 
   return (
     <Field label="Sub-tasks">
@@ -1592,12 +1597,9 @@ function Subtasks({
           <SubtaskCardRow
             key={child.id}
             child={child}
-            column={columns.find((option) => option.id === child.column_id)}
-            finishedColumn={finishedColumn}
-            firstColumn={firstColumn}
             busy={busy}
             onOpen={() => onOpenTask?.(child.reference)}
-            onMove={(column) => setColumn.mutate({ child, column })}
+            onFinish={(finished) => setFinished.mutate({ child, finished })}
           />
         ))}
 
@@ -1641,7 +1643,7 @@ function Subtasks({
         {/* A sub-task cannot be split again: the board would stop being one. */}
         {task.parent_id === null ? (
           <Button small variant="ghost" onClick={() => onSplit?.(task.reference)}>
-            + Split into a sub-task with its own card
+            + Split into a sub-task with an owner of its own
           </Button>
         ) : (
           <small>
@@ -1686,25 +1688,20 @@ function Subtasks({
  */
 function SubtasksRead({
   task,
-  columns,
   onOpenTask,
   announce,
   onDone,
 }: {
   task: TaskDetail
-  /** The board's columns, in order — the last of them is what "done" means. */
-  columns: BoardColumn[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
 }) {
-  const { setState, setColumn } = useSubtaskTicking({ task, announce, onDone })
+  const { setState, setFinished } = useSubtaskTicking({ task, announce, onDone })
 
   const outstanding = task.open_subtask_count
-  const error = setState.error ?? setColumn.error
-  const busy = setState.isPending || setColumn.isPending
-  const finishedColumn = columns[columns.length - 1]
-  const firstColumn = columns[0]
+  const error = setState.error ?? setFinished.error
+  const busy = setState.isPending || setFinished.isPending
 
   return (
     <div className={styles.subtasks}>
@@ -1714,12 +1711,9 @@ function SubtasksRead({
         <SubtaskCardRow
           key={child.id}
           child={child}
-          column={columns.find((option) => option.id === child.column_id)}
-          finishedColumn={finishedColumn}
-          firstColumn={firstColumn}
           busy={busy}
           onOpen={() => onOpenTask?.(child.reference)}
-          onMove={(column) => setColumn.mutate({ child, column })}
+          onFinish={(finished) => setFinished.mutate({ child, finished })}
         />
       ))}
 

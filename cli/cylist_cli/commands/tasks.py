@@ -77,6 +77,21 @@ def register(subparsers: Any) -> None:
     )
     move.set_defaults(handler=_move)
 
+    finish = task_actions.add_parser(
+        "finish",
+        help="Tick a sub-task off, or reopen one.",
+        description=(
+            "The only way a sub-task is finished: it is not on the board, so "
+            "there is no last column to move it into. A card is finished with "
+            "'task move' instead. --reopen puts a finished sub-task back."
+        ),
+    )
+    finish.add_argument("task", metavar="TASK", help="Sub-task reference, e.g. ATL-41-2.")
+    finish.add_argument(
+        "--reopen", action="store_true", help="Put a finished sub-task back to open."
+    )
+    finish.set_defaults(handler=_finish)
+
     status = task_actions.add_parser(
         "status",
         help="Change a task's status.",
@@ -197,16 +212,31 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
     output.echo()
 
     waiting = ", ".join(person["name"] for person in task.get("waiting_on", []))
-    columns = ctx.client.get(f"/projects/{_project_of(task)}/columns").get("columns", [])
-    column = next(
-        (str(entry["name"]) for entry in columns if str(entry["id"]) == str(task["column_id"])),
-        "",
-    )
+
+    # A sub-task is not on the board, so where it stands is whether it is ticked
+    # off rather than which column it is in. One row either way: the two facts
+    # answer the same question for the two kinds of task, and printing an empty
+    # Column on a sub-task would read as a column that failed to load.
+    if task.get("parent_reference"):
+        placement = ("Finished", str(task.get("finished_at") or "no")[:16].replace("T", " "))
+    else:
+        columns = ctx.client.get(f"/projects/{_project_of(task)}/columns").get("columns", [])
+        placement = (
+            "Column",
+            next(
+                (
+                    str(entry["name"])
+                    for entry in columns
+                    if str(entry["id"]) == str(task["column_id"])
+                ),
+                "",
+            ),
+        )
 
     output.fields(
         [
             ("Status", str(task["status"])),
-            ("Column", column),
+            placement,
             ("Type", str(task["type"])),
             ("Due", str(task["due_date"] or "")),
             ("Assignee", str((task.get("assignee") or {}).get("name", ""))),
@@ -222,13 +252,26 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
 _CHECKLIST_MARKS = {"done": "[x]", "cancelled": "[-]", "open": "[ ]"}
 
 
+def _subtask_mark(subtask: dict[str, Any]) -> str:
+    """The same three marks a tick box gets, read off a sub-task instead."""
+    if subtask.get("status") == "cancelled":
+        return _CHECKLIST_MARKS["cancelled"]
+    return _CHECKLIST_MARKS["done" if subtask.get("finished_at") else "open"]
+
+
 def _render_subtasks(task: dict[str, Any]) -> None:
-    """The cards split out of this one, then the tick boxes on it.
+    """The sub-tasks split out of this one, then the tick boxes on it.
 
     Both are listed even when empty-handed is the answer, because the number
     that matters is how many are still open: while it is above zero the card
     cannot reach the board's last column, and that is worth seeing before the
     move is attempted rather than after it is refused.
+
+    Marked the same way as each other. Neither kind is on the board any more, so
+    the question asked of both is the same one — ticked, dropped, or still to
+    do — and two notations for one answer would only invite reading a difference
+    into it. A sub-task carries its owner as well, which is the whole of what
+    still tells the two apart on the page.
     """
     subtasks = task.get("subtasks") or []
     checklist = task.get("checklist") or []
@@ -239,7 +282,9 @@ def _render_subtasks(task: dict[str, Any]) -> None:
     output.echo("Sub-tasks")
     output.echo("---------")
     for subtask in subtasks:
-        output.echo(f"  {subtask['reference']}  {subtask['title']}  ({subtask['status']})")
+        mark = _subtask_mark(subtask)
+        owner = str((subtask.get("assignee") or {}).get("name", ""))
+        output.echo(f"  {mark} {subtask['reference']}  {subtask['title']}  ({owner})")
     for item in checklist:
         mark = _CHECKLIST_MARKS.get(str(item.get("state")), "[ ]")
         output.echo(f"  {mark} {item['title']}")
@@ -364,6 +409,16 @@ def _move(args: argparse.Namespace, ctx: Context) -> None:
         output.emit_json(moved)
         return
     output.echo(f"Moved {moved['reference']} to {args.column} at position {moved['position']}.")
+
+
+def _finish(args: argparse.Namespace, ctx: Context) -> None:
+    finished = not args.reopen
+    task = ctx.client.post(f"/tasks/{args.task}/finish", {"finished": finished})
+    if ctx.as_json:
+        output.emit_json(task)
+        return
+    word = "Finished" if finished else "Reopened"
+    output.echo(f"{word} {task['reference']}: {task['title']}")
 
 
 def _status(args: argparse.Namespace, ctx: Context) -> None:

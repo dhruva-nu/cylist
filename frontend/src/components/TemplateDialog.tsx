@@ -60,11 +60,7 @@ export function TemplateDialog({
     return (
       <Modal title="Templates" onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
         <ModalBody>
-          {templates.error ? (
-            <ErrorBanner>{templates.error.message}</ErrorBanner>
-          ) : (
-            <p>Loading…</p>
-          )}
+          {templates.error ? <ErrorBanner>{templates.error.message}</ErrorBanner> : <p>Loading…</p>}
         </ModalBody>
       </Modal>
     )
@@ -128,7 +124,9 @@ export function TemplateDialog({
 function summarise(template: Template, columns: BoardColumn[]): string {
   if (!template.stages.length) return 'Any column — unrestricted.'
   return template.stages
-    .map((stage) => columns.find((column) => column.id === stage.column_id)?.name ?? stage.column_name)
+    .map(
+      (stage) => columns.find((column) => column.id === stage.column_id)?.name ?? stage.column_name,
+    )
     .join(' → ')
 }
 
@@ -266,7 +264,11 @@ function TemplateEditor({
           label="Where this template's cards may go"
           hint="Click a column to let this template's cards sit there — green is every column they may go. Click it again to take it back out."
         >
-          <div className={styles.columnToggles} role="group" aria-label="Columns this template's cards may sit in">
+          <div
+            className={styles.columnToggles}
+            role="group"
+            aria-label="Columns this template's cards may sit in"
+          >
             {columns.map((column) => {
               const allowed = stages.some((stage) => stage.column_id === column.id)
               return (

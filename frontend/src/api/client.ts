@@ -243,10 +243,18 @@ export interface TaskDay {
   reference: string
   /** Its title now — or the one it had at the time, if it has since been deleted. */
   title: string
-  /** Which column it sits in now. Null if the card no longer exists. */
+  /**
+   * Which column it sits in now. Null on a sub-task, which is not on the board,
+   * and on a card that no longer exists — `parent` tells the two apart.
+   */
   column: string | null
+  /** `ATL-41`, when this is a sub-task. Null on a card and on anything deleted. */
+  parent: string | null
   status: TaskStatus | null
-  /** Whether its last move of the day put it in the board's last column. */
+  /**
+   * Whether the day left it finished: a card by ending it in the board's last
+   * column, a sub-task by being ticked off.
+   */
   finished: boolean
   /**
    * What happened to it, oldest first — with its moves collapsed to the one
@@ -301,8 +309,10 @@ export interface Task {
   parent_reference: string | null
   /** `2` in `ATL-41-2`. Null at the top level. */
   sub_number: number | null
-  column_id: string
-  position: number
+  /** Which column the card is in. Null on a sub-task, which is not on the board. */
+  column_id: string | null
+  /** Where it sits in that column, from the top. Null on a sub-task. */
+  position: number | null
   title: string
   description: string
   type: TaskType
@@ -325,16 +335,28 @@ export interface Task {
   comment_count: number
   checklist: ChecklistItem[]
   /**
+   * When this sub-task was ticked off, or null while it is open. Always null on
+   * a card, which is finished by being in the board's last column instead.
+   */
+  finished_at: string | null
+  /**
    * Sub-tasks — cards and tick boxes together — that are neither finished nor
    * cancelled. While this is above zero the card cannot reach the last column.
    */
   open_subtask_count: number
+  /** How many sub-tasks in all, cancelled ones excluded. `total - open` are done. */
+  subtask_count: number
+  /**
+   * Who owns this card's sub-tasks, in sub-number order and each named once.
+   * The board shows these faces because it no longer shows where the work is.
+   */
+  subtask_assignees: Person[]
   created_at: string
 }
 
 export interface TaskDetail extends Task {
   comments: TaskComment[]
-  /** Sub-tasks with a card of their own, in sub-number order. */
+  /** Sub-tasks with a reference of their own, in sub-number order. */
   subtasks: Task[]
 }
 
@@ -676,6 +698,13 @@ export const api = {
     request<TaskDetail>(`/tasks/${taskRef}/move`, {
       method: 'POST',
       body: body({ column_id: columnId, position }),
+    }),
+  /** Ticks a sub-task off, or puts it back. The only way one is finished:
+   * a sub-task is not on the board, so there is no last column to move it to. */
+  finishTask: (taskRef: string, finished: boolean) =>
+    request<TaskDetail>(`/tasks/${taskRef}/finish`, {
+      method: 'POST',
+      body: body({ finished }),
     }),
   setTaskStatus: (taskRef: string, change: StatusChange) =>
     request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: body(change) }),

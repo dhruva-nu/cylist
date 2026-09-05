@@ -240,6 +240,11 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
         if column is not None:
             return moved(column["from"], column["to"])
         return moved(None, (columns or {}).get(str(payload.get("column_id"))))
+    if entry.verb == "task.finished":
+        # Worded as the sub-task's own line, because that is the card whose
+        # history it is written to. The parent it belongs to is named on every
+        # other line of that history already.
+        return "Finished." if payload.get("finished") else "Reopened."
     if entry.verb == "task.sub_status_moved":
         stage = payload.get("sub_status")
         return f"Sub-status set to {stage}." if stage else "Sub-status moved."

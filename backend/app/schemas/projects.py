@@ -78,10 +78,17 @@ class ProjectSummary(ProjectRead):
 
     team_count: int
     client_count: int
-    task_count: int
+    task_count: int = Field(
+        description="Cards on the board. Sub-tasks are not among them — they are work on a "
+        "card rather than cards — so this is the column counts added up."
+    )
     column_count: int
-    blocked_count: int = Field(description="Tasks that cannot proceed. Flagged red on the hub.")
-    on_hold_count: int = Field(description="Tasks deliberately paused.")
+    blocked_count: int = Field(
+        description="Tasks that cannot proceed. Flagged red on the hub. Sub-tasks are counted "
+        "here, unlike in `task_count`: a blocked sub-task is blocked work whether or not the "
+        "board draws it."
+    )
+    on_hold_count: int = Field(description="Tasks deliberately paused, sub-tasks included.")
 
     folder_count: int
     file_count: int = Field(

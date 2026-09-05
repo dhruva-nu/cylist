@@ -20,12 +20,17 @@ class TaskDay(Schema):
         "has since been deleted."
     )
     column: str | None = Field(
-        description="Which column the card sits in now. Null if it no longer exists."
+        description="Which column the card sits in now. Null on a sub-task, which is not on "
+        "the board, and on a card that no longer exists — `parent` tells the two apart."
+    )
+    parent: str | None = Field(
+        description="`ATL-41`, when this is a sub-task. Null on a card, and on anything "
+        "deleted, whose parentage is no longer on record."
     )
     status: TaskStatus | None = Field(description="Its status now. Null if it no longer exists.")
     finished: bool = Field(
-        description="Whether the card's last move of the day put it in the board's "
-        "last column. False for one dropped there and pulled back out again."
+        description="Whether the day left it finished: a card by ending it in the board's last "
+        "column, a sub-task by being ticked off. False for either one undone again afterwards."
     )
     entries: list[HistoryEntry] = Field(
         description="What happened to it, oldest first. Its moves appear as the one "

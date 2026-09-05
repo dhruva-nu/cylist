@@ -128,7 +128,7 @@ async def get_summary(
         **_read(project).model_dump(),
         team_count=people_counts[PersonKind.TEAM],
         client_count=people_counts[PersonKind.CLIENT],
-        task_count=sum(task_counts.values()),
+        task_count=await tasks.card_count(session, project),
         column_count=await columns.count(session, project.id),
         blocked_count=task_counts[TaskStatus.BLOCKED],
         on_hold_count=task_counts[TaskStatus.HOLD],

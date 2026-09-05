@@ -30,6 +30,7 @@ LEO_ID = "0192f3c4-0002-7000-8000-0000000001e0"
 
 TASK_ONE_ID = "0192f3c4-0003-7000-8000-000000000001"
 TASK_TWO_ID = "0192f3c4-0003-7000-8000-000000000002"
+SUBTASK_ID = "0192f3c4-0003-7000-8000-000000000021"
 
 CONTRACTS_ID = "0192f3c4-0004-7000-8000-000000000001"
 NESTED_ID = "0192f3c4-0004-7000-8000-000000000002"
@@ -158,6 +159,12 @@ def _task(
         "pr_ref": None,
         "waiting_on": waiting_on or [],
         "comment_count": 0,
+        "finished_at": None,
+        "open_subtask_count": 0,
+        "subtask_count": 0,
+        "subtask_assignees": [],
+        "checklist": [],
+        "subtasks": [],
         "created_at": "2026-02-01T09:00:00Z",
     }
 
@@ -166,6 +173,18 @@ TASK_ONE = _task(TASK_ONE_ID, 1, BACKLOG_ID, "Reconcile the ledger export")
 TASK_TWO = _task(
     TASK_TWO_ID, 2, DOING_ID, "Switch the invoice job over", status="blocked", waiting_on=[LENA]
 )
+
+SUBTASK = {
+    **_task(SUBTASK_ID, 2, DOING_ID, "Drain the old queue"),
+    "reference": "ATL-2-1",
+    "number": None,
+    "parent_id": TASK_TWO_ID,
+    "parent_reference": "ATL-2",
+    "sub_number": 1,
+    # Not on the board: the two nulls are the whole of what tells it from a card.
+    "column_id": None,
+    "position": None,
+}
 
 TIMELINE = [
     {
@@ -430,7 +449,16 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
     if path in {"/tasks/ATL-1", f"/tasks/{TASK_ONE_ID}"}:
         return httpx.Response(200, json={**TASK_ONE, "comments": []})
     if path in {"/tasks/ATL-2", f"/tasks/{TASK_TWO_ID}"}:
-        return httpx.Response(200, json={**TASK_TWO, "comments": TIMELINE})
+        return httpx.Response(
+            200,
+            json={**TASK_TWO, "comments": TIMELINE, "subtasks": [SUBTASK], "open_subtask_count": 1},
+        )
+    if path in {"/tasks/ATL-2-1", f"/tasks/{SUBTASK_ID}"}:
+        return httpx.Response(200, json={**SUBTASK, "comments": []})
+    if path.endswith("/finish"):
+        body = json.loads(request.content)
+        finished = "2026-02-04T11:00:00Z" if body["finished"] else None
+        return httpx.Response(200, json={**SUBTASK, "finished_at": finished, "comments": []})
     if path.endswith("/move"):
         return httpx.Response(200, json={**TASK_TWO, "column_id": DOING_ID, "comments": []})
     if path.endswith("/status"):

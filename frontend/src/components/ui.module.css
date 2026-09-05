@@ -108,6 +108,14 @@
   font-size: 19px;
 }
 
+/* For a row of faces rather than one: small enough that three of them read as
+   a group at a glance, and still big enough for two initials. */
+.avatarSmall {
+  width: 19px;
+  height: 19px;
+  font-size: 9px;
+}
+
 .tag {
   padding: 2px 8px;
   border-radius: var(--radius-control);

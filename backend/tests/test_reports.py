@@ -195,6 +195,60 @@ async def test_a_deleted_card_keeps_the_title_it_had(signed_in: AsyncClient, pro
     assert card["reference"] == reference
     assert card["title"] == "Abandoned idea"
     assert card["column"] is None
+    assert card["parent"] is None
+
+
+async def test_a_finished_subtask_counts_as_finished(signed_in: AsyncClient, project: str) -> None:
+    """A sub-task has no last column to end the day in, so ticking it is what
+    finishing it looks like in the report."""
+    parent = await make_task(signed_in, project)
+    members = (await signed_in.get(f"/projects/{project}/members")).json()["members"]
+    subtask = (
+        await signed_in.post(
+            f"/tasks/{parent}/subtasks",
+            json={
+                "title": "Drain the old queue",
+                "description": "What done looks like.",
+                "type": "chore",
+                "assignee_id": members[0]["id"],
+            },
+        )
+    ).json()["reference"]
+
+    await signed_in.post(f"/tasks/{subtask}/finish", json={"finished": True})
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+    child = next(card for card in report["tasks"] if card["reference"] == subtask)
+    assert child["finished"] is True
+    assert subtask in report["finished"]
+    # No column, but named under the card it belongs to rather than as deleted.
+    assert child["column"] is None
+    assert child["parent"] == parent
+    assert f"(of {parent})" in report["markdown"]
+
+
+async def test_a_reopened_subtask_did_not_finish_today(
+    signed_in: AsyncClient, project: str
+) -> None:
+    parent = await make_task(signed_in, project)
+    members = (await signed_in.get(f"/projects/{project}/members")).json()["members"]
+    subtask = (
+        await signed_in.post(
+            f"/tasks/{parent}/subtasks",
+            json={
+                "title": "Drain the old queue",
+                "description": "What done looks like.",
+                "type": "chore",
+                "assignee_id": members[0]["id"],
+            },
+        )
+    ).json()["reference"]
+
+    await signed_in.post(f"/tasks/{subtask}/finish", json={"finished": True})
+    await signed_in.post(f"/tasks/{subtask}/finish", json={"finished": False})
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+    assert subtask not in report["finished"]
 
 
 # --- What it leaves out ----------------------------------------------------

@@ -95,11 +95,15 @@ class TaskCreate(Schema):
 
 
 class SubtaskCreate(TaskCreate):
-    """A sub-task that gets its own card on the board.
+    """A sub-task with a reference of its own, numbered under its parent.
 
-    Same fields as any other task, because that is what it is: it lands in the
-    first column, it has an owner, it may have a due date, and it is numbered
-    under its parent as ``ATL-41-2``.
+    Same fields as any other task — an owner, a description, a due date, a
+    priority — because it is one in every respect but placement: a sub-task is
+    work on a card rather than a card on the board, so it lands in no column
+    and is finished by being ticked off rather than by being moved.
+
+    ``template_id`` is still accepted: what kind of work it is stays true. Its
+    stages, which are rules about columns, simply have nothing to say here.
     """
 
 
@@ -207,10 +211,22 @@ class TaskMove(Schema):
     Any column at any time, unless the card's template has stages — then,
     any column one of its stages names. Leaving a column is itself refused
     until the card is on the last sub-stage its template set for that column.
+
+    A sub-task cannot be moved at all: it is not on the board.
     """
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+
+
+class TaskFinish(Schema):
+    """Ticks a sub-task off, or puts it back."""
+
+    finished: bool = Field(
+        default=True,
+        description="`true` finishes the sub-task, `false` reopens it. Finishing one already "
+        "finished changes nothing and does not restate the time.",
+    )
 
 
 class SubStatusMove(Schema):
@@ -292,8 +308,12 @@ class TaskRead(Schema):
     sub_number: int | None = Field(
         description="Position in the parent's numbering. `2` in `ATL-41-2`."
     )
-    column_id: UUID
-    position: int
+    column_id: UUID | None = Field(
+        description="Which column the card is in. Null on a sub-task, which is not on the board."
+    )
+    position: int | None = Field(
+        description="Where the card sits in its column, from the top. Null on a sub-task."
+    )
     title: str
     description: str
     type: TaskType
@@ -321,9 +341,21 @@ class TaskRead(Schema):
         description="Tick-box sub-tasks. Every one must be done or cancelled before the card "
         "can reach the board's last column."
     )
+    finished_at: datetime | None = Field(
+        description="When this sub-task was ticked off. Null while it is open, and always null "
+        "on a card, which is finished by being in the board's last column instead."
+    )
     open_subtask_count: int = Field(
         description="Sub-tasks — cards and tick boxes together — that are neither finished nor "
         "cancelled. While this is above zero the card cannot reach the last column."
+    )
+    subtask_count: int = Field(
+        description="How many sub-tasks the card has in all, cancelled ones excluded. With "
+        "`open_subtask_count` this is the progress a card shows: `total - open` are done."
+    )
+    subtask_assignees: list[PersonRead] = Field(
+        description="Who owns this card's sub-tasks, in sub-number order and each named once. "
+        "The board shows these faces because it no longer shows where the sub-tasks are."
     )
     created_at: datetime
 
@@ -333,7 +365,8 @@ class TaskDetail(TaskRead):
 
     comments: list[CommentRead]
     subtasks: list[TaskRead] = Field(
-        description="Sub-tasks with their own card on the board, in sub-number order."
+        description="Sub-tasks with a reference of their own, in sub-number order. They are "
+        "not on the board, so this is the only place they are listed."
     )
 
 

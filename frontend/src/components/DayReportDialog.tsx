@@ -196,8 +196,12 @@ function Card({ card }: { card: TaskDay }) {
       <div className={styles.cardHead}>
         <span className={styles.reference}>{card.reference}</span>
         <span className={styles.title}>{card.title}</span>
+        {/* Where this piece of work stands: a card names its column, a sub-task
+            names the card it belongs to, and something with neither has been
+            deleted. Read straight off the column, an absent one would make
+            every sub-task in the report look deleted. */}
         <span className={card.finished ? styles.done : styles.where}>
-          {card.column ?? 'deleted'}
+          {card.column ?? (card.parent ? `of ${card.parent}` : 'deleted')}
         </span>
       </div>
       <div className={styles.entries}>

@@ -377,7 +377,11 @@ export function ProjectBoard() {
   // question this data already answers.
   const visibleTasks = filterTasks(tasks.data, parseQuery(tokenize(search)), columns, memberList)
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
-  for (const task of visibleTasks) byColumn.get(task.column_id)?.push(task)
+  // The server sends top-level cards only, so nothing here is column-less; the
+  // check is what makes that a statement rather than an assumption.
+  for (const task of visibleTasks) {
+    if (task.column_id !== null) byColumn.get(task.column_id)?.push(task)
+  }
 
   // A column's own draggable id is prefixed to keep it out of the task id
   // namespace — the two are otherwise both plain UUIDs.
@@ -1035,6 +1039,15 @@ function TaskCardBody({
         />
       ) : null}
 
+      {/* Sits happily under the stage bar when there is one. They are drawn as
+          different things because they are different things: the bar is one
+          journey with a position along it, the dots are a set of items with
+          some of them ticked. A second bar would have read as the first one
+          split in half. */}
+      {task.subtask_count ? (
+        <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
+      ) : null}
+
       {task.waiting_on.length ? (
         <div className={styles.waiting}>
           Waiting on{' '}
@@ -1051,11 +1064,18 @@ function TaskCardBody({
           {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : null}
           {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : null}
           {task.comment_count ? <span>✎ {task.comment_count}</span> : null}
-          {/* The one number on a card that can stop it moving: while it is
-              above zero the server refuses the last column. */}
-          {task.open_subtask_count ? (
-            <span className={styles.open} title={`${task.open_subtask_count} sub-tasks still open`}>
-              ☑ {task.open_subtask_count}
+          {/* Everyone who owes this card something. The board stopped showing
+              where a sub-task is when it stopped putting one in a column, so
+              this is what it shows instead — the assignee at the other end of
+              the row still being whoever owns the card itself. */}
+          {task.subtask_assignees.length ? (
+            <span
+              className={styles.owners}
+              title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
+            >
+              {task.subtask_assignees.map((person) => (
+                <Avatar key={person.id} name={person.name} colour={person.colour} small />
+              ))}
             </span>
           ) : null}
         </div>
@@ -1072,6 +1092,45 @@ function TaskCardBody({
         </span>
       </div>
     </>
+  )
+}
+
+/**
+ * How much of a card exists yet: one dot per sub-task, filled as each is done.
+ *
+ * When a sub-task was a card of its own you could see the split by looking at
+ * the board — three cards in three columns. Nothing on the board says it any
+ * more, so this does.
+ *
+ * Dots rather than a bar, and that is the whole design. A card may carry the
+ * stage bar as well, and the two are not the same kind of fact: a bar is one
+ * journey with a position along it, where the part behind you is finished and
+ * the part ahead is not. Sub-tasks have no order and no position — they are a
+ * set of things, ticked off in whatever order they get done — and drawn as a
+ * second bar they read as the first one split in half. Countable marks say
+ * "some of these" the way a filled track cannot.
+ *
+ * Not a control. Every other mark on a card moves when you click it; these
+ * stand for work that is settled elsewhere, and the way to get at it is to open
+ * the card, which is what clicking anywhere on them already does.
+ */
+function SubtaskDots({ total, open }: { total: number; open: number }) {
+  const done = total - open
+  const label = `${done} of ${total} sub-tasks finished`
+
+  return (
+    // The dots are decoration twice over — they are the label drawn — so the
+    // sentence is what is read out and they are passed over in silence.
+    <div className={styles.dots} title={label}>
+      {Array.from({ length: total }, (_, index) => (
+        <span
+          key={index}
+          aria-hidden="true"
+          className={`${styles.dot} ${index < done ? styles.dotDone : ''}`}
+        />
+      ))}
+      <span className="visually-hidden">{label}</span>
+    </div>
   )
 }
 
