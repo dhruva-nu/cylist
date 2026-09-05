@@ -75,7 +75,9 @@ async def for_day(
     # Keyed by the string a payload stores, for the moves too old to have
     # recorded a column's name themselves — see `activity.describe`.
     named = {str(column.id): column.name for column in board}
-    cards = {card.reference: card for card in await tasks.list_for_project(session, project)}
+    # Every task, not only the board's cards: a sub-task is not on the board but
+    # it is as likely as anything else to be in a day's work.
+    cards = {card.reference: card for card in await tasks.all_for_project(session, project)}
 
     # Insertion order is chronological, because the entries are: a day reads
     # in the order its cards were first picked up.
@@ -166,6 +168,7 @@ def _task_day(
             reference=reference,
             title=title,
             column=None,
+            parent=None,
             status=None,
             finished=finished,
             entries=entries,
@@ -174,7 +177,11 @@ def _task_day(
     return TaskDay(
         reference=reference,
         title=card.title,
-        column=column_names.get(card.column_id),
+        # A sub-task is in no column, and its parent is what says so: without it
+        # the two ways of having no column — not on the board, and not existing
+        # any more — would read as the same thing.
+        column=column_names.get(card.column_id) if card.column_id else None,
+        parent=card.parent.reference if card.parent else None,
         status=card.status,
         finished=finished,
         entries=entries,
@@ -182,17 +189,24 @@ def _task_day(
 
 
 def _ended_in(rows: list[Activity], column_id: UUID | None) -> bool:
-    """Whether the card's last move of the day put it in ``column_id``.
+    """Whether the day left this task finished.
 
-    The last move rather than any move: a card dropped in Done and pulled back
-    out an hour later did not finish today, whatever the middle of the
-    afternoon looked like. Same reading of the day as :func:`_condensed` — what
-    the card ended up as, not everywhere it has been.
+    Two kinds of task finish two different ways, so this reads whichever
+    applies: a card by ending the day in the board's last column, a sub-task by
+    being ticked off. Both are read from the *last* such entry rather than from
+    any of them — a card dropped in Done and pulled back out an hour later did
+    not finish today, whatever the middle of the afternoon looked like. Same
+    reading of the day as :func:`_condensed`: what the task ended up as, not
+    everywhere it has been.
     """
-    if column_id is None:
+    settled = next(
+        (row for row in reversed(rows) if row.verb in {"task.moved", "task.finished"}), None
+    )
+    if settled is None:
         return False
-    arrived = next((row for row in reversed(rows) if row.verb == "task.moved"), None)
-    return arrived is not None and arrived.payload.get("column_id") == str(column_id)
+    if settled.verb == "task.finished":
+        return bool(settled.payload.get("finished"))
+    return column_id is not None and settled.payload.get("column_id") == str(column_id)
 
 
 def _condensed(entries: list[HistoryEntry]) -> list[HistoryEntry]:
@@ -298,7 +312,7 @@ def _markdown(
     if tasks:
         lines += ["", "## Cards", ""]
         for card in tasks:
-            where = f" ({card.column})" if card.column else " (deleted)"
+            where = _where(card)
             lines += [f"### {card.reference} — {card.title}{where}", ""]
             lines += [_line(entry, zone) for entry in card.entries]
             lines.append("")
@@ -311,6 +325,21 @@ def _markdown(
     # A trailing newline, so appending this to a longer note does not run the
     # last line into whatever follows it.
     return "\n".join(lines) + "\n"
+
+
+def _where(card: TaskDay) -> str:
+    """What to put after a heading to say where this piece of work stands.
+
+    Three answers, and the middle one is why this is a function: a card names
+    its column, a sub-task names the card it belongs to, and something with
+    neither has been deleted. Read straight off the column, an absent one would
+    make every sub-task in the note look deleted.
+    """
+    if card.column:
+        return f" ({card.column})"
+    if card.parent:
+        return f" (of {card.parent})"
+    return " (deleted)"
 
 
 def _line(entry: HistoryEntry, zone: ZoneInfo) -> str:

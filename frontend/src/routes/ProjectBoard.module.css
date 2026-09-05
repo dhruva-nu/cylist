@@ -352,7 +352,13 @@
   padding: 12px 14px 12px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--paper-2);
+
+  /* Named as well as set, so anything drawn on top of the card can ring itself
+     in the surface it is actually sitting on — which the status tints below
+     change out from under it. */
+  --card-surface: var(--paper-2);
+
+  background: var(--card-surface);
   cursor: grab;
   touch-action: none;
 }
@@ -393,7 +399,9 @@
 
 .hold {
   border-color: transparent;
-  background: var(--hold-soft);
+  --card-surface: var(--hold-soft);
+
+  background: var(--card-surface);
 }
 
 .hold::before {
@@ -402,7 +410,9 @@
 
 .blocked {
   border-color: transparent;
-  background: var(--blocked-soft);
+  --card-surface: var(--blocked-soft);
+
+  background: var(--card-surface);
 }
 
 .blocked::before {
@@ -561,17 +571,60 @@
 .links {
   display: flex;
   gap: 8px;
+  align-items: center;
 
   /* Tinted cards again — see .reference. */
   color: var(--ink-2);
   font-size: 12px;
 }
 
-/* Amber, because this is the number that will refuse the card at the last
-   column — the only count on a card that is a rule rather than a fact. */
-.open {
-  color: var(--hold);
-  font-weight: 600;
+/* Everyone who owes this card something, overlapped into one mark. The ring is
+   the card's own surface, so the faces read as a stack rather than as a smear —
+   and it follows the card's tint, which is why it is a variable and not white. */
+.owners {
+  display: flex;
+  padding-left: 3px;
+}
+
+.owners > * {
+  margin-left: -6px;
+  box-shadow: 0 0 0 2px var(--card-surface, var(--paper));
+}
+
+/* One dot per sub-task, filled as each is finished.
+
+   Round, small and countable, because the stage bar directly above may be
+   drawing the other kind of progress and the two must not be mistaken for one
+   another: that bar spans the card and fills left to right, so anything else
+   that spanned and filled would read as more of it. Dots span nothing — they
+   are a handful of marks, which is what a set of sub-tasks is.
+
+   Wrapping rather than shrinking or scrolling: a card split into more pieces
+   than fit on a line is telling you something, and the honest way to show it is
+   a second line of dots. */
+.dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+/* Ringed rather than filled grey, so an unfinished dot reads as an empty slot
+   waiting for its green rather than as a fourth status colour. --line-2, not
+   --line: this rides on cards tinted amber and red, where the faintest rule
+   disappears into the tint. */
+.dot {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 50%;
+}
+
+/* The same green a finished stage takes, and for the same reason: done is done,
+   and a second colour for it would be a second thing to learn. */
+.dotDone {
+  border-color: var(--ok);
+  background: var(--ok);
 }
 
 .trailing {
@@ -641,4 +694,12 @@
 
 .spacer {
   margin-right: auto;
+}
+
+/* A column the card in the air is not allowed in — see `forbiddenFor`. Faded
+   rather than hidden: the board keeps its shape, and a column that vanished
+   mid-drag would move every other one out from under the pointer. */
+.forbidden {
+  opacity: 0.35;
+  filter: saturate(0.4);
 }

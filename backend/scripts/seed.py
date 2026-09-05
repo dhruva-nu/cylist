@@ -115,14 +115,18 @@ class PersonSpec:
 
 @dataclass(frozen=True, slots=True)
 class SubtaskSpec:
-    """A sub-task with a card of its own, numbered under its parent."""
+    """A sub-task with a reference of its own, numbered under its parent.
+
+    No column: a sub-task is not on the board. ``finished`` is the whole of
+    where it has got to.
+    """
 
     title: str
     description: str
     type: TaskType
     due_date: date
     assignee: str
-    column: int
+    finished: bool = False
     status: TaskStatus = TaskStatus.ACTIVE
     reason: str = ""
 
@@ -146,7 +150,7 @@ class TaskSpec:
     order the mock shows them in."""
 
     subtasks: tuple[SubtaskSpec, ...] = ()
-    """Sub-tasks with their own cards, in the order they are numbered."""
+    """Sub-tasks with their own references, in the order they are numbered."""
 
     checklist: tuple[tuple[str, ChecklistState], ...] = ()
     """``(title, state)`` tick boxes, top to bottom."""
@@ -372,7 +376,6 @@ ATLAS = ProjectSpec(
                     type=TaskType.FEATURE,
                     due_date=date(2026, 8, 26),
                     assignee="ak",
-                    column=1,
                 ),
                 SubtaskSpec(
                     title="Replay the four double-charged invoices",
@@ -380,7 +383,7 @@ ATLAS = ProjectSpec(
                     type=TaskType.CHORE,
                     due_date=date(2026, 8, 28),
                     assignee="rs",
-                    column=2,
+                    finished=True,
                 ),
             ),
             checklist=(
@@ -1033,7 +1036,7 @@ async def _write_tasks(
     # card it belongs to.
     for task_spec in spec.tasks:
         await _write_subtasks(
-            session, project, created[task_spec.number], task_spec, board, directory, summary
+            session, project, created[task_spec.number], task_spec, directory, summary
         )
 
 
@@ -1095,15 +1098,13 @@ async def _write_subtasks(
     project: Project,
     parent: Task,
     spec: TaskSpec,
-    board: list[UUID],
     directory: dict[str, UUID],
     summary: Summary,
 ) -> None:
-    """Give a card its own cards, numbered ATL-35-1, ATL-35-2, …
+    """Split a card into sub-tasks, numbered ATL-35-1, ATL-35-2, …
 
-    Moved to the bottom of their column rather than to a chosen position: they
-    are drawn wherever the board has room for them, and the mock has no opinion
-    about where a sub-task sits among its parent's neighbours.
+    They go nowhere on the board — a sub-task has no column — so the only
+    placing to do is whether each one is already ticked off.
     """
     for sub_spec in spec.subtasks:
         subtask = await tasks.create(
@@ -1124,9 +1125,8 @@ async def _write_subtasks(
                 subtask,
                 TaskStatusChange(status=sub_spec.status, reason=sub_spec.reason),
             )
-        await tasks.move(
-            session, subtask, TaskMove(column_id=board[sub_spec.column], position=10_000)
-        )
+        if sub_spec.finished:
+            await tasks.set_finished(session, subtask, finished=True)
         summary.tasks += 1
 
 

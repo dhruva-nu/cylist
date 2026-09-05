@@ -240,6 +240,11 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
         if column is not None:
             return moved(column["from"], column["to"])
         return moved(None, (columns or {}).get(str(payload.get("column_id"))))
+    if entry.verb == "task.finished":
+        # Worded as the sub-task's own line, because that is the card whose
+        # history it is written to. The parent it belongs to is named on every
+        # other line of that history already.
+        return "Finished." if payload.get("finished") else "Reopened."
     if entry.verb == "task.sub_status_moved":
         stage = payload.get("sub_status")
         return f"Sub-status set to {stage}." if stage else "Sub-status moved."
@@ -319,6 +324,13 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "column.updated": lambda p: f"Changed a column's {_fields(p)}.",
     "column.deleted": lambda p: f"Deleted the column {_quoted(p.get('name'))}.",
     "column.reordered": lambda p: "Reordered the board's columns.",
+    # --- Task templates -------------------------------------------------------
+    "template.created": lambda p: (
+        f"Added the task template {_quoted(p.get('name'))}, with {p.get('stage_count', 0)} "
+        f"{'column' if p.get('stage_count') == 1 else 'columns'} set up."
+    ),
+    "template.updated": lambda p: f"Changed the task template {_quoted(p.get('name'))}.",
+    "template.deleted": lambda p: f"Deleted the task template {_quoted(p.get('name'))}.",
     # --- Files --------------------------------------------------------------
     "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
     "folder.updated": lambda p: f"Changed the folder {_quoted(p.get('name'))}'s {_fields(p)}.",

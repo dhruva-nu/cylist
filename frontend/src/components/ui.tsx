@@ -209,11 +209,14 @@ export function SubStatusBar({ labels, index, onMove, wrap = false, members }: S
   const [preview, setPreview] = useState<number | null>(null)
   const live = onMove !== undefined
   const current = labels[index] ?? ''
+  /** There is no stage past the last one to be unfinished about, so reaching
+   * it is done rather than merely arrived — see the thumb's own colour. */
+  const done = index === labels.length - 1
 
   /** The tip for a stage: its label, and what pointing at it is offering. */
   const noteFor = (position: number) =>
     position === index
-      ? `Stage ${position + 1} of ${labels.length} · you are here`
+      ? `Stage ${position + 1} of ${labels.length} · ${done ? 'done' : 'you are here'}`
       : `Stage ${position + 1} of ${labels.length}${live ? ' · click to move here' : ''}`
 
   return (
@@ -274,7 +277,7 @@ export function SubStatusBar({ labels, index, onMove, wrap = false, members }: S
             key={position}
             className={[
               styles.subStatusSegment,
-              position < index && styles.subStatusDone,
+              (position < index || (position === index && done)) && styles.subStatusDone,
               position === index && styles.subStatusHere,
               preview !== null && position > index && position <= preview && styles.subStatusAhead,
             ]
@@ -302,7 +305,9 @@ export function SubStatusBar({ labels, index, onMove, wrap = false, members }: S
           segments having to be four more things to tab past. */}
       <ol className="visually-hidden">
         {labels.map((label, position) => (
-          <li key={position}>{position === index ? `${label} — current stage` : label}</li>
+          <li key={position}>
+            {position === index ? `${label} — ${done ? 'done' : 'current stage'}` : label}
+          </li>
         ))}
       </ol>
 
@@ -315,14 +320,19 @@ export function Avatar({
   name,
   colour,
   large = false,
+  small = false,
 }: {
   name: string
   colour: string
   large?: boolean
+  /** For a row of them, where each face is a hint rather than the subject. */
+  small?: boolean
 }) {
   return (
     <span
-      className={`${styles.avatar} ${large ? styles.avatarLarge : ''}`}
+      className={[styles.avatar, large && styles.avatarLarge, small && styles.avatarSmall]
+        .filter(Boolean)
+        .join(' ')}
       style={{ background: colour, color: readableInkOn(colour) }}
       title={name}
       aria-hidden="true"

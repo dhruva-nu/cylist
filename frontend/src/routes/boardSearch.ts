@@ -102,7 +102,11 @@ export function filterTasks(
   const freeText = parsed.freeText.map((term) => term.toLowerCase())
 
   return tasks.filter((task) => {
-    if (matchedColumnIds && !matchedColumnIds.has(task.column_id)) return false
+    // A card with no column is a sub-task, which is not on the board and so
+    // cannot be in the column being searched for.
+    if (matchedColumnIds && (task.column_id === null || !matchedColumnIds.has(task.column_id))) {
+      return false
+    }
     if (matchedAssignees && !matchedAssignees.has(task.assignee.id)) return false
     if (parsed.blocked && task.status !== 'blocked') return false
     if (parsed.hold && task.status !== 'hold') return false

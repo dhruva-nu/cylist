@@ -23,6 +23,7 @@ from app.models.task import (
     TaskType,
     TaskWaitingOn,
 )
+from app.models.template import TaskTemplate, TemplateStage
 from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 
 __all__ = [
@@ -47,8 +48,10 @@ __all__ = [
     "TaskComment",
     "TaskPriority",
     "TaskStatus",
+    "TaskTemplate",
     "TaskType",
     "TaskWaitingOn",
+    "TemplateStage",
     "TokenKind",
     "VaultNode",
     "VaultNodeKind",

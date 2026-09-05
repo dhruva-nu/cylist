@@ -116,7 +116,10 @@ TASK = {
     "waiting_on": [],
     "comment_count": 0,
     "checklist": [],
+    "finished_at": None,
     "open_subtask_count": 0,
+    "subtask_count": 0,
+    "subtask_assignees": [],
     "created_at": "2026-02-01T09:00:00Z",
     "comments": [],
     "subtasks": [],
@@ -130,7 +133,10 @@ SUBTASK = {
     "parent_id": TASK_ID,
     "parent_reference": "ATL-2",
     "sub_number": 1,
-    "column_id": BACKLOG_ID,
+    # A sub-task is not on the board, so it is in no column and has no place in
+    # one — the two nulls are the whole of what tells it from a card.
+    "column_id": None,
+    "position": None,
     "title": "Drain the old queue",
 }
 
@@ -250,6 +256,7 @@ DAY_REPORT = {
             "reference": "ATL-2",
             "title": "Stripe webhook idempotency",
             "column": "In progress",
+            "parent": None,
             "status": "active",
             "finished": True,
             "entries": TASK_HISTORY_ENTRIES,
@@ -376,6 +383,10 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
     if path.endswith("/move"):
         body = json.loads(request.content)
         return httpx.Response(200, json={**TASK, "column_id": body["column_id"]})
+    if path.endswith("/finish"):
+        body = json.loads(request.content)
+        finished = "2026-02-02T10:00:00Z" if body["finished"] else None
+        return httpx.Response(200, json={**SUBTASK, "finished_at": finished})
     if path.endswith("/status"):
         body = json.loads(request.content)
         return httpx.Response(

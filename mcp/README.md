@@ -100,7 +100,8 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `get_task` | one card with its whole timeline |
 | `read_task_history` | what has been *done* to one card, and by whom — paged |
 | `create_task` | add a card to the first column |
-| `create_subtask` | split a card into one of its own, `ATL-41-2` |
+| `create_subtask` | split a card into owned work of its own, `ATL-41-2` |
+| `finish_subtask` | tick a sub-task off, or reopen one |
 | `add_checklist_item` | add a tick-box sub-task to a card |
 | `set_checklist_item` | tick, cancel, reopen or retitle one |
 | `move_task` | move a card to a named column |
@@ -122,9 +123,13 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
   the candidates rather than picking one.
 - **`get_project` returns the columns**, so an agent can call `move_task` with
   a column name it has actually seen instead of inventing one.
-- **Sub-tasks gate the last column.** Both kinds — cards of their own and tick
-  boxes — must be finished or cancelled before `move_task` will put the parent
-  in the board's last column; the refusal names what is still outstanding.
+- **Sub-tasks are not on the board.** Both kinds — the referenced kind and tick
+  boxes — belong to the card they were split out of: they have no column, they
+  are not in `list_tasks`, and `finish_subtask` completes one rather than
+  `move_task`, which refuses them.
+- **Sub-tasks gate the last column.** Every one of them must be finished or
+  cancelled before `move_task` will put the parent in the board's last column;
+  the refusal names what is still outstanding.
 
 ### Errors are results, not exceptions
 

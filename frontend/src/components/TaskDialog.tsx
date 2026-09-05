@@ -18,6 +18,19 @@
  * form over every field of the parent to finish something that is not the
  * parent.
  *
+ * The form is tabbed. Basics holds what the card *is* — its name, what done
+ * looks like, how urgent, what kind, and which template it follows; Details
+ * holds how it is tracked. On an existing card a third tab carries its
+ * sub-tasks and its conversation, which are about other work and about people
+ * rather than about this card's fields. Every panel stays mounted, so tabbing
+ * away never discards what has been typed, and a tab carries a dot while
+ * something required on it is still blank — a disabled Save button has to have
+ * somewhere to point.
+ *
+ * Neither column nor status appears on a *new* card: work enters the board at
+ * the first column and starts out active, and a control with one possible
+ * value is a question that reads as though it had an answer.
+ *
  * The status control is the interesting part. Choosing On hold or Blocked
  * reveals a reason box and a picker of people to tag, and neither the button
  * nor the server will let the change through without a reason — a red card
@@ -33,12 +46,17 @@
  *
  * Sub-tasks come in two kinds, and both are ticked off in place — from either
  * half of the dialog — rather than on the Save button: a checkbox that only
- * takes effect when you remember to press Save is a checkbox that lies. A tick
- * box settles itself; a sub-task with a card of its own is settled by being
- * moved to the board's last column, since "done" is a place on the board. What
- * a sub-task card's *fields* say is never edited here: "Split into a sub-task"
- * hands the job back to the board, which opens a second dialog for the new
- * card.
+ * takes effect when you remember to press Save is a checkbox that lies. Neither
+ * kind is on the board, so neither is finished by going anywhere: a tick box
+ * carries a state, a sub-task carries a finishing time, and one gesture settles
+ * either. What a sub-task's *fields* say is never edited here: "Split into a
+ * sub-task" hands the job back to the board, which opens a second dialog for
+ * it, because a sub-task needs every field a card needs.
+ *
+ * A sub-task opened here is the same dialog with one thing missing — the column
+ * — and one thing in its place: whether it is finished. It is the only field a
+ * card has that a sub-task does not, and the only field a sub-task has that a
+ * card does not.
  */
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -57,6 +75,7 @@ import {
   type TaskPriority,
   type TaskStatus,
   type TaskType,
+  type Template,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
@@ -99,6 +118,14 @@ interface DialogProps {
   parentRef?: string | null
   columns: BoardColumn[]
   firstColumn: BoardColumn
+  /**
+   * The project's task templates, for the picker on the form.
+   *
+   * Passed in rather than fetched here because the board needs them too: it
+   * greys out the columns a card being dragged is not allowed in, which is the
+   * same rule read from the other end.
+   */
+  templates: Template[]
   /** Opens another card in this dialog's place — a sub-task, from the list. */
   onOpenTask?: ((taskRef: string) => void) | undefined
   /** Asks the board to open a new-sub-task dialog under this reference. */
@@ -234,6 +261,9 @@ function TaskDetailView({
             {PRIORITIES.find((option) => option.value === task.priority)?.label ?? task.priority}
           </span>
           <span className={`${styles.chip} ${styles[`state_${task.status}`]}`}>{statusLabel}</span>
+          {/* Last, and worded rather than iconised: a template is the only
+              chip here that names something the project invented. */}
+          {task.template_name ? <span className={styles.chip}>◇ {task.template_name}</span> : null}
         </div>
 
         {task.sub_statuses.length ? (
@@ -270,7 +300,16 @@ function TaskDetailView({
         </div>
 
         <div className={styles.readPair}>
-          <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+          {/* A sub-task is in no column, so the row that would name one says
+              the thing that answers the same question for it instead. An empty
+              Column would read as one that failed to load. */}
+          {task.parent_id === null ? (
+            <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+          ) : (
+            <ReadField label="Finished">
+              {task.finished_at ? formatDue(task.finished_at.slice(0, 10)) : 'Not yet'}
+            </ReadField>
+          )}
           <ReadField label="Waiting on">
             {task.waiting_on.length ? task.waiting_on.map((person) => person.name).join(', ') : '—'}
           </ReadField>
@@ -288,13 +327,7 @@ function TaskDetailView({
         ) : null}
 
         <ReadField label="Sub-tasks">
-          <SubtasksRead
-            task={task}
-            columns={columns}
-            onOpenTask={onOpenTask}
-            announce={announce}
-            onDone={onDone}
-          />
+          <SubtasksRead task={task} onOpenTask={onOpenTask} announce={announce} onDone={onDone} />
         </ReadField>
 
         <ReadField label="Timeline">
@@ -571,6 +604,7 @@ function TaskForm({
   parentRef,
   columns,
   firstColumn,
+  templates,
   task,
   members,
   announce,
@@ -598,6 +632,7 @@ function TaskForm({
     // into the null the API reads as "no date".
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
+    template_id: task?.template_id ?? null,
     jira_ref: task?.jira_ref ?? '',
     pr_ref: task?.pr_ref ?? '',
   })
@@ -618,8 +653,19 @@ function TaskForm({
   const was = task?.status ?? 'active'
   const changing = status !== was
   const stalling = changing && status !== 'active'
-  const moving = task !== null && columnId !== task.column_id
+  // Never for a sub-task: it has no column, so `columnId` fell back to the
+  // board's first one and every save would look like a move to it.
+  const moving = task !== null && task.column_id !== null && columnId !== task.column_id
   const destination = columns.find((column) => column.id === columnId)?.name ?? null
+  /**
+   * Whether this save changes what kind of card it is.
+   *
+   * Worth knowing on its own because it decides the order of the requests: a
+   * card is never left sitting in a column its own new template forbids, so a
+   * card being retyped *and* moved is moved first, while it is still the kind
+   * of card that was allowed where it started.
+   */
+  const retyping = task !== null && form.template_id !== task.template_id
 
   const save = useMutation({
     mutationFn: async () => {
@@ -630,15 +676,18 @@ function TaskForm({
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
+      // Top of the column rather than the bottom: a card moved from a dialog
+      // has no place on the board the reader is already looking at. Before the
+      // edit when the template is changing too — see `retyping`.
+      if (task && moving && retyping) await api.moveTask(task.id, columnId, 0)
+
       const saved = task
         ? await api.updateTask(task.id, { ...payload, sub_status_index: subStatusIndex })
         : parentRef
           ? await api.createSubtask(parentRef, payload)
           : await api.createTask(projectKey, payload)
 
-      // Top of the column rather than the bottom: a card moved from a dialog
-      // has no place on the board the reader is already looking at.
-      if (task && columnId !== task.column_id) await api.moveTask(saved.id, columnId, 0)
+      if (task && moving && !retyping) await api.moveTask(saved.id, columnId, 0)
 
       if (changing) {
         await api.setTaskStatus(saved.id, {
@@ -715,6 +764,41 @@ function TaskForm({
     group?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
   }
 
+  /**
+   * Which tab is showing.
+   *
+   * The form is long enough that the fields that decide what the card *is* —
+   * its name, what done looks like, how urgent, what kind — were being scrolled
+   * past on the way to the ones that decide how it is tracked. Splitting them
+   * puts the first decision on the first screen.
+   *
+   * Every panel stays mounted and is hidden with `hidden`, so switching tabs
+   * never throws away what has been typed on the other one. `hidden` also takes
+   * the panel out of the modal's focus trap, which reads the laid-out controls
+   * rather than a list it keeps in step by hand.
+   */
+  const [tab, setTab] = useState<TabId>('basics')
+
+  const tabs: Tab[] = [
+    {
+      id: 'basics',
+      label: 'Basics',
+      // Marked on the tab, not only on the Save button: a disabled Save with
+      // no reason showing is a dead end when the reason is on a tab you
+      // cannot see.
+      incomplete: !form.title.trim() || !form.description.trim(),
+    },
+    {
+      id: 'details',
+      label: 'Details',
+      incomplete:
+        !form.assignee_id ||
+        !form.sub_statuses.every((label) => label.trim()) ||
+        Boolean(stalling && !reason.trim()),
+    },
+    ...(task ? [{ id: 'work' as const, label: 'Sub-tasks & comments', incomplete: false }] : []),
+  ]
+
   return (
     <Modal
       // Escape and the backdrop mean "stop editing", which on an existing card
@@ -756,39 +840,149 @@ function TaskForm({
       <ModalBody>
         {error ? <ErrorBanner>{error.message}</ErrorBanner> : null}
 
-        <Field label="Task name" required>
-          <input
-            value={form.title}
-            maxLength={200}
-            onChange={(event) => setForm({ ...form, title: event.target.value })}
-            placeholder="Short, verb-first"
-          />
-        </Field>
+        <Tabs tabs={tabs} current={tab} onSelect={setTab} />
 
-        <Field label="Description" required hint="Type @ to tag someone on the project.">
-          <MentionBox
-            multiline
-            value={form.description}
-            onChange={(description) => setForm({ ...form, description })}
-            members={members}
-            placeholder="What done looks like"
-          />
-        </Field>
+        <div
+          className={styles.panel}
+          role="tabpanel"
+          id="task-panel-basics"
+          aria-labelledby="task-tab-basics"
+          hidden={tab !== 'basics'}
+        >
+          <Field label="Task name" required>
+            <input
+              value={form.title}
+              maxLength={200}
+              onChange={(event) => setForm({ ...form, title: event.target.value })}
+              placeholder="Short, verb-first"
+            />
+          </Field>
 
-        <FieldPair>
-          <Field label="Type" required>
+          <Field label="Description" required hint="Type @ to tag someone on the project.">
+            <MentionBox
+              multiline
+              value={form.description}
+              onChange={(description) => setForm({ ...form, description })}
+              members={members}
+              placeholder="What done looks like"
+            />
+          </Field>
+
+          <FieldPair>
+            <Field label="Priority" required>
+              <select
+                value={form.priority}
+                onChange={(event) =>
+                  setForm({ ...form, priority: event.target.value as TaskPriority })
+                }
+              >
+                {PRIORITIES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Type" required>
+              <select
+                value={form.type}
+                onChange={(event) => setForm({ ...form, type: event.target.value as TaskType })}
+              >
+                {TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </FieldPair>
+
+          <Field label="Template" hint={templateHint(templates, form.template_id, columns)}>
             <select
-              value={form.type}
-              onChange={(event) => setForm({ ...form, type: event.target.value as TaskType })}
+              value={form.template_id ?? ''}
+              onChange={(event) => setForm({ ...form, template_id: event.target.value || null })}
             >
-              {TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
+              <option value="">No template — goes anywhere on the board</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
                 </option>
               ))}
             </select>
           </Field>
-          {task ? (
+        </div>
+
+        <div
+          className={styles.panel}
+          role="tabpanel"
+          id="task-panel-details"
+          aria-labelledby="task-tab-details"
+          hidden={tab !== 'details'}
+        >
+          <FieldPair>
+            <Field label="Due date">
+              <input
+                type="date"
+                value={form.due_date ?? ''}
+                onChange={(event) => setForm({ ...form, due_date: event.target.value })}
+              />
+            </Field>
+            <Field label="Assignee" required>
+              <select
+                value={form.assignee_id}
+                onChange={(event) => setForm({ ...form, assignee_id: event.target.value })}
+              >
+                {members.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name} — {person.role}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </FieldPair>
+
+          <Field
+            label="Sub-status"
+            hint="Up to 4 stages, in order. Moving the card between them happens on the board. Type @ to tag someone."
+          >
+            <SubStatusListEditor
+              value={form.sub_statuses}
+              current={subStatusIndex}
+              members={members}
+              onChange={(sub_statuses, current) => {
+                setForm({ ...form, sub_statuses })
+                setSubStatusIndex(current)
+              }}
+            />
+          </Field>
+
+          <FieldPair>
+            <Field label="Jira">
+              <input
+                value={form.jira_ref ?? ''}
+                onChange={(event) => setForm({ ...form, jira_ref: event.target.value })}
+                placeholder="ATL-00 or a URL"
+              />
+            </Field>
+            <Field label="Pull request">
+              <input
+                value={form.pr_ref ?? ''}
+                onChange={(event) => setForm({ ...form, pr_ref: event.target.value })}
+                placeholder="#000 or a URL"
+              />
+            </Field>
+          </FieldPair>
+
+          {/* Neither column nor status is offered on a new card, because
+              neither is a choice: work enters the board at the first column and
+              starts out active. A control with one possible value is a question
+              that reads as though it had an answer.
+
+              Nor is a column offered on a sub-task, for the stronger reason
+              that it has none: a sub-task is not on the board, and every one of
+              these options would be a move the server refuses. It is finished
+              from its parent's list instead. */}
+          {task && task.parent_id === null ? (
             <Field label="Column" required>
               <select value={columnId} onChange={(event) => setColumnId(event.target.value)}>
                 {columns.map((column) => (
@@ -798,179 +992,268 @@ function TaskForm({
                 ))}
               </select>
             </Field>
-          ) : (
-            <Field label="Column" hint="New tasks land in the first column. Move it afterwards.">
-              <input value={firstColumn.name} disabled />
-            </Field>
-          )}
-        </FieldPair>
+          ) : null}
 
-        <Field label="Priority" required>
-          <select
-            value={form.priority}
-            onChange={(event) => setForm({ ...form, priority: event.target.value as TaskPriority })}
-          >
-            {PRIORITIES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <Field
-          label="Sub-status"
-          hint="Up to 4 stages, in order. Moving the card between them happens on the board. Type @ to tag someone."
-        >
-          <SubStatusListEditor
-            value={form.sub_statuses}
-            current={subStatusIndex}
-            members={members}
-            onChange={(sub_statuses, current) => {
-              setForm({ ...form, sub_statuses })
-              setSubStatusIndex(current)
-            }}
-          />
-        </Field>
-
-        <FieldPair>
-          <Field label="Due date">
-            <input
-              type="date"
-              value={form.due_date ?? ''}
-              onChange={(event) => setForm({ ...form, due_date: event.target.value })}
-            />
-          </Field>
-          <Field label="Assignee" required>
-            <select
-              value={form.assignee_id}
-              onChange={(event) => setForm({ ...form, assignee_id: event.target.value })}
-            >
-              {members.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.name} — {person.role}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </FieldPair>
-
-        <FieldPair>
-          <Field label="Jira">
-            <input
-              value={form.jira_ref ?? ''}
-              onChange={(event) => setForm({ ...form, jira_ref: event.target.value })}
-              placeholder="ATL-00 or a URL"
-            />
-          </Field>
-          <Field label="Pull request">
-            <input
-              value={form.pr_ref ?? ''}
-              onChange={(event) => setForm({ ...form, pr_ref: event.target.value })}
-              placeholder="#000 or a URL"
-            />
-          </Field>
-        </FieldPair>
-
-        <Field label="Status">
-          <div className={styles.segmented} role="radiogroup" aria-label="Status">
-            {STATUSES.map((option, index) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={status === option.value}
-                // One stop for the whole group, on whichever option is chosen:
-                // Tab should pass a three-way choice, not visit it three times.
-                tabIndex={status === option.value ? 0 : -1}
-                className={status === option.value ? `${styles.on} ${styles[option.value]}` : ''}
-                onClick={() => setStatus(option.value)}
-                onKeyDown={(event) => walkStatus(event, index)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        {stalling ? (
-          <div className={`${styles.why} ${styles[status]}`}>
-            <Field label="Why is the status changing?" required>
-              <textarea
-                className={styles.reason}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="Required when moving to On hold or Blocked"
-              />
-            </Field>
-            <Field label="Who is this waiting on?">
-              <div className={styles.tagPicker} role="group" aria-label="Who is this waiting on?">
-                {members.map((person) => (
+          {task ? (
+            <Field label="Status">
+              <div className={styles.segmented} role="radiogroup" aria-label="Status">
+                {STATUSES.map((option, index) => (
                   <button
-                    key={person.id}
+                    key={option.value}
                     type="button"
-                    className={tagged.includes(person.id) ? styles.tagged : ''}
-                    aria-pressed={tagged.includes(person.id)}
-                    onClick={() => toggleTag(person.id)}
+                    role="radio"
+                    aria-checked={status === option.value}
+                    // One stop for the whole group, on whichever option is chosen:
+                    // Tab should pass a three-way choice, not visit it three times.
+                    tabIndex={status === option.value ? 0 : -1}
+                    className={
+                      status === option.value ? `${styles.on} ${styles[option.value]}` : ''
+                    }
+                    onClick={() => setStatus(option.value)}
+                    onKeyDown={(event) => walkStatus(event, index)}
                   >
-                    <Avatar name={person.name} colour={person.colour} />
-                    {person.name.split(' ')[0]}
-                    <span className={styles.role}>· {person.role.split(',')[0]}</span>
+                    {option.label}
                   </button>
                 ))}
               </div>
             </Field>
-            <small>
-              Added to the card&rsquo;s comments and shown on the board as &ldquo;Waiting on
-              @name&rdquo;.
-            </small>
-          </div>
-        ) : null}
+          ) : null}
+
+          {stalling ? (
+            <div className={`${styles.why} ${styles[status]}`}>
+              <Field label="Why is the status changing?" required>
+                <textarea
+                  className={styles.reason}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="Required when moving to On hold or Blocked"
+                />
+              </Field>
+              <Field label="Who is this waiting on?">
+                <div className={styles.tagPicker} role="group" aria-label="Who is this waiting on?">
+                  {members.map((person) => (
+                    <button
+                      key={person.id}
+                      type="button"
+                      className={tagged.includes(person.id) ? styles.tagged : ''}
+                      aria-pressed={tagged.includes(person.id)}
+                      onClick={() => toggleTag(person.id)}
+                    >
+                      <Avatar name={person.name} colour={person.colour} />
+                      {person.name.split(' ')[0]}
+                      <span className={styles.role}>· {person.role.split(',')[0]}</span>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <small>
+                Added to the card&rsquo;s comments and shown on the board as &ldquo;Waiting on
+                @name&rdquo;.
+              </small>
+            </div>
+          ) : null}
+
+          {/* A card being written has no timeline yet, but it may well be
+              worth a first word — so the composer follows it onto Details
+              rather than disappearing with the tab it lives on for a card
+              that exists. */}
+          {task ? null : (
+            <Comments
+              task={null}
+              members={members}
+              author={author}
+              onAuthor={setAuthor}
+              comment={comment}
+              onComment={setComment}
+            />
+          )}
+        </div>
 
         {task ? (
-          <Subtasks
-            task={task}
-            columns={columns}
-            onOpenTask={onOpenTask}
-            onSplit={onSplit}
-            announce={announce}
-            onDone={onDone}
-          />
-        ) : null}
+          <div
+            className={styles.panel}
+            role="tabpanel"
+            id="task-panel-work"
+            aria-labelledby="task-tab-work"
+            hidden={tab !== 'work'}
+          >
+            <Subtasks
+              task={task}
+              onOpenTask={onOpenTask}
+              onSplit={onSplit}
+              announce={announce}
+              onDone={onDone}
+            />
 
-        <Field label="Comments">
-          <div className={styles.timeline}>
-            {task?.comments.length ? (
-              task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
-            ) : (
-              <span className={styles.empty}>No comments yet.</span>
-            )}
-            <div className={styles.composer}>
-              <select
-                value={author}
-                onChange={(event) => setAuthor(event.target.value)}
-                aria-label="Comment as"
-              >
-                <option value="">Unattributed</option>
-                {members.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
-              </select>
-              <MentionBox
-                value={comment}
-                onChange={setComment}
-                members={members}
-                className={styles.grow}
-                aria-label="Add a comment"
-                placeholder="Add a comment, @ to tag someone…"
-              />
-            </div>
+            <Comments
+              task={task}
+              members={members}
+              author={author}
+              onAuthor={setAuthor}
+              comment={comment}
+              onComment={setComment}
+            />
           </div>
-        </Field>
+        ) : null}
       </ModalBody>
     </Modal>
+  )
+}
+
+/**
+ * What has been said about the card, and a box to say something.
+ *
+ * Shared by both halves of the form because a new card gets the composer
+ * without the timeline: there is nothing to read yet, and a first comment
+ * typed while writing the card is posted with it.
+ */
+function Comments({
+  task,
+  members,
+  author,
+  onAuthor,
+  comment,
+  onComment,
+}: {
+  /** Null while the card is being written, which is the empty timeline. */
+  task: TaskDetail | null
+  members: Person[]
+  author: string
+  onAuthor: (id: string) => void
+  comment: string
+  onComment: (text: string) => void
+}) {
+  return (
+    <Field label="Comments">
+      <div className={styles.timeline}>
+        {task?.comments.length ? (
+          task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
+        ) : (
+          <span className={styles.empty}>No comments yet.</span>
+        )}
+        <div className={styles.composer}>
+          <select
+            value={author}
+            onChange={(event) => onAuthor(event.target.value)}
+            aria-label="Comment as"
+          >
+            <option value="">Unattributed</option>
+            {members.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+          <MentionBox
+            value={comment}
+            onChange={onComment}
+            members={members}
+            className={styles.grow}
+            aria-label="Add a comment"
+            placeholder="Add a comment, @ to tag someone…"
+          />
+        </div>
+      </div>
+    </Field>
+  )
+}
+
+type TabId = 'basics' | 'details' | 'work'
+
+interface Tab {
+  id: TabId
+  label: string
+  /** Whether a required field on this tab is still empty. */
+  incomplete: boolean
+}
+
+/**
+ * The form's tab strip.
+ *
+ * A tab carries a dot when something required on it is still blank, so a
+ * disabled Save button always has somewhere visible to point at — otherwise
+ * the one unfilled field is behind a tab nobody has a reason to open.
+ *
+ * Arrow keys walk the strip and focus follows the selection, as they do in any
+ * tab list: the roving tabindex sits on the selected tab, so leaving focus
+ * behind would make the second arrow press do nothing.
+ */
+function Tabs({
+  tabs,
+  current,
+  onSelect,
+}: {
+  tabs: Tab[]
+  current: TabId
+  onSelect: (id: TabId) => void
+}) {
+  function walk(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    if (step === 0) return
+
+    event.preventDefault()
+    const next = tabs[(index + step + tabs.length) % tabs.length]
+    if (!next) return
+
+    onSelect(next.id)
+    const strip = event.currentTarget.parentElement
+    strip?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[tabs.indexOf(next)]?.focus()
+  }
+
+  return (
+    <div className={styles.tabs} role="tablist" aria-label="Task fields">
+      {tabs.map((tab, index) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          id={`task-tab-${tab.id}`}
+          aria-selected={tab.id === current}
+          aria-controls={`task-panel-${tab.id}`}
+          tabIndex={tab.id === current ? 0 : -1}
+          className={tab.id === current ? styles.tabOn : ''}
+          onClick={() => onSelect(tab.id)}
+          onKeyDown={(event) => walk(event, index)}
+        >
+          {tab.label}
+          {tab.incomplete ? (
+            <span className={styles.needed} aria-label="something required is still empty">
+              •
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * What choosing a template commits the card to, in words.
+ *
+ * A template's stages are invisible until the card is dragged somewhere they
+ * refuse, or stuck short of a sub-stage they demand. Saying it here is the
+ * difference between a dropdown and a decision.
+ */
+function templateHint(
+  templates: Template[],
+  templateId: string | null,
+  columns: BoardColumn[],
+): string {
+  if (!templateId) return 'Optional. A card with no template may sit in any column.'
+
+  const template = templates.find((candidate) => candidate.id === templateId)
+  if (!template) return ''
+  if (!template.stages.length) {
+    return `${template.name} has no columns set up yet, so its cards may sit anywhere.`
+  }
+
+  const named = template.allowed_column_ids
+    .map((id) => columns.find((column) => column.id === id)?.name)
+    .filter(Boolean)
+  const staged = template.stages.some((stage) => stage.sub_stage_labels.length)
+  return (
+    `${template.name} cards go to ${named.join(' → ')}, and nowhere else.` +
+    (staged ? ' Each column may set sub-stages a card must reach before leaving it.' : '')
   )
 }
 
@@ -1148,11 +1431,10 @@ const CHECKLIST_LABELS: Record<ChecklistState, string> = {
 /**
  * Ticking a sub-task off, shared by the detail view and the form.
  *
- * Two kinds of sub-task settle two different ways. A tick box has a state of
- * its own. A sub-task with a card is finished by being moved to the board's
- * last column, because "done" is a place on this board and not a field — the
- * same rule the server enforces when it refuses a parent whose sub-tasks are
- * still open.
+ * Two kinds of sub-task, one gesture. Neither is on the board, so neither is
+ * finished by going anywhere: a tick box carries a state, a sub-task carries a
+ * finishing time, and ticking either one settles it and stops it holding the
+ * parent back.
  *
  * One hook rather than a copy in each list, so the two cannot drift: whichever
  * half of the dialog you are looking at, ticking means the same thing.
@@ -1185,69 +1467,61 @@ function useSubtaskTicking({
     },
   })
 
-  // Position 0, as every move made from a dialog is: a card dropped at the
-  // bottom of a column lands somewhere the reader cannot see.
-  const setColumn = useMutation({
-    mutationFn: ({ child, column }: { child: Task; column: BoardColumn }) =>
-      api.moveTask(child.id, column.id, 0),
-    onSuccess: async (moved, { column }) => {
-      announce(`${moved.reference} moved to ${column.name}.`)
+  const setFinished = useMutation({
+    mutationFn: ({ child, finished }: { child: Task; finished: boolean }) =>
+      api.finishTask(child.id, finished),
+    onSuccess: async (child, { finished }) => {
+      announce(`${child.reference} is ${finished ? 'finished' : 'open again'}.`)
       await refresh()
     },
   })
 
-  return { refresh, setState, setColumn }
+  return { refresh, setState, setFinished }
 }
 
 /**
- * One sub-task that has a card of its own, in either list.
+ * One sub-task with a reference of its own, in either list.
  *
  * The tick box is the point of it: the reason to be looking at this list is to
- * see what is left, and a list you have to leave in order to finish anything
- * is a list that gets left. Ticking is a move, so the label names the column —
- * a checkbox that silently relocates a card on the board behind the dialog
- * would be worse than no checkbox at all. Unticking returns the card to the
- * first column, which is the only honest destination: where it sat before it
- * was ticked is recorded nowhere.
+ * see what is left, and a list you have to leave in order to finish anything is
+ * a list that gets left. It ticks the sub-task itself — nothing moves on the
+ * board behind the dialog, because a sub-task is not on it.
+ *
+ * The owner is the one thing here a tick box has no equivalent of, and the
+ * reason the two kinds of sub-task both exist: the board no longer shows who is
+ * on a piece of split-out work, so this row does.
  */
 function SubtaskCardRow({
   child,
-  column,
-  finishedColumn,
-  firstColumn,
   busy,
   onOpen,
-  onMove,
+  onFinish,
 }: {
   child: Task
-  /** The column the card is in now, if the board still has it. */
-  column: BoardColumn | undefined
-  finishedColumn: BoardColumn | undefined
-  firstColumn: BoardColumn | undefined
   busy: boolean
   onOpen: () => void
-  onMove: (column: BoardColumn) => void
+  onFinish: (finished: boolean) => void
 }) {
-  const finished = finishedColumn !== undefined && child.column_id === finishedColumn.id
-  const target = finished ? firstColumn : finishedColumn
+  const finished = child.finished_at !== null
+  const cancelled = child.status === 'cancelled'
   const status = STATUSES.find((option) => option.value === child.status)
 
   return (
-    <div className={`${styles.subtaskRow} ${finished ? styles.settled : ''}`}>
+    <div className={`${styles.subtaskRow} ${finished || cancelled ? styles.settled : ''}`}>
       <input
         type="checkbox"
         checked={finished}
-        disabled={busy || target === undefined}
+        // A cancelled sub-task is settled already and ticking it would say the
+        // work happened. Reopen it with the status control on its own card.
+        disabled={busy || cancelled}
         aria-label={
-          target === undefined
-            ? `${child.reference} cannot be moved`
+          cancelled
+            ? `${child.reference} is cancelled`
             : finished
-              ? `${child.reference} is done. Reopen it into ${target.name}.`
-              : `Mark ${child.reference} done by moving it to ${target.name}.`
+              ? `${child.reference} is finished. Reopen it.`
+              : `Finish ${child.reference}.`
         }
-        onChange={() => {
-          if (target) onMove(target)
-        }}
+        onChange={() => onFinish(!finished)}
       />
       {/* The button is the whole of the rest of the row rather than the
           reference alone: the title is what the eye lands on, and a link you
@@ -1257,10 +1531,15 @@ function SubtaskCardRow({
         <span className={styles.subRef}>{child.reference}</span>
         <span className={styles.subTitle}>{child.title}</span>
       </button>
-      {/* The column, because that is what the tick box just changed — the
-          status only replaces it when it is the more urgent of the two. */}
       <span className={styles.subState}>
-        {child.status === 'active' ? column?.name : status?.label}
+        {/* Whichever of the two is the more urgent thing to know. A stalled
+            sub-task says so; anything else is answered by the tick box, so the
+            owner is what the space is better spent on. */}
+        {child.status === 'active' ? (
+          <Avatar name={child.assignee.name} colour={child.assignee.colour} />
+        ) : (
+          status?.label
+        )}
       </span>
     </div>
   )
@@ -1277,22 +1556,19 @@ function SubtaskCardRow({
  */
 function Subtasks({
   task,
-  columns,
   onOpenTask,
   onSplit,
   announce,
   onDone,
 }: {
   task: TaskDetail
-  /** The board's columns, in order — the last of them is what "done" means. */
-  columns: BoardColumn[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   onSplit?: ((parentRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
 }) {
   const [title, setTitle] = useState('')
-  const { refresh, setState, setColumn } = useSubtaskTicking({ task, announce, onDone })
+  const { refresh, setState, setFinished } = useSubtaskTicking({ task, announce, onDone })
 
   const add = useMutation({
     mutationFn: (text: string) => api.addChecklistItem(task.id, text),
@@ -1308,11 +1584,9 @@ function Subtasks({
     onSuccess: refresh,
   })
 
-  const error = add.error ?? setState.error ?? remove.error ?? setColumn.error
+  const error = add.error ?? setState.error ?? remove.error ?? setFinished.error
   const outstanding = task.open_subtask_count
-  const busy = setState.isPending || setColumn.isPending || remove.isPending
-  const finishedColumn = columns[columns.length - 1]
-  const firstColumn = columns[0]
+  const busy = setState.isPending || setFinished.isPending || remove.isPending
 
   return (
     <Field label="Sub-tasks">
@@ -1323,12 +1597,9 @@ function Subtasks({
           <SubtaskCardRow
             key={child.id}
             child={child}
-            column={columns.find((option) => option.id === child.column_id)}
-            finishedColumn={finishedColumn}
-            firstColumn={firstColumn}
             busy={busy}
             onOpen={() => onOpenTask?.(child.reference)}
-            onMove={(column) => setColumn.mutate({ child, column })}
+            onFinish={(finished) => setFinished.mutate({ child, finished })}
           />
         ))}
 
@@ -1372,7 +1643,7 @@ function Subtasks({
         {/* A sub-task cannot be split again: the board would stop being one. */}
         {task.parent_id === null ? (
           <Button small variant="ghost" onClick={() => onSplit?.(task.reference)}>
-            + Split into a sub-task with its own card
+            + Split into a sub-task with an owner of its own
           </Button>
         ) : (
           <small>
@@ -1417,25 +1688,20 @@ function Subtasks({
  */
 function SubtasksRead({
   task,
-  columns,
   onOpenTask,
   announce,
   onDone,
 }: {
   task: TaskDetail
-  /** The board's columns, in order — the last of them is what "done" means. */
-  columns: BoardColumn[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
 }) {
-  const { setState, setColumn } = useSubtaskTicking({ task, announce, onDone })
+  const { setState, setFinished } = useSubtaskTicking({ task, announce, onDone })
 
   const outstanding = task.open_subtask_count
-  const error = setState.error ?? setColumn.error
-  const busy = setState.isPending || setColumn.isPending
-  const finishedColumn = columns[columns.length - 1]
-  const firstColumn = columns[0]
+  const error = setState.error ?? setFinished.error
+  const busy = setState.isPending || setFinished.isPending
 
   return (
     <div className={styles.subtasks}>
@@ -1445,12 +1711,9 @@ function SubtasksRead({
         <SubtaskCardRow
           key={child.id}
           child={child}
-          column={columns.find((option) => option.id === child.column_id)}
-          finishedColumn={finishedColumn}
-          firstColumn={firstColumn}
           busy={busy}
           onOpen={() => onOpenTask?.(child.reference)}
-          onMove={(column) => setColumn.mutate({ child, column })}
+          onFinish={(finished) => setFinished.mutate({ child, finished })}
         />
       ))}
 

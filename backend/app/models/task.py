@@ -3,16 +3,35 @@
 A task's whole history — comments people wrote and status changes Cylist
 recorded — lives in one table, so a card reads as a single story rather than
 two lists the reader has to interleave by timestamp.
+
+One rule shapes half the columns below: **a sub-task is work on a card, not a
+card on the board.** It keeps its reference, its owner, its due date, its
+comments and its history; what it does not have is a column. So ``column_id``
+and ``position`` belong to top-level cards alone, and ``finished_at`` — which
+is what "done" means once there is no last column to be in — belongs to
+sub-tasks alone. Both facts are check constraints rather than conventions,
+because a row that is half on the board and half off it is not a state any
+code here knows how to read.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
@@ -21,6 +40,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.person import Person
 from app.models.project import Project
+from app.models.template import TaskTemplate
 
 
 class TaskType(StrEnum):
@@ -48,6 +68,10 @@ class TaskStatus(StrEnum):
 
     A settled state rather than a stalled one: a cancelled sub-task no longer
     holds its parent back, which is the whole reason the state exists.
+
+    The other way to stop holding a parent back is to be finished, which is
+    ``finished_at`` rather than a member here: this enum answers "is it moving,
+    and if not, why not", and *done* is not a reason for not moving.
     """
 
     @property
@@ -146,6 +170,22 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "AND (parent_id IS NULL) = (sub_number IS NULL)",
             name="numbered_by_parentage",
         ),
+        # The same shape, for the same kind of reason: a top-level card is on
+        # the board and always in a column, a sub-task is not on the board and
+        # never in one. Neither "a card in no column" nor "a sub-task in Review"
+        # can be written at all.
+        CheckConstraint(
+            "(parent_id IS NULL) = (column_id IS NOT NULL) "
+            "AND (parent_id IS NULL) = (position IS NOT NULL)",
+            name="placed_by_parentage",
+        ),
+        # Done is a place on the board for a card, and a moment for a sub-task.
+        # A top-level card holding a finishing time would be a second answer to
+        # a question the board has already answered, and the two could disagree.
+        CheckConstraint(
+            "finished_at IS NULL OR parent_id IS NOT NULL",
+            name="finished_only_by_subtasks",
+        ),
         # A card can be split into at most 4 stages — enough to read as a
         # position along a bar, not so many that a segment on a board card is
         # too narrow to point at.
@@ -177,17 +217,20 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     everywhere else — ``ATL-41`` in a commit message, a Slack thread, a CLI
     argument — so the same number turning up on a second task would be a lie."""
 
-    column_id: Mapped[UUID] = mapped_column(
+    column_id: Mapped[UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True),
         ForeignKey("board_column.id"),
-        nullable=False,
     )
-    """No ``ondelete``: NO ACTION is checked at the end of the statement, so
+    """Which column the card is in. Null on a sub-task, which is not on the
+    board at all — see ``placed_by_parentage``.
+
+    No ``ondelete``: NO ACTION is checked at the end of the statement, so
     deleting a project still cascades cleanly, while deleting a column that
     holds tasks fails rather than quietly taking the tasks with it."""
 
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
-    """Top to bottom within the column, contiguous from zero."""
+    position: Mapped[int | None] = mapped_column(Integer)
+    """Top to bottom within the column, contiguous from zero. Null on a
+    sub-task, which is ordered by ``sub_number`` under its parent instead."""
 
     title: Mapped[str] = mapped_column(String(200), nullable=False)
 
@@ -245,6 +288,35 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         _enum(TaskStatus, "task_status"), nullable=False, default=TaskStatus.ACTIVE
     )
 
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """When this sub-task was finished, or null while it is still open.
+
+    Only a sub-task can hold one — see ``finished_only_by_subtasks``. A card on
+    the board is finished by being in the board's last column, and that is the
+    board's answer to give.
+
+    A timestamp rather than a flag because the question asked of a settled
+    sub-task is nearly always *when*: the day's report wants it, and a boolean
+    that has to be joined against the activity trail to answer it is a boolean
+    that was the wrong shape."""
+
+    template_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task_template.id"),
+    )
+    """What kind of card this is, if it was created as one.
+
+    Null on a card written before templates existed, and on one created
+    without picking a template — which is unrestricted, not untyped: a
+    template's stages say where its cards may go, and a card with none may
+    go anywhere on its board.
+
+    No ``ondelete``, for the reason ``column_id`` has none: NO ACTION is
+    checked at the end of the statement, so a project still cascades away
+    cleanly while a template a card is using cannot be deleted out from under
+    it.
+    """
+
     jira_ref: Mapped[str | None] = mapped_column(String(200))
     pr_ref: Mapped[str | None] = mapped_column(String(200))
 
@@ -271,6 +343,7 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     project: Mapped[Project] = relationship(lazy="selectin")
     assignee: Mapped[Person] = relationship(lazy="selectin")
+    template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
 
     waiting_on: Mapped[list[Person]] = relationship(
         secondary="task_waiting_on",
@@ -318,10 +391,11 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     def is_settled(self) -> bool:
         """Whether this task has stopped holding a parent back.
 
-        Cancelled counts; finished does not live on the task at all — it is
-        "in the board's last column", which only the board can say.
+        Finished or cancelled — the two ways a sub-task stops being outstanding,
+        and the only two states a parent's move to the last column is allowed to
+        find under it.
         """
-        return self.status is TaskStatus.CANCELLED
+        return self.status is TaskStatus.CANCELLED or self.finished_at is not None
 
 
 class TaskWaitingOn(Base, TimestampMixin):

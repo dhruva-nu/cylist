@@ -103,6 +103,62 @@ export interface ColumnInput {
   description: string
 }
 
+/**
+ * One column a template's cards may sit in, and the sub-stages a card passes
+ * through there.
+ *
+ * A card created from the template — or arriving here by a later move — has
+ * these labels loaded onto its own `sub_statuses`, the same click-through
+ * progress bar every card carries, and cannot leave the column until it is on
+ * the last one.
+ */
+export interface TemplateStage {
+  column_id: string
+  /** So a stage reads without the board's columns fetched beside it. */
+  column_name: string
+  /** The sub-stages a card passes through here, left to right. May be empty:
+   * a column can be named without asking anything of the card there. */
+  sub_stage_labels: string[]
+}
+
+/**
+ * A kind of card — "Hotfix", "Design task" — and the rule for where its
+ * cards go.
+ *
+ * A template carries nothing onto the task it makes beyond that rule: no
+ * type, no priority. `stages` is the whole of it, one entry per column the
+ * template's cards may sit in.
+ */
+export interface Template {
+  id: string
+  project_id: string
+  name: string
+  description: string
+  stages: TemplateStage[]
+  /**
+   * The stages' column ids, in the same order — a convenience for knowing
+   * where a card may go without reading what it owes to get there. **Empty
+   * means unrestricted**: this template has no stages yet, so its cards go
+   * anywhere on the board.
+   */
+  allowed_column_ids: string[]
+  /** How many cards were created from it. Above zero, it cannot be deleted. */
+  task_count: number
+  created_at: string
+}
+
+/**
+ * A template as it is written.
+ *
+ * `stages` is all-or-nothing on an edit: sending it replaces the whole set,
+ * because the stages together are the policy. Leave it out to rename alone.
+ */
+export interface TemplateInput {
+  name: string
+  description?: string
+  stages?: { column_id: string; sub_stage_labels: string[] }[]
+}
+
 /** What a `status_change` entry carries. Empty on a comment somebody typed. */
 export interface StatusChangeMeta {
   from?: TaskStatus
@@ -187,10 +243,18 @@ export interface TaskDay {
   reference: string
   /** Its title now — or the one it had at the time, if it has since been deleted. */
   title: string
-  /** Which column it sits in now. Null if the card no longer exists. */
+  /**
+   * Which column it sits in now. Null on a sub-task, which is not on the board,
+   * and on a card that no longer exists — `parent` tells the two apart.
+   */
   column: string | null
+  /** `ATL-41`, when this is a sub-task. Null on a card and on anything deleted. */
+  parent: string | null
   status: TaskStatus | null
-  /** Whether its last move of the day put it in the board's last column. */
+  /**
+   * Whether the day left it finished: a card by ending it in the board's last
+   * column, a sub-task by being ticked off.
+   */
   finished: boolean
   /**
    * What happened to it, oldest first — with its moves collapsed to the one
@@ -245,8 +309,10 @@ export interface Task {
   parent_reference: string | null
   /** `2` in `ATL-41-2`. Null at the top level. */
   sub_number: number | null
-  column_id: string
-  position: number
+  /** Which column the card is in. Null on a sub-task, which is not on the board. */
+  column_id: string | null
+  /** Where it sits in that column, from the top. Null on a sub-task. */
+  position: number | null
   title: string
   description: string
   type: TaskType
@@ -259,22 +325,38 @@ export interface Task {
   due_date: string | null
   assignee: Person
   status: TaskStatus
+  /** The template this card was created from, if any. Null is unrestricted. */
+  template_id: string | null
+  /** That template's name, so a card reads without the template list beside it. */
+  template_name: string | null
   jira_ref: string | null
   pr_ref: string | null
   waiting_on: Person[]
   comment_count: number
   checklist: ChecklistItem[]
   /**
+   * When this sub-task was ticked off, or null while it is open. Always null on
+   * a card, which is finished by being in the board's last column instead.
+   */
+  finished_at: string | null
+  /**
    * Sub-tasks — cards and tick boxes together — that are neither finished nor
    * cancelled. While this is above zero the card cannot reach the last column.
    */
   open_subtask_count: number
+  /** How many sub-tasks in all, cancelled ones excluded. `total - open` are done. */
+  subtask_count: number
+  /**
+   * Who owns this card's sub-tasks, in sub-number order and each named once.
+   * The board shows these faces because it no longer shows where the work is.
+   */
+  subtask_assignees: Person[]
   created_at: string
 }
 
 export interface TaskDetail extends Task {
   comments: TaskComment[]
-  /** Sub-tasks with a card of their own, in sub-number order. */
+  /** Sub-tasks with a reference of their own, in sub-number order. */
   subtasks: Task[]
 }
 
@@ -289,6 +371,8 @@ export interface TaskInput {
   /** `YYYY-MM-DD`, or null for a card with no date. */
   due_date: string | null
   assignee_id: string
+  /** One of the project's templates, or null for a card with no template. */
+  template_id: string | null
   jira_ref: string | null
   pr_ref: string | null
 }
@@ -576,6 +660,14 @@ export const api = {
       body: body({ column_ids: columnIds }),
     }),
 
+  listTemplates: (ref: string) => request<Template[]>(`/projects/${ref}/templates`),
+  createTemplate: (ref: string, input: TemplateInput) =>
+    request<Template>(`/projects/${ref}/templates`, { method: 'POST', body: body(input) }),
+  updateTemplate: (id: string, input: Partial<TemplateInput>) =>
+    request<Template>(`/templates/${id}`, { method: 'PATCH', body: body(input) }),
+  deleteTemplate: (id: string) =>
+    request<{ ok: boolean }>(`/templates/${id}`, { method: 'DELETE' }),
+
   listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
   /**
@@ -606,6 +698,13 @@ export const api = {
     request<TaskDetail>(`/tasks/${taskRef}/move`, {
       method: 'POST',
       body: body({ column_id: columnId, position }),
+    }),
+  /** Ticks a sub-task off, or puts it back. The only way one is finished:
+   * a sub-task is not on the board, so there is no last column to move it to. */
+  finishTask: (taskRef: string, finished: boolean) =>
+    request<TaskDetail>(`/tasks/${taskRef}/finish`, {
+      method: 'POST',
+      body: body({ finished }),
     }),
   setTaskStatus: (taskRef: string, change: StatusChange) =>
     request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: body(change) }),

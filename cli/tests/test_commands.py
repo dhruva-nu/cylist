@@ -200,6 +200,34 @@ def test_task_new_rejects_a_date_that_is_not_a_date(run: Runner) -> None:
     assert "--due wants a date like 2026-03-31" in result.err
 
 
+def test_task_finish_ticks_a_subtask_off(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("task", "finish", "ATL-2-1")
+    assert result.code == 0
+    assert "Finished ATL-2-1" in result.out
+    assert recorder.body("POST", "/tasks/ATL-2-1/finish") == {"finished": True}
+
+
+def test_task_finish_reopens_one(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("task", "finish", "ATL-2-1", "--reopen")
+    assert result.code == 0
+    assert "Reopened ATL-2-1" in result.out
+    assert recorder.body("POST", "/tasks/ATL-2-1/finish") == {"finished": False}
+
+
+def test_task_show_marks_an_open_subtask(run: Runner) -> None:
+    result = run("task", "show", "ATL-2")
+    assert result.code == 0
+    assert "[ ] ATL-2-1" in result.out
+
+
+def test_task_show_says_whether_a_subtask_is_finished_not_where_it_is(run: Runner) -> None:
+    """A sub-task is in no column, so the row that would name one names this."""
+    result = run("task", "show", "ATL-2-1")
+    assert result.code == 0
+    assert "Finished" in result.out
+    assert "Column" not in result.out
+
+
 def test_task_move_resolves_a_column_name(run: Runner, recorder: fake_api.Recorder) -> None:
     result = run("task", "move", "ATL-2", "--column", "In progress")
     assert result.code == 0

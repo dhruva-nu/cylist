@@ -21,6 +21,7 @@ EXPECTED_TOOLS = {
     "read_task_history",
     "create_task",
     "create_subtask",
+    "finish_subtask",
     "add_checklist_item",
     "set_checklist_item",
     "move_task",
@@ -332,6 +333,22 @@ async def test_a_subtask_is_addressed_by_its_own_reference(server: MCPServer) ->
     result = await call(server, "get_task", task="ATL-2-1")
     assert not result.is_error
     assert result.data["task"]["parent_reference"] == "ATL-2"
+    # Not on the board, which is the one thing that tells it from a card.
+    assert result.data["task"]["column_id"] is None
+
+
+async def test_finish_subtask_ticks_it_off(server: MCPServer, recorder: fake_api.Recorder) -> None:
+    result = await call(server, "finish_subtask", task="ATL-2-1")
+    assert not result.is_error
+    assert result.data["task"]["finished_at"] is not None
+    assert recorder.body("POST", "/tasks/ATL-2-1/finish") == {"finished": True}
+
+
+async def test_finish_subtask_reopens_one(server: MCPServer, recorder: fake_api.Recorder) -> None:
+    result = await call(server, "finish_subtask", task="ATL-2-1", finished=False)
+    assert not result.is_error
+    assert result.data["task"]["finished_at"] is None
+    assert recorder.body("POST", "/tasks/ATL-2-1/finish") == {"finished": False}
 
 
 async def test_add_checklist_item_posts_the_title(

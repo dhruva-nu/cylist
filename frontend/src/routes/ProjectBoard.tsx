@@ -28,6 +28,12 @@
  * space and walked between columns with the arrow keys, which is the same
  * operation through the same code path — see `DRAG_KEYS` and `moveByColumn`.
  *
+ * A card created from a template goes only where that template allows. While
+ * such a card is in the air the columns it cannot be dropped in are greyed
+ * and refuse the drop, so the rule is visible before the server has to state
+ * it — see `forbiddenFor`. The rule itself lives on the server; this is only
+ * the board saying out loud what it already knows.
+ *
  * Any column folds down to a rail, and which ones are folded is remembered per
  * project. A folded column is still a drop target: "Done" is exactly the
  * column you stop looking at and keep moving cards into, and a board that made
@@ -76,6 +82,7 @@ import {
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
+import { TemplateDialog } from '../components/TemplateDialog'
 import {
   Avatar,
   Button,
@@ -222,6 +229,7 @@ export function ProjectBoard() {
   /** The parent a new sub-task is being written under, if one is. */
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
   const [search, setSearch] = useState('')
   /** What is in the air, so the overlay knows what to draw. */
   const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
@@ -244,6 +252,12 @@ export function ProjectBoard() {
     queryKey: ['members', projectKey],
     queryFn: () => api.listMembers(projectKey),
   })
+  // Needed twice over: the New task form offers them, and the board reads the
+  // columns each one allows to know where a card being dragged may be dropped.
+  const templates = useQuery({
+    queryKey: ['templates', projectKey],
+    queryFn: () => api.listTemplates(projectKey),
+  })
 
   const tasksKey = ['tasks', projectKey]
 
@@ -253,6 +267,7 @@ export function ProjectBoard() {
       queryClient.invalidateQueries({ queryKey: tasksKey }),
       queryClient.invalidateQueries({ queryKey: ['task'] }), // every open card's timeline
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: ['templates', projectKey] }),
     ])
   }
 
@@ -337,13 +352,36 @@ export function ProjectBoard() {
   const columns = board.data.columns
   const firstColumn = columns[0]
   const memberList = members.data?.members ?? []
+  const templateList = templates.data ?? []
+
+  /**
+   * The columns a card may not be dropped in, by its template's own stages.
+   *
+   * Empty for a card with no template, and for one whose template has no
+   * stages: silence is not a ban. Empty is also what an unloaded template
+   * list gives, which is the right failure — the board waves the card through
+   * and the server, which is where the rule actually lives, has the last word.
+   */
+  const forbiddenFor = (task: Task | null | undefined): Set<string> => {
+    const template = templateList.find((candidate) => candidate.id === task?.template_id)
+    if (!template || !template.allowed_column_ids.length) return new Set()
+    return new Set(
+      columns
+        .filter((column) => !template.allowed_column_ids.includes(column.id))
+        .map((column) => column.id),
+    )
+  }
 
   // Client-side, over what's already fetched: the board holds every task in
   // memory regardless, and a search endpoint would be a second way to ask a
   // question this data already answers.
   const visibleTasks = filterTasks(tasks.data, parseQuery(tokenize(search)), columns, memberList)
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
-  for (const task of visibleTasks) byColumn.get(task.column_id)?.push(task)
+  // The server sends top-level cards only, so nothing here is column-less; the
+  // check is what makes that a statement rather than an assumption.
+  for (const task of visibleTasks) {
+    if (task.column_id !== null) byColumn.get(task.column_id)?.push(task)
+  }
 
   // A column's own draggable id is prefixed to keep it out of the task id
   // namespace — the two are otherwise both plain UUIDs.
@@ -369,12 +407,22 @@ export function ProjectBoard() {
       `Picked up ${nameOfDragged(active.id)}. Use the left and right arrow keys to choose a column.`,
     onDragOver: ({ active, over }) =>
       over ? `${nameOfDragged(active.id)} is over ${nameOfColumn(over.id)}.` : undefined,
-    onDragEnd: ({ active, over }) =>
-      over
-        ? isColumnDrag(active.id)
-          ? `${nameOfDragged(active.id)} moved next to ${nameOfColumn(over.id)}.`
-          : `Dropped ${nameOfDragged(active.id)} into ${nameOfColumn(over.id)}.`
-        : `${nameOfDragged(active.id)} was left where it was.`,
+    onDragEnd: ({ active, over }) => {
+      if (!over) return `${nameOfDragged(active.id)} was left where it was.`
+      if (isColumnDrag(active.id)) {
+        return `${nameOfDragged(active.id)} moved next to ${nameOfColumn(over.id)}.`
+      }
+      // A refused drop has to be announced as refused. dnd-kit's own wording
+      // is "dropped into", which is the one thing that did not happen.
+      const card = tasks.data?.find((candidate) => candidate.id === active.id)
+      if (typeof over.id === 'string' && forbiddenFor(card).has(over.id)) {
+        return (
+          `${card?.template_name ?? 'This card'} cards do not go to ${nameOfColumn(over.id)}. ` +
+          `${nameOfDragged(active.id)} is back where it was.`
+        )
+      }
+      return `Dropped ${nameOfDragged(active.id)} into ${nameOfColumn(over.id)}.`
+    },
     onDragCancel: ({ active }) => `Cancelled. ${nameOfDragged(active.id)} is back where it was.`,
   }
 
@@ -394,6 +442,9 @@ export function ProjectBoard() {
     dragging !== null && !isColumnDrag(dragging)
       ? (tasks.data?.find((task) => task.id === dragging) ?? null)
       : null
+
+  /** Greyed while a card is in the air, and empty the rest of the time. */
+  const forbidden = forbiddenFor(draggedTask)
 
   function onDragStart(event: DragStartEvent) {
     setDragging(event.active.id)
@@ -419,6 +470,14 @@ export function ProjectBoard() {
     const task = tasks.data?.find((candidate) => candidate.id === event.active.id)
     if (!task || task.column_id === overId) return
 
+    // Refused here as well as by the server: a card that snaps back with an
+    // error banner is how you find out afterwards, and the column already
+    // greyed itself the moment the card was picked up. Said out loud by
+    // `announcements.onDragEnd` rather than here — dnd-kit speaks on every
+    // drop, and two live regions describing one gesture is one of them
+    // talking over the other.
+    if (forbiddenFor(task).has(overId)) return
+
     move.mutate({ taskId: task.id, columnId: overId, position: byColumn.get(overId)?.length ?? 0 })
   }
 
@@ -436,6 +495,10 @@ export function ProjectBoard() {
 
       <div className={styles.toolbar}>
         <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
+        <Button small onClick={() => setTemplatesOpen(true)}>
+          + Templates
+          <span className={styles.hint}>{templateList.length}</span>
+        </Button>
         <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
       </div>
 
@@ -464,6 +527,7 @@ export function ProjectBoard() {
               tasks={byColumn.get(column.id) ?? []}
               isFirst={column.id === firstColumn?.id}
               collapsed={collapsed.includes(column.id)}
+              forbidden={forbidden.has(column.id)}
               onToggleCollapse={() => {
                 toggle(column.id)
                 announce(
@@ -510,12 +574,23 @@ export function ProjectBoard() {
         />
       ) : null}
 
+      {templatesOpen ? (
+        <TemplateDialog
+          projectKey={projectKey}
+          columns={columns}
+          announce={announce}
+          onDone={refresh}
+          onClose={() => setTemplatesOpen(false)}
+        />
+      ) : null}
+
       {creatingTask && firstColumn ? (
         <TaskDialog
           projectKey={projectKey}
           taskId={null}
           columns={columns}
           firstColumn={firstColumn}
+          templates={templateList}
           announce={announce}
           onDone={refresh}
           onClose={() => setCreatingTask(false)}
@@ -532,6 +607,7 @@ export function ProjectBoard() {
           parentRef={splitting}
           columns={columns}
           firstColumn={firstColumn}
+          templates={templateList}
           announce={announce}
           onDone={refresh}
           onClose={() => setSplitting(null)}
@@ -544,6 +620,7 @@ export function ProjectBoard() {
           taskId={openTaskId}
           columns={columns}
           firstColumn={firstColumn}
+          templates={templateList}
           announce={announce}
           onOpenTask={setOpenTaskId}
           onSplit={(parentRef) => {
@@ -659,6 +736,7 @@ function Column({
   tasks,
   isFirst,
   collapsed,
+  forbidden,
   onToggleCollapse,
   onOpenTask,
   onMoveSubStatus,
@@ -670,6 +748,12 @@ function Column({
   tasks: Task[]
   isFirst: boolean
   collapsed: boolean
+  /**
+   * Whether the card currently in the air may not be dropped here — its
+   * template's own stages rule this column out. False the rest of the time,
+   * including while nothing is being dragged.
+   */
+  forbidden: boolean
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
@@ -706,7 +790,10 @@ function Column({
       className={[
         styles.column,
         collapsed && styles.collapsed,
-        isOver && styles.over,
+        // Not `over` when the drop would be refused: highlighting a column the
+        // card cannot land in is the board promising something it will not do.
+        isOver && !forbidden && styles.over,
+        forbidden && styles.forbidden,
         isDragging && styles.columnDragging,
       ]
         .filter(Boolean)
@@ -952,6 +1039,15 @@ function TaskCardBody({
         />
       ) : null}
 
+      {/* Sits happily under the stage bar when there is one. They are drawn as
+          different things because they are different things: the bar is one
+          journey with a position along it, the dots are a set of items with
+          some of them ticked. A second bar would have read as the first one
+          split in half. */}
+      {task.subtask_count ? (
+        <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
+      ) : null}
+
       {task.waiting_on.length ? (
         <div className={styles.waiting}>
           Waiting on{' '}
@@ -968,11 +1064,18 @@ function TaskCardBody({
           {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : null}
           {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : null}
           {task.comment_count ? <span>✎ {task.comment_count}</span> : null}
-          {/* The one number on a card that can stop it moving: while it is
-              above zero the server refuses the last column. */}
-          {task.open_subtask_count ? (
-            <span className={styles.open} title={`${task.open_subtask_count} sub-tasks still open`}>
-              ☑ {task.open_subtask_count}
+          {/* Everyone who owes this card something. The board stopped showing
+              where a sub-task is when it stopped putting one in a column, so
+              this is what it shows instead — the assignee at the other end of
+              the row still being whoever owns the card itself. */}
+          {task.subtask_assignees.length ? (
+            <span
+              className={styles.owners}
+              title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
+            >
+              {task.subtask_assignees.map((person) => (
+                <Avatar key={person.id} name={person.name} colour={person.colour} small />
+              ))}
             </span>
           ) : null}
         </div>
@@ -989,6 +1092,45 @@ function TaskCardBody({
         </span>
       </div>
     </>
+  )
+}
+
+/**
+ * How much of a card exists yet: one dot per sub-task, filled as each is done.
+ *
+ * When a sub-task was a card of its own you could see the split by looking at
+ * the board — three cards in three columns. Nothing on the board says it any
+ * more, so this does.
+ *
+ * Dots rather than a bar, and that is the whole design. A card may carry the
+ * stage bar as well, and the two are not the same kind of fact: a bar is one
+ * journey with a position along it, where the part behind you is finished and
+ * the part ahead is not. Sub-tasks have no order and no position — they are a
+ * set of things, ticked off in whatever order they get done — and drawn as a
+ * second bar they read as the first one split in half. Countable marks say
+ * "some of these" the way a filled track cannot.
+ *
+ * Not a control. Every other mark on a card moves when you click it; these
+ * stand for work that is settled elsewhere, and the way to get at it is to open
+ * the card, which is what clicking anywhere on them already does.
+ */
+function SubtaskDots({ total, open }: { total: number; open: number }) {
+  const done = total - open
+  const label = `${done} of ${total} sub-tasks finished`
+
+  return (
+    // The dots are decoration twice over — they are the label drawn — so the
+    // sentence is what is read out and they are passed over in silence.
+    <div className={styles.dots} title={label}>
+      {Array.from({ length: total }, (_, index) => (
+        <span
+          key={index}
+          aria-hidden="true"
+          className={`${styles.dot} ${index < done ? styles.dotDone : ''}`}
+        />
+      ))}
+      <span className="visually-hidden">{label}</span>
+    </div>
   )
 }
 
