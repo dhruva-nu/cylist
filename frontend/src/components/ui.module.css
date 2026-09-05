@@ -258,6 +258,16 @@
   background: var(--ink);
 }
 
+/* The one exception: there is no stage left to be "not yet finished" about
+   once the thumb is on the last one, so it drops the ink and takes the green
+   instead — reaching the end reads as done rather than merely arrived. Two
+   classes on one segment rather than a third colour: this is still the
+   thumb (full height, not the half-height a merely "done" segment gets at
+   rest), just told apart by hue instead of ink. */
+.subStatusHere.subStatusDone::before {
+  background: var(--go);
+}
+
 .subStatusTrackLive .subStatusSegment {
   cursor: pointer;
 }
@@ -278,6 +288,13 @@
 
 .subStatusTrackLive .subStatusHere:hover::before {
   height: 12px;
+}
+
+/* The last stage's thumb keeps its green on hover too, rather than the
+   done-hover darkening — clicking it is still a no-op, not the "move back a
+   stage" gesture that darkening promises elsewhere. */
+.subStatusTrackLive .subStatusHere.subStatusDone:hover::before {
+  background: var(--go);
 }
 
 /*
