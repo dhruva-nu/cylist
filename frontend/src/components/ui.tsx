@@ -2,7 +2,7 @@
 
 import { useCallback, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { Person, PersonKind, TaskPriority, TaskType } from '../api/client'
+import type { Person, PersonKind, TaskPriority, TaskStatus, TaskType } from '../api/client'
 import { splitMentions } from './mentions'
 import styles from './ui.module.css'
 
@@ -355,16 +355,37 @@ export function Avatar({
  * is never dropped, only moved onto the chip around it, which carries it as a
  * tooltip and as text a screen reader still reads out.
  */
-function Glyph({ children }: { children: ReactNode }) {
+function Glyph({
+  children,
+  size = 14,
+  weight = 1.6,
+  filled = false,
+}: {
+  children: ReactNode
+  /** Edge of the square box. 13 in a due chip, 14 on a card, 15 in a type tile. */
+  size?: number
+  /**
+   * Stroke width. 1.6 is the drawing weight of the set; the priority chevrons
+   * take 1.8 because they are two or three hairlines rather than a shape, and
+   * at 1.6 a stack of them turned into a grey smudge at card size.
+   */
+  weight?: number
+  /**
+   * Painted solid rather than drawn in outline. Only the feature spark: it is
+   * the one glyph in the set that is a shape rather than a diagram, and hollow
+   * it read as a fifth kind of outline instead of as the thing that is new.
+   */
+  filled?: boolean
+}) {
   return (
     <svg
       className={styles.glyph}
       viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
+      width={size}
+      height={size}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke={filled ? undefined : 'currentColor'}
+      strokeWidth={filled ? undefined : weight}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -375,10 +396,10 @@ function Glyph({ children }: { children: ReactNode }) {
   )
 }
 
-export function TypeIcon({ type }: { type: TaskType }) {
+export function TypeIcon({ type, size = 14 }: { type: TaskType; size?: number }) {
   if (type === 'bug') {
     return (
-      <Glyph>
+      <Glyph size={size}>
         {/* A shell with legs: the body reads at 14px even when the legs do not. */}
         <path d="M5 6.5a3 3 0 0 1 6 0v3a3 3 0 0 1-6 0Z" />
         <path d="M6 4.2 7 5.4M10 4.2 9 5.4M5 7.2H2.6M11 7.2h2.4M5 10.4H3M11 10.4h2" />
@@ -387,47 +408,180 @@ export function TypeIcon({ type }: { type: TaskType }) {
   }
   if (type === 'chore') {
     return (
-      <Glyph>
+      <Glyph size={size}>
         {/* A spanner: work that has to happen, not work anyone asked for. */}
         <path d="M10.6 2.4a3.4 3.4 0 0 0-3.3 5.7L3 12.4l1.4 1.4 4.3-4.3a3.4 3.4 0 0 0 4.6-4.3l-2 2-1.7-1.7Z" />
       </Glyph>
     )
   }
   return (
-    <Glyph>
+    <Glyph size={size} filled>
       {/* A spark: the one of the three that is new work. */}
       <path d="M8 2.2 9.4 6.6 13.8 8 9.4 9.4 8 13.8 6.6 9.4 2.2 8l4.4-1.4Z" />
     </Glyph>
   )
 }
 
-export function PriorityIcon({ priority }: { priority: TaskPriority }) {
+/**
+ * A task's status, for the tile at the head of a card that is not simply
+ * running. The word itself is never dropped — it stays on the pill beside it —
+ * so this is the same kind of shorthand the type tile is.
+ *
+ * Nothing is drawn for `active`: a card that is just getting on with it wears
+ * its type there instead, which is the more useful of the two facts.
+ */
+export function StatusIcon({ status, size = 14 }: { status: TaskStatus; size?: number }) {
+  if (status === 'hold') {
+    return (
+      <Glyph size={size} weight={1.7}>
+        {/* Two bars: paused, and able to start again. */}
+        <path d="M6.2 4.4v7.2M9.8 4.4v7.2" />
+      </Glyph>
+    )
+  }
+  if (status === 'blocked') {
+    return (
+      <Glyph size={size} weight={1.7}>
+        {/* Barred, not crossed out: something is in the way of this, and the
+            thing in the way is somebody else's. */}
+        <circle cx="8" cy="8" r="5.4" />
+        <path d="M4.2 4.2 11.8 11.8" />
+      </Glyph>
+    )
+  }
+  return (
+    <Glyph size={size} weight={1.7}>
+      {/* A cross: not going to happen. */}
+      <path d="M4.6 4.6 11.4 11.4M11.4 4.6 4.6 11.4" />
+    </Glyph>
+  )
+}
+
+export function PriorityIcon({ priority, size = 14 }: { priority: TaskPriority; size?: number }) {
   // One shape rotated through four positions, so the four values read as one
   // scale: two chevrons up, one up, level, one down.
   if (priority === 'urgent') {
     return (
-      <Glyph>
+      <Glyph size={size} weight={1.8}>
         <path d="M3.5 8.5 8 4l4.5 4.5M3.5 12 8 7.5l4.5 4.5" />
       </Glyph>
     )
   }
   if (priority === 'asap') {
     return (
-      <Glyph>
+      <Glyph size={size} weight={1.8}>
         <path d="M3.5 10.2 8 5.8l4.5 4.4" />
       </Glyph>
     )
   }
   if (priority === 'week') {
     return (
-      <Glyph>
+      <Glyph size={size} weight={1.8}>
         <path d="M3.5 6.4h9M3.5 9.6h9" />
       </Glyph>
     )
   }
   return (
-    <Glyph>
+    <Glyph size={size} weight={1.8}>
       <path d="M3.5 5.8 8 10.2l4.5-4.4" />
+    </Glyph>
+  )
+}
+
+/**
+ * The rest of the card's shorthand, drawn in the same hand as the type and
+ * priority marks above.
+ *
+ * These five were typed characters until now — `✎ ☑ ⌷ ⎇ ⚠` picked out of the
+ * font because they were to hand. A dingbat is at the mercy of whatever font
+ * has it: the four rendered at four different weights and three different
+ * heights on the same row, and `⌷` and `⎇` are missing often enough to show
+ * as a box. Drawn, they line up with the glyphs already on the card and sit on
+ * the baseline the row gives them.
+ */
+
+/** How much has been said about this card. */
+export function CommentIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <path d="M13.2 9.6a1.9 1.9 0 0 1-1.9 1.9H5.7L3 13.9V4.7a1.9 1.9 0 0 1 1.9-1.9h6.4a1.9 1.9 0 0 1 1.9 1.9Z" />
+    </Glyph>
+  )
+}
+
+/**
+ * A list with things ticked off it.
+ *
+ * Not on a board card, where a set of sub-tasks is drawn as the dots that
+ * count them rather than as an icon and a fraction — see `SubtaskDots` on the
+ * board. This is the mark for the places that name the list instead.
+ */
+export function ChecklistIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <path d="M3 4.6 4.3 5.9 6.6 3.6M3 11 4.3 12.3 6.6 10M8.6 4.8h4.4M8.6 11.2h4.4" />
+    </Glyph>
+  )
+}
+
+/** Jira's four-diamond mark, near enough to be recognised at 14px. */
+function JiraIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <path d="M8 2.4 13.6 8 8 13.6 2.4 8Z" />
+      <path d="M8 5.6 10.4 8 8 10.4 5.6 8Z" />
+    </Glyph>
+  )
+}
+
+/** A branch rejoining its trunk: the shape every forge draws a PR as. */
+function PrIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <circle cx="4.7" cy="4" r="1.7" />
+      <circle cx="4.7" cy="12" r="1.7" />
+      <circle cx="11.3" cy="12" r="1.7" />
+      <path d="M4.7 5.7v4.6M11.3 10.3V8.4a2.1 2.1 0 0 0-2.1-2.1H6.4" />
+    </Glyph>
+  )
+}
+
+/** A date that is simply a date. */
+export function CalendarIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <rect x="2.6" y="3.9" width="10.8" height="9.5" rx="1.9" />
+      <path d="M2.6 7h10.8M5.6 2.5v2.6M10.4 2.5v2.6" />
+    </Glyph>
+  )
+}
+
+/** A date that has come round: the calendar, with the day running out of it. */
+export function ClockIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <circle cx="8" cy="8" r="5.4" />
+      <path d="M8 4.9v3.3l2.2 1.3" />
+    </Glyph>
+  )
+}
+
+/** A date that has gone. */
+export function AlertIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <path d="M8 2.9 14.2 13.4H1.8Z" />
+      <path d="M8 6.8v2.6" />
+      <circle cx="8" cy="11.4" r="0.75" fill="currentColor" stroke="none" />
+    </Glyph>
+  )
+}
+
+/** Add one of whatever the control is next to. */
+export function PlusIcon({ size = 14 }: { size?: number }) {
+  return (
+    <Glyph size={size} weight={1.8}>
+      <path d="M8 3.6v8.8M3.6 8h8.8" />
     </Glyph>
   )
 }
@@ -499,19 +653,20 @@ export function LiveRegion({ message }: { message: string }) {
  */
 export function TaskRef({ kind, value }: { kind: 'jira' | 'pr'; value: string }) {
   const { label, href } = kind === 'jira' ? jiraRef(value) : prRef(value)
-  const icon = kind === 'jira' ? '\u2337' : '\u2387'
+  const icon = kind === 'jira' ? <JiraIcon /> : <PrIcon />
 
   if (!href) {
     return (
-      <span>
-        {icon} {label}
+      <span className={styles.refMark}>
+        {icon}
+        <span className={styles.refLabel}>{label}</span>
       </span>
     )
   }
 
   return (
     <a
-      className={styles.taskRef}
+      className={`${styles.refMark} ${styles.taskRef}`}
       href={href}
       target="_blank"
       rel="noreferrer"
@@ -523,7 +678,8 @@ export function TaskRef({ kind, value }: { kind: 'jira' | 'pr'; value: string })
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      {icon} {label}
+      {icon}
+      <span className={styles.refLabel}>{label}</span>
     </a>
   )
 }

@@ -451,13 +451,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The card's own reference and its parent's, together at the head of the card.
-   Sub-tasks are the only cards with two, so the pair only ever appears where
-   it means something. */
+/* The type tile, the card's own reference and its parent's, together at the
+   head of the card. Sub-tasks are the only cards with two references, so the
+   pair only ever appears where it means something.
+
+   Centred rather than sat on a baseline: a 24px tile has no baseline to share
+   with the two lines of type beside it. */
 .refs {
   display: flex;
-  gap: 6px;
-  align-items: baseline;
+  gap: 8px;
+  align-items: center;
   min-width: 0;
 }
 
@@ -479,35 +482,61 @@
   line-height: 1.35;
 }
 
-.chip {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 1px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--paper);
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 600;
+/* What kind of card this is, at the head of it.
+
+   A tinted tile rather than an outlined chip. The type is the one mark that is
+   on every card in the same place, which makes it what the eye actually uses
+   to find a card again in a column — and a hairline box in the row's own ink
+   was not a thing you could find at a glance. The tint carries the meaning and
+   the glyph confirms it, so neither has to do the job alone.
+
+   Square-ish and soft-cornered, not a pill: a pill is what this file uses for
+   something with a word in it, and there is no word in here. */
+.tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
 }
 
-/* An icon-only chip: square-ish padding, since there is no text to sit beside
-   and a pill's side padding would leave the glyph adrift in it. */
-.icon {
-  padding: 3px 6px;
-}
-
-.type_feature {
+.tile_feature {
+  background: var(--ok-soft);
   color: var(--go);
 }
 
-.type_bug {
+.tile_bug {
+  background: var(--blocked-soft);
   color: var(--blocked);
 }
 
-.type_chore {
+/* Grey stays grey. A chore is the one of the three that is nobody's idea, and
+   giving it a hue of its own would be inventing a fourth thing to learn. */
+.tile_chore {
+  background: var(--line);
   color: var(--ink-2);
+}
+
+/* Held, blocked or given up: the tile carries the status instead of the type,
+   and takes --paper for its ground because the card behind it is already
+   tinted with the same hue — see .pill, which is paper-backed for the reason. */
+.tile_hold,
+.tile_blocked,
+.tile_cancelled {
+  background: var(--paper);
+}
+
+.tile_hold {
+  color: var(--hold);
+}
+
+.tile_blocked {
+  color: var(--blocked);
+}
+
+.tile_cancelled {
+  color: var(--ink-3);
 }
 
 /* The type/status chip's neighbour on the right of a card, and the priority
@@ -519,7 +548,24 @@
   align-items: center;
 }
 
+/* The priority mark. No box by default: three of the four levels are the
+   glyph and nothing else, so the one that does get a box is unmistakably the
+   one that got it. The 2px of side padding is there only to stop the glyph
+   touching the mark next to it. */
+.prio {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 3px 2px;
+}
+
+/* The only level that gets a fill. Its ground is --blocked-soft rather than a
+   wash of its own: urgent and overdue are the two things on a card that mean
+   drop what you are doing, and they are meant to read as the same alarm. */
 .priority_urgent {
+  padding: 3px 7px;
+  border-radius: var(--radius-control);
+  background: var(--blocked-soft);
   color: var(--priority-urgent);
 }
 
@@ -529,6 +575,27 @@
 
 .priority_week {
   color: var(--priority-week);
+}
+
+.priority_someday {
+  color: var(--priority-someday);
+}
+
+/* The two pills that carry a wash of their own, on the two cards that are
+   already washed in it.
+
+   An urgent card that is also blocked drew --blocked-soft on --blocked-soft,
+   and a card due today that is on hold drew --hold-soft on --hold-soft: in
+   both cases the pill kept its ink and lost its shape entirely. --paper, for
+   the same reason .pill below takes it — the card is carrying the colour, so
+   what sits on top of it has to be the thing that is not. */
+.hold .priority_urgent,
+.blocked .priority_urgent,
+.hold .dueLate,
+.blocked .dueLate,
+.hold .dueToday,
+.blocked .dueToday {
+  background: var(--paper);
 }
 
 /* Deliberately paper-backed rather than tinted: the card behind it is already
@@ -568,14 +635,30 @@
   font-weight: 600;
 }
 
+/* The card's small print: a set of counts, each a drawn mark and a number.
+   10px rather than 8px between them, because every item is now an icon plus a
+   figure and at 8px two neighbouring items ran together into one. */
 .links {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 
   /* Tinted cards again — see .reference. */
   color: var(--ink-2);
   font-size: 12px;
+}
+
+/* One count in that row. */
+.meta {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.metaValue {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Everyone who owes this card something, overlapped into one mark. The ring is
@@ -593,31 +676,36 @@
 
 /* One dot per sub-task, filled as each is finished.
 
-   Round, small and countable, because the stage bar directly above may be
+   Round, small and countable, because the stage bar further up the card may be
    drawing the other kind of progress and the two must not be mistaken for one
    another: that bar spans the card and fills left to right, so anything else
    that spanned and filled would read as more of it. Dots span nothing — they
    are a handful of marks, which is what a set of sub-tasks is.
 
-   Wrapping rather than shrinking or scrolling: a card split into more pieces
-   than fit on a line is telling you something, and the honest way to show it is
-   a second line of dots. */
+   No wrapping any more, because there is nothing left to wrap: the row is
+   capped at six and says `+n` for the rest. It shares a line with the other
+   counts now, and a set that could grow to two lines would push that line's
+   neighbours around every time a card was split again. */
 .dots {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
   gap: 5px;
   align-items: center;
 }
 
-/* Ringed rather than filled grey, so an unfinished dot reads as an empty slot
-   waiting for its green rather than as a fourth status colour. --line-2, not
-   --line: this rides on cards tinted amber and red, where the faintest rule
-   disappears into the tint. */
+/* Ringed rather than filled grey, so an unfinished dot reads as a slot waiting
+   for its green rather than as a third colour.
+
+   The ring is --hold, not a rule colour. An open sub-task is the reason a card
+   cannot reach the last column — the server refuses the move and names it —
+   so the mark for one is the same amber every other kind of waiting on this
+   board wears, and it clears the tints a card can take underneath it, which
+   --line-2 did not. */
 .dot {
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid var(--line-2);
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--hold);
   border-radius: 50%;
+  box-sizing: border-box;
 }
 
 /* The same green a finished stage takes, and for the same reason: done is done,
@@ -627,26 +715,98 @@
   background: var(--ok);
 }
 
+/* However many did not fit. Amber like the open dots, because that is what it
+   is standing in for — the finished ones are all drawn. */
+.dotRest {
+  color: var(--hold);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .trailing {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
+/* A due date, drawn as near or as far as it is — five steps, and the same
+   height in all five so that a column of cards keeps one edge down its side.
+   The mark itself never changes size; only its ink, its ground and whether it
+   has a ground at all. */
 .due {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.late {
+/* The two that are asking for something get a filled pill. Past its date and
+   due today are the only states where the date is a thing to do rather than a
+   thing to know, and the fill is what separates the two kinds. */
+.dueLate,
+.dueToday {
+  padding: 2px 8px 2px 6px;
+  border-radius: var(--radius-control);
+  font-size: 11px;
+}
+
+/* --blocked-soft on --blocked, the same pairing the urgent priority takes.
+   Overdue and urgent are meant to read as one alarm rather than two. */
+.dueLate {
+  background: var(--blocked-soft);
   color: var(--blocked);
-  font-weight: 600;
 }
 
+.dueToday {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+/* Amber ink and no fill: worth knowing, not worth shouting. */
+.dueTomorrow {
+  color: var(--hold);
+}
+
+/* From here out the mark is only reporting, so it stops using words and shows
+   the date. Two steps of ink rather than one: inside the week is something you
+   are working towards, past it is something you have merely been told. */
+.dueSoon {
+  color: var(--ink-2);
+}
+
+.dueLater {
+  color: var(--ink-3);
+}
+
+/* The words in the near states are set in the UI face; the dates in the far
+   ones are figures, and are set as figures. */
+.dueSoon .dueText,
+.dueLater .dueText {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* The slot the next card goes in, drawn as a slot: a dashed outline at the
+   card's own width and corner radius, sitting where the card will sit. It was
+   a line of text under the column, which is a link to somewhere rather than a
+   space to fill.
+
+   The margin matches `.cards`' side padding, so the outline lines up with the
+   cards above it rather than with the column's edge. */
 .addTask {
-  padding: 8px 18px 14px;
-  border: 0;
-  border-radius: 0 0 16px 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 12px 12px;
+  padding: 9px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
@@ -656,7 +816,25 @@
   cursor: pointer;
 }
 
+/* The plus, in the same tile the type marks use at the head of a card — a
+   little smaller, because this one is a control rather than a label. */
+.addTaskMark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--paper-2);
+  color: var(--ink-3);
+}
+
 .addTask:hover {
+  border-color: var(--go);
+  color: var(--go);
+}
+
+.addTask:hover .addTaskMark {
   color: var(--go);
 }
 

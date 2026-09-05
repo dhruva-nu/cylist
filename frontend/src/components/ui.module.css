@@ -362,15 +362,35 @@
   font-size: 11px;
 }
 
+/* A drawn mark and the identifier beside it. The mark takes the row's colour;
+   only the identifier is set in mono, because it is the part that is a code. */
+.refMark {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.refLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Underlined, not just tinted: this sits in a row of plain counts on a card
    that may be tinted amber or red, and --link is not far enough from --ink-2
-   there to be the only thing saying which one you can follow. */
+   there to be the only thing saying which one you can follow.
+
+   The underline is on the label rather than the whole mark: run under the icon
+   too it turns into a rule with a drawing sitting on it. */
 .taskRef {
   color: var(--link);
+  white-space: nowrap;
+}
+
+.taskRef .refLabel {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
-  white-space: nowrap;
 }
 
 /* The type and priority glyphs. `block` so the line box around them does not
