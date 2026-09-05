@@ -1,12 +1,12 @@
 /**
- * A project's four areas.
+ * A project's five areas.
  *
- * All four are live: the board, the file store, the vault and the people on
- * the project, each summarised by the counts behind its card.
+ * All five are live: the board, its goals, the file store, the vault and the
+ * people on the project, each summarised by the counts behind its card.
  *
- * The day report sits beside the title rather than becoming a fifth card. The
- * four cards are places you go and stay; a report is something you take away,
- * so it opens over the hub and closes again.
+ * The day report sits beside the title rather than becoming a sixth card. The
+ * cards are places you go and stay; a report is something you take away, so it
+ * opens over the hub and closes again.
  */
 
 import { useQuery } from '@tanstack/react-query'
@@ -36,6 +36,13 @@ const ICONS = {
       <rect x="4" y="10" width="16" height="10" rx="2" />
       <path d="M8 10V7a4 4 0 0 1 8 0v3" />
       <circle cx="12" cy="15" r="1.3" />
+    </svg>
+  ),
+  goals: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
     </svg>
   ),
   people: (
@@ -120,6 +127,23 @@ export function ProjectHub() {
         </Tool>
 
         <Tool
+          icon={ICONS.goals}
+          title="Goals"
+          to="/p/$projectKey/goals"
+          projectKey={projectKey}
+          meta={
+            <>
+              <span>
+                {project.goal_count} {project.goal_count === 1 ? 'goal' : 'goals'}
+              </span>
+              {project.open_goal_count ? <span>{project.open_goal_count} open</span> : null}
+            </>
+          }
+        >
+          The epics a card is written under. Each has a colour, and its cards wear it on the board.
+        </Tool>
+
+        <Tool
           icon={ICONS.files}
           title="Files"
           to="/p/$projectKey/files"
@@ -177,6 +201,7 @@ function Tool({
   meta?: ReactNode
   to?:
     | '/p/$projectKey/board'
+    | '/p/$projectKey/goals'
     | '/p/$projectKey/files'
     | '/p/$projectKey/vault'
     | '/p/$projectKey/people'

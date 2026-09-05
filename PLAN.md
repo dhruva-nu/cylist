@@ -77,7 +77,8 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | `person` | `name`, `kind` (`team`/`client`), `role`, `responsibilities`, `email`, `color` | **Global directory** — a client can appear in several projects |
 | `project_member` | `project_id`, `person_id`, PK(both) | membership; assignee/tag pickers read from this |
 | `board_column` | `project_id`, `name`, `description`, `position` | `CHECK` + service rule: 2 ≤ count ≤ 8; first column (`position=0`) is where new tasks land |
-| `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `jira_ref`, `pr_ref` | required fields enforced in schema |
+| `goal` | `project_id`, `number` (per-project sequence → ATL-G1), `name`, `description`, `colour`, `status` (`open`/`achieved`/`dropped`), `achieved_at`, `target_date`, `owner_id`→person | an epic. Unique name per project; progress is counted from its cards, never stored |
+| `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards |
 | `task_waiting_on` | `task_id`, `person_id` | people tagged on the *current* hold/block; cleared when status returns to active |
 | `task_comment` | `task_id`, `author_id` (person, nullable for agents), `body`, `kind` (`comment`/`status_change`), `meta jsonb` (`{from,to,reason,tagged:[…]}`) | status changes are comments — one timeline |
 | `folder` | `project_id`, `parent_id` (nullable), `name` | adjacency list; path built in API |
@@ -113,6 +114,9 @@ GET|POST        /projects/{id}/columns        POST 409 if 8 already
 PATCH|DELETE    /columns/{id}                 DELETE 409 if tasks present or would drop below 2
 PUT             /projects/{id}/columns/order
 
+GET|POST        /projects/{id}/goals          ?open_only= leaves out settled ones
+GET|PATCH|DELETE/goals/{ref}                  ATL-G1; PATCH status=achieved 422s over open cards
+
 GET|POST        /projects/{id}/tasks          POST always lands in first column
 GET|PATCH|DELETE/tasks/{id}
 POST            /tasks/{id}/move              {column_id, position}
@@ -142,7 +146,7 @@ Business rules live in `services/`, not routers, so MCP tools can call them dire
 
 ## 6. Frontend
 
-- Routes: `/` · `/p/:key` · `/p/:key/board` · `/p/:key/files/*` · `/p/:key/vault` · `/p/:key/people`.
+- Routes: `/` · `/p/:key` · `/p/:key/board` · `/p/:key/goals` · `/p/:key/goals/:ref` · `/p/:key/files/*` · `/p/:key/vault` · `/p/:key/people`.
 - Port the mock's CSS tokens and components 1:1 (Figtree / Source Sans 3 / IBM Plex Mono, warm ground, yellow brand, green go-button, status tints).
 - Board: `@dnd-kit` for cross-column drag; optimistic move via TanStack Query mutation; "+ Add a task" only under first column; column cap UI as in mock.
 - Task dialog: status segmented control → reason textarea + "waiting on" person chips, both required-when-not-active, mirrored server-side.
@@ -195,3 +199,7 @@ These came up while implementing and are worth knowing:
 11. **Only the vault's secret *value* is encrypted** (AES-256-GCM, fresh nonce per write, bound to its node with GCM associated data). Username, URL and notes stay searchable.
 12. **Blobs are content-addressed by SHA-256**, so two uploads of identical bytes share one file on disk.
 13. **`/activity` takes a project key**, like every other project-scoped path — added after the CLI and MCP server both had to resolve a key to an id first.
+14. **A goal takes the card's left-hand rail.** The rail used to be the status — green, amber, red, grey. A card on a goal now wears the goal's colour there instead, and only a card on no goal falls back to the status colours. Status was already on the card three times over (the tint, the icon tile, the word on the pill); a goal had nowhere else on a board to be.
+15. **A card belongs to at most one goal**, and a sub-task to none of its own — its card is what belongs to the goal. Both are check constraints rather than conventions: one colour on one rail, and one honest answer to "what is left on this goal".
+16. **A goal's progress is never stored.** It is counted from its cards on every read. A percentage kept beside them is a number that can disagree with them.
+17. **A goal cannot be marked achieved while a card on it is open** — the same shape as the rule that keeps a card out of the last column with a sub-task outstanding, and the refusal names what is holding it open. Dropping a goal carries no such rule.

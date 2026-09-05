@@ -60,17 +60,16 @@ import {
   type UniqueIdentifier,
 } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useParams, useSearch } from '@tanstack/react-router'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   api,
   type Board,
   type BoardColumn,
   type ColumnInput,
+  type Goal,
   type Person,
   type Task,
-  type TaskPriority,
-  type TaskType,
 } from '../api/client'
 import {
   activeToken,
@@ -81,6 +80,8 @@ import {
   tokenize,
   type Suggestion,
 } from './boardSearch'
+import { dueBucket, formatDue, formatDueLong } from '../components/dates'
+import { GoalChip } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
@@ -95,7 +96,6 @@ import {
   EmptyState,
   ErrorBanner,
   LiveRegion,
-  PlusIcon,
   PriorityIcon,
   StatusIcon,
   SubStatusBar,
@@ -184,52 +184,107 @@ const moveByColumn: KeyboardCoordinateGetter = (event, { context, currentCoordin
 }
 
 /**
- * Which columns are folded, remembered per project.
+ * What is folded away, remembered per project.
  *
- * Per project rather than per board-wide: folding "Done" away on one project
- * says nothing about what you want to see on another. localStorage is wrapped
- * because reading it throws outright in a private window, and a board that
- * will not render is a worse outcome than one that forgets a preference.
+ * Two things fold on this board — a column, and, in lanes, a goal — and they
+ * are the same list of ids under two storage keys. Per project rather than
+ * board-wide: folding "Done" away on one project says nothing about what you
+ * want to see on another. localStorage is wrapped because reading it throws
+ * outright in a private window, and a board that will not render is a worse
+ * outcome than one that forgets a preference.
  */
-function collapsedKey(projectKey: string): string {
-  return `cylist.board.collapsed.${projectKey}`
-}
-
-function readCollapsed(projectKey: string): string[] {
+function readFolded(storageKey: string): string[] {
   try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(collapsedKey(projectKey)) ?? '')
+    const stored: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '')
     return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
   } catch {
     return []
   }
 }
 
-function useCollapsedColumns(projectKey: string) {
-  const [collapsed, setCollapsed] = useState<string[]>(() => readCollapsed(projectKey))
+function useFolded(storageKey: string) {
+  const [folded, setFolded] = useState<string[]>(() => readFolded(storageKey))
 
-  // Keyed on the project, so walking from one board to another picks up that
-  // board's folds instead of carrying the last one's across.
-  useEffect(() => setCollapsed(readCollapsed(projectKey)), [projectKey])
+  // Keyed on the storage key — which carries the project — so walking from one
+  // board to another picks up that board's folds instead of carrying the last
+  // one's across.
+  useEffect(() => setFolded(readFolded(storageKey)), [storageKey])
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(collapsedKey(projectKey), JSON.stringify(collapsed))
+      window.localStorage.setItem(storageKey, JSON.stringify(folded))
     } catch {
       // The fold still holds for this visit; it just will not be remembered.
     }
-  }, [projectKey, collapsed])
+  }, [storageKey, folded])
 
-  const toggle = useCallback((columnId: string) => {
-    setCollapsed((current) =>
-      current.includes(columnId) ? current.filter((id) => id !== columnId) : [...current, columnId],
+  const toggle = useCallback((id: string) => {
+    setFolded((current) =>
+      current.includes(id) ? current.filter((one) => one !== id) : [...current, id],
     )
   }, [])
 
-  return { collapsed, toggle }
+  return { folded, setFolded, toggle }
+}
+
+/**
+ * Whether the board is split into one lane per goal, remembered per project.
+ *
+ * Kept the way the folded columns are, and for the same reason: how you look
+ * at one board says nothing about how you want to look at another, and a
+ * preference nobody can save is a smaller problem than a board that will not
+ * render — see `readFolded`.
+ */
+function useLaneMode(projectKey: string) {
+  const key = `cylist.board.lanes.${projectKey}`
+  const read = useCallback(() => {
+    try {
+      return window.localStorage.getItem(`cylist.board.lanes.${projectKey}`) === 'true'
+    } catch {
+      return false
+    }
+  }, [projectKey])
+
+  const [grouped, setGrouped] = useState<boolean>(read)
+
+  useEffect(() => setGrouped(read()), [projectKey, read])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, String(grouped))
+    } catch {
+      // The grouping still holds for this visit; it just is not remembered.
+    }
+  }, [key, grouped])
+
+  return { grouped, setGrouped }
+}
+
+/**
+ * The lane a card is in, as a string a drop target can be named after.
+ *
+ * A card on no goal is in a lane too — the one everything unclassified falls
+ * into — so the absence needs a name of its own rather than a null that
+ * cannot be part of an id.
+ */
+const NO_GOAL_LANE = 'none'
+
+/** A drop target's column, whichever kind of target it is. */
+function columnIdOf(over: string): string {
+  const separator = over.indexOf('::')
+  return separator === -1 ? over : over.slice(separator + 2)
+}
+
+/** The lane a drop target belongs to, or null when it is not in a lane. */
+function laneKeyOf(over: string): string | null {
+  if (!over.startsWith('lane:')) return null
+  const separator = over.indexOf('::')
+  return separator === -1 ? null : over.slice('lane:'.length, separator)
 }
 
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
+  const { q: initialQuery = '' } = useSearch({ from: '/p/$projectKey/board' })
   const queryClient = useQueryClient()
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
@@ -238,11 +293,37 @@ export function ProjectBoard() {
   const [splitting, setSplitting] = useState<string | null>(null)
   const [columnDialog, setColumnDialog] = useState<BoardColumn | 'new' | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
-  const [search, setSearch] = useState('')
+  // Seeded from `?q=`, which is how a goal's page hands the board its own
+  // cards. Read once: after that the box is the reader's, and rewriting it
+  // from the URL on every render would take the cursor with it.
+  const [search, setSearch] = useState(() => initialQuery)
+  /** The goal a card written from a lane starts on. */
+  const [composingOn, setComposingOn] = useState<string | null>(null)
   /** What is in the air, so the overlay knows what to draw. */
   const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
   const boardRef = useRef<HTMLDivElement>(null)
-  const { collapsed, toggle } = useCollapsedColumns(projectKey)
+  const { folded: collapsed, toggle } = useFolded(`cylist.board.collapsed.${projectKey}`)
+  /**
+   * Which lanes are folded away, when the board is in lanes.
+   *
+   * The same fold a column has, turned ninety degrees: a board split by goal
+   * is as tall as the sum of its goals, and the goal you are not working on
+   * this week is a screen of scrolling between the two you are. A folded lane
+   * keeps its heading — the name and the count are the part you still need —
+   * and drops its row of cells.
+   *
+   * A folded lane is not a drop target, which is the one way it differs from a
+   * folded column. A column keeps a rail you can drop onto because a card put
+   * into "Done" is still a card put somewhere definite; a lane's cells are one
+   * goal's share of every column at once, and there is no single place a card
+   * dropped on a folded lane could honestly land.
+   */
+  const {
+    folded: foldedLanes,
+    setFolded: setFoldedLanes,
+    toggle: toggleLane,
+  } = useFolded(`cylist.board.lanes.folded.${projectKey}`)
+  const { grouped, setGrouped } = useLaneMode(projectKey)
   const { message, announce } = useAnnouncer()
 
   const board = useQuery({
@@ -266,6 +347,14 @@ export function ProjectBoard() {
     queryKey: ['templates', projectKey],
     queryFn: () => api.listTemplates(projectKey),
   })
+  // Needed for the `goal:` tag and its autocomplete, for the picker on the
+  // card form, and for the lanes — which draw a lane per open goal whether or
+  // not anything has been written under it yet, since an empty lane is where
+  // the first card on a goal gets dropped.
+  const goals = useQuery({
+    queryKey: ['goals', projectKey],
+    queryFn: () => api.listGoals(projectKey),
+  })
 
   const tasksKey = ['tasks', projectKey]
 
@@ -276,17 +365,48 @@ export function ProjectBoard() {
       queryClient.invalidateQueries({ queryKey: ['task'] }), // every open card's timeline
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['templates', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: ['goals', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: ['goal'] }),
     ])
   }
 
-  const move = useMutation<Task, Error, Move, { previous: Task[] | undefined }>({
-    mutationFn: ({ taskId, columnId, position }) => api.moveTask(taskId, columnId, position),
-    onMutate: async ({ taskId, columnId, position }) => {
+  /**
+   * Where a dropped card lands: a column, and — when the board is in lanes —
+   * the goal of the lane it was dropped into.
+   *
+   * One mutation rather than two because it is one gesture. Dragging a card
+   * across into another goal's lane is how a card is put on a goal without
+   * opening it, and a version of that which moved the card first and linked it
+   * a moment later would show the reader two things happening where they did
+   * one.
+   */
+  const move = useMutation<Task | null, Error, Move, { previous: Task[] | undefined }>({
+    mutationFn: async ({ taskId, taskRef, columnId, position, goalId }) => {
+      const moved = columnId ? await api.moveTask(taskId, columnId, position) : null
+      // By reference rather than by id for the same reason the dialog does:
+      // it is what the error message will name if the server refuses.
+      return goalId === undefined ? moved : api.updateTask(taskRef, { goal_id: goalId })
+    },
+    onMutate: async ({ taskId, columnId, position, goalId }) => {
       await queryClient.cancelQueries({ queryKey: tasksKey })
       const previous = queryClient.getQueryData<Task[]>(tasksKey)
+      const landed = goalId === undefined ? null : (goals.data ?? []).find((g) => g.id === goalId)
       queryClient.setQueryData<Task[]>(tasksKey, (current) =>
         current?.map((task) =>
-          task.id === taskId ? { ...task, column_id: columnId, position } : task,
+          task.id === taskId
+            ? {
+                ...task,
+                ...(columnId ? { column_id: columnId, position } : {}),
+                ...(goalId === undefined
+                  ? {}
+                  : {
+                      goal_id: goalId,
+                      goal_name: landed?.name ?? null,
+                      goal_colour: landed?.colour ?? null,
+                      goal_reference: landed?.reference ?? null,
+                    }),
+              }
+            : task,
         ),
       )
       return { previous }
@@ -391,6 +511,41 @@ export function ProjectBoard() {
     if (task.column_id !== null) byColumn.get(task.column_id)?.push(task)
   }
 
+  const goalList = goals.data ?? []
+  /**
+   * Whether to draw the lanes yet.
+   *
+   * Not until the goals are in: every card would fall into the "No goal" lane
+   * for as long as the request took, and the board would visibly re-sort
+   * itself the moment it landed.
+   */
+  const inLanes = grouped && !goals.isPending
+  /**
+   * The lanes to draw, in the goals page's own order, with everything on no
+   * goal at the bottom.
+   *
+   * Every open goal gets a lane whether or not a card is on it yet: an empty
+   * lane is the drop target that puts the first card on a goal. A settled goal
+   * only appears while it still has cards on the board, because a lane for
+   * work that has stopped is a row of nothing that never goes away.
+   */
+  const lanes = [
+    ...goalList
+      .filter(
+        (goal) => goal.status === 'open' || visibleTasks.some((task) => task.goal_id === goal.id),
+      )
+      .map((goal) => ({ key: goal.id, goal })),
+    { key: NO_GOAL_LANE, goal: null },
+  ]
+
+  /** The grid the header row and every lane share, so their columns line up. */
+  const laneTracks = columns
+    .map((column) => (collapsed.includes(column.id) ? '52px' : 'minmax(280px, 400px)'))
+    .join(' ')
+
+  const tasksIn = (laneKey: string, columnId: string) =>
+    (byColumn.get(columnId) ?? []).filter((task) => (task.goal_id ?? NO_GOAL_LANE) === laneKey)
+
   // A column's own draggable id is prefixed to keep it out of the task id
   // namespace — the two are otherwise both plain UUIDs.
   const columnDragPrefix = 'column:'
@@ -404,7 +559,10 @@ export function ProjectBoard() {
   const nameOfColumnId = (id: string) =>
     columns.find((column) => column.id === id)?.name ?? 'the column'
   const nameOfColumn = (id: UniqueIdentifier | undefined) =>
-    typeof id === 'string' ? nameOfColumnId(id) : 'nowhere'
+    // Through `columnIdOf`, because in lanes the target is a lane's cell in a
+    // column rather than the column itself — and "over lane:…::uuid" is not a
+    // sentence anybody wants read to them.
+    typeof id === 'string' ? nameOfColumnId(columnIdOf(id)) : 'nowhere'
 
   // Spoken by dnd-kit's own live region, so a keyboard drag is followed rather
   // than merely performed. Shared between task cards and column handles: both
@@ -454,6 +612,26 @@ export function ProjectBoard() {
   /** Greyed while a card is in the air, and empty the rest of the time. */
   const forbidden = forbiddenFor(draggedTask)
 
+  function onToggleCollapse(column: BoardColumn) {
+    toggle(column.id)
+    announce(
+      collapsed.includes(column.id) ? `${column.name} expanded.` : `${column.name} collapsed.`,
+    )
+  }
+
+  function onToggleLane(laneKey: string, name: string) {
+    toggleLane(laneKey)
+    announce(foldedLanes.includes(laneKey) ? `${name} expanded.` : `${name} folded away.`)
+  }
+
+  /** One gesture for the whole board: everything away, or everything back. */
+  const everyLaneFolded = lanes.length > 0 && lanes.every((lane) => foldedLanes.includes(lane.key))
+
+  function onFoldAllLanes() {
+    setFoldedLanes(everyLaneFolded ? [] : lanes.map((lane) => lane.key))
+    announce(everyLaneFolded ? 'Every lane expanded.' : 'Every lane folded away.')
+  }
+
   function onDragStart(event: DragStartEvent) {
     setDragging(event.active.id)
   }
@@ -466,17 +644,20 @@ export function ProjectBoard() {
     const overId = event.over?.id
     if (typeof overId !== 'string') return
 
+    // Every drop target names a column; in lanes it names the lane as well.
+    const droppedIn = columnIdOf(overId)
+
     if (isColumnDrag(event.active.id)) {
       const columnId = String(event.active.id).slice(columnDragPrefix.length)
       moveColumnTo(
         columns.findIndex((column) => column.id === columnId),
-        columns.findIndex((column) => column.id === overId),
+        columns.findIndex((column) => column.id === droppedIn),
       )
       return
     }
 
     const task = tasks.data?.find((candidate) => candidate.id === event.active.id)
-    if (!task || task.column_id === overId) return
+    if (!task) return
 
     // Refused here as well as by the server: a card that snaps back with an
     // error banner is how you find out afterwards, and the column already
@@ -484,9 +665,23 @@ export function ProjectBoard() {
     // `announcements.onDragEnd` rather than here — dnd-kit speaks on every
     // drop, and two live regions describing one gesture is one of them
     // talking over the other.
-    if (forbiddenFor(task).has(overId)) return
+    if (forbiddenFor(task).has(droppedIn)) return
 
-    move.mutate({ taskId: task.id, columnId: overId, position: byColumn.get(overId)?.length ?? 0 })
+    const lane = laneKeyOf(overId)
+    const wasOn = task.goal_id ?? NO_GOAL_LANE
+    const changingGoal = lane !== null && lane !== wasOn
+    const changingColumn = task.column_id !== droppedIn
+    // A card put back where it came from is not a move, and a lane it was
+    // already in is not a change of goal: neither is worth a request.
+    if (!changingColumn && !changingGoal) return
+
+    move.mutate({
+      taskId: task.id,
+      taskRef: task.reference,
+      columnId: changingColumn ? droppedIn : null,
+      position: byColumn.get(droppedIn)?.length ?? 0,
+      ...(changingGoal ? { goalId: lane === NO_GOAL_LANE ? null : lane } : {}),
+    })
   }
 
   return (
@@ -501,13 +696,52 @@ export function ProjectBoard() {
       {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
+      {/* The search takes the row and the buttons sit together at the end of
+          it. They are one group in the markup as well as on the screen: the
+          toolbar used to be a two-cell grid holding a search box and one
+          button, and every button added since had been landing in a row of its
+          own underneath, stretched across the board. */}
       <div className={styles.toolbar}>
-        <SearchBar query={search} onChange={setSearch} columns={columns} members={memberList} />
-        <Button small onClick={() => setTemplatesOpen(true)}>
-          + Templates
-          <span className={styles.hint}>{templateList.length}</span>
-        </Button>
-        <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+        <SearchBar
+          query={search}
+          onChange={setSearch}
+          columns={columns}
+          members={memberList}
+          goals={goalList}
+        />
+        <div className={styles.tools}>
+          {/* A toggle rather than a second page: lanes are the same board read
+              by goal instead of by column, and a board you have to leave to
+              group is one you group once and then stop using. */}
+          <Button
+            small
+            aria-pressed={grouped}
+            className={grouped ? styles.groupedOn : undefined}
+            onClick={() => setGrouped(!grouped)}
+            title="Split the board into one lane per goal"
+          >
+            ▤ Lanes
+            <span className={styles.hint}>{grouped ? 'on' : 'off'}</span>
+          </Button>
+          {/* Only while there are lanes to fold. Off the board, it is a button
+              about nothing. */}
+          {inLanes ? (
+            <Button
+              small
+              onClick={onFoldAllLanes}
+              title={
+                everyLaneFolded ? 'Open every goal back up' : 'Fold every goal down to its heading'
+              }
+            >
+              {everyLaneFolded ? '⌄ Open all' : '⌃ Fold all'}
+            </Button>
+          ) : null}
+          <Button small onClick={() => setTemplatesOpen(true)}>
+            + Templates
+            <span className={styles.hint}>{templateList.length}</span>
+          </Button>
+          <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+        </div>
       </div>
 
       <DndContext
@@ -527,34 +761,104 @@ export function ProjectBoard() {
         onDragEnd={onDragEnd}
         onDragCancel={() => setDragging(null)}
       >
-        <div ref={boardRef} className={styles.board}>
-          {columns.map((column) => (
-            <Column
-              key={column.id}
-              column={column}
-              projectKey={projectKey}
-              tasks={byColumn.get(column.id) ?? []}
-              isFirst={column.id === firstColumn?.id}
-              collapsed={collapsed.includes(column.id)}
-              forbidden={forbidden.has(column.id)}
-              onToggleCollapse={() => {
-                toggle(column.id)
-                announce(
-                  collapsed.includes(column.id)
-                    ? `${column.name} expanded.`
-                    : `${column.name} collapsed.`,
-                )
-              }}
-              onOpenTask={setOpenTaskId}
-              onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
-              onAddTask={() => setCreatingTask(true)}
-              onCreated={refresh}
-              onEdit={() => setColumnDialog(column)}
-              members={memberList}
-              announce={announce}
-            />
-          ))}
-        </div>
+        {inLanes ? (
+          <div ref={boardRef} className={styles.lanes}>
+            {/* The column headings, once, above every lane — with the drag
+                handle and the fold still on them. Repeating them down each
+                lane would say the same five words as many times as there are
+                goals, and put the board's own controls in five places. */}
+            <div className={styles.laneRow} style={{ gridTemplateColumns: laneTracks }}>
+              {columns.map((column) => (
+                <Column
+                  key={column.id}
+                  part="head"
+                  column={column}
+                  tasks={byColumn.get(column.id) ?? []}
+                  isFirst={column.id === firstColumn?.id}
+                  collapsed={collapsed.includes(column.id)}
+                  forbidden={forbidden.has(column.id)}
+                  onToggleCollapse={() => onToggleCollapse(column)}
+                  onOpenTask={setOpenTaskId}
+                  onMoveSubStatus={() => {}}
+                  onAddTask={() => setCreatingTask(true)}
+                  onEdit={() => setColumnDialog(column)}
+                  members={memberList}
+                />
+              ))}
+            </div>
+
+            {lanes.map(({ key, goal }) => {
+              const laneFolded = foldedLanes.includes(key)
+              const name = goal?.name ?? 'No goal'
+              return (
+                <section key={key} className={styles.lane} aria-label={name}>
+                  <LaneHead
+                    goal={goal}
+                    projectKey={projectKey}
+                    count={columns.reduce(
+                      (total, column) => total + tasksIn(key, column.id).length,
+                      0,
+                    )}
+                    folded={laneFolded}
+                    rowId={`lane-${key}`}
+                    onToggleFold={() => onToggleLane(key, name)}
+                    onAdd={() => {
+                      setComposingOn(goal?.id ?? null)
+                      setCreatingTask(true)
+                    }}
+                  />
+                  {laneFolded ? null : (
+                    <div
+                      id={`lane-${key}`}
+                      className={styles.laneRow}
+                      style={{ gridTemplateColumns: laneTracks }}
+                    >
+                      {columns.map((column) => (
+                        <Column
+                          key={column.id}
+                          part="cards"
+                          laneKey={key}
+                          column={column}
+                          tasks={tasksIn(key, column.id)}
+                          isFirst={column.id === firstColumn?.id}
+                          collapsed={collapsed.includes(column.id)}
+                          forbidden={forbidden.has(column.id)}
+                          onToggleCollapse={() => onToggleCollapse(column)}
+                          onOpenTask={setOpenTaskId}
+                          onMoveSubStatus={(taskId, index) =>
+                            moveSubStatus.mutate({ taskId, index })
+                          }
+                          onAddTask={() => setCreatingTask(true)}
+                          onEdit={() => setColumnDialog(column)}
+                          members={memberList}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        ) : (
+          <div ref={boardRef} className={styles.board}>
+            {columns.map((column) => (
+              <Column
+                key={column.id}
+                column={column}
+                tasks={byColumn.get(column.id) ?? []}
+                isFirst={column.id === firstColumn?.id}
+                collapsed={collapsed.includes(column.id)}
+                forbidden={forbidden.has(column.id)}
+                onToggleCollapse={() => onToggleCollapse(column)}
+                onOpenTask={setOpenTaskId}
+                onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
+                onAddTask={() => setCreatingTask(true)}
+                onEdit={() => setColumnDialog(column)}
+                members={memberList}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Outside the board, so the board's own overflow has nothing to say
             about where the card in the air is allowed to be drawn. */}
@@ -567,6 +871,11 @@ export function ProjectBoard() {
               className={[styles.task, styles[draggedTask.status], styles.lifted]
                 .filter(Boolean)
                 .join(' ')}
+              style={
+                draggedTask.goal_colour
+                  ? ({ '--card-rail': draggedTask.goal_colour } as CSSProperties)
+                  : undefined
+              }
             >
               <TaskCardBody task={draggedTask} members={memberList} />
             </article>
@@ -602,9 +911,14 @@ export function ProjectBoard() {
           columns={columns}
           firstColumn={firstColumn}
           templates={templateList}
+          goals={goalList}
+          defaultGoalId={composingOn}
           announce={announce}
           onDone={refresh}
-          onClose={() => setCreatingTask(false)}
+          onClose={() => {
+            setCreatingTask(false)
+            setComposingOn(null)
+          }}
         />
       ) : null}
 
@@ -619,6 +933,7 @@ export function ProjectBoard() {
           columns={columns}
           firstColumn={firstColumn}
           templates={templateList}
+          goals={goalList}
           announce={announce}
           onDone={refresh}
           onClose={() => setSplitting(null)}
@@ -632,6 +947,7 @@ export function ProjectBoard() {
           columns={columns}
           firstColumn={firstColumn}
           templates={templateList}
+          goals={goalList}
           announce={announce}
           onOpenTask={setOpenTaskId}
           onSplit={(parentRef) => {
@@ -658,15 +974,17 @@ function SearchBar({
   onChange,
   columns,
   members,
+  goals,
 }: {
   query: string
   onChange: (query: string) => void
   columns: BoardColumn[]
   members: Person[]
+  goals: Goal[]
 }) {
   const [highlighted, setHighlighted] = useState(0)
   const [dismissed, setDismissed] = useState(false)
-  const suggestions = dismissed ? [] : suggestionsFor(activeToken(query), columns, members)
+  const suggestions = dismissed ? [] : suggestionsFor(activeToken(query), columns, members, goals)
 
   function pick(suggestion: Suggestion) {
     onChange(applySuggestion(query, suggestion))
@@ -701,7 +1019,7 @@ function SearchBar({
             setDismissed(true)
           }
         }}
-        placeholder='Search, or tag it: col:"In progress"  who:Aditi  blk:  hld:'
+        placeholder='Search, or tag it: col:"In progress"  who:Aditi  goal:Search  blk:  hld:'
         aria-label="Search tasks"
         aria-autocomplete="list"
         aria-expanded={suggestions.length > 0}
@@ -723,9 +1041,17 @@ function SearchBar({
                   pick(suggestion)
                 }}
               >
-                <span className={styles.suggestionKind}>
-                  {suggestion.kind === 'column' ? 'Column' : 'Assignee'}
-                </span>
+                <span className={styles.suggestionKind}>{SUGGESTION_KINDS[suggestion.kind]}</span>
+                {/* The goal's own colour beside its name, because that is what
+                    the tag is really selecting: the rail on the cards it is
+                    about to leave on the board. */}
+                {suggestion.colour ? (
+                  <span
+                    className={styles.suggestionDot}
+                    style={{ background: suggestion.colour }}
+                    aria-hidden="true"
+                  />
+                ) : null}
                 {suggestion.value}
               </button>
             </li>
@@ -736,15 +1062,107 @@ function SearchBar({
   )
 }
 
+const SUGGESTION_KINDS: Record<Suggestion['kind'], string> = {
+  column: 'Column',
+  assignee: 'Assignee',
+  goal: 'Goal',
+}
+
 interface Move {
   taskId: string
-  columnId: string
+  /** `ATL-41` — what an error about this card will name it by. */
+  taskRef: string
+  /** Null when the card was dropped in the column it was already in. */
+  columnId: string | null
   position: number
+  /**
+   * The goal to put the card on, or null to take it off the one it is on.
+   * Left out entirely — as opposed to null — when the drop said nothing about
+   * a goal, which is every drop on a board that is not in lanes.
+   */
+  goalId?: string | null
+}
+
+/**
+ * A goal's lane heading: what the lane is, and how much is in it.
+ *
+ * A full-width bar above the lane's cells rather than a label to one side.
+ * A side rail would take 200px off every column on the board for a name that
+ * is read once, and on a board scrolled sideways it would be the first thing
+ * to scroll out of sight — which is the one thing about a lane you always need
+ * to be able to see.
+ */
+function LaneHead({
+  goal,
+  projectKey,
+  count,
+  folded,
+  rowId,
+  onToggleFold,
+  onAdd,
+}: {
+  /** Null for the lane everything on no goal falls into. */
+  goal: Goal | null
+  projectKey: string
+  count: number
+  folded: boolean
+  /** The row this heading opens and closes, for `aria-controls`. */
+  rowId: string
+  onToggleFold: () => void
+  onAdd: () => void
+}) {
+  const name = goal?.name ?? 'No goal'
+
+  return (
+    <div
+      className={`${styles.laneHead} ${goal ? '' : styles.laneHeadLoose}`}
+      style={goal ? ({ '--goal': goal.colour } as CSSProperties) : undefined}
+    >
+      {/* The fold, on the heading rather than beside it: the heading is the
+          whole of a folded lane, and the control that brings it back has to be
+          on the part that is still there. */}
+      <button
+        type="button"
+        className={styles.laneFold}
+        aria-expanded={!folded}
+        aria-controls={rowId}
+        aria-label={folded ? `Open ${name}` : `Fold ${name} away`}
+        title={folded ? `Open ${name}` : `Fold ${name} away`}
+        onClick={onToggleFold}
+      >
+        <span aria-hidden="true">{folded ? '▸' : '▾'}</span>
+      </button>
+      {goal ? (
+        <Link
+          to="/p/$projectKey/goals/$goalRef"
+          params={{ projectKey, goalRef: goal.reference }}
+          className={styles.laneName}
+        >
+          <span className={styles.laneDot} aria-hidden="true" />
+          {goal.name}
+          <span className={styles.laneRef}>{goal.reference}</span>
+        </Link>
+      ) : (
+        <span className={styles.laneName}>
+          <span className={styles.laneDot} aria-hidden="true" />
+          No goal
+        </span>
+      )}
+      <span className={styles.count}>{count}</span>
+      <Button
+        variant="ghost"
+        small
+        onClick={onAdd}
+        aria-label={goal ? `Add a task on ${goal.name}` : 'Add a task on no goal'}
+      >
+        + Task
+      </Button>
+    </div>
+  )
 }
 
 function Column({
   column,
-  projectKey,
   tasks,
   isFirst,
   collapsed,
@@ -753,13 +1171,12 @@ function Column({
   onOpenTask,
   onMoveSubStatus,
   onAddTask,
-  onCreated,
   onEdit,
   members,
-  announce,
+  part = 'all',
+  laneKey,
 }: {
   column: BoardColumn
-  projectKey: string
   tasks: Task[]
   isFirst: boolean
   collapsed: boolean
@@ -772,16 +1189,29 @@ function Column({
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
-  /** The long way round: the whole form, for a column folded away to a rail. */
+  /** Open the whole form, which is where a card is written. */
   onAddTask: () => void
-  /** A card written in the composer has landed; re-read the board. */
-  onCreated: () => Promise<void>
   onEdit: () => void
   /** The project's people, for the `@` tags in a stage label. */
   members: Person[]
-  announce: (message: string) => void
+  /**
+   * Which half of a column this is drawing.
+   *
+   * `all` is the ordinary board: one box with the heading, the cards and the
+   * composer in it. Grouped by goal, the column is split — `head` draws the
+   * heading once above every lane, and `cards` draws one lane's share of the
+   * cards, over and over down the board. Splitting the component rather than
+   * repeating a whole column per lane is what keeps the fold, the reordering
+   * handle and the column's own rules in one place.
+   */
+  part?: 'all' | 'head' | 'cards'
+  /** Which lane this cell belongs to; only a `cards` part has one. */
+  laneKey?: string
 }) {
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
+  // A lane's cell is its own drop target — the lane says which goal, the
+  // column says which column, and a drop reads both off the one id.
+  const dropId = part === 'cards' && laneKey ? `lane:${laneKey}::${column.id}` : column.id
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: dropId })
   // A column is draggable on the whole card (so it visually moves as one
   // piece) but only the handle carries the listeners — otherwise every
   // button in the header would start a drag instead of doing its own job.
@@ -791,12 +1221,18 @@ function Column({
     setNodeRef: setDragRef,
     transform,
     isDragging,
-  } = useDraggable({ id: `column:${column.id}` })
+  } = useDraggable({
+    id: `column:${column.id}`,
+    // A lane's cells are not the column, they are one lane's share of it —
+    // and eight copies of a column all claiming to be draggable is eight
+    // things dnd-kit would have to be told apart by.
+    disabled: part === 'cards',
+  })
   const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
 
   const setRefs = (node: HTMLElement | null) => {
     setDropRef(node)
-    setDragRef(node)
+    if (part !== 'cards') setDragRef(node)
   }
   const dragStyle = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
@@ -808,6 +1244,8 @@ function Column({
       style={dragStyle}
       className={[
         styles.column,
+        part === 'head' && styles.headOnly,
+        part === 'cards' && styles.cardsOnly,
         collapsed && styles.collapsed,
         // Not `over` when the drop would be refused: highlighting a column the
         // card cannot land in is the board promising something it will not do.
@@ -826,7 +1264,15 @@ function Column({
           width has somewhere to travel from — and the keys are what make the
           filling inside it a swap React remounts, so the fade runs each time
           rather than only on the first. */}
-      {collapsed ? (
+      {collapsed && part === 'cards' ? (
+        // A folded column still has a lane's worth of cards in it; what it
+        // does not have is room to draw them. The cell stays as a drop target
+        // so a card can be put into a column that is folded away, which is
+        // exactly what folding one is for.
+        <div key="railcell" className={styles.railCell} aria-hidden="true">
+          {tasks.length ? <span className={styles.count}>{tasks.length}</span> : null}
+        </div>
+      ) : collapsed ? (
         <div key="rail" className={styles.rail}>
           <button
             type="button"
@@ -850,57 +1296,58 @@ function Column({
         </div>
       ) : (
         <div key="open" className={styles.unfolded}>
-          <div className={styles.head}>
-            <div className={styles.headRow}>
-              <button
-                type="button"
-                className={styles.dragHandle}
-                {...attributes}
-                {...listeners}
-                aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
-                title="Drag to reorder"
-              >
-                ⠿
-              </button>
-              <h3>{column.name}</h3>
-              <span className={styles.headActions}>
-                <span className={styles.count}>{tasks.length}</span>
-                <Button
-                  variant="ghost"
-                  small
-                  aria-expanded
-                  aria-label={`Collapse ${column.name}`}
-                  onClick={onToggleCollapse}
+          {part === 'cards' ? null : (
+            <div className={styles.head}>
+              <div className={styles.headRow}>
+                <button
+                  type="button"
+                  className={styles.dragHandle}
+                  {...attributes}
+                  {...listeners}
+                  aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
+                  title="Drag to reorder"
                 >
-                  ‹
-                </Button>
-                <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
-                  ···
-                </Button>
-              </span>
+                  ⠿
+                </button>
+                <h3>{column.name}</h3>
+                <span className={styles.headActions}>
+                  <span className={styles.count}>{tasks.length}</span>
+                  <Button
+                    variant="ghost"
+                    small
+                    aria-expanded
+                    aria-label={`Collapse ${column.name}`}
+                    onClick={onToggleCollapse}
+                  >
+                    ‹
+                  </Button>
+                  <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
+                    ···
+                  </Button>
+                </span>
+              </div>
+              <p>{column.description}</p>
             </div>
-            <p>{column.description}</p>
-          </div>
+          )}
 
-          <div className={styles.cards}>
-            {tasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                members={members}
-                onOpen={() => onOpenTask(task.id)}
-                onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
-              />
-            ))}
-          </div>
+          {part === 'head' ? null : (
+            <div className={styles.cards}>
+              {tasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  members={members}
+                  onOpen={() => onOpenTask(task.id)}
+                  onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+                />
+              ))}
+            </div>
+          )}
 
-          {isFirst ? (
-            <TaskComposer
-              projectKey={projectKey}
-              members={members}
-              announce={announce}
-              onCreated={onCreated}
-            />
+          {isFirst && part === 'all' ? (
+            <button className={styles.addTask} onClick={onAddTask}>
+              + Add a task
+            </button>
           ) : (
             <div className={styles.foot} />
           )}
@@ -961,11 +1408,20 @@ function TaskCard({
         }
         listeners?.onKeyDown?.(event)
       }}
-      aria-label={
-        task.parent_reference
-          ? `${task.reference}: ${task.title}, a sub-task of ${task.parent_reference}`
-          : `${task.reference}: ${task.title}`
-      }
+      aria-label={[
+        `${task.reference}: ${task.title}`,
+        task.parent_reference ? `a sub-task of ${task.parent_reference}` : null,
+        // Said, because the rail that carries it cannot be: a colour down
+        // the edge of a card is the one thing on it a screen reader has no
+        // way to reach.
+        task.goal_name ? `on ${task.goal_name}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ')}
+      // The rail's colour, when the card is on a goal. Read by `.task::before`
+      // through a fallback, so a card on no goal keeps the status colour the
+      // rail has always been — see ProjectBoard.module.css.
+      style={task.goal_colour ? ({ '--card-rail': task.goal_colour } as CSSProperties) : undefined}
       // No transform of its own: while this card is in the air the DragOverlay
       // is the copy that follows the pointer, and this one stays put and dims.
       className={[styles.task, styles[task.status], isDragging && styles.dragging]
@@ -1117,6 +1573,18 @@ function TaskCardBody({
           {task.subtask_count ? (
             <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
           ) : null}
+          {/* The name of the colour on the rail. A rail on its own is a legend
+              you have to have learned; with the name beside it, one card
+              teaches you the rest of the column. Truncated rather than
+              wrapped: it is the last thing on the row and the first that can
+              afford to be cut. */}
+          {task.goal_name && task.goal_colour ? (
+            <GoalChip
+              name={task.goal_name}
+              colour={task.goal_colour}
+              title={`On ${task.goal_name} (${task.goal_reference})`}
+            />
+          ) : null}
         </div>
         <span className={styles.trailing}>
           {/* Everyone who owes this card something, beside the person who owns
@@ -1137,270 +1605,6 @@ function TaskCardBody({
       </div>
     </>
   )
-}
-
-/** The three kinds, in the order the tiles are drawn. */
-const TYPES: TaskType[] = ['feature', 'bug', 'chore']
-
-const PRIORITIES: TaskPriority[] = ['urgent', 'asap', 'week', 'someday']
-
-/**
- * Writing the next card, in the column it is going to land in.
- *
- * At rest this is the slot the card will fill: a dashed outline at the card's
- * own width and radius, sitting exactly where the card will sit. Opened, the
- * outline becomes the card — same width, same corners, on paper — and what you
- * type appears on the line the title will occupy. Nothing moves between the two
- * states except what is inside the box.
- *
- * A form on the board rather than the dialog, because the dialog is the wrong
- * size for the job. Adding a card is a sentence and four small decisions, and
- * every one of the four has a sensible default; a modal that covers the board
- * to ask for a title is a lot of ceremony for a line of text, and it hides the
- * column you are adding to while you decide. The long way round is still there
- * — the rail's `+` on a folded column opens the full form, which is where a
- * description, stages, a template and the tracking references live.
- *
- * It stays open after a card is added, cleared and focused. Cards arrive in
- * runs — a standup, a planning session — and closing after each one would make
- * the second card cost as much as the first.
- */
-function TaskComposer({
-  projectKey,
-  members,
-  announce,
-  onCreated,
-}: {
-  projectKey: string
-  members: Person[]
-  announce: (message: string) => void
-  onCreated: () => Promise<void>
-}) {
-  const [open, setOpen] = useState(false)
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState<TaskType>('feature')
-  const [priority, setPriority] = useState<TaskPriority>('someday')
-  const [due, setDue] = useState('')
-  const [assigneeId, setAssigneeId] = useState('')
-  const titleField = useRef<HTMLInputElement>(null)
-  const dateField = useRef<HTMLInputElement>(null)
-
-  // Whoever is first in the directory until somebody says otherwise, which is
-  // the same default the full form takes.
-  const assignee = members.find((person) => person.id === assigneeId) ?? members[0] ?? null
-  const ready = title.trim().length > 0 && assignee !== null
-
-  useEffect(() => {
-    if (open) titleField.current?.focus()
-  }, [open])
-
-  const create = useMutation({
-    mutationFn: () =>
-      api.createTask(projectKey, {
-        title: title.trim(),
-        description: '',
-        type,
-        priority,
-        sub_statuses: [],
-        due_date: due || null,
-        assignee_id: assignee?.id ?? '',
-        template_id: null,
-        jira_ref: null,
-        pr_ref: null,
-      }),
-    onSuccess: async (saved) => {
-      announce(`${saved.reference} added.`)
-      // The title alone. The four decisions beside it are usually the same for
-      // the next card in a run — three bugs are three bugs — and re-picking
-      // them each time is the cost the composer exists to remove.
-      setTitle('')
-      await onCreated()
-      titleField.current?.focus()
-    },
-  })
-
-  function close() {
-    setOpen(false)
-    setTitle('')
-    create.reset()
-  }
-
-  if (!open) {
-    return (
-      <button type="button" className={styles.addTask} onClick={() => setOpen(true)}>
-        <span className={styles.addTaskMark}>
-          <PlusIcon />
-        </span>
-        Add a task
-      </button>
-    )
-  }
-
-  return (
-    <form
-      className={styles.composer}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (ready && !create.isPending) create.mutate()
-      }}
-      // Escape closes, and stops there: the board's own key handling would
-      // otherwise take it as cancelling a drag that is not happening.
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return
-        event.stopPropagation()
-        close()
-      }}
-    >
-      <input
-        ref={titleField}
-        className={styles.composerTitle}
-        value={title}
-        aria-label="Task title"
-        placeholder="What needs doing?"
-        onChange={(event) => setTitle(event.target.value)}
-      />
-
-      <div className={styles.composerRow}>
-        {/* The same tiles the cards wear, doing the choosing instead of the
-            reporting. Selected, a tile takes its type's tint; the other two
-            stay grey, so the row says which kind this is at the same glance
-            the column of cards above it is read with. */}
-        <div className={styles.types} role="group" aria-label="Type">
-          {TYPES.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={type === kind}
-              title={TYPE_LABELS[kind]}
-              className={`${styles.tile} ${styles.typeToggle} ${
-                type === kind ? styles[`tile_${kind}`] : styles.tileOff
-              }`}
-              onClick={() => setType(kind)}
-            >
-              <TypeIcon type={kind} size={15} />
-              <span className="visually-hidden">{TYPE_LABELS[kind]}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Set, each chip takes the colour the card will wear — the urgent
-            fill, the overdue pill — so the form is a preview of the card
-            rather than a description of one. Unset, both are outlines. */}
-        <label className={`${styles.chip} ${priorityChipStyle(priority)}`}>
-          <PriorityIcon priority={priority} size={13} />
-          <span className="visually-hidden">Priority</span>
-          <select
-            className={styles.chipControl}
-            value={priority}
-            onChange={(event) => setPriority(event.target.value as TaskPriority)}
-          >
-            {PRIORITIES.map((level) => (
-              <option key={level} value={level}>
-                {PRIORITY_LABELS[level]}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label
-          className={`${styles.chip} ${dueChipStyle(due || null)}`}
-          // The native indicator is hidden — there is already a calendar on
-          // this chip — so the label is what opens the picker. Guarded because
-          // a browser without it, or one that dislikes the gesture, must still
-          // leave a typable date field behind.
-          onClick={() => {
-            try {
-              dateField.current?.showPicker()
-            } catch {
-              dateField.current?.focus()
-            }
-          }}
-        >
-          {dueChipIcon(due || null)}
-          <span className="visually-hidden">Due date</span>
-          <input
-            ref={dateField}
-            type="date"
-            className={`${styles.chipControl} ${styles.chipDate}`}
-            value={due}
-            onChange={(event) => setDue(event.target.value)}
-          />
-        </label>
-      </div>
-
-      {create.error ? <ErrorBanner>{create.error.message}</ErrorBanner> : null}
-
-      <div className={styles.composerFoot}>
-        <label className={styles.chip}>
-          {assignee ? (
-            <Avatar name={assignee.name} colour={assignee.colour} small />
-          ) : (
-            <PlusIcon size={13} />
-          )}
-          <span className="visually-hidden">Assignee</span>
-          <select
-            className={styles.chipControl}
-            value={assignee?.id ?? ''}
-            onChange={(event) => setAssigneeId(event.target.value)}
-          >
-            {members.length === 0 ? <option value="">Nobody on this project</option> : null}
-            {members.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <span className={styles.composerGo}>
-          <button type="button" className={styles.composerCancel} onClick={close}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className={styles.composerAdd}
-            disabled={!ready || create.isPending}
-          >
-            {create.isPending ? 'Adding…' : 'Add'}
-          </button>
-        </span>
-      </div>
-    </form>
-  )
-}
-
-/** The priority chip's fill, in the four steps `.prio` escalates through. */
-function priorityChipStyle(priority: TaskPriority): string {
-  return (
-    {
-      urgent: styles.chipUrgent,
-      asap: styles.chipAsap,
-      week: styles.chipWeek,
-      someday: '',
-    }[priority] ?? ''
-  )
-}
-
-/** The due chip's fill, in the same five steps a card's own date is drawn in. */
-function dueChipStyle(iso: string | null): string {
-  return (
-    {
-      late: styles.chipLate,
-      today: styles.chipToday,
-      tomorrow: styles.chipTomorrow,
-      soon: styles.chipSoon,
-      later: styles.chipLater,
-      none: '',
-    }[dueBucket(iso).kind] ?? ''
-  )
-}
-
-/** And its mark: the alarm, the clock, or the plain calendar. */
-function dueChipIcon(iso: string | null) {
-  const { kind } = dueBucket(iso)
-  if (kind === 'late') return <AlertIcon size={13} />
-  if (kind === 'today') return <ClockIcon size={13} />
-  return <CalendarIcon size={13} />
 }
 
 /**
@@ -1587,70 +1791,6 @@ function ColumnDialog({
       </ModalBody>
     </Modal>
   )
-}
-
-/**
- * Parse a plain `YYYY-MM-DD`.
- *
- * `new Date(iso)` would read it as UTC midnight, which shows as the previous
- * day anywhere west of Greenwich — and a due date that is off by one is worse
- * than no due date at all.
- */
-function localDate(iso: string): Date {
-  const [year = 1970, month = 1, day = 1] = iso.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function formatDue(iso: string): string {
-  return localDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-}
-
-/** The same date said in full, for the tooltip on a mark that abbreviates it. */
-function formatDueLong(iso: string): string {
-  return localDate(iso).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-/**
- * How near a due date is, in the five steps a card draws differently.
- *
- * This was a boolean — overdue or not — and a boolean is the wrong shape for
- * the question. Every date that had not yet passed looked identical, so a card
- * wanted this afternoon sat in the column looking exactly like one wanted next
- * month, and the only moment the card ever changed was the moment it was too
- * late to matter. Five steps put the colour where the urgency is.
- *
- * `late` carries its own day count because "how far past" is the part anybody
- * acts on: a card one day over is a card to finish, and a card three weeks
- * over is a card to have a conversation about.
- */
-type DueBucket =
-  | { kind: 'late'; days: number }
-  | { kind: 'today' }
-  | { kind: 'tomorrow' }
-  | { kind: 'soon' }
-  | { kind: 'later' }
-  | { kind: 'none' }
-
-/** A card with no date is never late: there is no day it was wanted by. */
-function dueBucket(iso: string | null): DueBucket {
-  if (!iso) return { kind: 'none' }
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  // Rounded, not truncated: the two midnights are an hour apart rather than a
-  // whole number of days across a daylight-saving change, and a date that came
-  // out at 6.96 days would otherwise be filed a step nearer than it is.
-  const days = Math.round((localDate(iso).getTime() - today.getTime()) / 86_400_000)
-
-  if (days < 0) return { kind: 'late', days: -days }
-  if (days === 0) return { kind: 'today' }
-  if (days === 1) return { kind: 'tomorrow' }
-  if (days <= 7) return { kind: 'soon' }
-  return { kind: 'later' }
 }
 
 /**

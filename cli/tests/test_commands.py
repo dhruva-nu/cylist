@@ -525,3 +525,68 @@ def test_a_name_error_quotes_the_project_key_not_a_uuid(run: Runner) -> None:
     assert result.code == 1
     assert "ATL's board" in result.err
     assert fake_api.PROJECT_ID not in result.err
+
+
+def test_goals_ls_reads_progress_as_done_over_total(run: Runner) -> None:
+    """A goal is read at a glance as a fraction, not as six separate counts."""
+    result = run("goals", "ls", "ATL")
+    assert result.code == 0
+    assert "ATL-G1" in result.out
+    assert "Ledger cutover" in result.out
+    assert "1/2" in result.out
+
+
+def test_goals_ls_can_leave_out_settled_goals(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("goals", "ls", "ATL", "--open")
+    assert result.code == 0
+    assert recorder.sent("GET", "/goals").url.params["open_only"] == "true"
+
+
+def test_goals_show_lists_the_cards_on_the_goal(run: Runner) -> None:
+    result = run("goals", "show", "ATL-G1")
+    assert result.code == 0
+    assert "Ledger cutover" in result.out
+    assert "ATL-1" in result.out
+
+
+def test_goals_new_posts_the_owner_and_target(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run(
+        "goals",
+        "new",
+        "ATL",
+        "--name",
+        "Ledger cutover",
+        "--owner",
+        fake_api.ADITI_ID,
+        "--target",
+        "2026-06-30",
+    )
+    assert result.code == 0
+    body = recorder.body("POST", "/goals")
+    assert body["owner_id"] == fake_api.ADITI_ID
+    assert body["target_date"] == "2026-06-30"
+    assert "colour" not in body  # left to the palette rather than guessed at
+
+
+def test_goals_link_sends_the_goals_id_not_its_reference(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    """The reference is what a person types; the id is what the API stores."""
+    result = run("goals", "link", "ATL-1", "ATL-G1")
+    assert result.code == 0
+    assert recorder.body("PATCH", "/tasks/ATL-1") == {"goal_id": fake_api.GOAL_ID}
+
+
+def test_goals_unlink_clears_it_with_a_null(run: Runner, recorder: fake_api.Recorder) -> None:
+    """Null rather than an omitted field: on this one the API reads null as
+    "take it off" rather than as "leave it alone"."""
+    result = run("goals", "unlink", "ATL-1")
+    assert result.code == 0
+    assert recorder.body("PATCH", "/tasks/ATL-1") == {"goal_id": None}
+    assert "still on the board" in result.out
+
+
+def test_goals_status_sends_the_word_it_was_given(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("goals", "status", "ATL-G1", "achieved")
+    assert result.code == 0
+    assert recorder.body("PATCH", "/goals/ATL-G1") == {"status": "achieved"}

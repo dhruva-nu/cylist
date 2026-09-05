@@ -39,6 +39,8 @@ function usePageWidth(): string | undefined {
   if (
     matchRoute({ to: '/p/$projectKey/people' }) ||
     matchRoute({ to: '/p/$projectKey/files' }) ||
+    matchRoute({ to: '/p/$projectKey/goals' }) ||
+    matchRoute({ to: '/p/$projectKey/goals/$goalRef' }) ||
     matchRoute({ to: '/p/$projectKey/vault' })
   ) {
     return styles.pageRoomy
@@ -171,6 +173,9 @@ function ProjectTabs() {
       <Link to="/p/$projectKey/board" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Board
       </Link>
+      <Link to="/p/$projectKey/goals" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Goals
+      </Link>
       <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Files
       </Link>
@@ -195,15 +200,19 @@ function Breadcrumbs() {
   const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
   const onVault = matchRoute({ to: '/p/$projectKey/vault' })
+  // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
+  const onGoals = matchRoute({ to: '/p/$projectKey/goals', fuzzy: true })
   const area = onBoard
     ? 'Board'
-    : onFiles
-      ? 'Files'
-      : onVault
-        ? 'Vault'
-        : onPeople
-          ? 'People'
-          : null
+    : onGoals
+      ? 'Goals'
+      : onFiles
+        ? 'Files'
+        : onVault
+          ? 'Vault'
+          : onPeople
+            ? 'People'
+            : null
 
   if (!inProject) {
     return (

@@ -106,6 +106,10 @@ def _read(
         status=task.status,
         template_id=task.template_id,
         template_name=task.template.name if task.template else None,
+        goal_id=task.goal_id,
+        goal_reference=task.goal.reference if task.goal else None,
+        goal_name=task.goal.name if task.goal else None,
+        goal_colour=task.goal.colour if task.goal else None,
         jira_ref=task.jira_ref,
         pr_ref=task.pr_ref,
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
@@ -117,6 +121,29 @@ def _read(
         subtask_assignees=[PersonRead.model_validate(person) for person in owners or []],
         created_at=task.created_at,
     )
+
+
+async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]:
+    """Render a set of cards, with the counts a card cannot answer alone.
+
+    Comment counts, sub-task progress and sub-task owners each take one query
+    for the whole set rather than one per card. Public because the goals router
+    draws the same cards on a goal's page: a card should read identically
+    wherever it is listed, which it only does if one function is drawing it.
+    """
+    ids = [task.id for task in found]
+    counts = await tasks.comment_counts(session, ids)
+    split = await tasks.subtask_counts(session, ids)
+    owners = await tasks.subtask_owners(session, ids)
+    return [
+        _read(
+            task,
+            counts.get(task.id, 0),
+            split.get(task.id, tasks.Split(0, 0)),
+            owners.get(task.id),
+        )
+        for task in found
+    ]
 
 
 async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
@@ -159,20 +186,7 @@ async def list_tasks(
     sub-tasks here is `subtask_count`, `open_subtask_count` and
     `subtask_assignees`: how many, how many are left, and who is on them.
     """
-    found = await tasks.list_for_project(session, project)
-    ids = [task.id for task in found]
-    counts = await tasks.comment_counts(session, ids)
-    split = await tasks.subtask_counts(session, ids)
-    owners = await tasks.subtask_owners(session, ids)
-    return [
-        _read(
-            task,
-            counts.get(task.id, 0),
-            split.get(task.id, tasks.Split(0, 0)),
-            owners.get(task.id),
-        )
-        for task in found
-    ]
+    return await read_tasks(session, await tasks.list_for_project(session, project))
 
 
 @router.post(

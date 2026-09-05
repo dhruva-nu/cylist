@@ -202,6 +202,23 @@
   overflow: auto;
 }
 
+/* A wide page takes the width it was given, rather than the width its widest
+   sentence happened to need.
+
+   `margin: 0 auto` above centres the box, and an automatic margin on a flex
+   item turns off the stretch that would otherwise have sized it — so a page
+   whose content is a paragraph and a grid of cards was laid out around the
+   paragraph and then centred, leaving a quarter of the window empty down each
+   side while the cards it was making room for wrapped early. Stating the width
+   puts the cap back in charge: up to `--page-max`, and the window's own edge
+   below that. `min-width: 0` so the box can honour it. Reading pages keep the
+   old behaviour on purpose — prose has a measure, and a column that stops at
+   its own is centred exactly where it should be. */
+.pageRoomy.wrap {
+  width: 100%;
+  min-width: 0;
+}
+
 /* A measure, whatever the page is. Widening a screen widens what is laid out
    on it — a table gets more columns, a directory more cards — but a line of
    text read across 1600px is a line nobody's eye can return from, so prose

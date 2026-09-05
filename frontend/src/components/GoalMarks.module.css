@@ -1,0 +1,87 @@
+/* The bar a goal's progress is drawn on.
+
+   A single track with two filled lengths laid along it rather than three
+   stacked elements: the remainder is the track showing through, which is what
+   makes an empty goal read as empty rather than as a bar drawn in the colour
+   of nothing. */
+.track {
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.trackLarge {
+  height: 10px;
+}
+
+.done {
+  height: 100%;
+  transition: width 200ms ease;
+}
+
+/* Cancelled work keeps its length on the bar in the quietest ink there is:
+   it is not progress, but it is not still to do either. */
+.cancelled {
+  height: 100%;
+  background: var(--ink-3);
+  opacity: 0.45;
+  transition: width 200ms ease;
+}
+
+/* A goal's target date, on the same five-step ramp a card's due date uses.
+   Fixed height and no border, so a row of goals keeps one line however near
+   or far each of their dates is. */
+.target {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.late {
+  background: var(--blocked);
+  color: var(--on-accent);
+}
+
+.today {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.soon {
+  color: var(--ink-2);
+}
+
+.later {
+  color: var(--ink-3);
+}
+
+.chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.chipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

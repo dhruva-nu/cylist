@@ -60,12 +60,14 @@
  */
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
   type BoardColumn,
   type ChecklistItem,
   type ChecklistState,
+  type Goal,
   type Person,
   type Task,
   type TaskComment,
@@ -77,6 +79,7 @@ import {
   type TaskType,
   type Template,
 } from '../api/client'
+import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
 import {
@@ -126,6 +129,17 @@ interface DialogProps {
    * same rule read from the other end.
    */
   templates: Template[]
+  /**
+   * The project's goals, for the picker on the form.
+   *
+   * Open ones and settled ones alike: a card can be moved onto a goal that has
+   * already been achieved — that is how a straggler gets counted — and a
+   * picker that hid the goal a card is already on would look like the card had
+   * lost it.
+   */
+  goals: Goal[]
+  /** A new card starts on this goal. The board's lanes pass their own. */
+  defaultGoalId?: string | null
   /** Opens another card in this dialog's place — a sub-task, from the list. */
   onOpenTask?: ((taskRef: string) => void) | undefined
   /** Asks the board to open a new-sub-task dialog under this reference. */
@@ -212,6 +226,7 @@ function TaskPanel(props: DialogProps & { task: TaskDetail; members: Person[] })
  * list, which finishes work that belongs to other cards. See `SubtasksRead`.
  */
 function TaskDetailView({
+  projectKey,
   task,
   members,
   columns,
@@ -265,6 +280,23 @@ function TaskDetailView({
               chip here that names something the project invented. */}
           {task.template_name ? <span className={styles.chip}>◇ {task.template_name}</span> : null}
         </div>
+
+        {/* Under the chips rather than among them: the goal is the one thing
+            on this card that is somewhere else as well, so it is a link, and a
+            link sitting in a row of chips reads as a chip that is broken. */}
+        {task.goal_id && task.goal_name && task.goal_colour ? (
+          <ReadField label="Goal">
+            <Link
+              to="/p/$projectKey/goals/$goalRef"
+              params={{ projectKey, goalRef: task.goal_reference ?? task.goal_id }}
+              className={styles.goalLink}
+              onClick={onClose}
+            >
+              <GoalChip name={task.goal_name} colour={task.goal_colour} />
+              <span className={styles.goalRef}>{task.goal_reference}</span>
+            </Link>
+          </ReadField>
+        ) : null}
 
         {task.sub_statuses.length ? (
           <ReadField label="Sub-status">
@@ -605,6 +637,8 @@ function TaskForm({
   columns,
   firstColumn,
   templates,
+  goals,
+  defaultGoalId,
   task,
   members,
   announce,
@@ -633,6 +667,7 @@ function TaskForm({
     due_date: task?.due_date ?? '',
     assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
     template_id: task?.template_id ?? null,
+    goal_id: task?.goal_id ?? defaultGoalId ?? null,
     jira_ref: task?.jira_ref ?? '',
     pr_ref: task?.pr_ref ?? '',
   })
@@ -666,6 +701,8 @@ function TaskForm({
    * of card that was allowed where it started.
    */
   const retyping = task !== null && form.template_id !== task.template_id
+  /** Whether this card is one that can be on a goal at all. */
+  const onGoal = task ? task.parent_id === null : !parentRef
 
   const save = useMutation({
     mutationFn: async () => {
@@ -910,6 +947,29 @@ function TaskForm({
               ))}
             </select>
           </Field>
+
+          {/* Not offered on a sub-task: a sub-task belongs to its card, and its
+              card is what belongs to a goal. The API refuses one either way —
+              this is only the form agreeing with it. */}
+          {onGoal ? (
+            <Field
+              label="Goal"
+              hint="The epic this card is work towards. Its colour becomes the card's rail on the board."
+            >
+              <select
+                value={form.goal_id ?? ''}
+                onChange={(event) => setForm({ ...form, goal_id: event.target.value || null })}
+              >
+                <option value="">No goal — this card stands on its own</option>
+                {goals.map((goal) => (
+                  <option key={goal.id} value={goal.id}>
+                    {goal.name}
+                    {goal.status === 'open' ? '' : ` (${goal.status})`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
         </div>
 
         <div

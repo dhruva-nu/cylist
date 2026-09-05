@@ -12,6 +12,7 @@ from app.routers import (
     auth,
     columns,
     files,
+    goals,
     health,
     people,
     projects,
@@ -37,6 +38,8 @@ api_router.include_router(columns.router)
 # After `columns`, whose columns a template's stages name.
 api_router.include_router(templates.router)
 api_router.include_router(tasks.router)
+# After `tasks`, whose cards a goal's page lists and whose `_read` it borrows.
+api_router.include_router(goals.router)
 api_router.include_router(files.router)
 api_router.include_router(activity.router)
 
