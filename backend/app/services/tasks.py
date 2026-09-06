@@ -426,11 +426,18 @@ async def move(
     whatever the card already carried. Moving within one column leaves the
     stage alone: nothing has been arrived at.
 
+    Arriving in the board's last column is what finishes a card, and leaving it
+    is what reopens one: ``finished_at`` is written on the way in and cleared on
+    the way out. A card is not asked to confirm that here — the server records
+    what happened, and whoever is dragging the card is the one who decides
+    whether it should — but both directions are reported as a change, so a
+    reopened card says so in its own history rather than only saying it moved.
+
     Returns the task and what changed about it, in the same shape
-    :func:`update` reports — the column it left and the one it arrived in, and
-    the stage it was put back to if that happened. Reordering within one column
-    changes nothing worth recording: a card's place in a stack is not a fact
-    about the work.
+    :func:`update` reports — the column it left and the one it arrived in, the
+    stage it was put back to if that happened, and whether it was finished or
+    reopened. Reordering within one column changes nothing worth recording: a
+    card's place in a stack is not a fact about the work.
 
     Raises:
         UnprocessableRequestError: if the task is a sub-task, which is not on
@@ -461,7 +468,8 @@ async def move(
     templates.require_permitted(task, column)
     if task.column_id != column.id:
         await _refuse_stage_incomplete(session, task)
-    await _refuse_unfinished(session, task, column)
+    done_column = await columns.last(session, task.project_id)
+    await _refuse_unfinished(session, task, column, done_column)
 
     source_id = _column_of(task)
     was_on = _stage(task.sub_statuses, task.sub_status_index)
@@ -497,6 +505,19 @@ async def move(
         changes.append(
             {"field": "sub_status_index", "label": "sub-status", "from": was_on, "to": now_on}
         )
+
+    was_finished = task.finished_at is not None
+    now_finished = column.id == done_column.id
+    if now_finished != was_finished:
+        task.finished_at = datetime.now(UTC) if now_finished else None
+        changes.append(
+            {
+                "field": "finished",
+                "label": "finished",
+                "from": "finished" if was_finished else "open",
+                "to": "finished" if now_finished else "open",
+            }
+        )
     return task, changes
 
 
@@ -507,9 +528,12 @@ async def set_finished(
 
     This is what ticking a sub-task off does, and it is the only way a sub-task
     becomes done: there is no last column for it to be dragged into, because it
-    is not on the board. A finished sub-task stops holding its parent back —
-    the same effect cancelling it has, said about work that happened rather than
-    work that was dropped.
+    is not on the board. A card writes the same ``finished_at`` by being moved
+    into that column — see :func:`move` — which is why this refuses one.
+
+    A finished sub-task stops holding its parent back — the same effect
+    cancelling it has, said about work that happened rather than work that was
+    dropped.
 
     Finishing something already finished is not an error and does not restate
     the time: the tick box was already ticked, and a second click on it is a
@@ -1008,17 +1032,22 @@ async def _refuse_stage_incomplete(session: AsyncSession, task: Task) -> None:
     )
 
 
-async def _refuse_unfinished(session: AsyncSession, task: Task, column: BoardColumn) -> None:
+async def _refuse_unfinished(
+    session: AsyncSession, task: Task, column: BoardColumn, finished: BoardColumn
+) -> None:
     """Stop a card reaching the last column while a sub-task is still open.
 
     Enforced on the move rather than on the sub-task, because it is a rule about
     the parent: a sub-task may be left open for as long as anybody likes, and
     the moment that matters is the one where its parent claims to be done.
 
+    ``finished`` is the board's last column, handed in rather than looked up
+    because :func:`move` has already had to find it to know whether the card is
+    arriving at done.
+
     Raises:
         UnprocessableRequestError: if anything under the task is still open.
     """
-    finished = await columns.last(session, task.project_id)
     if column.id != finished.id or task.column_id == finished.id:
         return
 

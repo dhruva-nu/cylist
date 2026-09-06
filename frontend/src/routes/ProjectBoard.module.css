@@ -1078,6 +1078,14 @@
   font-size: 13px;
 }
 
+/* The whole of a confirmation, rather than a footnote under a field the way
+   `.note` is — so it is read at the size of the question it is asking. */
+.confirm {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
 .spacer {
   margin-right: auto;
 }

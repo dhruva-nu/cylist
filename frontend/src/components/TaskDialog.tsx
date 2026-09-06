@@ -336,7 +336,17 @@ function TaskDetailView({
               the thing that answers the same question for it instead. An empty
               Column would read as one that failed to load. */}
           {task.parent_id === null ? (
-            <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+            // The column is where a card is; the date beside it is when being
+            // there started meaning done. Shown only once there is one, so a
+            // card still on its way says where it is and nothing more.
+            <ReadField label="Column">
+              {column?.name ?? '—'}
+              {task.finished_at ? (
+                <span className={styles.role}>
+                  · finished {formatDue(task.finished_at.slice(0, 10))}
+                </span>
+              ) : null}
+            </ReadField>
           ) : (
             <ReadField label="Finished">
               {task.finished_at ? formatDue(task.finished_at.slice(0, 10)) : 'Not yet'}
