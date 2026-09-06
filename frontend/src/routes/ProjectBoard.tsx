@@ -555,12 +555,17 @@ export function ProjectBoard() {
    * lane is the drop target that puts the first card on a goal. A settled goal
    * only appears while it still has cards on the board, because a lane for
    * work that has stopped is a row of nothing that never goes away.
+   *
+   * Checked against every card on the board, not `visibleTasks`: a settled
+   * goal's lane has to survive a search or a quick filter that happens to
+   * match none of its cards, or the lane folding — which expects a lane with
+   * no match to fold shut, not to disappear — never gets the chance to fold
+   * it.
    */
+  const allTasks = tasks.data ?? []
   const lanes = [
     ...goalList
-      .filter(
-        (goal) => goal.status === 'open' || visibleTasks.some((task) => task.goal_id === goal.id),
-      )
+      .filter((goal) => goal.status === 'open' || allTasks.some((task) => task.goal_id === goal.id))
       .map((goal) => ({ key: goal.id, goal })),
     { key: NO_GOAL_LANE, goal: null },
   ]
