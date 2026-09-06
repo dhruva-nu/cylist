@@ -37,6 +37,7 @@ function usePageWidth(): string | undefined {
 
   if (matchRoute({ to: '/p/$projectKey/board' })) return styles.pageBoard
   if (
+    matchRoute({ to: '/p/$projectKey' }) ||
     matchRoute({ to: '/p/$projectKey/people' }) ||
     matchRoute({ to: '/p/$projectKey/files' }) ||
     matchRoute({ to: '/p/$projectKey/goals' }) ||
