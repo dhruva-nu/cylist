@@ -135,6 +135,11 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
 - **Sub-tasks gate the last column.** Every one of them must be finished or
   cancelled before `move_task` will put the parent in the board's last column;
   the refusal names what is still outstanding.
+- **The last column is done, and may say how.** A card moved into it is
+  finished and one moved back out is reopened, both recorded in its history.
+  That column alone can be divided into up to three outcomes — "Done",
+  "Cancelled", "In prod" — which `get_project` lists beside it and `move_task`
+  takes by name; a template can narrow which of them its own cards may end on.
 - **Goals gate their own closing.** `set_goal_status(..., "achieved")` is
   refused while a card on the goal is neither in the board's last column nor
   cancelled, and the refusal names every card holding it open. Dropping a goal

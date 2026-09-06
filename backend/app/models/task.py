@@ -41,6 +41,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.board import BoardColumn
 from app.models.goal import Goal
 from app.models.person import Person
 from app.models.project import Project
@@ -206,6 +207,14 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "goal_id IS NULL OR parent_id IS NULL",
             name="goal_only_on_cards",
         ),
+        # An outcome is a section of a column, so only something in a column
+        # can be in one. Which section is a valid one is a question about the
+        # column's own list and is answered in the service — see
+        # ``Task.outcome_index``.
+        CheckConstraint(
+            "outcome_index IS NULL OR (parent_id IS NULL AND outcome_index >= 0)",
+            name="outcome_only_on_cards",
+        ),
     )
 
     project_id: Mapped[UUID] = mapped_column(
@@ -235,6 +244,26 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     position: Mapped[int | None] = mapped_column(Integer)
     """Top to bottom within the column, contiguous from zero. Null on a
     sub-task, which is ordered by ``sub_number`` under its parent instead."""
+
+    outcome_index: Mapped[int | None] = mapped_column(Integer)
+    """Which of the column's ``outcomes`` this card ended on, or null.
+
+    Null on everything not in a column that draws the distinction, which is
+    every card on most boards: outcomes belong to the board's last column
+    alone. Set when a card arrives there and cleared when it leaves — see
+    :func:`app.services.tasks.move`.
+
+    An index rather than the label, so renaming "In prod" to "Released"
+    renames it on every card that landed there rather than stranding them under
+    a heading that no longer exists. The cost is that shortening the list has
+    to say what becomes of the cards past its end, which
+    :func:`app.services.columns.update` does by moving them to the last section
+    still standing.
+
+    Orthogonal to ``finished_at`` and to ``status``, which is the point of
+    having it: *when* the work stopped, *whether* it is moving, and *how* it
+    ended are three questions, and a board that had only the first two had to
+    answer the third by adding a column."""
 
     title: Mapped[str] = mapped_column(String(200), nullable=False)
 
@@ -371,6 +400,10 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     project: Mapped[Project] = relationship(lazy="selectin")
     assignee: Mapped[Person] = relationship(lazy="selectin")
+    column: Mapped[BoardColumn | None] = relationship(lazy="selectin")
+    """The column the card is in, loaded with it so ``outcome_index`` can be
+    read back as the label it points at. Null on a sub-task, which is in
+    none."""
     template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
     goal: Mapped[Goal | None] = relationship(lazy="selectin")
 
@@ -415,6 +448,20 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         if self.parent is not None:
             return f"{self.parent.reference}-{self.sub_number}"
         return f"{self.project.key}-{self.number}"
+
+    @property
+    def outcome(self) -> str | None:
+        """How the work ended, as the label rather than the index.
+
+        Null wherever the card is not in a section: no index, no column, or an
+        index the column's list no longer reaches — which
+        :func:`app.services.columns.update` settles as it happens, so the last
+        of those is a belt-and-braces read rather than a state to expect.
+        """
+        if self.outcome_index is None or self.column is None:
+            return None
+        outcomes = self.column.outcomes
+        return outcomes[self.outcome_index] if self.outcome_index < len(outcomes) else None
 
     @property
     def is_settled(self) -> bool:
