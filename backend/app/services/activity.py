@@ -237,9 +237,17 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
         return f"Changed the {_listed(str(field) for field in fields)}." if fields else "Updated."
     if entry.verb == "task.moved":
         column = next((change for change in changes if change["field"] == "column"), None)
+        # A move into the board's last column finishes the card and a move out
+        # of it reopens one, and either is the part of the sentence worth
+        # reading — "Moved from Done to In progress." is where it went, not
+        # what it now is.
+        settled = next((change for change in changes if change["field"] == "finished"), None)
+        ending = (
+            "" if settled is None else " Reopened." if settled["to"] == "open" else " Finished."
+        )
         if column is not None:
-            return moved(column["from"], column["to"])
-        return moved(None, (columns or {}).get(str(payload.get("column_id"))))
+            return moved(column["from"], column["to"]) + ending
+        return moved(None, (columns or {}).get(str(payload.get("column_id")))) + ending
     if entry.verb == "task.finished":
         # Worded as the sub-task's own line, because that is the card whose
         # history it is written to. The parent it belongs to is named on every

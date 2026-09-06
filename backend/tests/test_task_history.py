@@ -254,13 +254,83 @@ class TestMoving:
         )
 
         entry = (await _history(signed_in, task["reference"]))[0]
-        assert entry["summary"] == "Moved from To do to Done."
+        assert entry["summary"] == "Moved from To do to Done. Finished."
         assert entry["changes"][0] == {
             "field": "column",
             "label": "column",
             "from": "To do",
             "to": "Done",
         }
+
+    async def test_reaching_the_last_column_is_recorded_as_finishing(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Where the card went is half of it; that it is now done is the other."""
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        columns = await _columns(signed_in)
+
+        await signed_in.post(
+            f"/tasks/{task['reference']}/move",
+            json={"column_id": columns[-1]["id"], "position": 0},
+        )
+
+        entry = (await _history(signed_in, task["reference"]))[0]
+        assert {
+            "field": "finished",
+            "label": "finished",
+            "from": "open",
+            "to": "finished",
+        } in entry["changes"]
+
+    async def test_leaving_the_last_column_is_recorded_as_reopening(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """The one a card's history is really asked for: it was done, and then
+        somebody dragged it back onto the board."""
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        columns = await _columns(signed_in)
+        await signed_in.post(
+            f"/tasks/{task['reference']}/move",
+            json={"column_id": columns[-1]["id"], "position": 0},
+        )
+
+        await signed_in.post(
+            f"/tasks/{task['reference']}/move",
+            json={"column_id": columns[0]["id"], "position": 0},
+        )
+
+        entry = (await _history(signed_in, task["reference"]))[0]
+        assert entry["summary"] == "Moved from Done to To do. Reopened."
+        assert {
+            "field": "finished",
+            "label": "finished",
+            "from": "finished",
+            "to": "open",
+        } in entry["changes"]
+
+    async def test_a_move_that_neither_finishes_nor_reopens_says_neither(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """A column called "Done" with a column to its right is not done. The
+        board's last column is a position, and the sentence follows it."""
+        aditi, _ = await _setup(signed_in)
+        await signed_in.post(
+            "/projects/ATL/columns",
+            json={"name": "In staging", "description": "Deployed where it can be looked at."},
+        )
+        task = await _create(signed_in, aditi)
+        columns = await _columns(signed_in)
+
+        await signed_in.post(
+            f"/tasks/{task['reference']}/move",
+            json={"column_id": columns[1]["id"], "position": 0},
+        )
+
+        entry = (await _history(signed_in, task["reference"]))[0]
+        assert entry["summary"] == "Moved from To do to Done."
+        assert [change["field"] for change in entry["changes"]] == ["column"]
 
     async def test_reordering_within_a_column_is_not_history(self, signed_in: AsyncClient) -> None:
         """A card's place in a stack is not a fact about the work, so dragging

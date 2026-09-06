@@ -7,11 +7,14 @@ two lists the reader has to interleave by timestamp.
 One rule shapes half the columns below: **a sub-task is work on a card, not a
 card on the board.** It keeps its reference, its owner, its due date, its
 comments and its history; what it does not have is a column. So ``column_id``
-and ``position`` belong to top-level cards alone, and ``finished_at`` — which
-is what "done" means once there is no last column to be in — belongs to
-sub-tasks alone. Both facts are check constraints rather than conventions,
-because a row that is half on the board and half off it is not a state any
-code here knows how to read.
+and ``position`` belong to top-level cards alone, which is a check constraint
+rather than a convention, because a row that is half on the board and half off
+it is not a state any code here knows how to read.
+
+``finished_at`` is the one field the two kinds share, arrived at from different
+directions: a sub-task is finished by being ticked off, a card by being moved
+into the board's last column. Both write the same timestamp, so *when did this
+stop being work* is one question with one answer wherever it is asked.
 """
 
 from __future__ import annotations
@@ -180,13 +183,6 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "AND (parent_id IS NULL) = (position IS NOT NULL)",
             name="placed_by_parentage",
         ),
-        # Done is a place on the board for a card, and a moment for a sub-task.
-        # A top-level card holding a finishing time would be a second answer to
-        # a question the board has already answered, and the two could disagree.
-        CheckConstraint(
-            "finished_at IS NULL OR parent_id IS NOT NULL",
-            name="finished_only_by_subtasks",
-        ),
         # A card can be split into at most 4 stages — enough to read as a
         # position along a bar, not so many that a segment on a board card is
         # too narrow to point at.
@@ -297,16 +293,24 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    """When this sub-task was finished, or null while it is still open.
+    """When this task was finished, or null while it is still open.
 
-    Only a sub-task can hold one — see ``finished_only_by_subtasks``. A card on
-    the board is finished by being in the board's last column, and that is the
-    board's answer to give.
+    Set two ways, and cleared the same two: a sub-task is ticked off, and a card
+    is moved into the board's last column — see
+    :func:`app.services.tasks.set_finished` and :func:`app.services.tasks.move`.
+    Not a constraint, because the rule is about a board the row cannot see: no
+    column knows it is the last one, and the position that makes it so changes
+    the moment a column is added to its right.
 
-    A timestamp rather than a flag because the question asked of a settled
-    sub-task is nearly always *when*: the day's report wants it, and a boolean
-    that has to be joined against the activity trail to answer it is a boolean
-    that was the wrong shape."""
+    Which is also why the field is worth writing at all rather than being read
+    off the board every time it is asked. A card that was done in June and was
+    moved back out in July was still done in June, and the day's report, a
+    goal's progress and a card's own history all have to be able to say so.
+
+    A timestamp rather than a flag because the question asked of a settled task
+    is nearly always *when*: the day's report wants it, and a boolean that has
+    to be joined against the activity trail to answer it is a boolean that was
+    the wrong shape."""
 
     template_id: Mapped[UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True),

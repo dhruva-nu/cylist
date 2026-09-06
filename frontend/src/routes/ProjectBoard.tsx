@@ -305,6 +305,17 @@ export function ProjectBoard() {
   const [quickStatus, setQuickStatus] = useState<'all' | Task['status']>('all')
   /** The goal a card written from a lane starts on. */
   const [composingOn, setComposingOn] = useState<string | null>(null)
+  /**
+   * A drag that would take a finished card back onto the board, held until it
+   * is confirmed.
+   *
+   * The one move worth asking about. Every other drag says where work has got
+   * to; this one un-says it — the card stops being done, and its history
+   * records that it was reopened. A card nudged out of the last column by a
+   * slipped drop would rewrite that quietly, so the drop is held here and the
+   * card stays where it was until somebody says yes.
+   */
+  const [reopening, setReopening] = useState<Reopening | null>(null)
   /** What is in the air, so the overlay knows what to draw. */
   const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
   const boardRef = useRef<HTMLDivElement>(null)
@@ -555,6 +566,14 @@ export function ProjectBoard() {
     { key: NO_GOAL_LANE, goal: null },
   ]
 
+  /**
+   * The board's last column, which is what "done" means for a card: arriving
+   * there writes the card's finishing time and leaving there clears it. A
+   * position rather than a name — a column called Done with a column to its
+   * right is not the end of the board.
+   */
+  const doneColumn = columns.at(-1)
+
   /** The grid the header row and every lane share, so their columns line up. */
   const laneTracks = columns
     .map((column) => (collapsed.includes(column.id) ? '52px' : 'minmax(280px, 400px)'))
@@ -692,13 +711,20 @@ export function ProjectBoard() {
     // already in is not a change of goal: neither is worth a request.
     if (!changingColumn && !changingGoal) return
 
-    move.mutate({
+    const wanted: Move = {
       taskId: task.id,
       taskRef: task.reference,
       columnId: changingColumn ? droppedIn : null,
       position: byColumn.get(droppedIn)?.length ?? 0,
       ...(changingGoal ? { goalId: lane === NO_GOAL_LANE ? null : lane } : {}),
-    })
+    }
+
+    if (changingColumn && doneColumn && task.column_id === doneColumn.id) {
+      setReopening({ move: wanted, task, from: doneColumn.name, to: nameOfColumnId(droppedIn) })
+      return
+    }
+
+    move.mutate(wanted)
   }
 
   return (
@@ -920,6 +946,18 @@ export function ProjectBoard() {
           announce={announce}
           onDone={refresh}
           onClose={() => setColumnDialog(null)}
+        />
+      ) : null}
+
+      {reopening ? (
+        <ReopenDialog
+          reopening={reopening}
+          onClose={() => setReopening(null)}
+          onConfirm={() => {
+            move.mutate(reopening.move)
+            announce(`${reopening.task.reference} reopened into ${reopening.to}.`)
+            setReopening(null)
+          }}
         />
       ) : null}
 
@@ -1179,6 +1217,55 @@ function QuickFilters({
         {active ? <span className={styles.filterDot} aria-hidden="true" /> : null}
       </Button>
     </div>
+  )
+}
+
+/** A held drop: the move it would make, and the two columns it reads between. */
+interface Reopening {
+  move: Move
+  task: Task
+  from: string
+  to: string
+}
+
+/**
+ * Asks before a finished card goes back on the board.
+ *
+ * Worded as what it will do rather than as a warning, because reopening a card
+ * is a perfectly ordinary thing to want: work comes back. What the reader is
+ * being told is that it will be written down.
+ */
+function ReopenDialog({
+  reopening,
+  onClose,
+  onConfirm,
+}: {
+  reopening: Reopening
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const { task, from, to } = reopening
+  return (
+    <Modal
+      title={`Reopen ${task.reference}?`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Leave it in {from}</Button>
+          <Button variant="go" onClick={onConfirm}>
+            Reopen it
+          </Button>
+        </>
+      }
+    >
+      <ModalBody>
+        <p className={styles.confirm}>
+          <b>{task.title}</b> is finished — it is in {from}, which is the end of this board. Moving
+          it to {to} puts it back to work: it stops counting as done, and its history records that
+          it was reopened.
+        </p>
+      </ModalBody>
+    </Modal>
   )
 }
 
