@@ -674,7 +674,7 @@
 .blocked .dueToday,
 .hold .dueTab,
 .blocked .dueTab {
-  background: var(--paper-2);
+  --tab-tone: var(--paper-2);
 }
 
 /* Deliberately paper-backed rather than tinted: the card behind it is already
@@ -865,10 +865,10 @@
   position: absolute;
   right: 12px;
   bottom: 100%;
+
+  /* Down by the thickness of the card's border, so the shape sits over it
+     rather than on it and the two read as one outline. */
   margin-bottom: -1px;
-  padding: 2px 13px 3px;
-  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
-  border-radius: 5px 5px 0 0;
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 700;
@@ -876,50 +876,71 @@
   white-space: nowrap;
 }
 
+/* The shape: cut rather than drawn, a clip path over a fill. Nothing inside it
+   but the words — breaking the card's outline is already the alarm, and a
+   warning glyph on top would be the second voice the filled pill was. */
+.dueTabFace {
+  display: block;
+  padding: 2px 13px 3px;
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+  border-radius: 5px 5px 0 0;
+  background: var(--tab-tone);
+}
+
+/* The join. The same wash carried a few pixels over the card's edge and faded
+   out, so the tab has no bottom edge at all.
+
+   Cut off at the card's top the tab read as a sticker laid on a box: two
+   shapes touching, with a hard line where they met, which is the one thing the
+   1px fuse was there to avoid. A dozen pixels is enough to lose that line and
+   no more — carried further, or run the width of the card, the wash stops
+   being a join and becomes a tint, which is a different claim: that the card
+   is late, when what is late is a date it happens to carry.
+
+   As wide as the tab and not a pixel wider, which is the whole reason this
+   hangs off the wrapper: the tab's width is its text's, and no rule on the
+   card could know it. The mask takes the two ends off, because a strip that
+   stopped dead at the tab's corners would have traded one hard edge for two
+   smaller ones. */
+.dueTab::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 12px;
+  background: linear-gradient(to bottom, var(--tab-tone), transparent);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent
+  );
+  pointer-events: none;
+}
+
 /* The pairings the filled due pills already took, so overdue on the tab and
-   overdue in the small print are recognisably one thing. */
+   overdue in the small print are recognisably one thing. Named rather than set
+   directly: the shape and the join are two elements and one colour, and a
+   variable is what keeps them from drifting apart. */
 .dueTabLate {
-  background: var(--blocked-soft);
+  --tab-tone: var(--blocked-soft);
+
   color: var(--blocked);
 }
 
 .dueTabSoon {
-  background: var(--hold-soft);
+  --tab-tone: var(--hold-soft);
+
   color: var(--hold);
-}
-
-/* And the same wash carried down into the card, so the tab has no bottom edge
-   at all.
-
-   Cut off at the card's top the tab read as a sticker laid on a box: two
-   shapes touching, with a hard line where they met, which is the one thing the
-   1px fuse was there to avoid. A dozen pixels of the colour carried over the
-   edge and faded out is enough to lose that line — the tab becomes the top of
-   one shape rather than a flag on it. Any further and the wash stops being a
-   join and starts being a tint on the card, which is a different claim: that
-   the whole card is late, when what is late is a date it happens to carry.
-
-   Only the image is set, never the shorthand: the ground underneath stays
-   whatever `--card-surface` is, which is what lets these sit above the status
-   tints without repeating them.
-
-   Which wash it is has to be read off the tab, because that is where the
-   decision was made — `dueTabMark` weighs the date, and nothing hands the
-   answer back up to the card. `:has()` is how the card asks. */
-.task:has(.dueTabLate) {
-  background-image: linear-gradient(to bottom, var(--blocked-soft), transparent 12px);
-}
-
-.task:has(.dueTabSoon) {
-  background-image: linear-gradient(to bottom, var(--hold-soft), transparent 12px);
-}
-
-/* A tinted card takes the bleed in the colour its tab took, and for the same
-   reason: a second wash of the hue the card is already carrying would be
-   invisible against it, and the tab would go back to having an edge. */
-.hold:has(.dueTab),
-.blocked:has(.dueTab) {
-  background-image: linear-gradient(to bottom, var(--paper-2), transparent 12px);
 }
 
 /* Room for it, paid only by the cards that have one: 14px on top of the

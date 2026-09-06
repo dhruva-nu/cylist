@@ -1876,7 +1876,14 @@ function DueTab({ mark }: { mark: DueTabMark }) {
       className={`${styles.dueTab} ${mark.tone === 'late' ? styles.dueTabLate : styles.dueTabSoon}`}
       title={mark.said}
     >
-      <span aria-hidden="true">{mark.text}</span>
+      {/* Two elements because the cut and the join cannot be the same one: a
+          clip path takes the element's own children and pseudo-elements with
+          it, so anything meant to reach past the tab's edge has to hang off
+          something outside the clip. The outer span is that something, and it
+          is exactly as wide as the shape inside it. */}
+      <span className={styles.dueTabFace} aria-hidden="true">
+        {mark.text}
+      </span>
       <span className="visually-hidden">{mark.said}</span>
     </span>
   )
