@@ -893,9 +893,11 @@
 
    Cut off at the card's top the tab read as a sticker laid on a box: two
    shapes touching, with a hard line where they met, which is the one thing the
-   1px fuse was there to avoid. Bleeding the colour in and fading it out over
-   the height of the title's first line makes the tab the top of one shape
-   instead — a card that is late, rather than a card with a flag on it.
+   1px fuse was there to avoid. A dozen pixels of the colour carried over the
+   edge and faded out is enough to lose that line — the tab becomes the top of
+   one shape rather than a flag on it. Any further and the wash stops being a
+   join and starts being a tint on the card, which is a different claim: that
+   the whole card is late, when what is late is a date it happens to carry.
 
    Only the image is set, never the shorthand: the ground underneath stays
    whatever `--card-surface` is, which is what lets these sit above the status
@@ -905,11 +907,11 @@
    decision was made — `dueTabMark` weighs the date, and nothing hands the
    answer back up to the card. `:has()` is how the card asks. */
 .task:has(.dueTabLate) {
-  background-image: linear-gradient(to bottom, var(--blocked-soft), transparent 52px);
+  background-image: linear-gradient(to bottom, var(--blocked-soft), transparent 12px);
 }
 
 .task:has(.dueTabSoon) {
-  background-image: linear-gradient(to bottom, var(--hold-soft), transparent 52px);
+  background-image: linear-gradient(to bottom, var(--hold-soft), transparent 12px);
 }
 
 /* A tinted card takes the bleed in the colour its tab took, and for the same
@@ -917,7 +919,7 @@
    invisible against it, and the tab would go back to having an edge. */
 .hold:has(.dueTab),
 .blocked:has(.dueTab) {
-  background-image: linear-gradient(to bottom, var(--paper-2), transparent 52px);
+  background-image: linear-gradient(to bottom, var(--paper-2), transparent 12px);
 }
 
 /* Room for it, paid only by the cards that have one: 14px on top of the
