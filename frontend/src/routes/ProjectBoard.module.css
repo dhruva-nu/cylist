@@ -551,10 +551,17 @@
    spaces to break at, which is exactly why they overflowed. */
 .title {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+
+  /* A measure rather than a width. Past about 35 characters a line stops being
+     scanned and starts being read, which is the wrong thing to ask of a card in
+     a column — and a column may be 400px wide, where the card would otherwise
+     set a line half as long again. On a narrow column this does nothing: the
+     card is already the shorter of the two. */
+  max-width: 35ch;
   font-family: var(--font-ui);
   font-size: 15px;
   font-weight: 600;
@@ -879,6 +886,38 @@
 .dueTabSoon {
   background: var(--hold-soft);
   color: var(--hold);
+}
+
+/* And the same wash carried down into the card, so the tab has no bottom edge
+   at all.
+
+   Cut off at the card's top the tab read as a sticker laid on a box: two
+   shapes touching, with a hard line where they met, which is the one thing the
+   1px fuse was there to avoid. Bleeding the colour in and fading it out over
+   the height of the title's first line makes the tab the top of one shape
+   instead — a card that is late, rather than a card with a flag on it.
+
+   Only the image is set, never the shorthand: the ground underneath stays
+   whatever `--card-surface` is, which is what lets these sit above the status
+   tints without repeating them.
+
+   Which wash it is has to be read off the tab, because that is where the
+   decision was made — `dueTabMark` weighs the date, and nothing hands the
+   answer back up to the card. `:has()` is how the card asks. */
+.task:has(.dueTabLate) {
+  background-image: linear-gradient(to bottom, var(--blocked-soft), transparent 52px);
+}
+
+.task:has(.dueTabSoon) {
+  background-image: linear-gradient(to bottom, var(--hold-soft), transparent 52px);
+}
+
+/* A tinted card takes the bleed in the colour its tab took, and for the same
+   reason: a second wash of the hue the card is already carrying would be
+   invisible against it, and the tab would go back to having an edge. */
+.hold:has(.dueTab),
+.blocked:has(.dueTab) {
+  background-image: linear-gradient(to bottom, var(--paper-2), transparent 52px);
 }
 
 /* Room for it, paid only by the cards that have one: 14px on top of the
