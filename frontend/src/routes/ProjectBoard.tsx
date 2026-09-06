@@ -295,6 +295,14 @@ export function ProjectBoard() {
   // cards. Read once: after that the box is the reader's, and rewriting it
   // from the URL on every render would take the cursor with it.
   const [search, setSearch] = useState(() => initialQuery)
+  /**
+   * The quick filters: a goal and a status, picked from a dropdown rather than
+   * typed. The search box already parses `goal:` and `blk:`/`hld:` tags, but a
+   * tag has to be known to be typed — these are the same two questions asked
+   * as a pair of selects, for whoever would rather point than type.
+   */
+  const [quickGoal, setQuickGoal] = useState<'all' | 'none' | (string & {})>('all')
+  const [quickStatus, setQuickStatus] = useState<'all' | Task['status']>('all')
   /** The goal a card written from a lane starts on. */
   const [composingOn, setComposingOn] = useState<string | null>(null)
   /** What is in the air, so the overlay knows what to draw. */
@@ -502,6 +510,17 @@ export function ProjectBoard() {
   // memory regardless, and a search endpoint would be a second way to ask a
   // question this data already answers.
   const visibleTasks = filterTasks(tasks.data, parseQuery(tokenize(search)), columns, memberList)
+    // The quick filters, ANDed on top of the search box the same way its own
+    // tags are ANDed together — see `filterTasks`. Kept out of that function
+    // rather than folded into `ParsedSearch`: these two already have their own
+    // exact-match values (a goal's id, one of the four statuses) from a
+    // dropdown, where `goal:` and `blk:`/`hld:` are typed and only ever
+    // narrower questions — "on no goal" or "is blocked" — not this.
+    .filter((task) => {
+      if (quickGoal === 'all') return true
+      return quickGoal === 'none' ? task.goal_id === null : task.goal_id === quickGoal
+    })
+    .filter((task) => quickStatus === 'all' || task.status === quickStatus)
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
   // The server sends top-level cards only, so nothing here is column-less; the
   // check is what makes that a statement rather than an assumption.
@@ -739,6 +758,13 @@ export function ProjectBoard() {
             <span className={styles.hint}>{templateList.length}</span>
           </Button>
           <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+          <QuickFilters
+            goals={goalList}
+            goal={quickGoal}
+            onGoal={setQuickGoal}
+            status={quickStatus}
+            onStatus={setQuickStatus}
+          />
         </div>
       </div>
 
@@ -1069,6 +1095,91 @@ const SUGGESTION_KINDS: Record<Suggestion['kind'], string> = {
   column: 'Column',
   assignee: 'Assignee',
   goal: 'Goal',
+}
+
+/**
+ * Two dropdowns, narrowing the board by goal and by status — tucked behind a
+ * toggle rather than sitting on the toolbar all the time.
+ *
+ * A pair of selects rather than a row of chips: a project's goal list is
+ * open-ended, and a chip for each would be the one control on the board that
+ * grows with the data instead of the columns. Both ANDed onto whatever the
+ * search box is already narrowing to — see the `.filter` calls around
+ * `visibleTasks`.
+ *
+ * Collapsed by default and opened from the button at its right, which is also
+ * where it closes back to: a board with two more selects parked on the
+ * toolbar permanently is a toolbar that grew for a filter most visits do not
+ * use. Closing it does not clear it — a filter left on while the drawer is
+ * shut is still doing its job, which is what the dot on the button is for.
+ */
+function QuickFilters({
+  goals,
+  goal,
+  onGoal,
+  status,
+  onStatus,
+}: {
+  goals: Goal[]
+  goal: 'all' | 'none' | (string & {})
+  onGoal: (goal: 'all' | 'none' | (string & {})) => void
+  status: 'all' | Task['status']
+  onStatus: (status: 'all' | Task['status']) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const active = goal !== 'all' || status !== 'all'
+
+  return (
+    <div className={styles.quickFilters}>
+      <div
+        className={`${styles.filterDrawer} ${open ? styles.filterDrawerOpen : ''}`}
+        // Hidden from screen readers while shut, and each select pulled out of
+        // tab order with it: the drawer's width collapses to nothing but the
+        // selects inside it stay in the document, and a control a sighted user
+        // cannot see is still one a keyboard user could tab into.
+        aria-hidden={!open}
+      >
+        <select
+          value={goal}
+          onChange={(event) => onGoal(event.target.value)}
+          tabIndex={open ? undefined : -1}
+          aria-label="Filter the board by goal"
+        >
+          <option value="all">All goals</option>
+          <option value="none">No goal</option>
+          {goals.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={status}
+          onChange={(event) => onStatus(event.target.value as 'all' | Task['status'])}
+          tabIndex={open ? undefined : -1}
+          aria-label="Filter the board by status"
+        >
+          <option value="all">All statuses</option>
+          {(Object.keys(STATUS_LABELS) as Task['status'][]).map((candidate) => (
+            <option key={candidate} value={candidate}>
+              {STATUS_LABELS[candidate]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Button
+        small
+        aria-pressed={open}
+        aria-expanded={open}
+        className={open ? styles.groupedOn : undefined}
+        onClick={() => setOpen(!open)}
+        title={open ? 'Hide the quick filters' : 'Filter the board by goal or status'}
+      >
+        ⏷ Filters
+        {active ? <span className={styles.filterDot} aria-hidden="true" /> : null}
+      </Button>
+    </div>
+  )
 }
 
 interface Move {

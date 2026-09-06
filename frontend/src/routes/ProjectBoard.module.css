@@ -977,6 +977,69 @@
   height: 10px;
 }
 
+/* The quick filters: a drawer of two selects, and the button that opens it —
+   see `QuickFilters`. The button sits last, so the drawer has only the button
+   itself to push as it grows, rather than reflowing every other tool beside
+   it. */
+.quickFilters {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Collapsed to nothing and faded out, rather than removed from the layout:
+   what animates has to stay mounted, or there is no width to transition from.
+   `inert` (set in the component) is what keeps a hidden select out of tab
+   order while this is doing that. */
+.filterDrawer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateX(16px);
+  transition:
+    max-width 220ms ease,
+    opacity 160ms ease,
+    transform 220ms ease;
+}
+
+.filterDrawerOpen {
+  /* Comfortably past two selects at their widest — a goal's name can run
+     long, and a drawer that clips one mid-word is worse than one with a
+     little empty margin past it. */
+  max-width: 480px;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.filterDrawer select {
+  height: var(--control, 44px);
+  padding: 0 30px 0 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Says a filter is doing something while the drawer holding it is shut —
+   otherwise closing it is indistinguishable from clearing it. */
+.filterDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--brand-ink);
+  vertical-align: middle;
+}
+
 /* The board's own controls, kept together at the end of the toolbar so they
    read as one strip rather than as buttons scattered along a row. They wrap as
    a group, and stay at the end of the row while there is room for them. */
