@@ -33,6 +33,7 @@ import {
   Eyebrow,
   LiveRegion,
   StatusIcon,
+  Tagged,
   TypeIcon,
   useAnnouncer,
 } from '../components/ui'
@@ -178,7 +179,13 @@ export function GoalPage() {
 
           <section className={styles.about}>
             <h2>What it is</h2>
-            <p>{found.description || 'No description yet.'}</p>
+            <p>
+              {found.description ? (
+                <Tagged text={found.description} members={members.data?.members ?? []} />
+              ) : (
+                'No description yet.'
+              )}
+            </p>
           </section>
         </aside>
 
