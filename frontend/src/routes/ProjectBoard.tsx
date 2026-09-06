@@ -1830,11 +1830,13 @@ function TaskCardBody({
   onMoveSubStatus?: (index: number) => void
 }) {
   const active = task.status === 'active'
-  /* Cancelling the work is what stops it owing anybody a date, so a dropped
-     card wears neither the tab nor the date that would otherwise stand in for
-     it. A red "12d late" shouting from a card nobody is going to do is the
-     loudest wrong thing the board could say. */
-  const dated = task.status !== 'cancelled'
+  /* Cancelling the work is what stops it owing anybody a date, and finishing
+     it does the same — a card already in the board's last column has nothing
+     left to be late for. Neither wears the tab nor the date that would
+     otherwise stand in for it: a red "12d late" shouting from a card that is
+     done, same as one nobody is going to do, is the loudest wrong thing the
+     board could say. */
+  const dated = task.status !== 'cancelled' && task.finished_at === null
   const tab = dated ? dueTabMark(task.due_date) : null
 
   return (
