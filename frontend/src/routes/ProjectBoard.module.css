@@ -897,33 +897,25 @@
    being a join and becomes a tint, which is a different claim: that the card
    is late, when what is late is a date it happens to carry.
 
-   As wide as the tab and not a pixel wider, which is the whole reason this
-   hangs off the wrapper: the tab's width is its text's, and no rule on the
-   card could know it. The mask takes the two ends off, because a strip that
-   stopped dead at the tab's corners would have traded one hard edge for two
-   smaller ones. */
+   Sized and shaped off the tab, which is the whole reason this hangs off the
+   wrapper rather than off the card: the tab's width is its text's — "Due
+   tomorrow" against "3d late" — and no rule on the card could know it.
+
+   The same cut, carried on. Its top edge is the wrapper's own width, so it
+   meets the shape's bottom exactly; from there it keeps the sides' angle and
+   goes on widening, which is what makes it read as the sign spilling rather
+   than as a patch parked under the middle of one. Faded out over the same
+   dozen pixels, so the flare is nearly gone by the time it is wide enough to
+   have an edge worth seeing. */
 .dueTab::after {
   content: '';
   position: absolute;
   top: 100%;
-  right: 0;
-  left: 0;
+  right: -7px;
+  left: -7px;
   height: 12px;
+  clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
   background: linear-gradient(to bottom, var(--tab-tone), transparent);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 12px,
-    #000 calc(100% - 12px),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 12px,
-    #000 calc(100% - 12px),
-    transparent
-  );
   pointer-events: none;
 }
 
