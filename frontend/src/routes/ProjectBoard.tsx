@@ -80,7 +80,7 @@ import {
   tokenize,
   type Suggestion,
 } from './boardSearch'
-import { dueBucket, formatDue, formatDueLong } from '../components/dates'
+import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
 import { GoalChip } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
@@ -97,10 +97,8 @@ import {
   ErrorBanner,
   LiveRegion,
   PriorityIcon,
-  StatusIcon,
   SubStatusBar,
   TaskRef,
-  TypeIcon,
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
@@ -868,7 +866,12 @@ export function ProjectBoard() {
               // Filtered like the card in the column, and for the same reason:
               // an active task has no status class, and a template string would
               // put the word "undefined" in the class list instead of nothing.
-              className={[styles.task, styles[draggedTask.status], styles.lifted]
+              className={[
+                styles.task,
+                styles[`type_${draggedTask.type}`],
+                styles[draggedTask.status],
+                styles.lifted,
+              ]
                 .filter(Boolean)
                 .join(' ')}
               style={
@@ -1409,11 +1412,13 @@ function TaskCard({
         listeners?.onKeyDown?.(event)
       }}
       aria-label={[
-        `${task.reference}: ${task.title}`,
+        // The type leads, and is said at all, because the rail that carries
+        // it cannot be: a colour down the edge of a card is the one thing on
+        // it a screen reader has no way to reach. With the tile gone this is
+        // the only place on the card the word appears — the goal below it has
+        // the same problem and the same answer.
+        `${TYPE_LABELS[task.type]} ${task.reference}: ${task.title}`,
         task.parent_reference ? `a sub-task of ${task.parent_reference}` : null,
-        // Said, because the rail that carries it cannot be: a colour down
-        // the edge of a card is the one thing on it a screen reader has no
-        // way to reach.
         task.goal_name ? `on ${task.goal_name}` : null,
       ]
         .filter(Boolean)
@@ -1424,7 +1429,12 @@ function TaskCard({
       style={task.goal_colour ? ({ '--card-rail': task.goal_colour } as CSSProperties) : undefined}
       // No transform of its own: while this card is in the air the DragOverlay
       // is the copy that follows the pointer, and this one stays put and dims.
-      className={[styles.task, styles[task.status], isDragging && styles.dragging]
+      className={[
+        styles.task,
+        styles[`type_${task.type}`],
+        styles[task.status],
+        isDragging && styles.dragging,
+      ]
         .filter(Boolean)
         .join(' ')}
     >
@@ -1454,76 +1464,18 @@ function TaskCardBody({
   onMoveSubStatus?: (index: number) => void
 }) {
   const active = task.status === 'active'
-  /* What the tile at the head of the card is standing for. A card that is
-     simply running wears its type there, which is the more useful of the two
-     facts; one that is held, blocked or given up wears that instead, and the
-     word itself stays on the pill across the row. */
-  const tileLabel = active ? TYPE_LABELS[task.type] : STATUS_LABELS[task.status]
+  /* Cancelling the work is what stops it owing anybody a date, so a dropped
+     card wears neither the tab nor the date that would otherwise stand in for
+     it. A red "12d late" shouting from a card nobody is going to do is the
+     loudest wrong thing the board could say. */
+  const dated = task.status !== 'cancelled'
+  const tab = dated ? dueTabMark(task.due_date) : null
 
   return (
     <>
-      <div className={styles.taskRow}>
-        <span className={styles.refs}>
-          {/* Icons rather than words, with the word each one stands for kept on
-              the tile: as a tooltip, and as text only a screen reader reads.
-              "This week · feature" spelled out was the widest thing on a row
-              that repeats down every card in the column, and the least worth
-              reading twice — but it is still what the mark means, so nothing
-              that cannot see the icon loses it.
-
-              A tinted tile rather than a bordered chip. The type is the one
-              fact on the card that is the same shape on every card, so it is
-              what the eye uses to find its place in a column — and an outline
-              in the row's own ink was not enough to be found by. */}
-          <span
-            className={`${styles.tile} ${active ? styles[`tile_${task.type}`] : styles[`tile_${task.status}`]}`}
-            title={tileLabel}
-          >
-            {active ? (
-              <TypeIcon type={task.type} size={15} />
-            ) : (
-              <StatusIcon status={task.status} size={15} />
-            )}
-            <span className="visually-hidden">{tileLabel}</span>
-          </span>
-          <span className={styles.reference}>{task.reference}</span>
-          {/* A sub-task's own reference already carries its parent's number,
-              but `ATL-41-2` only says so to a reader who knows the scheme —
-              and on a board, where the two cards may be columns apart, the
-              parent is the thing you need to recognise the card at all. */}
-          {task.parent_reference ? (
-            <span className={styles.parent} title={`Sub-task of ${task.parent_reference}`}>
-              of {task.parent_reference}
-            </span>
-          ) : null}
-        </span>
-        <span className={styles.badges}>
-          {/* Someday is the baseline every card starts on, so flagging it too
-              would be noise on every single card — the same reasoning that
-              keeps the status pill off an active task.
-
-              Only urgent gets a filled pill. The four levels escalate in
-              chrome and never in width, so a column of cards keeps one margin
-              down its right-hand side however its work is prioritised. */}
-          {task.priority !== 'someday' ? (
-            <span
-              className={`${styles.prio} ${styles[`priority_${task.priority}`]}`}
-              title={PRIORITY_LABELS[task.priority]}
-            >
-              <PriorityIcon priority={task.priority} />
-              <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
-            </span>
-          ) : null}
-          {active ? null : (
-            <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
-              {STATUS_LABELS[task.status]}
-            </span>
-          )}
-          {/* No date, no mark. A dash where a date goes reads as a date that
-              failed to load; the absence of one says it plainly. */}
-          <DueMark iso={task.due_date} />
-        </span>
-      </div>
+      {/* Above the title and outside the card's outline, which is the whole of
+          what makes it findable — see `DueTab`. */}
+      {tab ? <DueTab mark={tab} /> : null}
 
       <div className={styles.title}>{task.title}</div>
 
@@ -1547,61 +1499,113 @@ function TaskCardBody({
         </div>
       ) : null}
 
-      {/* The card's own small print, all of it on one row: how much has been
-          said about the card, what it is tracked as elsewhere, and how far
-          through its parts it is. Each is a drawn mark and a number, so the
-          row reads as a set of counts rather than as a sentence. */}
-      <div className={styles.taskRow}>
-        <div className={styles.links}>
-          {task.comment_count ? (
-            <span className={styles.meta} title={`${task.comment_count} comments`}>
-              <CommentIcon />
-              <span className={styles.metaValue} aria-hidden="true">
-                {task.comment_count}
-              </span>
-              <span className="visually-hidden">{task.comment_count} comments</span>
+      {/* Every piece of chrome the card has, on one line under the title.
+          There used to be a row above the title as well, and between them they
+          gave the same six-element tax to every card whether or not it had
+          anything urgent to say — so the eye had to read three rows down to
+          find the one sentence that differs between cards.
+
+          The line has two halves and a gap that grows between them. On the
+          left is what the card is: which one, whose part of what, and how it
+          stands. On the right is what has accumulated around it — how much has
+          been said, what it is tracked as elsewhere, how far through its parts
+          it is, and who has it. The gap is what keeps the faces on one margin
+          down the column however much or little sits to their left. */}
+      <div className={styles.strip}>
+        {/* Someday is the baseline every card starts on, so flagging it too
+            would be noise on every single card — the same reasoning that keeps
+            the status pill off an active task.
+
+            Only urgent gets a filled pill. The four levels escalate in chrome
+            and never in width, so a column of cards keeps one margin down its
+            right-hand side however its work is prioritised. */}
+        {task.priority !== 'someday' ? (
+          <span
+            className={`${styles.prio} ${styles[`priority_${task.priority}`]}`}
+            title={PRIORITY_LABELS[task.priority]}
+          >
+            <PriorityIcon priority={task.priority} />
+            <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
+          </span>
+        ) : null}
+        <span className={styles.reference}>{task.reference}</span>
+        {/* A sub-task's own reference already carries its parent's number, but
+            `ATL-41-2` only says so to a reader who knows the scheme — and on a
+            board, where the two cards may be columns apart, the parent is the
+            thing you need to recognise the card at all. */}
+        {task.parent_reference ? (
+          <span className={styles.parent} title={`Sub-task of ${task.parent_reference}`}>
+            of {task.parent_reference}
+          </span>
+        ) : null}
+        {/* The word the tile used to carry. It is the only thing left saying
+            which of the four states a card is in, the tint underneath it
+            aside, so it says it in full. */}
+        {active ? null : (
+          <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
+            {STATUS_LABELS[task.status]}
+          </span>
+        )}
+        {/* Only the dates the tab did not take. A date near enough to be asked
+            something of is up on the tab; one further out is only reporting,
+            so it stays down here as the date itself and the card never says it
+            twice. No date, no mark either way — a dash where a date goes reads
+            as a date that failed to load. */}
+        {dated && !tab ? <DueMark iso={task.due_date} /> : null}
+        {/* The name of the colour on the rail. A rail on its own is a legend
+            you have to have learned; with the name beside it, one card teaches
+            you the rest of the column. Last of the left-hand half and hard
+            against the gap, because it is the one thing here that can afford
+            to be cut. */}
+        {task.goal_name && task.goal_colour ? (
+          <GoalChip
+            name={task.goal_name}
+            colour={task.goal_colour}
+            title={`On ${task.goal_name} (${task.goal_reference})`}
+          />
+        ) : null}
+        <span className={styles.stripGap} />
+        {task.comment_count ? (
+          <span className={styles.meta} title={`${task.comment_count} comments`}>
+            <CommentIcon />
+            <span className={styles.metaValue} aria-hidden="true">
+              {task.comment_count}
             </span>
-          ) : null}
-          {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : null}
-          {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : null}
-          {/* Sits in the row rather than above it. The stage bar and these
-              dots are drawn as different things because they are different
-              things — the bar is one journey with a position along it, the
-              dots are a set of items with some of them ticked — but a set of
-              counts is what this row already is, and given a line of its own
-              the set read as a second bar. */}
-          {task.subtask_count ? (
-            <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
-          ) : null}
-          {/* The name of the colour on the rail. A rail on its own is a legend
-              you have to have learned; with the name beside it, one card
-              teaches you the rest of the column. Truncated rather than
-              wrapped: it is the last thing on the row and the first that can
-              afford to be cut. */}
-          {task.goal_name && task.goal_colour ? (
-            <GoalChip
-              name={task.goal_name}
-              colour={task.goal_colour}
-              title={`On ${task.goal_name} (${task.goal_reference})`}
-            />
-          ) : null}
-        </div>
-        <span className={styles.trailing}>
-          {/* Everyone who owes this card something, beside the person who owns
-              it. The board stopped showing where a sub-task is when it stopped
-              putting one in a column, so this is what it shows instead. */}
-          {task.subtask_assignees.length ? (
-            <span
-              className={styles.owners}
-              title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
-            >
-              {task.subtask_assignees.map((person) => (
-                <Avatar key={person.id} name={person.name} colour={person.colour} small />
-              ))}
-            </span>
-          ) : null}
-          <Avatar name={task.assignee.name} colour={task.assignee.colour} />
-        </span>
+            <span className="visually-hidden">{task.comment_count} comments</span>
+          </span>
+        ) : null}
+        {/* Marks rather than identifiers here, and spelled out in the dialog.
+            Quieting a board is only honest if what it stopped saying is one
+            click away — see `TaskRef`. */}
+        {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
+        {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} compact /> : null}
+        {/* Sits on the line rather than above it. The stage bar and these dots
+            are drawn as different things because they are different things —
+            the bar is one journey with a position along it, the dots are a set
+            of items with some of them ticked — but a set of counts is what
+            this half of the line already is, and given a row of its own the
+            set read as a second bar. */}
+        {task.subtask_count ? (
+          <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
+        ) : null}
+        {/* Everyone who owes this card something, beside the person who owns
+            it. The board stopped showing where a sub-task is when it stopped
+            putting one in a column, so this is what it shows instead. */}
+        {task.subtask_assignees.length ? (
+          <span
+            className={styles.owners}
+            title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
+          >
+            {task.subtask_assignees.map((person) => (
+              <Avatar key={person.id} name={person.name} colour={person.colour} small />
+            ))}
+          </span>
+        ) : null}
+        {/* Small, like everything else on the line. The owner is still the
+            last thing on the card and the only face at full strength, but it
+            is no longer a 26px disc anchoring a row of 11px print — which is
+            what made the line read as a second row of chrome. */}
+        <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
       </div>
     </>
   )
@@ -1794,7 +1798,104 @@ function ColumnDialog({
 }
 
 /**
+ * How near a date has to be before the card grows a tab for it.
+ *
+ * One day, so: today and tomorrow. A team that works a week ahead wants 3 or
+ * 5, and this line is the whole edit — everything downstream reads the number
+ * rather than repeating the rule.
+ */
+const DUE_TAB_DAYS = 1
+
+/** A date near enough to be worth breaking the card's outline for. */
+interface DueTabMark {
+  tone: 'late' | 'soon'
+  /** The abbreviation on the tab. */
+  text: string
+  /** The same thing at length, for the tooltip and for a screen reader. */
+  said: string
+}
+
+/**
+ * Whether a date has earned a tab, and what it says if it has.
+ *
+ * Null for everything else, which is most cards: a date three weeks out is
+ * only telling you something, and it stays down in the small print as the date
+ * itself. Nothing that returns null here has been dropped — see the strip.
+ */
+function dueTabMark(iso: string | null): DueTabMark | null {
+  if (!iso) return null
+
+  const days = daysUntilDue(iso)
+  const on = formatDueLong(iso)
+
+  // Overdue always earns one, however long ago. A date does not stop mattering
+  // because it passed a fortnight ago, and the count is the part anybody acts
+  // on: one day over is a card to finish, three weeks over is a conversation
+  // to have.
+  if (days < 0) {
+    const late = -days
+    return {
+      tone: 'late',
+      text: `${late}d late`,
+      said: `${late} ${late === 1 ? 'day' : 'days'} late, due ${on}`,
+    }
+  }
+
+  if (days > DUE_TAB_DAYS) return null
+
+  // Said as a countdown rather than as a date. "Due in 2 days" is the thing
+  // being decided about; "8 Sep" is a fact you would have to work that out
+  // from, and a card asking for something today should not make you.
+  const text = days === 0 ? 'Due today' : days === 1 ? 'Due tomorrow' : `Due in ${days} days`
+
+  return { tone: 'soon', text, said: `${text}, ${on}` }
+}
+
+/**
+ * The one shape allowed to break the card.
+ *
+ * Everything else a card says is said inside its rectangle, and that is what
+ * lets a column scan as a list rather than as a pile. A date that has arrived
+ * or already gone is the one fact worth costing that: the tab is the only
+ * silhouette on the board that is not a rounded rectangle, so a column of them
+ * can be counted without reading a word.
+ *
+ * Cut rather than drawn — a clip path over a fill, overlapping the card's own
+ * border by the pixel it is thick, so the two read as one outline rather than
+ * as a shape parked on a box. No glyph inside it either: breaking the outline
+ * is already the alarm, and a warning triangle on top would be the second
+ * voice the filled due pill used to be.
+ *
+ * Because the tab carries lateness, the rail underneath is free to go on
+ * saying what kind of work this is even while the card is overdue — which is
+ * how the card keeps to one alarm apiece.
+ */
+function DueTab({ mark }: { mark: DueTabMark }) {
+  return (
+    <span
+      className={`${styles.dueTab} ${mark.tone === 'late' ? styles.dueTabLate : styles.dueTabSoon}`}
+      title={mark.said}
+    >
+      {/* Two elements because the cut and the join cannot be the same one: a
+          clip path takes the element's own children and pseudo-elements with
+          it, so anything meant to reach past the tab's edge has to hang off
+          something outside the clip. The outer span is that something, and it
+          is exactly as wide as the shape inside it. */}
+      <span className={styles.dueTabFace} aria-hidden="true">
+        {mark.text}
+      </span>
+      <span className="visually-hidden">{mark.said}</span>
+    </span>
+  )
+}
+
+/**
  * A due date on a card, drawn as near or as far as it is.
+ *
+ * The near end of this ramp is the tab's now, and which steps those are is
+ * `DUE_TAB_DAYS`' to decide — so the five states stay written out here rather
+ * than trimmed to the two a threshold of one day leaves reachable. Turning
+ * that knob up is meant to be one line, not one line and an archaeology.
  *
  * The two ends of the ramp are the design: a date that has passed or is
  * passing today gets a filled pill and says what it means in words, because it

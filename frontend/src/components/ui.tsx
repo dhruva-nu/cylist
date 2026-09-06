@@ -667,16 +667,42 @@ export function LiveRegion({ message }: { message: string }) {
  * drop on a board card. That card is both the drag handle and the button that
  * opens the task, so an event left to bubble would open the dialog behind the
  * new tab, or pick the card up instead of following the link.
+ *
+ * `compact` is the board's form: the mark alone, with the identifier moved to
+ * the tooltip and the accessible name. Nobody reads `GLSSW-134004` off a
+ * column — they click it, or they open the card and read it spelled out — and
+ * thirteen monospace characters that begin the same way on every card in the
+ * project were the widest thing on the row carrying the least. Everywhere with
+ * room to say it, the dialog above all, still says it.
  */
-export function TaskRef({ kind, value }: { kind: 'jira' | 'pr'; value: string }) {
+export function TaskRef({
+  kind,
+  value,
+  compact = false,
+}: {
+  kind: 'jira' | 'pr'
+  value: string
+  compact?: boolean
+}) {
   const { label, href } = kind === 'jira' ? jiraRef(value) : prRef(value)
   const icon = kind === 'jira' ? <JiraIcon /> : <PrIcon />
+  // The icon is decoration and the label is an abbreviation, so neither says
+  // on its own what the reference is of.
+  const said = `${kind === 'jira' ? 'Jira' : 'Pull request'} ${label}`
+
+  // Hidden rather than dropped: what compact takes off the card it keeps for
+  // the reader who is not looking at the card.
+  const text = compact ? (
+    <span className="visually-hidden">{said}</span>
+  ) : (
+    <span className={styles.refLabel}>{label}</span>
+  )
 
   if (!href) {
     return (
-      <span className={styles.refMark}>
+      <span className={styles.refMark} title={compact ? said : undefined}>
         {icon}
-        <span className={styles.refLabel}>{label}</span>
+        {text}
       </span>
     )
   }
@@ -687,16 +713,16 @@ export function TaskRef({ kind, value }: { kind: 'jira' | 'pr'; value: string })
       href={href}
       target="_blank"
       rel="noreferrer"
-      // The icon is decoration and the label is an abbreviation, so neither
-      // says on its own what the link goes to.
-      aria-label={`${kind === 'jira' ? 'Jira' : 'Pull request'} ${label}`}
-      title={href}
+      aria-label={said}
+      // The URL is the useful tooltip where the identifier is already on
+      // screen. Where it is not, the identifier is what the tooltip is for.
+      title={compact ? said : href}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
       {icon}
-      <span className={styles.refLabel}>{label}</span>
+      {text}
     </a>
   )
 }

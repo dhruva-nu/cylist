@@ -368,13 +368,19 @@
 /* A colour bar rather than a tinted card alone: what it stands for has to
    survive being glanced at from across the room.
 
-   Two things want the rail, and the goal wins. A card on a goal wears that
-   goal's colour, set as `--card-rail` on the card itself; a card on no goal
-   falls back to the status colours below, which is what the rail has always
-   meant. Nothing is lost by the swap: a card that is held or blocked is also
-   tinted, wears a word on a pill and carries its own icon tile, so the status
-   is still on the card three times over — while the goal has nowhere else on
-   a board to be. */
+   Three things want the rail now, and they are ordered rather than merged. A
+   card on a goal wears that goal's colour, set as `--card-rail` on the card
+   itself, because the goal has nowhere else on a board to be. Failing that it
+   wears its status, for the cards that have one worth saying. Failing both —
+   which is most cards, most of the time — it wears what kind of work it is:
+   the fact the tinted tile at the head of the card used to spend twenty-four
+   pixels and the card's heaviest object on.
+
+   The type ramp is written first and the status blocks below override it,
+   which is the whole of what makes a held bug wear amber: a class and a
+   pseudo-element weigh exactly the same, so source order is the only thing
+   deciding between them. Moving `.hold` above `.type_bug` would silently swap
+   what the card says. */
 .task::before {
   content: '';
   position: absolute;
@@ -383,7 +389,21 @@
   left: 0;
   width: 4px;
   border-radius: 0 3px 3px 0;
+  background: var(--card-rail, var(--line-2));
+}
+
+.type_feature::before {
   background: var(--card-rail, var(--ok));
+}
+
+.type_bug::before {
+  background: var(--card-rail, var(--blocked));
+}
+
+/* Grey stays grey. A chore is the one of the three that is nobody's idea, and
+   colouring it would be saying so twice. */
+.type_chore::before {
+  background: var(--card-rail, var(--line-2));
 }
 
 .task:hover {
@@ -448,49 +468,100 @@
   text-decoration: line-through;
 }
 
-.taskRow {
+/* The card's one line of chrome, under the title.
+
+   Counts, references, dates and a status word are all the same class of fact,
+   so they get one size and one ink and take their emphasis from where they sit
+   instead — left is what the card is, right is what has gathered around it. A
+   second type size in here is how the row above the title used to argue that
+   it mattered more than the title did.
+
+   11.5px against the mono at 11px below: the two faces do not measure the same
+   at the same number, and matching the figures optically is the point rather
+   than matching the declaration. */
+.strip {
   display: flex;
-  gap: 8px;
+
+  /* 10px rather than 8px, which is the gap the counts already asked for: each
+     of them is a drawn mark and a figure, and at 8px two neighbouring items
+     ran together into one. */
+  gap: 6px 10px;
   align-items: center;
-  justify-content: space-between;
+
+  /* One line is what this is for, and wrapping is what happens instead of
+     losing an end of it. A card can carry all of this at once — urgent, and
+     blocked, and a sub-task of something, and seven comments — and at a
+     column's narrowest that set is wider than the card. Without this the
+     overflow runs off the right-hand side and the column's own clip takes the
+     owner's face off, which is the one thing here that must never be cut.
+
+     `flex-end` is for the wrapped line only, and reaches no further: the first
+     line has `.stripGap` on it, which has already taken every spare pixel, so
+     there is nothing left there for this to move. What it does do is keep the
+     faces on the right-hand margin on whichever line they end up on — a
+     straight edge of them down the column is the whole point of the gap. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
   color: var(--ink-2);
-  font-size: 13px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+
+/* What separates the line's two halves. Growing rather than a margin, so the
+   faces sit on the same margin down the whole column however much is to their
+   left — a straight edge of them is what makes "whose is this" answerable
+   without reading. */
+.stripGap {
+  flex: 1;
 }
 
 /* --ink-2, not --ink-3: this sits on a card that may be tinted amber or red,
    and the quietest ink only clears AA on the plain surfaces. */
 .reference {
+  flex: none;
   color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-}
-
-/* The type tile, the card's own reference and its parent's, together at the
-   head of the card. Sub-tasks are the only cards with two references, so the
-   pair only ever appears where it means something.
-
-   Centred rather than sat on a baseline: a 24px tile has no baseline to share
-   with the two lines of type beside it. */
-.refs {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
 }
 
 /* --ink-2 like .reference, and for the same reason: this rides on cards that
    may be tinted amber or red, where the quietest ink stops clearing AA. The
-   word "of" carries the relationship, so the colour does not have to. */
+   word "of" carries the relationship, so the colour does not have to.
+
+   A sub-task is the only card with two references, so the pair only ever
+   appears where it means something. */
 .parent {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
+/* The first thing on the card, and the only thing on it set at reading size.
+
+   Clamped rather than left to run: a long identifier used to overflow and be
+   sheared off by the card's own edge — no ellipsis, and no sign that there was
+   more of it. `anywhere` because the strings that do this are the ones with no
+   spaces to break at, which is exactly why they overflowed. */
 .title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+
+  /* A measure rather than a width. Past about 35 characters a line stops being
+     scanned and starts being read, which is the wrong thing to ask of a card in
+     a column — and a column may be 400px wide, where the card would otherwise
+     set a line half as long again. On a narrow column this does nothing: the
+     card is already the shorter of the two. */
+  max-width: 35ch;
   font-family: var(--font-ui);
   font-size: 15px;
   font-weight: 600;
@@ -554,15 +625,6 @@
   color: var(--ink-3);
 }
 
-/* The type/status chip's neighbour on the right of a card, and the priority
-   chip beside it when there is one. */
-.badges {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  align-items: center;
-}
-
 /* The priority mark. No box by default: three of the four levels are the
    glyph and nothing else, so the one that does get a box is unmistakably the
    one that got it. The 2px of side padding is there only to stop the glyph
@@ -609,18 +671,21 @@
 .hold .dueLate,
 .blocked .dueLate,
 .hold .dueToday,
-.blocked .dueToday {
-  background: var(--paper);
+.blocked .dueToday,
+.hold .dueTab,
+.blocked .dueTab {
+  --tab-tone: var(--paper-2);
 }
 
 /* Deliberately paper-backed rather than tinted: the card behind it is already
    carrying the colour, and two washes of the same hue muddy both. */
 .pill {
+  flex: none;
   padding: 1px 9px;
   border-radius: var(--radius-control);
   background: var(--paper);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -648,19 +713,6 @@
 .at {
   color: var(--ink);
   font-weight: 600;
-}
-
-/* The card's small print: a set of counts, each a drawn mark and a number.
-   10px rather than 8px between them, because every item is now an icon plus a
-   figure and at 8px two neighbouring items ran together into one. */
-.links {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-
-  /* Tinted cards again — see .reference. */
-  color: var(--ink-2);
-  font-size: 12px;
 }
 
 /* One count in that row. */
@@ -739,12 +791,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.trailing {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 /* A due date, drawn as near or as far as it is — five steps, and the same
    height in all five so that a column of cards keeps one edge down its side.
    The mark itself never changes size; only its ink, its ground and whether it
@@ -805,6 +851,103 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
+}
+
+/* The date that has arrived or gone, on the one shape allowed out of the card.
+
+   Cut rather than drawn: a clip path over a fill, with the negative margin
+   pulling it down over the card's own border by the pixel that border is
+   thick. The two then read as one silhouette, where a tab sat flush on top of
+   the border reads as a sticker on a box. Nothing inside it but the words —
+   breaking the outline is already the alarm, and a warning glyph on top would
+   be the second voice the filled pill was. */
+.dueTab {
+  position: absolute;
+  right: 12px;
+  bottom: 100%;
+
+  /* Down by the thickness of the card's border, so the shape sits over it
+     rather than on it and the two read as one outline. */
+  margin-bottom: -1px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The shape: cut rather than drawn, a clip path over a fill. Nothing inside it
+   but the words — breaking the card's outline is already the alarm, and a
+   warning glyph on top would be the second voice the filled pill was. */
+.dueTabFace {
+  display: block;
+  padding: 2px 13px 3px;
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+  border-radius: 5px 5px 0 0;
+  background: var(--tab-tone);
+}
+
+/* The join. The same wash carried a few pixels over the card's edge and faded
+   out, so the tab has no bottom edge at all.
+
+   Cut off at the card's top the tab read as a sticker laid on a box: two
+   shapes touching, with a hard line where they met, which is the one thing the
+   1px fuse was there to avoid. A dozen pixels is enough to lose that line and
+   no more — carried further, or run the width of the card, the wash stops
+   being a join and becomes a tint, which is a different claim: that the card
+   is late, when what is late is a date it happens to carry.
+
+   Sized and shaped off the tab, which is the whole reason this hangs off the
+   wrapper rather than off the card: the tab's width is its text's — "Due
+   tomorrow" against "3d late" — and no rule on the card could know it.
+
+   The same cut, carried on. Its top edge is the wrapper's own width, so it
+   meets the shape's bottom exactly; from there it keeps the sides' angle and
+   goes on widening, which is what makes it read as the sign spilling rather
+   than as a patch parked under the middle of one. Faded out over the same
+   dozen pixels, so the flare is nearly gone by the time it is wide enough to
+   have an edge worth seeing. */
+.dueTab::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: -7px;
+  left: -7px;
+  height: 12px;
+  clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
+  background: linear-gradient(to bottom, var(--tab-tone), transparent);
+  pointer-events: none;
+}
+
+/* The pairings the filled due pills already took, so overdue on the tab and
+   overdue in the small print are recognisably one thing. Named rather than set
+   directly: the shape and the join are two elements and one colour, and a
+   variable is what keeps them from drifting apart. */
+.dueTabLate {
+  --tab-tone: var(--blocked-soft);
+
+  color: var(--blocked);
+}
+
+.dueTabSoon {
+  --tab-tone: var(--hold-soft);
+
+  color: var(--hold);
+}
+
+/* Room for it, paid only by the cards that have one: 14px on top of the
+   column's own 10px gap clears the tab's 17px.
+
+   And taken straight back off in the air. dnd-kit sizes the overlay to the
+   border box of the card that was lifted, which a margin is outside of — so
+   the copy would hang that far below the pointer for the whole of the drag.
+   Below `.task:has()` because the two weigh the same and the later wins. */
+.task:has(.dueTab) {
+  margin-top: 14px;
+}
+
+.task.lifted {
+  margin-top: 0;
 }
 
 .addTask {

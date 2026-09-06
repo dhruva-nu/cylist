@@ -53,16 +53,28 @@ export type DueBucket =
   | { kind: 'later' }
   | { kind: 'none' }
 
-/** A card with no date is never late: there is no day it was wanted by. */
-export function dueBucket(iso: string | null): DueBucket {
-  if (!iso) return { kind: 'none' }
-
+/**
+ * Whole days from today until a date, negative once it has gone by.
+ *
+ * Its own function because the card asks the same question twice now — which
+ * step of the ramp a date is on, and whether it is near enough to earn a tab —
+ * and two midnights worked out in two places is precisely the drift this file
+ * exists to make impossible.
+ */
+export function daysUntilDue(iso: string): number {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   // Rounded, not truncated: the two midnights are an hour apart rather than a
   // whole number of days across a daylight-saving change, and a date that came
   // out at 6.96 days would otherwise be filed a step nearer than it is.
-  const days = Math.round((localDate(iso).getTime() - today.getTime()) / 86_400_000)
+  return Math.round((localDate(iso).getTime() - today.getTime()) / 86_400_000)
+}
+
+/** A card with no date is never late: there is no day it was wanted by. */
+export function dueBucket(iso: string | null): DueBucket {
+  if (!iso) return { kind: 'none' }
+
+  const days = daysUntilDue(iso)
 
   if (days < 0) return { kind: 'late', days: -days }
   if (days === 0) return { kind: 'today' }
