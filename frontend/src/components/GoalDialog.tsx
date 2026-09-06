@@ -18,22 +18,27 @@ import { Button, ErrorBanner, readableInkOn } from './ui'
 import styles from './GoalDialog.module.css'
 
 /**
- * The identity palette, matching `app/core/palette.py`.
+ * The goal palette, matching `GOAL_PALETTE` in `app/core/palette.py`.
  *
  * Repeated here rather than fetched because it is a design decision rather
  * than data: these are the accents the interface is drawn from, and a client
  * that had to ask the server which colours it may draw with would be asking
  * about its own stylesheet.
+ *
+ * Its own set rather than the identity palette people and projects draw from
+ * — a goal's colour is never written as text, only worn as a rail, a dot, a
+ * fill, so it is free of the AA-for-white-initials debt that set carries, and
+ * pushed a good deal louder for it.
  */
 const PALETTE = [
-  '#1D7D46',
-  '#3B6FC2',
-  '#A76900',
-  '#7A6B9E',
-  '#8E6A3D',
-  '#278655',
-  '#B5533F',
-  '#4A7B8C',
+  '#1FAA5C',
+  '#2F6FEB',
+  '#E8890B',
+  '#8B5CF6',
+  '#0D9488',
+  '#DB2777',
+  '#E5484D',
+  '#0891B2',
 ] as const
 
 const STATUSES: GoalStatus[] = ['open', 'achieved', 'dropped']

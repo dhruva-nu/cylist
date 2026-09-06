@@ -24,7 +24,7 @@ from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
-from app.core.palette import colour_for
+from app.core.palette import GOAL_PALETTE, colour_for
 from app.models.board import BoardColumn
 from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
@@ -161,7 +161,7 @@ async def create(session: AsyncSession, project: Project, data: GoalCreate) -> G
         # reason a project's is: every goal should look like it belongs to the
         # same interface, and picking one is a decision nobody wanted to make
         # at the moment they were naming a quarter's work.
-        colour=data.colour or colour_for(data.name),
+        colour=data.colour or colour_for(data.name, GOAL_PALETTE),
         target_date=data.target_date,
         owner_id=data.owner_id,
         status=GoalStatus.OPEN,
