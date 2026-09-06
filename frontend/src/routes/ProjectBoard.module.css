@@ -347,44 +347,81 @@
 }
 
 /* A divided column: one stack per way the work can have ended, filling the
-   column between them the way a single stack of cards fills it. */
+   column between them the way a single stack of cards fills it. Padded and
+   gapped rather than run edge to edge, so the boxes inside read as sitting
+   in the column rather than as the column itself cut into thirds. */
 .sections {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 10px;
   min-height: 0;
+  padding: 8px 10px 10px;
   overflow-y: auto;
 }
 
+/* Its own bordered, rounded panel — not a rule between two otherwise
+   identical stretches of the column. A 1px line reads as noise the moment
+   there is a third section to tell apart from the other two; a box that
+   looks like a place of its own reads at a glance regardless of how many
+   there are. */
 .section {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--line);
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--paper);
 }
 
-.section:first-child {
-  border-top: none;
-}
-
-/* Only as loud as it has to be: the column's own heading is what names the
-   place, and these three name the corners of it. */
+/* The heading strip is tinted so it reads as the section's own header rather
+   than a caption floating over the cards — the same relationship a card's
+   head has to its body, just drawn a size down. */
 .sectionHead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   margin: 0;
-  padding: 8px 12px 2px;
-  color: var(--ink-3);
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  padding: 4px 10px 4px 4px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* The label between the fold button and the count, given the room to take —
+   and to give up first, eliding, when the section is narrower than its name. */
+.sectionLabel {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Its own surface against the tinted strip round it, the way `.count`
+   everywhere else on the board sits against `--paper-2`. */
+.sectionHead .count {
+  background: var(--paper);
 }
 
 /* The same welcome a column gives a card held over it, drawn a section at a
    time — otherwise a card in the air over a divided column has three targets
-   and no way to tell which one has it. */
+   and no way to tell which one has it. A ring rather than just a wash, so it
+   reads next to the section's own border rather than blending into it. */
 .sectionOver {
+  border-color: var(--brand-ink);
+  box-shadow: inset 0 0 0 1px var(--brand-ink);
+}
+
+.sectionOver .sectionHead {
+  background: var(--brand-soft);
+}
+
+.sectionOver .cards {
   background: var(--brand-soft);
 }
 
