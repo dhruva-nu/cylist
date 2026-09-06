@@ -68,6 +68,13 @@ so `move_task` refuses one and `finish_subtask` is what completes it. Either
 way, every one of them has to be finished or cancelled before the parent can be
 moved into the board's last column, and `move_task` refuses that too, naming
 what is still outstanding.
+
+The board's last column is where a card is done: moving one in records the
+moment it was finished, and moving it back out reopens it. That column alone
+may be divided into up to three **outcomes** — "Done", "Cancelled", "In prod" —
+which `get_project` lists beside it; `move_task` takes the name of one to say
+how the work ended. A template may narrow which of them its own cards are
+allowed to end on.
 """
 
 
@@ -399,7 +406,10 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "length, so 0 puts the card first and a large number puts it last. "
             "Moving does not change the task's status, but moving a card into "
             "the board's last column finishes it and moving it back out reopens "
-            "it — both are written to the card's history. A card with a sub-task "
+            "it — both are written to the card's history. Where that column is "
+            "divided into outcomes — 'Done', 'Cancelled', 'In prod' — name one "
+            "with `outcome` to say how the work ended; left unsaid, the card "
+            "lands on the first its template allows. A card with a sub-task "
             "still open cannot be moved into the board's last column; that comes "
             "back as an error naming what is outstanding. A sub-task cannot be "
             "moved at all — it is not on the board; finish_subtask is what "
@@ -412,13 +422,23 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         position: Annotated[
             int, Field(description="Index from the top of the column. Default 0.", ge=0)
         ] = 0,
+        outcome: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Which of the column's outcomes the card ends on, by name. Only the "
+                    "board's last column has any; get_project lists them."
+                )
+            ),
+        ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
             current = await client.get(f"/tasks/{task}")
             column_id = await resolve.column_id(client, _project_of(current), column)
-            moved = await client.post(
-                f"/tasks/{task}/move", {"column_id": column_id, "position": position}
-            )
+            body: dict[str, Any] = {"column_id": column_id, "position": position}
+            if outcome is not None:
+                body["outcome"] = outcome
+            moved = await client.post(f"/tasks/{task}/move", body)
             return {"task": moved}
 
         return await _guard(call)

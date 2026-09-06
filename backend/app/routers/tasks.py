@@ -115,6 +115,8 @@ def _read(
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
         comment_count=comment_count,
         checklist=[_item(item) for item in task.checklist],
+        outcome=task.outcome,
+        outcome_index=task.outcome_index,
         finished_at=task.finished_at,
         open_subtask_count=split.open,
         subtask_count=split.total,

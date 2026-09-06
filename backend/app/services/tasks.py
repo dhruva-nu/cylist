@@ -433,19 +433,28 @@ async def move(
     whether it should — but both directions are reported as a change, so a
     reopened card says so in its own history rather than only saying it moved.
 
+    Where that last column is divided into outcomes — "Done", "Cancelled", "In
+    prod" — the card lands on the one named, or on the first its template
+    allows if the move named none, and a card leaving loses whichever it was
+    on. Dragged between two sections of the same column, a card has not moved
+    by the board's reckoning but has changed how it ended, and that alone is
+    reported.
+
     Returns the task and what changed about it, in the same shape
     :func:`update` reports — the column it left and the one it arrived in, the
-    stage it was put back to if that happened, and whether it was finished or
-    reopened. Reordering within one column changes nothing worth recording: a
-    card's place in a stack is not a fact about the work.
+    stage it was put back to if that happened, the outcome it ended on, and
+    whether it was finished or reopened. Reordering within one column changes
+    nothing worth recording: a card's place in a stack is not a fact about the
+    work.
 
     Raises:
         UnprocessableRequestError: if the task is a sub-task, which is not on
             the board and so has nowhere to be moved to; if the column belongs
-            to another project, if the card's template is not allowed in it, if
-            the column it is leaving still has the card short of the last
-            sub-stage its template set there, or if the destination is the last
-            column and a sub-task is still open.
+            to another project, if the card's template is not allowed in it or
+            not allowed to end on the outcome named, if the outcome is not one
+            of that column's, if the column it is leaving still has the card
+            short of the last sub-stage its template set there, or if the
+            destination is the last column and a sub-task is still open.
     """
     # `parent` rather than `parent_id`: it is eagerly loaded — a sub-task cannot
     # spell its own reference without it — and naming the card to go and move
@@ -470,9 +479,15 @@ async def move(
         await _refuse_stage_incomplete(session, task)
     done_column = await columns.last(session, task.project_id)
     await _refuse_unfinished(session, task, column, done_column)
+    landing_on = _landing_outcome(task, column, data.outcome)
 
     source_id = _column_of(task)
     was_on = _stage(task.sub_statuses, task.sub_status_index)
+    # Read off the source column while the card is still in it. The label the
+    # index points at is a fact about a column, and in a moment the card will
+    # be in a different one.
+    was_ending = _outcome_label(task.column, task.outcome_index)
+    now_ending = _outcome_label(column, landing_on)
     siblings = [
         sibling
         for sibling in await _ordered(session, column.id)
@@ -488,12 +503,21 @@ async def move(
             task.sub_status_index = 0
         elif task.sub_statuses:
             task.sub_status_index = 0
+    task.outcome_index = landing_on
     for position, sibling in enumerate(siblings):
         sibling.position = position
     await session.flush()
+    # The card is in a different column now, and the one still hanging off the
+    # relationship is the one it left — which is the column ``Task.outcome``
+    # would read its own label out of.
+    await session.refresh(task, ["column"])
 
     if source_id == column.id:
-        return task, []
+        # Dragged between the sections of one column: not a move by the board's
+        # reckoning, but a change of how the work ended, which is worth saying.
+        if was_ending == now_ending:
+            return task, []
+        return task, [_outcome_change(was_ending, now_ending)]
 
     await _renumber(session, source_id)
     source = await columns.get(session, source_id)
@@ -505,6 +529,9 @@ async def move(
         changes.append(
             {"field": "sub_status_index", "label": "sub-status", "from": was_on, "to": now_on}
         )
+
+    if was_ending != now_ending:
+        changes.append(_outcome_change(was_ending, now_ending))
 
     was_finished = task.finished_at is not None
     now_finished = column.id == done_column.id
@@ -1074,6 +1101,55 @@ async def _refuse_unfinished(
             "open_checklist_items": open_boxes,
         },
     )
+
+
+def _outcome_label(column: BoardColumn | None, index: int | None) -> str | None:
+    """The section a card is in, as its label — or None where it is in none."""
+    if column is None or index is None or index >= len(column.outcomes):
+        return None
+    return column.outcomes[index]
+
+
+def _outcome_change(before: str | None, after: str | None) -> dict[str, Any]:
+    """One history entry's worth of "how this ended" changing."""
+    return {"field": "outcome", "label": "outcome", "from": before, "to": after}
+
+
+def _landing_outcome(task: Task, column: BoardColumn, wanted: str | None) -> int | None:
+    """Which of a column's outcomes a card being moved into it lands on.
+
+    None wherever the column draws no distinction, which is every column but
+    the board's last and most of those too. Where it does, an unnamed outcome
+    lands on the first the card's template allows: a card dragged into the last
+    column has ended, and refusing the drop for want of a word the board could
+    supply would make the ordinary gesture the awkward one.
+
+    Raises:
+        UnprocessableRequestError: if the column has no outcome by that name,
+            or if the card's template does not let its cards end on it.
+    """
+    if not column.outcomes:
+        return None
+
+    if wanted is None:
+        allowed = templates.permitted_outcomes(task.template, column)
+        return column.outcomes.index(allowed[0]) if allowed else 0
+
+    landed = next(
+        (
+            index
+            for index, label in enumerate(column.outcomes)
+            if label.casefold() == wanted.casefold()
+        ),
+        None,
+    )
+    if landed is None:
+        raise UnprocessableRequestError(
+            f"{column.name} has no outcome called {wanted!r}. It has {', '.join(column.outcomes)}.",
+            details={"column": column.name, "outcome": wanted, "outcomes": list(column.outcomes)},
+        )
+    templates.require_outcome_permitted(task, column, column.outcomes[landed])
+    return landed
 
 
 def _column_of(task: Task) -> UUID:

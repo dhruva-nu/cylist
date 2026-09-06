@@ -1,13 +1,18 @@
-"""Task templates: naming them, writing their stages, and the two rules they
-exist to enforce.
+"""Task templates: naming them, writing their stages, and the rules they exist
+to enforce.
 
-A template's stages say two things at once: which columns its cards may sit
-in (:func:`permitted_columns`, asked at creation and on every move), and the
+A template's stages say three things at once: which columns its cards may sit
+in (:func:`permitted_columns`, asked at creation and on every move), the
 sub-stages a card passes through in each (:func:`landing_sub_stages`, asked
 whenever a card lands in a column — at creation and on every move — and
 loaded onto the card's own ``sub_statuses``; the leaving-is-refused half of
 that rule lives in :func:`app.services.tasks._refuse_stage_incomplete`, since
-it only needs the stage already on the task, not the template lookup again).
+it only needs the stage already on the task, not the template lookup again),
+and — on the board's last column alone — which of its outcomes the cards may
+end on (:func:`require_outcome_permitted`).
+
+All three keep the same silence: a template that says nothing about a column,
+a stage, or an outcome is allowing it, not banning it.
 """
 
 from __future__ import annotations
@@ -193,6 +198,47 @@ def require_permitted(task: Task, column: BoardColumn) -> None:
     )
 
 
+def permitted_outcomes(template: TaskTemplate | None, column: BoardColumn) -> list[str]:
+    """Which of a column's outcomes this template's cards may end on.
+
+    The column's own list filtered by the template's, in the column's order —
+    which is what the board draws and what an error message reads out, so both
+    match the sections left to right rather than the order the template was
+    written in. An empty template list means all of them; a template list that
+    names nothing the column still has means the same, because a rule about
+    sections that were renamed away is a rule about nothing.
+    """
+    stage = stage_for_column(template, column.id)
+    if stage is None or not stage.allowed_outcomes:
+        return list(column.outcomes)
+    allowed = {label.casefold() for label in stage.allowed_outcomes}
+    kept = [label for label in column.outcomes if label.casefold() in allowed]
+    return kept or list(column.outcomes)
+
+
+def require_outcome_permitted(task: Task, column: BoardColumn, outcome: str) -> None:
+    """Refuse to land a card on an outcome its template's stage rules out.
+
+    Raises:
+        UnprocessableRequestError: naming the outcomes the card may end on
+            instead.
+    """
+    allowed = permitted_outcomes(task.template, column)
+    if any(label.casefold() == outcome.casefold() for label in allowed):
+        return
+
+    name = task.template.name if task.template else "This card's template"
+    raise UnprocessableRequestError(
+        f"{name} cards do not end on {outcome} in {column.name}. They end on {', '.join(allowed)}.",
+        details={
+            "template": name,
+            "column": column.name,
+            "outcome": outcome,
+            "allowed_outcomes": allowed,
+        },
+    )
+
+
 def stage_for_column(template: TaskTemplate | None, column_id: UUID) -> TemplateStage | None:
     """This template's stage for one column, if it names one."""
     if template is None:
@@ -243,7 +289,7 @@ async def _write_stages(
             "two answers to what it requires.",
         )
 
-    board = {column.id for column in await _board(session, template.project_id)}
+    board = {column.id: column for column in await _board(session, template.project_id)}
     strange = [str(column_id) for column_id in named if column_id not in board]
     if strange:
         raise UnprocessableRequestError(
@@ -252,14 +298,42 @@ async def _write_stages(
         )
 
     for stage in stages:
+        _refuse_unknown_outcomes(board[stage.column_id], stage.allowed_outcomes)
+
+    for stage in stages:
         session.add(
             TemplateStage(
                 template_id=template.id,
                 column_id=stage.column_id,
                 sub_stage_labels=stage.sub_stage_labels,
+                allowed_outcomes=stage.allowed_outcomes,
             )
         )
     await session.flush()
+
+
+def _refuse_unknown_outcomes(column: BoardColumn, allowed: list[str]) -> None:
+    """A stage may only narrow the outcomes its column actually has.
+
+    Refused rather than quietly dropped: a template naming an outcome that is
+    not there is either a typo or a rule written against a board that has since
+    changed, and both are worth being told about while the author is looking.
+    """
+    if not allowed:
+        return
+    known = {label.casefold() for label in column.outcomes}
+    unknown = [label for label in allowed if label.casefold() not in known]
+    if not unknown:
+        return
+    raise UnprocessableRequestError(
+        f"{column.name} has no outcome called {unknown[0]!r}."
+        + (f" It has {', '.join(column.outcomes)}." if column.outcomes else " It has none."),
+        details={
+            "column": column.name,
+            "unknown_outcomes": unknown,
+            "outcomes": list(column.outcomes),
+        },
+    )
 
 
 async def _refuse_duplicate_template(session: AsyncSession, project_id: UUID, name: str) -> None:

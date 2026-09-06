@@ -27,6 +27,7 @@ const MAX_SUB_STAGES = 4
 interface DraftStage {
   column_id: string
   sub_stage_labels: string[]
+  allowed_outcomes: string[]
 }
 
 export function TemplateDialog({
@@ -162,6 +163,7 @@ function TemplateEditor({
     (template?.stages ?? []).map((stage) => ({
       column_id: stage.column_id,
       sub_stage_labels: [...stage.sub_stage_labels],
+      allowed_outcomes: [...stage.allowed_outcomes],
     })),
   )
 
@@ -195,7 +197,7 @@ function TemplateEditor({
     setStages((current) =>
       current.some((stage) => stage.column_id === columnId)
         ? current.filter((stage) => stage.column_id !== columnId)
-        : [...current, { column_id: columnId, sub_stage_labels: [] }],
+        : [...current, { column_id: columnId, sub_stage_labels: [], allowed_outcomes: [] }],
     )
   }
 
@@ -204,6 +206,32 @@ function TemplateEditor({
       current.map((stage) =>
         stage.column_id === columnId ? { ...stage, sub_stage_labels: labels } : stage,
       ),
+    )
+  }
+
+  /**
+   * Turn one of a column's outcomes on or off for this stage.
+   *
+   * An empty list means all of them, so the toggles start lit and the first
+   * click has to take one *out* of the full set rather than add one to
+   * nothing. Choosing every one is the same rule as choosing none and is
+   * stored as none, which is the form that survives an outcome being renamed;
+   * choosing none at all is refused, because it would light them all straight
+   * back up and read as a click that did nothing.
+   */
+  function toggleOutcome(columnId: string, outcome: string, all: string[]) {
+    setStages((current) =>
+      current.map((stage) => {
+        if (stage.column_id !== columnId) return stage
+        const chosen = new Set(stage.allowed_outcomes.length ? stage.allowed_outcomes : all)
+        if (chosen.has(outcome)) chosen.delete(outcome)
+        else chosen.add(outcome)
+        if (chosen.size === 0) return stage
+        // In the column's own order, so the template reads the way the board
+        // draws it however the toggles were clicked.
+        const next = all.filter((one) => chosen.has(one))
+        return { ...stage, allowed_outcomes: next.length === all.length ? [] : next }
+      }),
     )
   }
 
@@ -298,6 +326,38 @@ function TemplateEditor({
                       value={stage.sub_stage_labels}
                       onChange={(labels) => setLabels(stage.column_id, labels)}
                     />
+                    {/* Only where the column has sections to choose between,
+                        which is the board's last and only once it has been
+                        divided. Choosing none is choosing all of them, the
+                        same silence the columns above keep. */}
+                    {column?.outcomes.length ? (
+                      <div
+                        className={styles.columnToggles}
+                        role="group"
+                        aria-label={`How ${column.name} may end for this template's cards`}
+                      >
+                        {column.outcomes.map((outcome) => {
+                          const chosen =
+                            stage.allowed_outcomes.length === 0 ||
+                            stage.allowed_outcomes.includes(outcome)
+                          return (
+                            <button
+                              key={outcome}
+                              type="button"
+                              className={`${styles.columnToggle} ${
+                                chosen ? styles.columnToggleActive : ''
+                              }`}
+                              aria-pressed={chosen}
+                              onClick={() =>
+                                toggleOutcome(stage.column_id, outcome, column.outcomes)
+                              }
+                            >
+                              {outcome}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 )
               })}

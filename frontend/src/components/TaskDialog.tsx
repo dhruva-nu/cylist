@@ -341,6 +341,7 @@ function TaskDetailView({
             // card still on its way says where it is and nothing more.
             <ReadField label="Column">
               {column?.name ?? '—'}
+              {task.outcome ? <span className={styles.role}>· {task.outcome}</span> : null}
               {task.finished_at ? (
                 <span className={styles.role}>
                   · finished {formatDue(task.finished_at.slice(0, 10))}

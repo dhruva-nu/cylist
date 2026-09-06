@@ -267,10 +267,27 @@ function useLaneMode(projectKey: string) {
  */
 const NO_GOAL_LANE = 'none'
 
+/**
+ * The section of a divided column a drop target names.
+ *
+ * A drop target's id is its column, prefixed by whatever else narrows it: the
+ * lane it is in, the section of the column it is. Every part but the last one
+ * qualifies, and the column is always the last — which is what lets the two
+ * qualifiers be read independently of each other and of how many there are.
+ */
+const OUTCOME_PREFIX = 'out:'
+
 /** A drop target's column, whichever kind of target it is. */
 function columnIdOf(over: string): string {
-  const separator = over.indexOf('::')
-  return separator === -1 ? over : over.slice(separator + 2)
+  return over.split('::').at(-1) ?? over
+}
+
+/** The outcome a drop target lands on, as an index, or null for a plain one. */
+function outcomeIndexOf(over: string): number | null {
+  const marked = over.split('::').find((part) => part.startsWith(OUTCOME_PREFIX))
+  if (marked === undefined) return null
+  const index = Number(marked.slice(OUTCOME_PREFIX.length))
+  return Number.isInteger(index) ? index : null
 }
 
 /** The lane a drop target belongs to, or null when it is not in a lane. */
@@ -398,13 +415,13 @@ export function ProjectBoard() {
    * one.
    */
   const move = useMutation<Task | null, Error, Move, { previous: Task[] | undefined }>({
-    mutationFn: async ({ taskId, taskRef, columnId, position, goalId }) => {
-      const moved = columnId ? await api.moveTask(taskId, columnId, position) : null
+    mutationFn: async ({ taskId, taskRef, columnId, position, outcome, goalId }) => {
+      const moved = columnId ? await api.moveTask(taskId, columnId, position, outcome) : null
       // By reference rather than by id for the same reason the dialog does:
       // it is what the error message will name if the server refuses.
       return goalId === undefined ? moved : api.updateTask(taskRef, { goal_id: goalId })
     },
-    onMutate: async ({ taskId, columnId, position, goalId }) => {
+    onMutate: async ({ taskId, columnId, position, outcome, outcomeIndex, goalId }) => {
       await queryClient.cancelQueries({ queryKey: tasksKey })
       const previous = queryClient.getQueryData<Task[]>(tasksKey)
       const landed = goalId === undefined ? null : (goals.data ?? []).find((g) => g.id === goalId)
@@ -413,7 +430,9 @@ export function ProjectBoard() {
           task.id === taskId
             ? {
                 ...task,
-                ...(columnId ? { column_id: columnId, position } : {}),
+                ...(columnId
+                  ? { column_id: columnId, position, outcome, outcome_index: outcomeIndex }
+                  : {}),
                 ...(goalId === undefined
                   ? {}
                   : {
@@ -592,8 +611,8 @@ export function ProjectBoard() {
     isColumnDrag(id)
       ? nameOfColumnId(String(id).slice(columnDragPrefix.length))
       : (tasks.data?.find((task) => task.id === id)?.title ?? 'the card')
-  const nameOfColumnId = (id: string) =>
-    columns.find((column) => column.id === id)?.name ?? 'the column'
+  const columnOf = (id: string) => columns.find((column) => column.id === id)
+  const nameOfColumnId = (id: string) => columnOf(id)?.name ?? 'the column'
   const nameOfColumn = (id: UniqueIdentifier | undefined) =>
     // Through `columnIdOf`, because in lanes the target is a lane's cell in a
     // column rather than the column itself — and "over lane:…::uuid" is not a
@@ -707,15 +726,25 @@ export function ProjectBoard() {
     const wasOn = task.goal_id ?? NO_GOAL_LANE
     const changingGoal = lane !== null && lane !== wasOn
     const changingColumn = task.column_id !== droppedIn
+    // The section of a divided column the card was dropped on. A card put in a
+    // different section of the column it is already in has not moved by the
+    // board's reckoning, but it has changed how the work ended — which is a
+    // change worth making, so it counts here the way a column does.
+    const landedOn = outcomeIndexOf(overId)
+    const changingOutcome = landedOn !== null && landedOn !== task.outcome_index
     // A card put back where it came from is not a move, and a lane it was
     // already in is not a change of goal: neither is worth a request.
-    if (!changingColumn && !changingGoal) return
+    if (!changingColumn && !changingGoal && !changingOutcome) return
 
     const wanted: Move = {
       taskId: task.id,
       taskRef: task.reference,
-      columnId: changingColumn ? droppedIn : null,
+      // The outcome travels with the move, so a card only changing section
+      // still names the column it is staying in.
+      columnId: changingColumn || changingOutcome ? droppedIn : null,
       position: byColumn.get(droppedIn)?.length ?? 0,
+      outcomeIndex: landedOn,
+      outcome: landedOn === null ? null : (columnOf(droppedIn)?.outcomes[landedOn] ?? null),
       ...(changingGoal ? { goalId: lane === NO_GOAL_LANE ? null : lane } : {}),
     }
 
@@ -943,6 +972,8 @@ export function ProjectBoard() {
           projectKey={projectKey}
           column={columnDialog === 'new' ? null : columnDialog}
           canDelete={columns.length > board.data.min_columns}
+          isLast={columnDialog !== 'new' && columnDialog.id === doneColumn?.id}
+          maxOutcomes={board.data.max_outcomes}
           announce={announce}
           onDone={refresh}
           onClose={() => setColumnDialog(null)}
@@ -1277,6 +1308,14 @@ interface Move {
   columnId: string | null
   position: number
   /**
+   * The section of a divided column the card lands on, by name, and where the
+   * board draws it while the request is in the air. Null for a drop on a
+   * column that is not divided — every column but the board's last, and most
+   * of those.
+   */
+  outcome: string | null
+  outcomeIndex: number | null
+  /**
    * The goal to put the card on, or null to take it off the one it is on.
    * Left out entirely — as opposed to null — when the drop said nothing about
    * a goal, which is every drop on a board that is not in lanes.
@@ -1531,7 +1570,29 @@ function Column({
             </div>
           )}
 
-          {part === 'head' ? null : (
+          {part === 'head' ? null : column.outcomes.length ? (
+            // A divided column is still one column: one heading, one count,
+            // one place on the board. What it has instead of a single stack of
+            // cards is a stack per way the work can have ended, each its own
+            // drop target, so which one a card is in is something you set by
+            // putting it there.
+            <div className={styles.sections}>
+              {column.outcomes.map((label, index) => (
+                <OutcomeSection
+                  key={label}
+                  label={label}
+                  dropId={`${OUTCOME_PREFIX}${index}::${dropId}`}
+                  // Cards written before the column was divided, and any left
+                  // behind by a section that was renamed away, sit in the
+                  // first: better an honest heading than a stack with none.
+                  tasks={tasks.filter((task) => (task.outcome_index ?? 0) === index)}
+                  members={members}
+                  onOpenTask={onOpenTask}
+                  onMoveSubStatus={onMoveSubStatus}
+                />
+              ))}
+            </div>
+          ) : (
             <div className={styles.cards}>
               {tasks.map((task) => (
                 <TaskCard
@@ -1554,6 +1615,56 @@ function Column({
           )}
         </div>
       )}
+    </section>
+  )
+}
+
+/**
+ * One section of a divided column: how the work ended, and what ended that way.
+ *
+ * Its own drop target, and its own heading with its own count — a column's
+ * count is still the sum of them, but "3 done, 1 cancelled" is the sentence
+ * dividing the column was for. The heading stays when the section is empty,
+ * because an empty section is the drop target that puts the first card in it.
+ */
+function OutcomeSection({
+  label,
+  dropId,
+  tasks,
+  members,
+  onOpenTask,
+  onMoveSubStatus,
+}: {
+  label: string
+  dropId: string
+  tasks: Task[]
+  members: Person[]
+  onOpenTask: (taskId: string) => void
+  onMoveSubStatus: (taskId: string, index: number) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: dropId })
+
+  return (
+    <section
+      ref={setNodeRef}
+      className={`${styles.section} ${isOver ? styles.sectionOver : ''}`}
+      aria-label={`${label}, ${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`}
+    >
+      <h4 className={styles.sectionHead}>
+        {label}
+        <span className={styles.count}>{tasks.length}</span>
+      </h4>
+      <div className={styles.cards}>
+        {tasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            members={members}
+            onOpen={() => onOpenTask(task.id)}
+            onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+          />
+        ))}
+      </div>
     </section>
   )
 }
@@ -1902,6 +2013,8 @@ function ColumnDialog({
   projectKey,
   column,
   canDelete,
+  isLast,
+  maxOutcomes,
   announce,
   onDone,
   onClose,
@@ -1909,6 +2022,14 @@ function ColumnDialog({
   projectKey: string
   column: BoardColumn | null
   canDelete: boolean
+  /**
+   * Whether this is the board's last column, which is the only one that can be
+   * divided into outcomes. A new column is added to the right, so it will be —
+   * but it is not one yet, and offering the sections before the column exists
+   * is asking about a thing that has nowhere to go.
+   */
+  isLast: boolean
+  maxOutcomes: number
   announce: (message: string) => void
   onDone: () => Promise<void>
   onClose: () => void
@@ -1916,7 +2037,9 @@ function ColumnDialog({
   const [form, setForm] = useState<ColumnInput>({
     name: column?.name ?? '',
     description: column?.description ?? '',
+    outcomes: column?.outcomes ?? [],
   })
+  const outcomes = form.outcomes ?? []
 
   const save = useMutation({
     mutationFn: (input: ColumnInput) =>
@@ -1937,8 +2060,13 @@ function ColumnDialog({
     },
   })
 
-  const complete = form.name.trim() && form.description.trim()
+  const complete =
+    form.name.trim() && form.description.trim() && outcomes.every((label) => label.trim())
   const error = save.error ?? remove.error
+
+  function setOutcomes(next: string[]) {
+    setForm({ ...form, outcomes: next })
+  }
 
   return (
     <Modal
@@ -1990,6 +2118,56 @@ function ColumnDialog({
             placeholder="Waiting on PR review or QA"
           />
         </Field>
+
+        {/* Only at the end of the board. An outcome is how a piece of work
+            ended, and nothing ends in the middle of one. */}
+        {column && isLast ? (
+          <Field
+            label="Outcomes"
+            hint={`How work can end here — up to ${maxOutcomes} sections this column is divided into. Leave it empty to draw no distinction.`}
+          >
+            <div className={styles.outcomes}>
+              {outcomes.map((label, index) => (
+                <div key={index} className={styles.outcomeRow}>
+                  <span className={styles.outcomeNumber}>{index + 1}</span>
+                  <input
+                    value={label}
+                    maxLength={40}
+                    className={styles.grow}
+                    aria-label={`Outcome ${index + 1}`}
+                    placeholder={['Done', 'Cancelled', 'In prod'][index] ?? 'Outcome'}
+                    onChange={(event) =>
+                      setOutcomes(
+                        outcomes.map((one, at) => (at === index ? event.target.value : one)),
+                      )
+                    }
+                  />
+                  <Button
+                    small
+                    variant="ghost"
+                    aria-label={`Remove outcome ${index + 1}`}
+                    onClick={() => setOutcomes(outcomes.filter((_, at) => at !== index))}
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+              {outcomes.length < maxOutcomes ? (
+                <Button small variant="ghost" onClick={() => setOutcomes([...outcomes, ''])}>
+                  + Add an outcome
+                </Button>
+              ) : null}
+              {/* Said here rather than left to the refusal: the cards are
+                  already in the sections, and what becomes of them is the
+                  thing anybody shortening the list is actually asking. */}
+              {column.outcomes.length > outcomes.length ? (
+                <p className={styles.note}>
+                  Cards in a section you have taken away move to the last one still standing.
+                </p>
+              ) : null}
+            </div>
+          </Field>
+        ) : null}
       </ModalBody>
     </Modal>
   )

@@ -346,6 +346,56 @@
   overflow-y: auto;
 }
 
+/* A divided column: one stack per way the work can have ended, filling the
+   column between them the way a single stack of cards fills it. */
+.sections {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.section:first-child {
+  border-top: none;
+}
+
+/* Only as loud as it has to be: the column's own heading is what names the
+   place, and these three name the corners of it. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px 2px;
+  color: var(--ink-3);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The same welcome a column gives a card held over it, drawn a section at a
+   time — otherwise a card in the air over a divided column has three targets
+   and no way to tell which one has it. */
+.sectionOver {
+  background: var(--brand-soft);
+}
+
+/* Inside a section the stack is as short as its cards: the section's own
+   heading is already the floor a drop can land on. */
+.section .cards {
+  flex: 0 0 auto;
+  min-height: 34px;
+  overflow: visible;
+}
+
 .task {
   position: relative;
   display: flex;
@@ -1076,6 +1126,51 @@
   margin: 0;
   color: var(--ink-3);
   font-size: 13px;
+}
+
+/* The list of ways work can end in the last column. Shaped like the stage
+   editor in the card dialog — a number, a box, a way to take it out — because
+   it is the same gesture and there is no reason for it to be a second one. */
+.outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.outcomeRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  align-self: stretch;
+}
+
+.outcomeRow .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.outcomeRow button {
+  flex-shrink: 0;
+  min-width: 32px;
+  padding-inline: 6px;
+}
+
+/* Which section this is, left to right — the order the column draws them in,
+   and the order a card lands in when a move names none. */
+.outcomeNumber {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The whole of a confirmation, rather than a footnote under a field the way
