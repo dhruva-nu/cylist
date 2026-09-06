@@ -49,6 +49,17 @@ class Project(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     commit messages and Jira long after the card it named is gone.
     """
 
+    goal_counter: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    """Highest goal number ever handed out on this project, for ``ATL-G1``.
+
+    Its own counter rather than a share of ``task_counter``: the two numberings
+    are read side by side and would be unreadable interleaved — a board whose
+    cards ran 1, 3, 4, 7 because the gaps were goals would look like a board
+    with four deleted cards.
+    """
+
     members: Mapped[list[Person]] = relationship(
         secondary="project_member",
         order_by=(KIND_ORDER, Person.name),

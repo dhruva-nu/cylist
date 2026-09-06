@@ -153,15 +153,40 @@
   box-shadow: var(--shadow);
 }
 
+/*
+ * The detail pane: a reading column, and whatever else there is beside it.
+ *
+ * Stretching this one with the page was not enough and would have made it
+ * worse. What is in here is a name, a path, a note and a list of labelled
+ * values, and a masked secret set across 1300px is a line you lose your place
+ * in halfway along — the widest thing in the pane is the one that least wants
+ * the width. So the reading matter stops at 720px and the room the page gained
+ * goes to the child cards, which are a grid and can use it.
+ *
+ * `align-content: start` because the two columns are different heights and a
+ * short one has no business being centred against a tall one.
+ */
 .detail {
+  display: grid;
+  grid-template-columns: minmax(0, 720px) minmax(0, 1fr);
+  gap: 40px;
+  align-content: start;
   padding: 24px;
 }
 
 .detailHead {
   display: grid;
+  grid-column: 1;
   grid-template-columns: 1fr auto;
   gap: 12px;
   align-items: start;
+}
+
+/* Whatever the node itself has to say — the key/value list of a secret, or the
+   line explaining an empty branch. Under the heading, in the same column. */
+.reading {
+  grid-column: 1;
+  min-width: 0;
 }
 
 .detailActions {
@@ -176,17 +201,21 @@
   font-size: 12.5px;
 }
 
+/* A measure of its own as well as the column's: 720px is 90-odd characters at
+   this size, which is past where a line stops being easy to return from. */
 .note {
+  max-width: 68ch;
   margin: 0;
   color: var(--ink-2);
 }
 
+/* No top margin of its own any more: the grid above puts 40px between the
+   heading and this, and a margin on top of that was 64px of nothing. */
 .kv {
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 12px 18px;
   align-items: center;
-  margin-top: 24px;
   font-size: 14.5px;
 }
 
@@ -232,11 +261,16 @@
   overflow-wrap: anywhere;
 }
 
+/* Beside the heading rather than under it. A branch's children are a grid of
+   small cards, which is the one thing in this pane that gets better the more
+   room it has. */
 .cards {
   display: grid;
+  grid-row: 1;
+  grid-column: 2;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  align-content: start;
   gap: 12px;
-  margin-top: 22px;
 }
 
 .childCard {
@@ -309,6 +343,21 @@
 .segmented button.on {
   background: var(--brand-soft);
   color: var(--brand-ink);
+}
+
+/* Below this the pane is not wide enough to be two columns of anything: 720px
+   of reading plus a 40px gutter leaves the cards a strip too narrow to hold
+   one. They go back under the heading, and the reading column takes the pane. */
+@media (max-width: 1500px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cards {
+    grid-row: auto;
+    grid-column: 1;
+    margin-top: 22px;
+  }
 }
 
 @media (max-width: 860px) {

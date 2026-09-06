@@ -18,11 +18,43 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
  * not a token that flips. */
 const OWNER_COLOUR = '#4a7b8c'
 
+/**
+ * How wide the screen you are on is allowed to be.
+ *
+ * Three answers rather than the two there used to be. The board is its own
+ * container and takes the window; People, Files and Vault are a directory, a
+ * table and two trees, none of which is reading matter, and the 1180px column
+ * they used to sit in spent a quarter of a wide display on empty margin while
+ * squeezing the content into more, thinner pieces than it wanted; everything
+ * else is prose and stays where prose belongs.
+ *
+ * The value lands on the frame as a custom property, so the bar and the
+ * breadcrumbs line up with the page rather than each carrying a width of their
+ * own — see `--page-max` in the stylesheet.
+ */
+function usePageWidth(): string | undefined {
+  const matchRoute = useMatchRoute()
+
+  if (matchRoute({ to: '/p/$projectKey/board' })) return styles.pageBoard
+  if (
+    matchRoute({ to: '/p/$projectKey' }) ||
+    matchRoute({ to: '/p/$projectKey/people' }) ||
+    matchRoute({ to: '/p/$projectKey/files' }) ||
+    matchRoute({ to: '/p/$projectKey/goals' }) ||
+    matchRoute({ to: '/p/$projectKey/goals/$goalRef' }) ||
+    matchRoute({ to: '/p/$projectKey/vault' })
+  ) {
+    return styles.pageRoomy
+  }
+  return styles.pageReading
+}
+
 export function Shell() {
   const matchRoute = useMatchRoute()
   // The board scrolls sideways, so it gets the full window rather than the
   // reading-width column every other screen sits in.
   const wide = Boolean(matchRoute({ to: '/p/$projectKey/board' }))
+  const page = usePageWidth() ?? ''
 
   return (
     <>
@@ -35,7 +67,7 @@ export function Shell() {
       <a href="#content" className={styles.skip}>
         Skip to content
       </a>
-      <div className={styles.top}>
+      <div className={`${styles.top} ${page}`}>
         <div className={styles.bar}>
           <Link to="/" className={styles.brand}>
             <span className={styles.mark}>C</span> Cylist
@@ -48,7 +80,7 @@ export function Shell() {
         </div>
         <Breadcrumbs />
       </div>
-      <main id="content" className={`${styles.wrap} ${wide ? styles.wide : ''}`}>
+      <main id="content" className={`${styles.wrap} ${page} ${wide ? styles.wide : ''}`}>
         <Outlet />
       </main>
     </>
@@ -142,6 +174,9 @@ function ProjectTabs() {
       <Link to="/p/$projectKey/board" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Board
       </Link>
+      <Link to="/p/$projectKey/goals" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Goals
+      </Link>
       <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
         Files
       </Link>
@@ -166,15 +201,19 @@ function Breadcrumbs() {
   const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
   const onVault = matchRoute({ to: '/p/$projectKey/vault' })
+  // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
+  const onGoals = matchRoute({ to: '/p/$projectKey/goals', fuzzy: true })
   const area = onBoard
     ? 'Board'
-    : onFiles
-      ? 'Files'
-      : onVault
-        ? 'Vault'
-        : onPeople
-          ? 'People'
-          : null
+    : onGoals
+      ? 'Goals'
+      : onFiles
+        ? 'Files'
+        : onVault
+          ? 'Vault'
+          : onPeople
+            ? 'People'
+            : null
 
   if (!inProject) {
     return (
@@ -237,9 +276,14 @@ export function PageHead({
 }) {
   return (
     <div className={styles.head}>
-      {eyebrow}
-      <h1>{title}</h1>
-      {children ? <p>{children}</p> : null}
+      {/* The words in one box and the buttons in another, because on a wide
+          page the two are a row rather than a stack — and a row needs the
+          eyebrow, the title and the description to travel together. */}
+      <div className={styles.headText}>
+        {eyebrow}
+        <h1>{title}</h1>
+        {children ? <p>{children}</p> : null}
+      </div>
       {actions ? <div className={styles.actions}>{actions}</div> : null}
     </div>
   )

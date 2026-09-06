@@ -26,7 +26,7 @@ from app.schemas.projects import (
     ProjectSummary,
     ProjectUpdate,
 )
-from app.services import activity, columns, files, projects, tasks, vault
+from app.services import activity, columns, files, goals, projects, tasks, vault
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -124,14 +124,17 @@ async def get_summary(
     task_counts = await tasks.status_counts(session, project)
     contents = await files.counts(session, project)
     stored = await vault.counts(session, project)
+    goal_count, open_goals = await goals.counts_for_project(session, project)
     return ProjectSummary(
         **_read(project).model_dump(),
         team_count=people_counts[PersonKind.TEAM],
         client_count=people_counts[PersonKind.CLIENT],
-        task_count=sum(task_counts.values()),
+        task_count=await tasks.card_count(session, project),
         column_count=await columns.count(session, project.id),
         blocked_count=task_counts[TaskStatus.BLOCKED],
         on_hold_count=task_counts[TaskStatus.HOLD],
+        goal_count=goal_count,
+        open_goal_count=open_goals,
         folder_count=contents.folders,
         file_count=contents.items,
         vault_tree_count=stored.trees,

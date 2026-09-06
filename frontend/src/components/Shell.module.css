@@ -26,12 +26,42 @@
   background: var(--bg);
 }
 
+/*
+ * How wide a screen is allowed to be, set once per page and read by everything
+ * that has to line up with it.
+ *
+ * There used to be a single 1180px cap on `.wrap`, and the board opted out of
+ * it. That is the wrong shape for the question: a table, a file tree and a
+ * directory of people are not reading matter, and on a 1728px display the cap
+ * spent 274px down each side on nothing while the content it was protecting
+ * squeezed itself into five thin columns. The cap belongs to the page, not to
+ * the frame, so the page says which one it is and the frame follows.
+ *
+ * The bar and the breadcrumbs read the same variable rather than carrying a
+ * number of their own. They used to carry 1180px each, which is how a wide
+ * page ended up with its navigation stranded in the middle of the window and
+ * its content running out past it on both sides.
+ */
+.pageReading {
+  --page-max: 1180px;
+}
+
+/* People, Files and Vault: a table and two trees, none of it prose. */
+.pageRoomy {
+  --page-max: 1720px;
+}
+
+/* The board scrolls sideways and is its own container. */
+.pageBoard {
+  --page-max: none;
+}
+
 .bar {
   display: flex;
   gap: 16px;
   align-items: center;
   justify-content: space-between;
-  max-width: 1180px;
+  max-width: var(--page-max, 1180px);
   margin: 0 auto;
   padding: 16px 24px 8px;
 }
@@ -128,7 +158,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  max-width: 1180px;
+  max-width: var(--page-max, 1180px);
   margin: 0 auto;
   padding: 6px 24px 0;
   color: var(--ink-2);
@@ -166,10 +196,36 @@
 .wrap {
   flex: 1;
   min-height: 0;
-  max-width: 1180px;
+  max-width: var(--page-max, 1180px);
   margin: 0 auto;
   padding: 22px 24px 60px;
   overflow: auto;
+}
+
+/* A wide page takes the width it was given, rather than the width its widest
+   sentence happened to need.
+
+   `margin: 0 auto` above centres the box, and an automatic margin on a flex
+   item turns off the stretch that would otherwise have sized it — so a page
+   whose content is a paragraph and a grid of cards was laid out around the
+   paragraph and then centred, leaving a quarter of the window empty down each
+   side while the cards it was making room for wrapped early. Stating the width
+   puts the cap back in charge: up to `--page-max`, and the window's own edge
+   below that. `min-width: 0` so the box can honour it. Reading pages keep the
+   old behaviour on purpose — prose has a measure, and a column that stops at
+   its own is centred exactly where it should be. */
+.pageRoomy.wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+/* A measure, whatever the page is. Widening a screen widens what is laid out
+   on it — a table gets more columns, a directory more cards — but a line of
+   text read across 1600px is a line nobody's eye can return from, so prose
+   stops where prose stops. Before `.head p` on purpose: that one is narrower
+   still, and equal specificity means the later rule is the one that wins. */
+.wrap p {
+  max-width: 68ch;
 }
 
 /* The board: full width, and a column of its own so the board inside it can
@@ -193,10 +249,11 @@
      question away, and `min-width: 0` lets the box honour it. */
   width: 100%;
   min-width: 0;
-  max-width: none;
   padding-bottom: 24px;
 }
 
+/* A reading page's heading is centred over the column it introduces, because
+   there the heading and the column are the same width. */
 .head {
   display: flex;
   flex-direction: column;
@@ -204,6 +261,46 @@
   align-items: center;
   margin: 8px 0 30px;
   text-align: center;
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * A wide page's heading is a row instead: what the page is on the left, what
+ * you can do to it on the right.
+ *
+ * Centring only works while the heading is as wide as the thing beneath it. At
+ * 1720px it is not — the title sits alone in the middle of the window with a
+ * table's worth of content squared off underneath, and the buttons are a
+ * pointer-journey away from everything they act on. Baseline alignment rather
+ * than centre: the actions line up with the title's own baseline, so the row
+ * reads as one line however many lines of description sit under it.
+ */
+.pageRoomy .head,
+.pageBoard .head {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: baseline;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.pageRoomy .headText,
+.pageBoard .headText {
+  align-items: flex-start;
+}
+
+.pageRoomy .actions,
+.pageBoard .actions {
+  margin-top: 0;
+  justify-content: flex-end;
 }
 
 .head p {

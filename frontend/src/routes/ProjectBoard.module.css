@@ -1,33 +1,35 @@
-/* Two tracks: the search takes the row, the button takes what it needs at the
-   end of it. It was three, with the search boxed into the middle one and empty
-   space either side holding it on the board's midline — but a box this wide
-   has no side left to be off, and those tracks were only ever there to centre
-   it. It is centred now by spanning.
-
-   `1fr` on the search's track rather than `auto`, so the width below resolves
-   against a track that has already been given a size rather than against one
-   still being sized by what is in it. */
+/* One row: the search box, then the buttons hard against the end of it.
+   A row rather than the two-cell grid this used to be — that grid had a cell
+   for a search box and a cell for one button, so the second button wrapped to
+   a line of its own and the third stretched across the width of the board. */
 .toolbar {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  /* One height for everything in the row. The search box and the buttons were
+     51px and 27px respectively when they finally shared a line, which read as
+     a control with some decoration beside it rather than as a toolbar. */
+  --control: 44px;
+
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   margin: 0 6px 14px;
 }
 
-/* The cap only bites on a display wider than about 3000px; on anything
-   narrower this is the whole row, less the button. Centred in its track for
-   the displays where it does bite. */
+/* Takes what the buttons leave. The cap only bites on a display wider than
+   about 3000px; on anything narrower this is the whole row, less the buttons.
+   The basis is the width below which the two drop onto separate lines rather
+   than squeezing the box down to nothing. */
 .search {
   position: relative;
-  grid-column: 1;
-  justify-self: center;
-  width: min(2880px, 100%);
+  flex: 1 1 360px;
+  min-width: 0;
+  max-width: 2880px;
 }
 
 .search input {
   width: 100%;
-  padding: 13px 22px;
+  height: var(--control, 44px);
+  padding: 0 20px;
   font-size: 15px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
@@ -352,13 +354,33 @@
   padding: 12px 14px 12px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--paper-2);
+
+  /* Named as well as set, so anything drawn on top of the card can ring itself
+     in the surface it is actually sitting on — which the status tints below
+     change out from under it. */
+  --card-surface: var(--paper-2);
+
+  background: var(--card-surface);
   cursor: grab;
   touch-action: none;
 }
 
-/* A colour bar rather than a tinted card alone: the status has to survive
-   being glanced at from across the room. */
+/* A colour bar rather than a tinted card alone: what it stands for has to
+   survive being glanced at from across the room.
+
+   Three things want the rail now, and they are ordered rather than merged. A
+   card on a goal wears that goal's colour, set as `--card-rail` on the card
+   itself, because the goal has nowhere else on a board to be. Failing that it
+   wears its status, for the cards that have one worth saying. Failing both —
+   which is most cards, most of the time — it wears what kind of work it is:
+   the fact the tinted tile at the head of the card used to spend twenty-four
+   pixels and the card's heaviest object on.
+
+   The type ramp is written first and the status blocks below override it,
+   which is the whole of what makes a held bug wear amber: a class and a
+   pseudo-element weigh exactly the same, so source order is the only thing
+   deciding between them. Moving `.hold` above `.type_bug` would silently swap
+   what the card says. */
 .task::before {
   content: '';
   position: absolute;
@@ -367,7 +389,21 @@
   left: 0;
   width: 4px;
   border-radius: 0 3px 3px 0;
-  background: var(--ok);
+  background: var(--card-rail, var(--line-2));
+}
+
+.type_feature::before {
+  background: var(--card-rail, var(--ok));
+}
+
+.type_bug::before {
+  background: var(--card-rail, var(--blocked));
+}
+
+/* Grey stays grey. A chore is the one of the three that is nobody's idea, and
+   colouring it would be saying so twice. */
+.type_chore::before {
+  background: var(--card-rail, var(--line-2));
 }
 
 .task:hover {
@@ -393,23 +429,32 @@
 
 .hold {
   border-color: transparent;
-  background: var(--hold-soft);
+  --card-surface: var(--hold-soft);
+
+  background: var(--card-surface);
 }
 
 .hold::before {
-  background: var(--hold);
+  background: var(--card-rail, var(--hold));
 }
 
 .blocked {
   border-color: transparent;
-  background: var(--blocked-soft);
+  --card-surface: var(--blocked-soft);
+
+  background: var(--card-surface);
 }
 
 .blocked::before {
-  background: var(--blocked);
+  background: var(--card-rail, var(--blocked));
 }
 
-/* No tint and a grey rail: a cancelled card is finished with, not urgent. */
+/* No tint and a grey rail: a cancelled card is finished with, not urgent.
+
+   The one card whose goal does not take the rail. A dropped card still counts
+   towards its goal and still says which one on its chip, but drawing it in
+   the goal's own colour would put it back among the live work at exactly the
+   distance the colour is meant to be read from. */
 .cancelled {
   background: var(--paper-2);
 }
@@ -423,93 +468,181 @@
   text-decoration: line-through;
 }
 
-.taskRow {
+/* The card's one line of chrome, under the title.
+
+   Counts, references, dates and a status word are all the same class of fact,
+   so they get one size and one ink and take their emphasis from where they sit
+   instead — left is what the card is, right is what has gathered around it. A
+   second type size in here is how the row above the title used to argue that
+   it mattered more than the title did.
+
+   11.5px against the mono at 11px below: the two faces do not measure the same
+   at the same number, and matching the figures optically is the point rather
+   than matching the declaration. */
+.strip {
   display: flex;
-  gap: 8px;
+
+  /* 10px rather than 8px, which is the gap the counts already asked for: each
+     of them is a drawn mark and a figure, and at 8px two neighbouring items
+     ran together into one. */
+  gap: 6px 10px;
   align-items: center;
-  justify-content: space-between;
+
+  /* One line is what this is for, and wrapping is what happens instead of
+     losing an end of it. A card can carry all of this at once — urgent, and
+     blocked, and a sub-task of something, and seven comments — and at a
+     column's narrowest that set is wider than the card. Without this the
+     overflow runs off the right-hand side and the column's own clip takes the
+     owner's face off, which is the one thing here that must never be cut.
+
+     `flex-end` is for the wrapped line only, and reaches no further: the first
+     line has `.stripGap` on it, which has already taken every spare pixel, so
+     there is nothing left there for this to move. What it does do is keep the
+     faces on the right-hand margin on whichever line they end up on — a
+     straight edge of them down the column is the whole point of the gap. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
   color: var(--ink-2);
-  font-size: 13px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+
+/* What separates the line's two halves. Growing rather than a margin, so the
+   faces sit on the same margin down the whole column however much is to their
+   left — a straight edge of them is what makes "whose is this" answerable
+   without reading. */
+.stripGap {
+  flex: 1;
 }
 
 /* --ink-2, not --ink-3: this sits on a card that may be tinted amber or red,
    and the quietest ink only clears AA on the plain surfaces. */
 .reference {
+  flex: none;
   color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-}
-
-/* The card's own reference and its parent's, together at the head of the card.
-   Sub-tasks are the only cards with two, so the pair only ever appears where
-   it means something. */
-.refs {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  min-width: 0;
 }
 
 /* --ink-2 like .reference, and for the same reason: this rides on cards that
    may be tinted amber or red, where the quietest ink stops clearing AA. The
-   word "of" carries the relationship, so the colour does not have to. */
+   word "of" carries the relationship, so the colour does not have to.
+
+   A sub-task is the only card with two references, so the pair only ever
+   appears where it means something. */
 .parent {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
+/* The first thing on the card, and the only thing on it set at reading size.
+
+   Clamped rather than left to run: a long identifier used to overflow and be
+   sheared off by the card's own edge — no ellipsis, and no sign that there was
+   more of it. `anywhere` because the strings that do this are the ones with no
+   spaces to break at, which is exactly why they overflowed. */
 .title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+
+  /* A measure rather than a width. Past about 35 characters a line stops being
+     scanned and starts being read, which is the wrong thing to ask of a card in
+     a column — and a column may be 400px wide, where the card would otherwise
+     set a line half as long again. On a narrow column this does nothing: the
+     card is already the shorter of the two. */
+  max-width: 35ch;
   font-family: var(--font-ui);
   font-size: 15px;
   font-weight: 600;
   line-height: 1.35;
 }
 
-.chip {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 1px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--paper);
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 600;
+/* What kind of card this is, at the head of it.
+
+   A tinted tile rather than an outlined chip. The type is the one mark that is
+   on every card in the same place, which makes it what the eye actually uses
+   to find a card again in a column — and a hairline box in the row's own ink
+   was not a thing you could find at a glance. The tint carries the meaning and
+   the glyph confirms it, so neither has to do the job alone.
+
+   Square-ish and soft-cornered, not a pill: a pill is what this file uses for
+   something with a word in it, and there is no word in here. */
+.tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
 }
 
-/* An icon-only chip: square-ish padding, since there is no text to sit beside
-   and a pill's side padding would leave the glyph adrift in it. */
-.icon {
-  padding: 3px 6px;
-}
-
-.type_feature {
+.tile_feature {
+  background: var(--ok-soft);
   color: var(--go);
 }
 
-.type_bug {
+.tile_bug {
+  background: var(--blocked-soft);
   color: var(--blocked);
 }
 
-.type_chore {
+/* Grey stays grey. A chore is the one of the three that is nobody's idea, and
+   giving it a hue of its own would be inventing a fourth thing to learn. */
+.tile_chore {
+  background: var(--line);
   color: var(--ink-2);
 }
 
-/* The type/status chip's neighbour on the right of a card, and the priority
-   chip beside it when there is one. */
-.badges {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  align-items: center;
+/* Held, blocked or given up: the tile carries the status instead of the type,
+   and takes --paper for its ground because the card behind it is already
+   tinted with the same hue — see .pill, which is paper-backed for the reason. */
+.tile_hold,
+.tile_blocked,
+.tile_cancelled {
+  background: var(--paper);
 }
 
+.tile_hold {
+  color: var(--hold);
+}
+
+.tile_blocked {
+  color: var(--blocked);
+}
+
+.tile_cancelled {
+  color: var(--ink-3);
+}
+
+/* The priority mark. No box by default: three of the four levels are the
+   glyph and nothing else, so the one that does get a box is unmistakably the
+   one that got it. The 2px of side padding is there only to stop the glyph
+   touching the mark next to it. */
+.prio {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 3px 2px;
+}
+
+/* The only level that gets a fill. Its ground is --blocked-soft rather than a
+   wash of its own: urgent and overdue are the two things on a card that mean
+   drop what you are doing, and they are meant to read as the same alarm. */
 .priority_urgent {
+  padding: 3px 7px;
+  border-radius: var(--radius-control);
+  background: var(--blocked-soft);
   color: var(--priority-urgent);
 }
 
@@ -521,14 +654,38 @@
   color: var(--priority-week);
 }
 
+.priority_someday {
+  color: var(--priority-someday);
+}
+
+/* The two pills that carry a wash of their own, on the two cards that are
+   already washed in it.
+
+   An urgent card that is also blocked drew --blocked-soft on --blocked-soft,
+   and a card due today that is on hold drew --hold-soft on --hold-soft: in
+   both cases the pill kept its ink and lost its shape entirely. --paper, for
+   the same reason .pill below takes it — the card is carrying the colour, so
+   what sits on top of it has to be the thing that is not. */
+.hold .priority_urgent,
+.blocked .priority_urgent,
+.hold .dueLate,
+.blocked .dueLate,
+.hold .dueToday,
+.blocked .dueToday,
+.hold .dueTab,
+.blocked .dueTab {
+  --tab-tone: var(--paper-2);
+}
+
 /* Deliberately paper-backed rather than tinted: the card behind it is already
    carrying the colour, and two washes of the same hue muddy both. */
 .pill {
+  flex: none;
   padding: 1px 9px;
   border-radius: var(--radius-control);
   background: var(--paper);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -558,36 +715,239 @@
   font-weight: 600;
 }
 
-.links {
-  display: flex;
-  gap: 8px;
-
-  /* Tinted cards again — see .reference. */
-  color: var(--ink-2);
-  font-size: 12px;
-}
-
-/* Amber, because this is the number that will refuse the card at the last
-   column — the only count on a card that is a rule rather than a fact. */
-.open {
-  color: var(--hold);
-  font-weight: 600;
-}
-
-.trailing {
-  display: flex;
-  gap: 8px;
+/* One count in that row. */
+.meta {
+  display: inline-flex;
+  gap: 4px;
   align-items: center;
 }
 
-.due {
+.metaValue {
   font-family: var(--font-mono);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-.late {
+/* Everyone who owes this card something, overlapped into one mark. The ring is
+   the card's own surface, so the faces read as a stack rather than as a smear —
+   and it follows the card's tint, which is why it is a variable and not white. */
+.owners {
+  display: flex;
+  padding-left: 3px;
+}
+
+.owners > * {
+  margin-left: -6px;
+  box-shadow: 0 0 0 2px var(--card-surface, var(--paper));
+}
+
+/* One dot per sub-task, filled as each is finished.
+
+   Round, small and countable, because the stage bar further up the card may be
+   drawing the other kind of progress and the two must not be mistaken for one
+   another: that bar spans the card and fills left to right, so anything else
+   that spanned and filled would read as more of it. Dots span nothing — they
+   are a handful of marks, which is what a set of sub-tasks is.
+
+   No wrapping any more, because there is nothing left to wrap: the row is
+   capped at six and says `+n` for the rest. It shares a line with the other
+   counts now, and a set that could grow to two lines would push that line's
+   neighbours around every time a card was split again. */
+.dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+/* Ringed rather than filled grey, so an unfinished dot reads as a slot waiting
+   for its green rather than as a third colour.
+
+   The ring is --hold, not a rule colour. An open sub-task is the reason a card
+   cannot reach the last column — the server refuses the move and names it —
+   so the mark for one is the same amber every other kind of waiting on this
+   board wears, and it clears the tints a card can take underneath it, which
+   --line-2 did not. */
+.dot {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--hold);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+/* The same green a finished stage takes, and for the same reason: done is done,
+   and a second colour for it would be a second thing to learn. */
+.dotDone {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+/* However many did not fit. Amber like the open dots, because that is what it
+   is standing in for — the finished ones are all drawn. */
+.dotRest {
+  color: var(--hold);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A due date, drawn as near or as far as it is — five steps, and the same
+   height in all five so that a column of cards keeps one edge down its side.
+   The mark itself never changes size; only its ink, its ground and whether it
+   has a ground at all. */
+.due {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* The two that are asking for something get a filled pill. Past its date and
+   due today are the only states where the date is a thing to do rather than a
+   thing to know, and the fill is what separates the two kinds. */
+.dueLate,
+.dueToday {
+  padding: 2px 8px 2px 6px;
+  border-radius: var(--radius-control);
+  font-size: 11px;
+}
+
+/* --blocked-soft on --blocked, the same pairing the urgent priority takes.
+   Overdue and urgent are meant to read as one alarm rather than two. */
+.dueLate {
+  background: var(--blocked-soft);
   color: var(--blocked);
-  font-weight: 600;
+}
+
+.dueToday {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+/* Amber ink and no fill: worth knowing, not worth shouting. */
+.dueTomorrow {
+  color: var(--hold);
+}
+
+/* From here out the mark is only reporting, so it stops using words and shows
+   the date. Two steps of ink rather than one: inside the week is something you
+   are working towards, past it is something you have merely been told. */
+.dueSoon {
+  color: var(--ink-2);
+}
+
+.dueLater {
+  color: var(--ink-3);
+}
+
+/* The words in the near states are set in the UI face; the dates in the far
+   ones are figures, and are set as figures. */
+.dueSoon .dueText,
+.dueLater .dueText {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* The date that has arrived or gone, on the one shape allowed out of the card.
+
+   Cut rather than drawn: a clip path over a fill, with the negative margin
+   pulling it down over the card's own border by the pixel that border is
+   thick. The two then read as one silhouette, where a tab sat flush on top of
+   the border reads as a sticker on a box. Nothing inside it but the words —
+   breaking the outline is already the alarm, and a warning glyph on top would
+   be the second voice the filled pill was. */
+.dueTab {
+  position: absolute;
+  right: 12px;
+  bottom: 100%;
+
+  /* Down by the thickness of the card's border, so the shape sits over it
+     rather than on it and the two read as one outline. */
+  margin-bottom: -1px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The shape: cut rather than drawn, a clip path over a fill. Nothing inside it
+   but the words — breaking the card's outline is already the alarm, and a
+   warning glyph on top would be the second voice the filled pill was. */
+.dueTabFace {
+  display: block;
+  padding: 2px 13px 3px;
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+  border-radius: 5px 5px 0 0;
+  background: var(--tab-tone);
+}
+
+/* The join. The same wash carried a few pixels over the card's edge and faded
+   out, so the tab has no bottom edge at all.
+
+   Cut off at the card's top the tab read as a sticker laid on a box: two
+   shapes touching, with a hard line where they met, which is the one thing the
+   1px fuse was there to avoid. A dozen pixels is enough to lose that line and
+   no more — carried further, or run the width of the card, the wash stops
+   being a join and becomes a tint, which is a different claim: that the card
+   is late, when what is late is a date it happens to carry.
+
+   Sized and shaped off the tab, which is the whole reason this hangs off the
+   wrapper rather than off the card: the tab's width is its text's — "Due
+   tomorrow" against "3d late" — and no rule on the card could know it.
+
+   The same cut, carried on. Its top edge is the wrapper's own width, so it
+   meets the shape's bottom exactly; from there it keeps the sides' angle and
+   goes on widening, which is what makes it read as the sign spilling rather
+   than as a patch parked under the middle of one. Faded out over the same
+   dozen pixels, so the flare is nearly gone by the time it is wide enough to
+   have an edge worth seeing. */
+.dueTab::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: -7px;
+  left: -7px;
+  height: 12px;
+  clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 100%, 0 100%);
+  background: linear-gradient(to bottom, var(--tab-tone), transparent);
+  pointer-events: none;
+}
+
+/* The pairings the filled due pills already took, so overdue on the tab and
+   overdue in the small print are recognisably one thing. Named rather than set
+   directly: the shape and the join are two elements and one colour, and a
+   variable is what keeps them from drifting apart. */
+.dueTabLate {
+  --tab-tone: var(--blocked-soft);
+
+  color: var(--blocked);
+}
+
+.dueTabSoon {
+  --tab-tone: var(--hold-soft);
+
+  color: var(--hold);
+}
+
+/* Room for it, paid only by the cards that have one: 14px on top of the
+   column's own 10px gap clears the tab's 17px.
+
+   And taken straight back off in the air. dnd-kit sizes the overlay to the
+   border box of the card that was lifted, which a margin is outside of — so
+   the copy would hang that far below the pointer for the whole of the drag.
+   Below `.task:has()` because the two weigh the same and the later wins. */
+.task:has(.dueTab) {
+  margin-top: 14px;
+}
+
+.task.lifted {
+  margin-top: 0;
 }
 
 .addTask {
@@ -617,11 +977,90 @@
   height: 10px;
 }
 
-/* The toolbar's second track, hard against the end of the search box, so the
-   pair reads as one strip of controls. */
+/* The quick filters: a drawer of two selects, and the button that opens it —
+   see `QuickFilters`. The button sits last, so the drawer has only the button
+   itself to push as it grows, rather than reflowing every other tool beside
+   it. */
+.quickFilters {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Collapsed to nothing and faded out, rather than removed from the layout:
+   what animates has to stay mounted, or there is no width to transition from.
+   `inert` (set in the component) is what keeps a hidden select out of tab
+   order while this is doing that. */
+.filterDrawer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateX(16px);
+  transition:
+    max-width 220ms ease,
+    opacity 160ms ease,
+    transform 220ms ease;
+}
+
+.filterDrawerOpen {
+  /* Comfortably past two selects at their widest — a goal's name can run
+     long, and a drawer that clips one mid-word is worse than one with a
+     little empty margin past it. */
+  max-width: 480px;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.filterDrawer select {
+  height: var(--control, 44px);
+  padding: 0 30px 0 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Says a filter is doing something while the drawer holding it is shut —
+   otherwise closing it is indistinguishable from clearing it. */
+.filterDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--brand-ink);
+  vertical-align: middle;
+}
+
+/* The board's own controls, kept together at the end of the toolbar so they
+   read as one strip rather than as buttons scattered along a row. They wrap as
+   a group, and stay at the end of the row while there is room for them. */
+.tools {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* The height comes from the row rather than from the button, so the strip
+   lines up with the search box beside it whatever is in it. */
+.tools button {
+  min-height: var(--control, 44px);
+  padding-right: 14px;
+  padding-left: 14px;
+}
+
 .addColumn {
-  grid-column: 2;
-  justify-self: start;
   white-space: nowrap;
 }
 
@@ -641,4 +1080,172 @@
 
 .spacer {
   margin-right: auto;
+}
+
+/* A column the card in the air is not allowed in — see `forbiddenFor`. Faded
+   rather than hidden: the board keeps its shape, and a column that vanished
+   mid-drag would move every other one out from under the pointer. */
+.forbidden {
+  opacity: 0.35;
+  filter: saturate(0.4);
+}
+
+/* --- Grouped by goal ------------------------------------------------------
+
+   The board, read by goal instead of by column. The columns are still the
+   columns — same order, same fold, same drop rules — but each one is split
+   into a stack of cells, one per goal, with a heading above the lot.
+
+   The whole thing scrolls as one box rather than lane by lane: two rows that
+   scrolled sideways independently would stop being columns the moment either
+   of them moved. */
+.lanes {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 6px 20px;
+  overflow: auto;
+}
+
+/* One grid, shared by the heading row and every lane, so a lane's cells sit
+   under the columns they belong to. The track list is written in by the board
+   from the columns themselves — 52px where one is folded, and a range where it
+   is not — because only the board knows which are folded. */
+.laneRow {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: safe center;
+  min-width: min-content;
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The lane's name, on a bar the width of the board rather than in a rail down
+   the side: a name in the margin is the first thing to scroll out of sight,
+   and the name is the one thing about a lane you always need in view. */
+.laneHead {
+  position: sticky;
+  left: 6px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 4px 12px 4px 10px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+}
+
+/* The lane's fold, at the head of the bar. A hit area the height of the bar
+   rather than the size of the arrow in it: this is the only way back from a
+   folded lane, and a 10px triangle is not a target. */
+.laneFold {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.laneFold:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.laneName {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.laneName:hover {
+  text-decoration: underline;
+}
+
+.laneDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--goal, var(--ink-3));
+}
+
+.laneRef {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* The lane for everything on no goal: an outline rather than a fill, because
+   it is the absence of a goal rather than one more of them. */
+.laneHeadLoose {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* A column drawn in halves. The heading keeps its own box and stops there;
+   a lane's cell has no heading and is as tall as the cards in it, with a
+   floor so an empty lane is still something you can drop a card onto. */
+.headOnly {
+  min-height: 0;
+}
+
+.headOnly .unfolded {
+  flex: none;
+}
+
+.cardsOnly {
+  min-height: 96px;
+}
+
+.cardsOnly .cards {
+  overflow: visible;
+  padding-top: 12px;
+}
+
+/* A folded column's share of a lane: a strip wide enough to drop a card on,
+   with the count of what is already in it. */
+.railCell {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  min-height: 96px;
+  color: var(--ink-3);
+}
+
+/* The lanes toggle, while it is on. Reads as a state rather than as a button
+   about to do something. */
+.groupedOn {
+  border-color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+/* A goal's colour in the search box's suggestions, so picking `goal:` off the
+   list is picking the rail you can see on the board behind it. */
+.suggestionDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
 }

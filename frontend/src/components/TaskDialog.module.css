@@ -678,3 +678,76 @@
   color: var(--ink-3);
   font-size: 13px;
 }
+
+/* --- The form's tabs ----------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tabs button:hover {
+  color: var(--ink);
+}
+
+.tabOn {
+  border-bottom-color: var(--go) !important;
+  color: var(--ink) !important;
+}
+
+/* The dot a tab carries while something required on it is still blank. */
+.needed {
+  color: var(--blocked);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* `hidden` is what switches the tabs, and any author `display` beats the
+   browser's own `[hidden] { display: none }` whatever its specificity. Without
+   this the panels all show at once and the tabs appear to do nothing. */
+.panel[hidden] {
+  display: none;
+}
+
+/* The goal, on the card that is on it. A row rather than a chip because it is
+   a link out of the dialog, and a link has to look like one. */
+.goalLink {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.goalLink:hover .chipName {
+  text-decoration: underline;
+}
+
+.goalRef {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

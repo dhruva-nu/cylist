@@ -1,0 +1,132 @@
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowText strong {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.columnToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.columnToggle {
+  padding: 8px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.columnToggle:hover {
+  border-color: var(--ink-3);
+}
+
+/* Green: this is every column a card of this template may go. */
+.columnToggleActive {
+  border-color: var(--go);
+  background: var(--go);
+  color: var(--go-ink);
+}
+
+.columnToggleActive:hover {
+  border-color: var(--go-hover);
+  background: var(--go-hover);
+}
+
+.stages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  /* --radius-control is the pill shape used for one-line controls; on a box
+     this tall it caps at half the height and bulges into a capsule. Cards get
+     --radius-card instead. */
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+}
+
+.stageHead strong {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.checklistEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checklistRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.checklistTitle {
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+}
+
+.composer input {
+  flex: 1;
+  min-width: 0;
+}
+
+.spacer {
+  margin-right: auto;
+}

@@ -70,12 +70,14 @@ from app.config import Settings, get_settings
 from app.core.crypto import VaultCipher, cipher_for
 from app.db import Database
 from app.models.file import Blob, FileItem, Folder, ItemSource
+from app.models.goal import GoalStatus
 from app.models.person import Person, PersonKind
 from app.models.project import Project
 from app.models.task import ChecklistState, Task, TaskStatus, TaskType
 from app.models.vault import VaultNodeKind, VaultSecret, VaultTree
 from app.schemas.columns import ColumnCreate, ColumnUpdate
 from app.schemas.files import FolderCreate, LinkCreate
+from app.schemas.goals import GoalCreate, GoalUpdate
 from app.schemas.people import PersonCreate
 from app.schemas.projects import ProjectCreate
 from app.schemas.tasks import (
@@ -87,7 +89,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
 )
 from app.schemas.vault import SecretCreate, VaultNodeCreate, VaultTreeCreate
-from app.services import columns, files, people, projects, tasks, vault
+from app.services import columns, files, goals, people, projects, tasks, vault
 from app.storage import BlobStore, LocalBlobStore
 
 # --- The mock, as data -----------------------------------------------------
@@ -115,16 +117,32 @@ class PersonSpec:
 
 @dataclass(frozen=True, slots=True)
 class SubtaskSpec:
-    """A sub-task with a card of its own, numbered under its parent."""
+    """A sub-task with a reference of its own, numbered under its parent.
+
+    No column: a sub-task is not on the board. ``finished`` is the whole of
+    where it has got to.
+    """
 
     title: str
     description: str
     type: TaskType
     due_date: date
     assignee: str
-    column: int
+    finished: bool = False
     status: TaskStatus = TaskStatus.ACTIVE
     reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GoalSpec:
+    """One goal, and the colour its cards wear on the board."""
+
+    name: str
+    description: str
+    owner: str
+    colour: str
+    target_date: date | None = None
+    status: GoalStatus = GoalStatus.OPEN
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +156,11 @@ class TaskSpec:
     column: int
     jira_ref: str | None = None
     pr_ref: str | None = None
+    goal: str | None = None
+    """The goal this card is written under, by name. None stands on its own —
+    which most cards do, and the sample keeps it that way so the board shows
+    both kinds of rail."""
+
     status: TaskStatus = TaskStatus.ACTIVE
     reason: str = ""
     waiting_on: tuple[str, ...] = ()
@@ -146,7 +169,7 @@ class TaskSpec:
     order the mock shows them in."""
 
     subtasks: tuple[SubtaskSpec, ...] = ()
-    """Sub-tasks with their own cards, in the order they are numbered."""
+    """Sub-tasks with their own references, in the order they are numbered."""
 
     checklist: tuple[tuple[str, ChecklistState], ...] = ()
     """``(title, state)`` tick boxes, top to bottom."""
@@ -214,7 +237,8 @@ class ProjectSpec:
     colour: str
     members: tuple[str, ...]
     columns: tuple[ColumnCreate, ...]
-    tasks: tuple[TaskSpec, ...]
+    goals: tuple[GoalSpec, ...] = ()
+    tasks: tuple[TaskSpec, ...] = ()
     root_items: tuple[FileSpec, ...] = ()
     """Files and links that sit at the top of the project, in its root folder.
     The mock puts a README and a brief here; before the root became a real row
@@ -319,8 +343,38 @@ ATLAS = ProjectSpec(
         ColumnCreate(name="Review", description="Waiting on PR review or QA"),
         ColumnCreate(name="Done", description="Merged and deployed to staging"),
     ),
+    # Three goals rather than one per card: the sample has to show a board
+    # where some cards are written under an epic and some stand on their own,
+    # because that is the board most projects actually have.
+    goals=(
+        GoalSpec(
+            name="Ledger cutover",
+            description=(
+                "Every invoice raised through the new ledger, with the legacy Java service "
+                "reading from it rather than writing to it."
+            ),
+            owner="dn",
+            colour="#2F6FEB",
+            target_date=date(2026, 11, 28),
+        ),
+        GoalSpec(
+            name="Payments hardening",
+            description="No double charges, no lost webhooks, and a number on the board for both.",
+            owner="ak",
+            colour="#E5484D",
+            target_date=date(2026, 9, 30),
+        ),
+        GoalSpec(
+            name="Billing service foundations",
+            description="The schema, the migrations and the auth the rest of it is built on.",
+            owner="dn",
+            colour="#0D9488",
+            status=GoalStatus.ACHIEVED,
+        ),
+    ),
     tasks=(
         TaskSpec(
+            goal="Ledger cutover",
             number=41,
             title="Design ledger event schema",
             description=(
@@ -339,6 +393,7 @@ ATLAS = ProjectSpec(
             ),
         ),
         TaskSpec(
+            goal="Ledger cutover",
             number=38,
             # The mock spells the range with an en dash, and it is a range.
             title="Back-fill 2019–2021 invoices",  # noqa: RUF001
@@ -350,6 +405,7 @@ ATLAS = ProjectSpec(
             jira_ref="ATL-38",
         ),
         TaskSpec(
+            goal="Payments hardening",
             number=35,
             title="Stripe webhook idempotency",
             description=(
@@ -372,7 +428,6 @@ ATLAS = ProjectSpec(
                     type=TaskType.FEATURE,
                     due_date=date(2026, 8, 26),
                     assignee="ak",
-                    column=1,
                 ),
                 SubtaskSpec(
                     title="Replay the four double-charged invoices",
@@ -380,7 +435,7 @@ ATLAS = ProjectSpec(
                     type=TaskType.CHORE,
                     due_date=date(2026, 8, 28),
                     assignee="rs",
-                    column=2,
+                    finished=True,
                 ),
             ),
             checklist=(
@@ -403,6 +458,7 @@ ATLAS = ProjectSpec(
             waiting_on=("sf",),
         ),
         TaskSpec(
+            goal="Ledger cutover",
             number=30,
             title="Invoice PDF rendering",
             description=(
@@ -431,6 +487,7 @@ ATLAS = ProjectSpec(
             pr_ref="#204",
         ),
         TaskSpec(
+            goal="Billing service foundations",
             number=22,
             title="Set up psql schema + alembic",
             description="Initial migrations, CI job to check for drift.",
@@ -442,6 +499,7 @@ ATLAS = ProjectSpec(
             pr_ref="#198",
         ),
         TaskSpec(
+            goal="Billing service foundations",
             number=19,
             title="Auth middleware for billing routes",
             description="JWT verification and per-tenant scoping.",
@@ -818,6 +876,7 @@ class Summary:
     people: int = 0
     projects: int = 0
     columns: int = 0
+    goals: int = 0
     tasks: int = 0
     folders: int = 0
     items: int = 0
@@ -827,7 +886,8 @@ class Summary:
     def render(self) -> str:
         return (
             f"{self.projects} projects · {self.people} people · {self.columns} columns · "
-            f"{self.tasks} tasks · {self.folders} folders · {self.items} files and links · "
+            f"{self.goals} goals · {self.tasks} tasks · {self.folders} folders · "
+            f"{self.items} files and links · "
             f"{self.trees} vault trees · {self.secrets} secrets"
         )
 
@@ -940,7 +1000,9 @@ async def populate(
         await projects.set_members(session, project, [directory[h] for h in spec.members])
 
         board = await _shape_board(session, project, spec, summary)
-        await _write_tasks(session, project, spec, board, directory, summary)
+        # Before the cards, because a card names the goal it is written under.
+        goal_ids = await _write_goals(session, project, spec, directory, summary)
+        await _write_tasks(session, project, spec, board, directory, goal_ids, summary)
         await _write_files(
             session,
             project,
@@ -999,12 +1061,46 @@ async def _shape_board(
     return [column.id for column in board]
 
 
+async def _write_goals(
+    session: AsyncSession,
+    project: Project,
+    spec: ProjectSpec,
+    directory: dict[str, UUID],
+    summary: Summary,
+) -> dict[str, UUID]:
+    """Write the project's goals, and hand back their ids by name.
+
+    A goal's status is set in a second pass rather than at creation, because
+    creating one achieved is not a thing the API allows — a goal is reached,
+    which is a thing that happens to it after its cards are done.
+    """
+    written: dict[str, UUID] = {}
+    for goal_spec in spec.goals:
+        goal = await goals.create(
+            session,
+            project,
+            GoalCreate(
+                name=goal_spec.name,
+                description=goal_spec.description,
+                colour=goal_spec.colour,
+                target_date=goal_spec.target_date,
+                owner_id=directory[goal_spec.owner],
+            ),
+        )
+        if goal_spec.status is not GoalStatus.OPEN:
+            await goals.update(session, goal, GoalUpdate(status=goal_spec.status))
+        written[goal_spec.name] = goal.id
+        summary.goals += 1
+    return written
+
+
 async def _write_tasks(
     session: AsyncSession,
     project: Project,
     spec: ProjectSpec,
     board: list[UUID],
     directory: dict[str, UUID],
+    goal_ids: dict[str, UUID],
     summary: Summary,
 ) -> None:
     """Create the cards, then put them where the mock has them.
@@ -1016,7 +1112,7 @@ async def _write_tasks(
     created: dict[int, Task] = {}
     for task_spec in sorted(spec.tasks, key=lambda entry: entry.number):
         created[task_spec.number] = await _write_task(
-            session, project, task_spec, directory, summary
+            session, project, task_spec, directory, goal_ids, summary
         )
 
     filled: dict[int, int] = {}
@@ -1033,7 +1129,7 @@ async def _write_tasks(
     # card it belongs to.
     for task_spec in spec.tasks:
         await _write_subtasks(
-            session, project, created[task_spec.number], task_spec, board, directory, summary
+            session, project, created[task_spec.number], task_spec, directory, summary
         )
 
 
@@ -1042,6 +1138,7 @@ async def _write_task(
     project: Project,
     spec: TaskSpec,
     directory: dict[str, UUID],
+    goal_ids: dict[str, UUID],
     summary: Summary,
 ) -> Task:
     # Wind the counter so the card comes out with the mock's own reference.
@@ -1058,6 +1155,7 @@ async def _write_task(
             type=spec.type,
             due_date=spec.due_date,
             assignee_id=directory[spec.assignee],
+            goal_id=goal_ids.get(spec.goal) if spec.goal else None,
             jira_ref=spec.jira_ref,
             pr_ref=spec.pr_ref,
         ),
@@ -1095,15 +1193,13 @@ async def _write_subtasks(
     project: Project,
     parent: Task,
     spec: TaskSpec,
-    board: list[UUID],
     directory: dict[str, UUID],
     summary: Summary,
 ) -> None:
-    """Give a card its own cards, numbered ATL-35-1, ATL-35-2, …
+    """Split a card into sub-tasks, numbered ATL-35-1, ATL-35-2, …
 
-    Moved to the bottom of their column rather than to a chosen position: they
-    are drawn wherever the board has room for them, and the mock has no opinion
-    about where a sub-task sits among its parent's neighbours.
+    They go nowhere on the board — a sub-task has no column — so the only
+    placing to do is whether each one is already ticked off.
     """
     for sub_spec in spec.subtasks:
         subtask = await tasks.create(
@@ -1124,9 +1220,8 @@ async def _write_subtasks(
                 subtask,
                 TaskStatusChange(status=sub_spec.status, reason=sub_spec.reason),
             )
-        await tasks.move(
-            session, subtask, TaskMove(column_id=board[sub_spec.column], position=10_000)
-        )
+        if sub_spec.finished:
+            await tasks.set_finished(session, subtask, finished=True)
         summary.tasks += 1
 
 

@@ -14,9 +14,14 @@
   font-size: 13px;
 }
 
+/* 340px rather than 300px, now that the page is allowed the width of the
+   window. A card holds a face, a name, a role, a line of responsibilities and
+   three controls, and at 300px a wide display fitted five of them across and
+   wrapped every one of those lines; 340px is the width the card was drawn at,
+   so four sit across the same room and each reads. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 16px;
 }
 
@@ -79,6 +84,21 @@
   margin-top: 8px;
   color: var(--ink-3);
   font-size: 12.5px;
+}
+
+/* The address and the mark for it, kept together on one line so a wrapped card
+   never leaves the envelope stranded above the address it belongs to. */
+.email {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.email span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .picker {

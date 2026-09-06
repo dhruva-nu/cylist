@@ -2,14 +2,18 @@
  * Parsing and filtering for the board's search box.
  *
  * Free text matches every word against a card's title; `col:`, `who:`,
- * `blk:` and `hld:` narrow by column, assignee, or status. Kept out of
- * `ProjectBoard.tsx` because none of it touches React — it is plain string
- * and array manipulation, easiest to get right (and to change) on its own.
+ * `goal:`, `blk:` and `hld:` narrow by column, assignee, goal, or status.
+ * Kept out of `ProjectBoard.tsx` because none of it touches React — it is
+ * plain string and array manipulation, easiest to get right (and to change)
+ * on its own.
  */
 
-import type { BoardColumn, Person, Task } from '../api/client'
+import type { BoardColumn, Goal, Person, Task } from '../api/client'
 
-const TAG_PATTERN = /^(col|who|blk|hld):"?([^"]*)$/i
+const TAG_PATTERN = /^(col|who|goal|blk|hld):"?([^"]*)$/i
+
+/** What `goal:` matches to mean "on no goal at all". */
+export const NO_GOAL = 'none'
 
 export interface ParsedSearch {
   freeText: string[]
@@ -17,6 +21,10 @@ export interface ParsedSearch {
   column: string | null
   /** The partial or full assignee name after `who:`, if any. */
   assignee: string | null
+  /** The partial or full goal name after `goal:`, if any. `none` finds the
+   * cards on no goal — as well as any goal actually called that, so naming
+   * one "None" costs you nothing but a wider answer. */
+  goal: string | null
   blocked: boolean
   hold: boolean
 }
@@ -54,6 +62,7 @@ export function parseQuery(tokens: string[]): ParsedSearch {
     freeText: [],
     column: null,
     assignee: null,
+    goal: null,
     blocked: false,
     hold: false,
   }
@@ -66,6 +75,9 @@ export function parseQuery(tokens: string[]): ParsedSearch {
     } else if (lower.startsWith('who:')) {
       const value = token.slice('who:'.length).trim()
       if (value) parsed.assignee = value
+    } else if (lower.startsWith('goal:')) {
+      const value = token.slice('goal:'.length).trim()
+      if (value) parsed.goal = value
     } else if (lower.startsWith('blk:')) {
       parsed.blocked = true
     } else if (lower.startsWith('hld:')) {
@@ -99,11 +111,17 @@ export function filterTasks(
           .map((person) => person.id),
       )
     : null
+  const goal = parsed.goal?.toLowerCase() ?? null
   const freeText = parsed.freeText.map((term) => term.toLowerCase())
 
   return tasks.filter((task) => {
-    if (matchedColumnIds && !matchedColumnIds.has(task.column_id)) return false
+    // A card with no column is a sub-task, which is not on the board and so
+    // cannot be in the column being searched for.
+    if (matchedColumnIds && (task.column_id === null || !matchedColumnIds.has(task.column_id))) {
+      return false
+    }
     if (matchedAssignees && !matchedAssignees.has(task.assignee.id)) return false
+    if (goal !== null && !matchesGoal(task, goal)) return false
     if (parsed.blocked && task.status !== 'blocked') return false
     if (parsed.hold && task.status !== 'hold') return false
     if (freeText.length) {
@@ -114,6 +132,19 @@ export function filterTasks(
   })
 }
 
+/**
+ * Whether a card answers to a `goal:` term.
+ *
+ * A card with no goal answers to `none` — the one question the goal list
+ * cannot be asked, because what it is asking for is the absence of an entry
+ * in it. Everything else is a substring of the goal's name, matched the way
+ * `col:` and `who:` are.
+ */
+function matchesGoal(task: Task, term: string): boolean {
+  if (task.goal_name === null) return term === NO_GOAL
+  return task.goal_name.toLowerCase().includes(term)
+}
+
 /** The token the caret is inside, assuming it sits at the end of the input. */
 export function activeToken(query: string): string {
   if (query === '' || query.endsWith(' ')) return ''
@@ -122,15 +153,19 @@ export function activeToken(query: string): string {
 }
 
 export interface Suggestion {
-  kind: 'column' | 'assignee'
+  kind: 'column' | 'assignee' | 'goal'
   value: string
+  /** A goal's own colour, so the list shows the rail it stands for. */
+  colour?: string
 }
 
-/** Candidates for the token being typed, when it is a `col:` or `who:` tag. */
+/** Candidates for the token being typed, when it is a `col:`, `who:` or
+ * `goal:` tag. */
 export function suggestionsFor(
   token: string,
   columns: BoardColumn[],
   members: Person[],
+  goals: Goal[] = [],
 ): Suggestion[] {
   const match = TAG_PATTERN.exec(token)
   if (!match) return []
@@ -148,7 +183,21 @@ export function suggestionsFor(
       .filter((person) => person.name.toLowerCase().includes(needle))
       .map((person) => ({ kind: 'assignee', value: person.name }))
   }
+  if (tag?.toLowerCase() === 'goal') {
+    const named: Suggestion[] = goals
+      .filter((candidate) => candidate.name.toLowerCase().includes(needle))
+      .map((candidate) => ({ kind: 'goal', value: candidate.name, colour: candidate.colour }))
+    // Offered last rather than first: it is the rarer question, and a list
+    // that opens on it would put a word nobody typed above the goals they did.
+    return NO_GOAL.includes(needle) ? [...named, { kind: 'goal', value: NO_GOAL }] : named
+  }
   return []
+}
+
+const TAGS: Record<Suggestion['kind'], string> = {
+  column: 'col:',
+  assignee: 'who:',
+  goal: 'goal:',
 }
 
 /** Replaces the token being typed with the chosen suggestion, quoting a name
@@ -156,7 +205,7 @@ export function suggestionsFor(
 export function applySuggestion(query: string, suggestion: Suggestion): string {
   const lastSpace = query.lastIndexOf(' ')
   const prefix = lastSpace === -1 ? '' : query.slice(0, lastSpace + 1)
-  const tag = suggestion.kind === 'column' ? 'col:' : 'who:'
+  const tag = TAGS[suggestion.kind]
   const value = suggestion.value.includes(' ') ? `"${suggestion.value}"` : suggestion.value
   return `${prefix}${tag}${value} `
 }

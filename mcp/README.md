@@ -100,11 +100,17 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `get_task` | one card with its whole timeline |
 | `read_task_history` | what has been *done* to one card, and by whom — paged |
 | `create_task` | add a card to the first column |
-| `create_subtask` | split a card into one of its own, `ATL-41-2` |
+| `create_subtask` | split a card into owned work of its own, `ATL-41-2` |
+| `finish_subtask` | tick a sub-task off, or reopen one |
 | `add_checklist_item` | add a tick-box sub-task to a card |
 | `set_checklist_item` | tick, cancel, reopen or retitle one |
 | `move_task` | move a card to a named column |
 | `set_task_status` | active / hold / blocked / cancelled, with a reason and tags |
+| `list_goals` | a project's epics, each with the progress counted from its cards |
+| `get_goal` | one goal and every card on it, in board order |
+| `create_goal` | start an epic, with an owner and an optional target date |
+| `set_task_goal` | put a card on a goal, or take it off the one it is on |
+| `set_goal_status` | open / achieved / dropped — achieving is refused over open cards |
 | `add_comment` | write to a card's timeline |
 | `list_people` | the directory, or one project's members |
 | `list_files` | folders and items, by path |
@@ -122,9 +128,17 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
   the candidates rather than picking one.
 - **`get_project` returns the columns**, so an agent can call `move_task` with
   a column name it has actually seen instead of inventing one.
-- **Sub-tasks gate the last column.** Both kinds — cards of their own and tick
-  boxes — must be finished or cancelled before `move_task` will put the parent
-  in the board's last column; the refusal names what is still outstanding.
+- **Sub-tasks are not on the board.** Both kinds — the referenced kind and tick
+  boxes — belong to the card they were split out of: they have no column, they
+  are not in `list_tasks`, and `finish_subtask` completes one rather than
+  `move_task`, which refuses them.
+- **Sub-tasks gate the last column.** Every one of them must be finished or
+  cancelled before `move_task` will put the parent in the board's last column;
+  the refusal names what is still outstanding.
+- **Goals gate their own closing.** `set_goal_status(..., "achieved")` is
+  refused while a card on the goal is neither in the board's last column nor
+  cancelled, and the refusal names every card holding it open. Dropping a goal
+  is never refused — its cards stay on the board either way.
 
 ### Errors are results, not exceptions
 

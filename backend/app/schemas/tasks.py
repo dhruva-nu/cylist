@@ -32,7 +32,12 @@ def _clean_sub_statuses(value: list[str]) -> list[str]:
 
 
 class TaskCreate(Schema):
-    """A new card. It always lands in the board's first column."""
+    """A new card. It lands in the board's first column.
+
+    The one exception is a card whose template does not allow that column,
+    which lands in the leftmost one it does allow instead — a card has to be
+    born somewhere its own template permits.
+    """
 
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(
@@ -47,7 +52,8 @@ class TaskCreate(Schema):
         max_length=4,
         description=(
             "Up to 4 short stage labels, left to right. Starts on the first one. "
-            "Advancing through them happens on the board, not here."
+            "Advancing through them happens on the board, not here. Overridden "
+            "by `template_id`'s stage for the landing column, if it names one."
         ),
     )
     due_date: date | None = Field(
@@ -55,6 +61,25 @@ class TaskCreate(Schema):
         description="When it is wanted by. Omit it — or send null — for a card with no date.",
     )
     assignee_id: UUID = Field(description="Must be a member of the project.")
+    template_id: UUID | None = Field(
+        default=None,
+        description=(
+            "What kind of card this is — one of the project's templates. Omit "
+            "it for a card with no template, which may sit in any column and "
+            "starts with whatever `sub_statuses` was sent. A card whose "
+            "template is barred from the board's first column lands in the "
+            "leftmost column its stages do allow, on the sub-stages that "
+            "column's stage names, if any."
+        ),
+    )
+    goal_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The goal this card is work towards — one of the project's goals. "
+            "Omit it for a card that stands on its own, which most cards do. "
+            "The goal's colour becomes the card's rail on the board."
+        ),
+    )
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
@@ -78,11 +103,15 @@ class TaskCreate(Schema):
 
 
 class SubtaskCreate(TaskCreate):
-    """A sub-task that gets its own card on the board.
+    """A sub-task with a reference of its own, numbered under its parent.
 
-    Same fields as any other task, because that is what it is: it lands in the
-    first column, it has an owner, it may have a due date, and it is numbered
-    under its parent as ``ATL-41-2``.
+    Same fields as any other task — an owner, a description, a due date, a
+    priority — because it is one in every respect but placement: a sub-task is
+    work on a card rather than a card on the board, so it lands in no column
+    and is finished by being ticked off rather than by being moved.
+
+    ``template_id`` is still accepted: what kind of work it is stays true. Its
+    stages, which are rules about columns, simply have nothing to say here.
     """
 
 
@@ -158,6 +187,27 @@ class TaskUpdate(Schema):
         ),
     )
     assignee_id: UUID | None = None
+    template_id: UUID | None = Field(
+        default=None,
+        description=(
+            "A different template, or null to take the card out of one "
+            "entirely. Like `due_date`, null here means clear rather than "
+            "leave alone. Refused if the card's current column is one the new "
+            "template does not allow — move it first. The card's current "
+            "`sub_statuses` are left as they are; a new template's stages are "
+            "not retroactively applied, only picked up the next time the card "
+            "lands somewhere new."
+        ),
+    )
+    goal_id: UUID | None = Field(
+        default=None,
+        description=(
+            "A different goal, or null to unlink the card from the one it is "
+            "on. Like `due_date`, null here means clear rather than leave "
+            "alone. Refused on a sub-task: a sub-task belongs to its card, and "
+            "its card is what belongs to a goal."
+        ),
+    )
     jira_ref: str | None = Field(default=None, max_length=200)
     pr_ref: str | None = Field(default=None, max_length=200)
 
@@ -173,10 +223,27 @@ class TaskUpdate(Schema):
 
 
 class TaskMove(Schema):
-    """Puts a card in a column at a position. Any column, any time."""
+    """Puts a card in a column at a position.
+
+    Any column at any time, unless the card's template has stages — then,
+    any column one of its stages names. Leaving a column is itself refused
+    until the card is on the last sub-stage its template set for that column.
+
+    A sub-task cannot be moved at all: it is not on the board.
+    """
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+
+
+class TaskFinish(Schema):
+    """Ticks a sub-task off, or puts it back."""
+
+    finished: bool = Field(
+        default=True,
+        description="`true` finishes the sub-task, `false` reopens it. Finishing one already "
+        "finished changes nothing and does not restate the time.",
+    )
 
 
 class SubStatusMove(Schema):
@@ -258,8 +325,12 @@ class TaskRead(Schema):
     sub_number: int | None = Field(
         description="Position in the parent's numbering. `2` in `ATL-41-2`."
     )
-    column_id: UUID
-    position: int
+    column_id: UUID | None = Field(
+        description="Which column the card is in. Null on a sub-task, which is not on the board."
+    )
+    position: int | None = Field(
+        description="Where the card sits in its column, from the top. Null on a sub-task."
+    )
     title: str
     description: str
     type: TaskType
@@ -273,6 +344,19 @@ class TaskRead(Schema):
     due_date: date | None = Field(description="Null when the card has no date.")
     assignee: PersonRead
     status: TaskStatus
+    template_id: UUID | None = Field(
+        description="The template this card was created from, if any. Null is unrestricted."
+    )
+    template_name: str | None = Field(description="That template's name, so a card reads alone.")
+    goal_id: UUID | None = Field(
+        description="The goal this card is work towards, if any. Null stands on its own."
+    )
+    goal_reference: str | None = Field(description="`ATL-G1`, when the card is on a goal.")
+    goal_name: str | None = Field(description="That goal's name, so a card reads alone.")
+    goal_colour: str | None = Field(
+        description="That goal's six-digit hex — the rail the board draws down the card. Null "
+        "when the card is on no goal, and the board draws its status colour instead."
+    )
     jira_ref: str | None
     pr_ref: str | None
     waiting_on: list[PersonRead] = Field(
@@ -283,9 +367,21 @@ class TaskRead(Schema):
         description="Tick-box sub-tasks. Every one must be done or cancelled before the card "
         "can reach the board's last column."
     )
+    finished_at: datetime | None = Field(
+        description="When this sub-task was ticked off. Null while it is open, and always null "
+        "on a card, which is finished by being in the board's last column instead."
+    )
     open_subtask_count: int = Field(
         description="Sub-tasks — cards and tick boxes together — that are neither finished nor "
         "cancelled. While this is above zero the card cannot reach the last column."
+    )
+    subtask_count: int = Field(
+        description="How many sub-tasks the card has in all, cancelled ones excluded. With "
+        "`open_subtask_count` this is the progress a card shows: `total - open` are done."
+    )
+    subtask_assignees: list[PersonRead] = Field(
+        description="Who owns this card's sub-tasks, in sub-number order and each named once. "
+        "The board shows these faces because it no longer shows where the sub-tasks are."
     )
     created_at: datetime
 
@@ -295,7 +391,8 @@ class TaskDetail(TaskRead):
 
     comments: list[CommentRead]
     subtasks: list[TaskRead] = Field(
-        description="Sub-tasks with their own card on the board, in sub-number order."
+        description="Sub-tasks with a reference of their own, in sub-number order. They are "
+        "not on the board, so this is the only place they are listed."
     )
 
 

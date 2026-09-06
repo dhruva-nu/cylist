@@ -80,6 +80,24 @@ async def column_id(client: ApiClient, project_ref: str, name: str) -> str:
     return str(pick(columns, name, kind="column", where=f"{project_ref}'s board")["id"])
 
 
+async def goal_ref(client: ApiClient, project_ref: str, name: str) -> str:
+    """A goal's reference, from its name — or from a reference or id, unchanged.
+
+    Reference first, because ``ATL-G1`` is what every goal tool hands back and
+    what a model is most likely to be holding; a name is matched against the
+    project's goals the way a column's is against its board.
+    """
+    if is_uuid(name):
+        return name
+
+    goals: list[JsonDict] = list(await client.get(f"/projects/{project_ref}/goals"))
+    wanted = name.strip().casefold()
+    for goal in goals:
+        if str(goal.get("reference", "")).casefold() == wanted:
+            return str(goal["reference"])
+    return str(pick(goals, name, kind="goal", where=f"{project_ref}'s goals")["reference"])
+
+
 async def folder_id(client: ApiClient, project_ref: str, path: str) -> str:
     """Walk ``Contracts/2026`` down the project's folder tree to an id."""
     if is_uuid(path):

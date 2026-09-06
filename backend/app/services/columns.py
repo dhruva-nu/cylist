@@ -111,13 +111,20 @@ async def count(session: AsyncSession, project_id: UUID) -> int:
 
 
 async def task_counts(session: AsyncSession, project_id: UUID) -> dict[UUID, int]:
-    """How many cards sit in each of a project's columns, in one query."""
+    """How many cards sit in each of a project's columns, in one query.
+
+    Sub-tasks are in no column, so they are not counted anywhere: the number on
+    a column is how many cards are in it, and a card that was split into three
+    is one card in one column.
+    """
     rows = await session.execute(
         select(Task.column_id, func.count())
-        .where(Task.project_id == project_id)
+        .where(Task.project_id == project_id, Task.column_id.is_not(None))
         .group_by(Task.column_id)
     )
-    return dict(rows.tuples().all())
+    # The `is_not(None)` above is what makes every key a column; the type of the
+    # mapped attribute cannot say so, so the narrowing is spelled out here.
+    return {column_id: total for column_id, total in rows.tuples() if column_id is not None}
 
 
 async def create(session: AsyncSession, project: Project, data: ColumnCreate) -> BoardColumn:

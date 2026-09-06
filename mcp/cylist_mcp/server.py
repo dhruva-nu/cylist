@@ -53,11 +53,21 @@ and `blocked`, and `waiting_on` should name whoever the work is now waiting on.
 The same goes for `cancelled`, which is how work that is not going to happen
 stops holding up the card it belongs to.
 
-A task can be split two ways. `create_subtask` makes a card of its own,
-referenced `ATL-41-2` and addressable like any other task; `add_checklist_item`
-makes a tick box that lives on the parent alone. Either way, every one of them
-has to be finished or cancelled before the parent can be moved into the board's
-last column — `move_task` refuses and names what is still outstanding.
+A card can be written under a **goal** — an epic like "Search revamp" — which
+is what the board colours it by. `list_goals` shows a project's goals with the
+progress counted from their own cards; `set_task_goal` puts a card on one or
+takes it off. A card belongs to at most one goal, and a goal cannot be marked
+achieved while a card on it is still open — `set_goal_status` refuses that and
+names the cards holding it open.
+
+A task can be split two ways. `create_subtask` makes a sub-task with a
+reference of its own, `ATL-41-2`, addressable like any other task and carrying
+its own owner, due date and timeline; `add_checklist_item` makes a tick box that
+lives on the parent alone. Neither is on the board — a sub-task has no column,
+so `move_task` refuses one and `finish_subtask` is what completes it. Either
+way, every one of them has to be finished or cancelled before the parent can be
+moved into the board's last column, and `move_task` refuses that too, naming
+what is still outstanding.
 """
 
 
@@ -202,7 +212,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "stale. A due date is optional — leave it off rather than inventing "
             "one, because a card is only ever overdue against a date somebody "
             "actually chose. The assignee must already be a member of the "
-            "project. Returns the created task, including its new reference."
+            "project. `goal` puts the card under one of the project's epics — "
+            "see list_goals — which is what colours it on the board. Returns "
+            "the created task, including its new reference."
         ),
     )
     async def create_task(
@@ -215,6 +227,15 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             str | None,
             Field(description="ISO date, e.g. '2026-03-31'. Omit for a card with no date."),
         ] = None,
+        goal: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "The goal this card is work towards: a goal's name, "
+                    "reference or id. Omit for a card that stands on its own."
+                )
+            ),
+        ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
         pr_ref: Annotated[str | None, Field(description="Pull request URL, if any.")] = None,
     ) -> CallToolResult:
@@ -226,6 +247,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                 "type": task_type,
                 "assignee_id": await resolve.person_id(client, assignee, project_ref=project),
             }
+            if goal:
+                reference = await resolve.goal_ref(client, project, goal)
+                body["goal_id"] = (await client.get(f"/goals/{reference}"))["id"]
             if due_date:
                 body["due_date"] = due_date
             if jira_ref:
@@ -239,14 +263,14 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
     @server.tool(
         name="create_subtask",
         description=(
-            "Split a task into a sub-task that gets its own card on the board. "
-            "It is a task in every respect — first column, owner, its own due "
-            "date — except its reference, which is numbered under its parent: a "
-            "sub-task of ATL-41 is ATL-41-2, and is addressable by that "
-            "everywhere a task reference is taken. Sub-tasks go one level deep, "
-            "so splitting a sub-task again is refused. Use add_checklist_item "
-            "instead when the piece needs no owner and no card of its own. "
-            "Returns the created sub-task."
+            "Split a task into a sub-task with a reference, an owner and a "
+            "timeline of its own. A sub-task of ATL-41 is ATL-41-2, and is "
+            "addressable by that everywhere a task reference is taken. It is not "
+            "on the board: it has no column, it does not appear in list_tasks, "
+            "and finish_subtask is what completes it rather than move_task. "
+            "Sub-tasks go one level deep, so splitting a sub-task again is "
+            "refused. Use add_checklist_item instead when the piece needs no "
+            "owner and no reference of its own. Returns the created sub-task."
         ),
     )
     async def create_subtask(
@@ -281,6 +305,32 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             if pr_ref:
                 body["pr_ref"] = pr_ref
             return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="finish_subtask",
+        description=(
+            "Tick a sub-task off, or put it back. This is the only way a "
+            "sub-task is finished: it is not on the board, so there is no last "
+            "column to move it into. A finished sub-task stops holding its "
+            "parent back, the same way a cancelled one does — cancel it with "
+            "set_task_status when the work is not going to happen, and finish it "
+            "here when it is done. Pass finished=false to reopen one. On a "
+            "top-level card this is refused: a card is finished by move_task "
+            "putting it in the board's last column. Returns the sub-task."
+        ),
+    )
+    async def finish_subtask(
+        task: Annotated[
+            str, Field(description="The sub-task: a reference such as 'ATL-41-2', or its id.")
+        ],
+        finished: Annotated[
+            bool, Field(description="True to tick it off, false to reopen it. Default true.")
+        ] = True,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            return {"task": await client.post(f"/tasks/{task}/finish", {"finished": finished})}
 
         return await _guard(call)
 
@@ -349,7 +399,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "length, so 0 puts the card first and a large number puts it last. "
             "Moving does not change the task's status. A card with a sub-task "
             "still open cannot be moved into the board's last column; that comes "
-            "back as an error naming what is outstanding. Returns the moved task."
+            "back as an error naming what is outstanding. A sub-task cannot be "
+            "moved at all — it is not on the board; finish_subtask is what "
+            "completes one. Returns the moved task."
         ),
     )
     async def move_task(
@@ -442,6 +494,153 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                     client, author, project_ref=_project_of(current)
                 )
             return {"comment": await client.post(f"/tasks/{task}/comments", payload)}
+
+        return await _guard(call)
+
+    # --- Goals -------------------------------------------------------------
+
+    @server.tool(
+        name="list_goals",
+        description=(
+            "List a project's goals — the epics its cards are written under. "
+            "Each carries its reference (like 'ATL-G1'), its colour, its owner, "
+            "its target date and a progress count taken from the cards linked "
+            "to it: how many in all, how many are done, how many are left, and "
+            "how many of those are blocked or on hold. Open goals come first, "
+            "the nearest target date at the top. Use this before create_task or "
+            "set_task_goal to see what a card could be written under."
+        ),
+    )
+    async def list_goals(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        open_only: Annotated[
+            bool,
+            Field(description="Leave out goals that have been achieved or dropped."),
+        ] = False,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            goals = await client.get(
+                f"/projects/{project}/goals", open_only=True if open_only else None
+            )
+            return {"goals": goals}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="get_goal",
+        description=(
+            "One goal, its progress, and every card linked to it in board "
+            "order. The goal may be named ('Search revamp'), referenced "
+            "('ATL-G1') or given as an id. Use this to answer what is left on "
+            "an epic: the cards come back with their columns, owners and "
+            "statuses, so you can say which are done and which are stuck "
+            "without listing the whole board."
+        ),
+    )
+    async def get_goal(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        goal: Annotated[str, Field(description="Goal name, reference such as 'ATL-G1', or id.")],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            reference = await resolve.goal_ref(client, project, goal)
+            return {"goal": await client.get(f"/goals/{reference}")}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="create_goal",
+        description=(
+            "Start a goal on a project. Name and owner are required — the owner "
+            "must already be a project member — and everything else is "
+            "optional: leave the colour off and one is taken from the palette, "
+            "and leave the target date off rather than inventing one. A goal is "
+            "created empty; put cards on it afterwards with set_task_goal, or "
+            "name it when you create one. Returns the new goal, including its "
+            "reference."
+        ),
+    )
+    async def create_goal(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        name: Annotated[str, Field(description="What the goal is called, e.g. 'Search revamp'.")],
+        owner: Annotated[
+            str, Field(description="Who is answerable for it: a project member's name or id.")
+        ],
+        description: Annotated[
+            str | None, Field(description="What reaching this goal means.")
+        ] = None,
+        target_date: Annotated[
+            str | None,
+            Field(description="ISO date, e.g. '2026-12-01'. Omit for a goal with no date."),
+        ] = None,
+        colour: Annotated[
+            str | None,
+            Field(description="Six-digit hex like '#3B6FC2'. Omit to take one from the palette."),
+        ] = None,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            body: dict[str, Any] = {
+                "name": name,
+                "owner_id": await resolve.person_id(client, owner, project_ref=project),
+            }
+            if description:
+                body["description"] = description
+            if target_date:
+                body["target_date"] = target_date
+            if colour:
+                body["colour"] = colour
+            return {"goal": await client.post(f"/projects/{project}/goals", body)}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="set_task_goal",
+        description=(
+            "Put a card on a goal, or take it off the one it is on by passing "
+            "no goal at all. The goal may be named, referenced or given as an "
+            "id, and must be on the same project as the card. A card belongs to "
+            "at most one goal, so this replaces whatever it was on rather than "
+            "adding to it. Refused on a sub-task: a sub-task belongs to its "
+            "card, and its card is what belongs to a goal. Returns the task."
+        ),
+    )
+    async def set_task_goal(
+        task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
+        goal: Annotated[
+            str | None,
+            Field(description="Goal name, reference or id. Omit to take the card off its goal."),
+        ] = None,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            current = await client.get(f"/tasks/{task}")
+            goal_id: str | None = None
+            if goal:
+                reference = await resolve.goal_ref(client, _project_of(current), goal)
+                goal_id = str((await client.get(f"/goals/{reference}"))["id"])
+            return {"task": await client.patch(f"/tasks/{task}", {"goal_id": goal_id})}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="set_goal_status",
+        description=(
+            "Mark a goal 'achieved', 'dropped', or 'open' again. Achieving one "
+            "is refused while a card on it is neither in the board's last "
+            "column nor cancelled — the error names every card holding it open, "
+            "so finish, cancel or unlink those first. Dropping a goal carries "
+            "no such rule: giving up on one is exactly what you do while its "
+            "work is unfinished, and its cards stay on the board either way. "
+            "Returns the goal."
+        ),
+    )
+    async def set_goal_status(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        goal: Annotated[str, Field(description="Goal name, reference such as 'ATL-G1', or id.")],
+        status: Annotated[str, Field(description="One of 'open', 'achieved' or 'dropped'.")],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            _check_choice("status", status, ("open", "achieved", "dropped"))
+            reference = await resolve.goal_ref(client, project, goal)
+            return {"goal": await client.patch(f"/goals/{reference}", {"status": status})}
 
         return await _guard(call)
 

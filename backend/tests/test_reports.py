@@ -195,6 +195,60 @@ async def test_a_deleted_card_keeps_the_title_it_had(signed_in: AsyncClient, pro
     assert card["reference"] == reference
     assert card["title"] == "Abandoned idea"
     assert card["column"] is None
+    assert card["parent"] is None
+
+
+async def test_a_finished_subtask_counts_as_finished(signed_in: AsyncClient, project: str) -> None:
+    """A sub-task has no last column to end the day in, so ticking it is what
+    finishing it looks like in the report."""
+    parent = await make_task(signed_in, project)
+    members = (await signed_in.get(f"/projects/{project}/members")).json()["members"]
+    subtask = (
+        await signed_in.post(
+            f"/tasks/{parent}/subtasks",
+            json={
+                "title": "Drain the old queue",
+                "description": "What done looks like.",
+                "type": "chore",
+                "assignee_id": members[0]["id"],
+            },
+        )
+    ).json()["reference"]
+
+    await signed_in.post(f"/tasks/{subtask}/finish", json={"finished": True})
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+    child = next(card for card in report["tasks"] if card["reference"] == subtask)
+    assert child["finished"] is True
+    assert subtask in report["finished"]
+    # No column, but named under the card it belongs to rather than as deleted.
+    assert child["column"] is None
+    assert child["parent"] == parent
+    assert f"(of {parent})" in report["markdown"]
+
+
+async def test_a_reopened_subtask_did_not_finish_today(
+    signed_in: AsyncClient, project: str
+) -> None:
+    parent = await make_task(signed_in, project)
+    members = (await signed_in.get(f"/projects/{project}/members")).json()["members"]
+    subtask = (
+        await signed_in.post(
+            f"/tasks/{parent}/subtasks",
+            json={
+                "title": "Drain the old queue",
+                "description": "What done looks like.",
+                "type": "chore",
+                "assignee_id": members[0]["id"],
+            },
+        )
+    ).json()["reference"]
+
+    await signed_in.post(f"/tasks/{subtask}/finish", json={"finished": True})
+    await signed_in.post(f"/tasks/{subtask}/finish", json={"finished": False})
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+    assert subtask not in report["finished"]
 
 
 # --- What it leaves out ----------------------------------------------------
@@ -382,6 +436,44 @@ async def test_midnight_belongs_to_the_day_it_begins(
     assert first["entry_count"] == 0
 
 
+async def test_a_misspelled_zone_is_cut_where_it_meant(
+    signed_in: AsyncClient, session: AsyncSession, project: str
+) -> None:
+    """A letter short of Calcutta still gets a report, not a 422.
+
+    The day has to come out cut in India — the same window "Asia/Kolkata"
+    gives — and the report has to say which zone that was, so a caller can see
+    what their name was read as.
+    """
+    await make_task(signed_in, project)
+    await move_everything_to(session, datetime(2026, 9, 2, 20, 30, tzinfo=UTC))  # 02:00 IST, 3rd
+
+    report = (
+        await signed_in.get(f"/projects/{project}/reports/day?date={TODAY}&timezone=Asia/Cacutta")
+    ).json()
+    in_kolkata = (
+        await signed_in.get(f"/projects/{project}/reports/day?date={TODAY}&timezone=Asia/Kolkata")
+    ).json()
+
+    assert report["timezone"] == "Asia/Calcutta"
+    assert (report["starts_at"], report["ends_at"]) == (
+        in_kolkata["starts_at"],
+        in_kolkata["ends_at"],
+    )
+    assert report["entry_count"] == in_kolkata["entry_count"]
+
+
+async def test_a_zone_named_in_the_wrong_case_is_still_that_zone(
+    signed_in: AsyncClient, project: str
+) -> None:
+    report = (
+        await signed_in.get(f"/projects/{project}/reports/day?date={TODAY}&timezone=asia/kolkata")
+    ).json()
+
+    assert report["timezone"] == "Asia/Kolkata"
+    assert report["starts_at"].startswith("2026-09-01T18:30")
+
+
 async def test_a_zone_the_server_does_not_know_is_a_clean_422(
     signed_in: AsyncClient, project: str
 ) -> None:
@@ -392,6 +484,18 @@ async def test_a_zone_the_server_does_not_know_is_a_clean_422(
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "unprocessable"
     assert "IANA" in response.json()["error"]["message"]
+
+
+async def test_a_zone_that_could_be_two_zones_is_a_422_naming_both(
+    signed_in: AsyncClient, project: str
+) -> None:
+    """Forgiving a typo stops where the typo stops having one reading."""
+    response = await signed_in.get(
+        f"/projects/{project}/reports/day", params={"timezone": "Asia/Macaz"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["details"]["suggestions"] == ["Asia/Macao", "Asia/Macau"]
 
 
 async def test_an_unknown_project_is_a_404(signed_in: AsyncClient) -> None:
