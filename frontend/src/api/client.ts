@@ -79,8 +79,8 @@ export interface ProjectSummary extends Project {
 }
 
 export type TaskType = 'feature' | 'bug' | 'chore'
-/** How soon a task needs attention. `urgent` is 0, `someday` is 3 — the default. */
-export type TaskPriority = 'urgent' | 'asap' | 'week' | 'someday'
+/** How soon a task needs attention. `p0` is drop everything, `p3` the default. */
+export type TaskPriority = 'p0' | 'p1' | 'p2' | 'p3'
 export type TaskStatus = 'active' | 'hold' | 'blocked' | 'cancelled'
 /** Where one tick-box sub-task has got to. `done` and `cancelled` both settle it. */
 export type ChecklistState = 'open' | 'done' | 'cancelled'

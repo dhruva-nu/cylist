@@ -70,19 +70,19 @@ class TestCreating:
         assert task["assignee"]["name"] == "Aditi K"
         assert task["comments"] == []
 
-    async def test_priority_defaults_to_someday(self, signed_in: AsyncClient) -> None:
+    async def test_priority_defaults_to_p3(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
 
         task = await _create(signed_in, person)
 
-        assert task["priority"] == "someday"
+        assert task["priority"] == "p3"
 
     async def test_priority_can_be_set_on_creation(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, priority="urgent")
+        task = await _create(signed_in, person, priority="p0")
 
-        assert task["priority"] == "urgent"
+        assert task["priority"] == "p0"
 
     async def test_an_unknown_priority_is_refused(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -361,11 +361,11 @@ class TestUpdating:
     async def test_priority_can_be_changed(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         task = await _create(signed_in, person)
-        assert task["priority"] == "someday"
+        assert task["priority"] == "p3"
 
-        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"priority": "asap"})).json()
+        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"priority": "p1"})).json()
 
-        assert updated["priority"] == "asap"
+        assert updated["priority"] == "p1"
 
     async def test_sub_statuses_can_be_added(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

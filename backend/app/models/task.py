@@ -90,20 +90,25 @@ _STATUS_LABELS = {
 
 
 class TaskPriority(StrEnum):
-    """How soon this needs attention, 0 (most) to 3 (least)."""
+    """How soon this needs attention, P0 (most) to P3 (least).
 
-    URGENT = "urgent"
-    """0. Drop what you are doing."""
+    Named by level rather than by feeling: "asap" and "this week" are two
+    people's words for the same urgency, and a scale everybody already reads
+    the same way needs no glossary.
+    """
 
-    ASAP = "asap"
-    """1. As fast as possible, once whatever is urgent is out of the way."""
+    P0 = "p0"
+    """Drop what you are doing."""
 
-    WEEK = "week"
-    """2. Some time in the next week."""
+    P1 = "p1"
+    """As fast as possible, once whatever is P0 is out of the way."""
 
-    SOMEDAY = "someday"
-    """3. Some time in the future. The default: nothing is marked urgent by
-    not having been asked about yet."""
+    P2 = "p2"
+    """Some time in the next week."""
+
+    P3 = "p3"
+    """Some time in the future. The default: nothing is marked urgent by not
+    having been asked about yet."""
 
 
 class ChecklistState(StrEnum):
@@ -251,8 +256,8 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     priority: Mapped[TaskPriority] = mapped_column(
         _enum(TaskPriority, "task_priority"),
         nullable=False,
-        default=TaskPriority.SOMEDAY,
-        server_default=sql_text("'someday'"),
+        default=TaskPriority.P3,
+        server_default=sql_text("'p3'"),
     )
 
     sub_statuses: Mapped[list[str]] = mapped_column(

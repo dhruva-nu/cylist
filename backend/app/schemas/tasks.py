@@ -45,7 +45,7 @@ class TaskCreate(Schema):
     )
     type: TaskType
     priority: TaskPriority = Field(
-        default=TaskPriority.SOMEDAY, description="0 (urgent) to 3 (someday). Defaults to someday."
+        default=TaskPriority.P3, description="`p0` (drop everything) to `p3`. Defaults to `p3`."
     )
     sub_statuses: list[str] = Field(
         default_factory=list,

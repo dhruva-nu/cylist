@@ -103,11 +103,18 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
 
 const TYPES: TaskType[] = ['feature', 'bug', 'chore']
 
-const PRIORITIES: { value: TaskPriority; label: string }[] = [
-  { value: 'urgent', label: 'Urgent' },
-  { value: 'asap', label: 'ASAP' },
-  { value: 'week', label: 'This week' },
-  { value: 'someday', label: 'Someday' },
+/**
+ * The four levels, and what each one asks of whoever picks the card up.
+ *
+ * The label is the level alone — it is what the chip and the board carry, and
+ * a level is the whole of what P0 means to anyone who has read one before. The
+ * gloss is for the picker, where somebody is choosing between them.
+ */
+const PRIORITIES: { value: TaskPriority; label: string; means: string }[] = [
+  { value: 'p0', label: 'P0', means: 'drop what you are doing' },
+  { value: 'p1', label: 'P1', means: 'as soon as P0 is clear' },
+  { value: 'p2', label: 'P2', means: 'this week' },
+  { value: 'p3', label: 'P3', means: 'some time' },
 ]
 
 interface DialogProps {
@@ -660,7 +667,7 @@ function TaskForm({
     title: task?.title ?? '',
     description: task?.description ?? '',
     type: task?.type ?? 'feature',
-    priority: task?.priority ?? 'someday',
+    priority: task?.priority ?? 'p3',
     sub_statuses: task?.sub_statuses ?? [],
     // The date input's empty value is '', not null; the mutation turns it back
     // into the null the API reads as "no date".
@@ -915,7 +922,7 @@ function TaskForm({
               >
                 {PRIORITIES.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {option.label} — {option.means}
                   </option>
                 ))}
               </select>

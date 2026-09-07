@@ -243,20 +243,20 @@
   color: var(--ink-2);
 }
 
-.priority_urgent {
-  color: var(--priority-urgent);
+.priority_p0 {
+  color: var(--priority-p0);
 }
 
-.priority_asap {
-  color: var(--priority-asap);
+.priority_p1 {
+  color: var(--priority-p1);
 }
 
-.priority_week {
-  color: var(--priority-week);
+.priority_p2 {
+  color: var(--priority-p2);
 }
 
-.priority_someday {
-  color: var(--priority-someday);
+.priority_p3 {
+  color: var(--priority-p3);
 }
 
 .state_active {

@@ -1485,10 +1485,10 @@ const TYPE_LABELS = {
 } as const
 
 const PRIORITY_LABELS = {
-  urgent: 'Urgent',
-  asap: 'ASAP',
-  week: 'This week',
-  someday: 'Someday',
+  p0: 'P0 — drop what you are doing',
+  p1: 'P1 — as soon as P0 is clear',
+  p2: 'P2 — this week',
+  p3: 'P3 — some time',
 } as const
 
 function TaskCard({
@@ -1623,14 +1623,14 @@ function TaskCardBody({
           it is, and who has it. The gap is what keeps the faces on one margin
           down the column however much or little sits to their left. */}
       <div className={styles.strip}>
-        {/* Someday is the baseline every card starts on, so flagging it too
-            would be noise on every single card — the same reasoning that keeps
-            the status pill off an active task.
+        {/* P3 is the baseline every card starts on, so flagging it too would
+            be noise on every single card — the same reasoning that keeps the
+            status pill off an active task.
 
-            Only urgent gets a filled pill. The four levels escalate in chrome
-            and never in width, so a column of cards keeps one margin down its
+            Only P0 gets a filled pill. The four levels escalate in chrome and
+            never in width, so a column of cards keeps one margin down its
             right-hand side however its work is prioritised. */}
-        {task.priority !== 'someday' ? (
+        {task.priority !== 'p3' ? (
           <span
             className={`${styles.prio} ${styles[`priority_${task.priority}`]}`}
             title={PRIORITY_LABELS[task.priority]}

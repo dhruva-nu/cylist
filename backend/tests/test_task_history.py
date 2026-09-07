@@ -224,7 +224,7 @@ class TestWhatChanged:
 
         await signed_in.patch(
             f"/tasks/{task['reference']}",
-            json={"title": "Renamed", "priority": "urgent", "due_date": "2026-10-01"},
+            json={"title": "Renamed", "priority": "p0", "due_date": "2026-10-01"},
         )
 
         entry = (await _history(signed_in, task["reference"]))[0]

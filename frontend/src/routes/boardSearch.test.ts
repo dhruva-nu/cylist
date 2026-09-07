@@ -65,7 +65,7 @@ function task(title: string, onGoal: string | null): Task {
     title,
     description: '',
     type: 'feature',
-    priority: 'someday',
+    priority: 'p3',
     sub_statuses: [],
     sub_status_index: null,
     due_date: null,

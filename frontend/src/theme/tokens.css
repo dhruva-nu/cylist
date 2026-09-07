@@ -93,23 +93,23 @@
   /*
    * Priority badges. Used as text on `--paper`/`--paper-2`, same as `.type_*`,
    * so each is picked for AA against those rather than against `--on-accent`.
-   * Ordered by urgency — someday is deliberately the most muted of the four,
+   * Ordered by urgency — p3 is deliberately the most muted of the four,
    * so the level that means "no rush" does not compete for attention with
    * the ones that do.
    *
    * These used to be fixed hues, on the reasoning that a priority is a label on
    * the task rather than part of the surface. That reasoning was wrong, and
    * measurably so: a label still has to be read, and read off whatever the card
-   * behind it is. On a dark card `--priority-urgent` came out at 1.8:1 and
-   * `--priority-someday` at 2.1:1 — the two ends of the scale both below the
+   * behind it is. On a dark card `--priority-p0` came out at 1.8:1 and
+   * `--priority-p3` at 2.1:1 — the two ends of the scale both below the
    * 3:1 floor for a graphic, let alone the 4.5:1 for text. So they flip like
    * every other ink here, and the dark values are at the bottom of the file
    * with the rest.
    */
-  --priority-urgent: #b3261e;
-  --priority-asap: #a76900;
-  --priority-week: #3b6fc2;
-  --priority-someday: #5c6b73;
+  --priority-p0: #b3261e;
+  --priority-p1: #a76900;
+  --priority-p2: #3b6fc2;
+  --priority-p3: #5c6b73;
 
   --font-ui: 'Figtree', system-ui, sans-serif;
   --font-body: 'Source Sans 3', system-ui, sans-serif;
@@ -151,17 +151,17 @@
    * The four priorities again, lightened until each clears AA on the darkest
    * card it can land on. Measured against `--dark-paper-2` (#2e3a44), which is
    * the plain card and the worst of the four surfaces a priority mark sits on:
-   * urgent 4.9:1, asap 5.4:1, week 5.5:1, someday 4.7:1.
+   * p0 4.9:1, p1 5.4:1, p2 5.5:1, p3 4.7:1.
    *
-   * Someday lands on the same value as `--dark-ink-3` on purpose. In light it
+   * P3 lands on the same value as `--dark-ink-3` on purpose. In light it
    * is a hair off `--ink-3` too — the level that means "no rush" is meant to
    * read as quiet text and nothing more, and giving it a hue of its own here
    * would say something the light theme does not.
    */
-  --dark-priority-urgent: #f58a80;
-  --dark-priority-asap: #e5a343;
-  --dark-priority-week: #8ab4f0;
-  --dark-priority-someday: #9ca7ad;
+  --dark-priority-p0: #f58a80;
+  --dark-priority-p1: #e5a343;
+  --dark-priority-p2: #8ab4f0;
+  --dark-priority-p3: #9ca7ad;
 }
 
 /*
@@ -193,10 +193,10 @@
     --hold-soft: var(--dark-hold-soft);
     --blocked: var(--dark-blocked);
     --blocked-soft: var(--dark-blocked-soft);
-    --priority-urgent: var(--dark-priority-urgent);
-    --priority-asap: var(--dark-priority-asap);
-    --priority-week: var(--dark-priority-week);
-    --priority-someday: var(--dark-priority-someday);
+    --priority-p0: var(--dark-priority-p0);
+    --priority-p1: var(--dark-priority-p1);
+    --priority-p2: var(--dark-priority-p2);
+    --priority-p3: var(--dark-priority-p3);
     --scrim: var(--dark-scrim);
     --focus: var(--dark-focus);
     --shadow: var(--dark-shadow);
@@ -228,10 +228,10 @@
   --hold-soft: var(--dark-hold-soft);
   --blocked: var(--dark-blocked);
   --blocked-soft: var(--dark-blocked-soft);
-  --priority-urgent: var(--dark-priority-urgent);
-  --priority-asap: var(--dark-priority-asap);
-  --priority-week: var(--dark-priority-week);
-  --priority-someday: var(--dark-priority-someday);
+  --priority-p0: var(--dark-priority-p0);
+  --priority-p1: var(--dark-priority-p1);
+  --priority-p2: var(--dark-priority-p2);
+  --priority-p3: var(--dark-priority-p3);
   --scrim: var(--dark-scrim);
   --focus: var(--dark-focus);
   --shadow: var(--dark-shadow);
