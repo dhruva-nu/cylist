@@ -135,12 +135,13 @@ built SPA, in front of a Postgres that publishes no port at all.
 a bad release back.
 
 **Staging** is the same machine, the same image and the same deploy script, on
-:8001 and on the tailnet only. The `staging` branch deploys itself there, and
-`make staging-refresh` reloads it from production's database and files — so what
-it rehearses is a real release against real rows.
+:8001 and on the tailnet only. It holds the `staging` branch, deployed when you
+ask for it rather than on every push, and `make staging-refresh` reloads it from
+production's database and files — so what it rehearses is a real release against
+real rows.
 
 ```bash
-make staging-deploy    # or just push to `staging`
+make staging-deploy    # or run the "Deploy staging" workflow from `staging`
 make staging-refresh   # reload it from production
 ```
 
