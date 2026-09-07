@@ -10,8 +10,8 @@ which is the day it is wanted in the last column. Everything here is the dates
 must not be deleted out from under them, while a deadline for a column that no
 longer exists is a date with nothing to be due in.
 
-Revision ID: 0017
-Revises: 0016
+Revision ID: 0019
+Revises: 0018
 Created: 2026-09-08
 """
 
@@ -24,8 +24,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0017"
-down_revision: str | None = "0016"
+revision: str = "0019"
+down_revision: str | None = "0018"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

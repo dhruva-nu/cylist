@@ -84,6 +84,8 @@ function task(title: string, onGoal: string | null): Task {
     waiting_on: [],
     comment_count: 0,
     checklist: [],
+    outcome: null,
+    outcome_index: null,
     finished_at: null,
     open_subtask_count: 0,
     subtask_count: 0,

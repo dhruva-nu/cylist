@@ -267,10 +267,27 @@ function useLaneMode(projectKey: string) {
  */
 const NO_GOAL_LANE = 'none'
 
+/**
+ * The section of a divided column a drop target names.
+ *
+ * A drop target's id is its column, prefixed by whatever else narrows it: the
+ * lane it is in, the section of the column it is. Every part but the last one
+ * qualifies, and the column is always the last — which is what lets the two
+ * qualifiers be read independently of each other and of how many there are.
+ */
+const OUTCOME_PREFIX = 'out:'
+
 /** A drop target's column, whichever kind of target it is. */
 function columnIdOf(over: string): string {
-  const separator = over.indexOf('::')
-  return separator === -1 ? over : over.slice(separator + 2)
+  return over.split('::').at(-1) ?? over
+}
+
+/** The outcome a drop target lands on, as an index, or null for a plain one. */
+function outcomeIndexOf(over: string): number | null {
+  const marked = over.split('::').find((part) => part.startsWith(OUTCOME_PREFIX))
+  if (marked === undefined) return null
+  const index = Number(marked.slice(OUTCOME_PREFIX.length))
+  return Number.isInteger(index) ? index : null
 }
 
 /** The lane a drop target belongs to, or null when it is not in a lane. */
@@ -305,10 +322,30 @@ export function ProjectBoard() {
   const [quickStatus, setQuickStatus] = useState<'all' | Task['status']>('all')
   /** The goal a card written from a lane starts on. */
   const [composingOn, setComposingOn] = useState<string | null>(null)
+  /**
+   * A drag that would take a finished card back onto the board, held until it
+   * is confirmed.
+   *
+   * The one move worth asking about. Every other drag says where work has got
+   * to; this one un-says it — the card stops being done, and its history
+   * records that it was reopened. A card nudged out of the last column by a
+   * slipped drop would rewrite that quietly, so the drop is held here and the
+   * card stays where it was until somebody says yes.
+   */
+  const [reopening, setReopening] = useState<Reopening | null>(null)
   /** What is in the air, so the overlay knows what to draw. */
   const [dragging, setDragging] = useState<UniqueIdentifier | null>(null)
   const boardRef = useRef<HTMLDivElement>(null)
   const { folded: collapsed, toggle } = useFolded(`cylist.board.collapsed.${projectKey}`)
+  /**
+   * Which outcome sections are folded away, keyed by `${columnId}:${index}` —
+   * an id built the same way a section's drop target is, so a fold survives
+   * exactly what the section itself survives: a rename, another card landing
+   * in it, anything short of the section no longer existing.
+   */
+  const { folded: collapsedOutcomes, toggle: toggleOutcome } = useFolded(
+    `cylist.board.collapsedOutcomes.${projectKey}`,
+  )
   /**
    * Which lanes are folded away, when the board is in lanes.
    *
@@ -387,13 +424,13 @@ export function ProjectBoard() {
    * one.
    */
   const move = useMutation<Task | null, Error, Move, { previous: Task[] | undefined }>({
-    mutationFn: async ({ taskId, taskRef, columnId, position, goalId }) => {
-      const moved = columnId ? await api.moveTask(taskId, columnId, position) : null
+    mutationFn: async ({ taskId, taskRef, columnId, position, outcome, goalId }) => {
+      const moved = columnId ? await api.moveTask(taskId, columnId, position, outcome) : null
       // By reference rather than by id for the same reason the dialog does:
       // it is what the error message will name if the server refuses.
       return goalId === undefined ? moved : api.updateTask(taskRef, { goal_id: goalId })
     },
-    onMutate: async ({ taskId, columnId, position, goalId }) => {
+    onMutate: async ({ taskId, columnId, position, outcome, outcomeIndex, goalId }) => {
       await queryClient.cancelQueries({ queryKey: tasksKey })
       const previous = queryClient.getQueryData<Task[]>(tasksKey)
       const landed = goalId === undefined ? null : (goals.data ?? []).find((g) => g.id === goalId)
@@ -402,7 +439,9 @@ export function ProjectBoard() {
           task.id === taskId
             ? {
                 ...task,
-                ...(columnId ? { column_id: columnId, position } : {}),
+                ...(columnId
+                  ? { column_id: columnId, position, outcome, outcome_index: outcomeIndex }
+                  : {}),
                 ...(goalId === undefined
                   ? {}
                   : {
@@ -555,6 +594,14 @@ export function ProjectBoard() {
     { key: NO_GOAL_LANE, goal: null },
   ]
 
+  /**
+   * The board's last column, which is what "done" means for a card: arriving
+   * there writes the card's finishing time and leaving there clears it. A
+   * position rather than a name — a column called Done with a column to its
+   * right is not the end of the board.
+   */
+  const doneColumn = columns.at(-1)
+
   /** The grid the header row and every lane share, so their columns line up. */
   const laneTracks = columns
     .map((column) => (collapsed.includes(column.id) ? '52px' : 'minmax(280px, 400px)'))
@@ -573,8 +620,8 @@ export function ProjectBoard() {
     isColumnDrag(id)
       ? nameOfColumnId(String(id).slice(columnDragPrefix.length))
       : (tasks.data?.find((task) => task.id === id)?.title ?? 'the card')
-  const nameOfColumnId = (id: string) =>
-    columns.find((column) => column.id === id)?.name ?? 'the column'
+  const columnOf = (id: string) => columns.find((column) => column.id === id)
+  const nameOfColumnId = (id: string) => columnOf(id)?.name ?? 'the column'
   const nameOfColumn = (id: UniqueIdentifier | undefined) =>
     // Through `columnIdOf`, because in lanes the target is a lane's cell in a
     // column rather than the column itself — and "over lane:…::uuid" is not a
@@ -688,17 +735,34 @@ export function ProjectBoard() {
     const wasOn = task.goal_id ?? NO_GOAL_LANE
     const changingGoal = lane !== null && lane !== wasOn
     const changingColumn = task.column_id !== droppedIn
+    // The section of a divided column the card was dropped on. A card put in a
+    // different section of the column it is already in has not moved by the
+    // board's reckoning, but it has changed how the work ended — which is a
+    // change worth making, so it counts here the way a column does.
+    const landedOn = outcomeIndexOf(overId)
+    const changingOutcome = landedOn !== null && landedOn !== task.outcome_index
     // A card put back where it came from is not a move, and a lane it was
     // already in is not a change of goal: neither is worth a request.
-    if (!changingColumn && !changingGoal) return
+    if (!changingColumn && !changingGoal && !changingOutcome) return
 
-    move.mutate({
+    const wanted: Move = {
       taskId: task.id,
       taskRef: task.reference,
-      columnId: changingColumn ? droppedIn : null,
+      // The outcome travels with the move, so a card only changing section
+      // still names the column it is staying in.
+      columnId: changingColumn || changingOutcome ? droppedIn : null,
       position: byColumn.get(droppedIn)?.length ?? 0,
+      outcomeIndex: landedOn,
+      outcome: landedOn === null ? null : (columnOf(droppedIn)?.outcomes[landedOn] ?? null),
       ...(changingGoal ? { goalId: lane === NO_GOAL_LANE ? null : lane } : {}),
-    })
+    }
+
+    if (changingColumn && doneColumn && task.column_id === doneColumn.id) {
+      setReopening({ move: wanted, task, from: doneColumn.name, to: nameOfColumnId(droppedIn) })
+      return
+    }
+
+    move.mutate(wanted)
   }
 
   return (
@@ -800,8 +864,10 @@ export function ProjectBoard() {
                   tasks={byColumn.get(column.id) ?? []}
                   isFirst={column.id === firstColumn?.id}
                   collapsed={collapsed.includes(column.id)}
+                  collapsedOutcomes={collapsedOutcomes}
                   forbidden={forbidden.has(column.id)}
                   onToggleCollapse={() => onToggleCollapse(column)}
+                  onToggleOutcome={toggleOutcome}
                   onOpenTask={setOpenTaskId}
                   onMoveSubStatus={() => {}}
                   onAddTask={() => setCreatingTask(true)}
@@ -846,8 +912,10 @@ export function ProjectBoard() {
                           tasks={tasksIn(key, column.id)}
                           isFirst={column.id === firstColumn?.id}
                           collapsed={collapsed.includes(column.id)}
+                          collapsedOutcomes={collapsedOutcomes}
                           forbidden={forbidden.has(column.id)}
                           onToggleCollapse={() => onToggleCollapse(column)}
+                          onToggleOutcome={toggleOutcome}
                           onOpenTask={setOpenTaskId}
                           onMoveSubStatus={(taskId, index) =>
                             moveSubStatus.mutate({ taskId, index })
@@ -872,8 +940,10 @@ export function ProjectBoard() {
                 tasks={byColumn.get(column.id) ?? []}
                 isFirst={column.id === firstColumn?.id}
                 collapsed={collapsed.includes(column.id)}
+                collapsedOutcomes={collapsedOutcomes}
                 forbidden={forbidden.has(column.id)}
                 onToggleCollapse={() => onToggleCollapse(column)}
+                onToggleOutcome={toggleOutcome}
                 onOpenTask={setOpenTaskId}
                 onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
                 onAddTask={() => setCreatingTask(true)}
@@ -917,9 +987,23 @@ export function ProjectBoard() {
           projectKey={projectKey}
           column={columnDialog === 'new' ? null : columnDialog}
           canDelete={columns.length > board.data.min_columns}
+          isLast={columnDialog !== 'new' && columnDialog.id === doneColumn?.id}
+          maxOutcomes={board.data.max_outcomes}
           announce={announce}
           onDone={refresh}
           onClose={() => setColumnDialog(null)}
+        />
+      ) : null}
+
+      {reopening ? (
+        <ReopenDialog
+          reopening={reopening}
+          onClose={() => setReopening(null)}
+          onConfirm={() => {
+            move.mutate(reopening.move)
+            announce(`${reopening.task.reference} reopened into ${reopening.to}.`)
+            setReopening(null)
+          }}
         />
       ) : null}
 
@@ -1182,6 +1266,55 @@ function QuickFilters({
   )
 }
 
+/** A held drop: the move it would make, and the two columns it reads between. */
+interface Reopening {
+  move: Move
+  task: Task
+  from: string
+  to: string
+}
+
+/**
+ * Asks before a finished card goes back on the board.
+ *
+ * Worded as what it will do rather than as a warning, because reopening a card
+ * is a perfectly ordinary thing to want: work comes back. What the reader is
+ * being told is that it will be written down.
+ */
+function ReopenDialog({
+  reopening,
+  onClose,
+  onConfirm,
+}: {
+  reopening: Reopening
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const { task, from, to } = reopening
+  return (
+    <Modal
+      title={`Reopen ${task.reference}?`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Leave it in {from}</Button>
+          <Button variant="go" onClick={onConfirm}>
+            Reopen it
+          </Button>
+        </>
+      }
+    >
+      <ModalBody>
+        <p className={styles.confirm}>
+          <b>{task.title}</b> is finished — it is in {from}, which is the end of this board. Moving
+          it to {to} puts it back to work: it stops counting as done, and its history records that
+          it was reopened.
+        </p>
+      </ModalBody>
+    </Modal>
+  )
+}
+
 interface Move {
   taskId: string
   /** `ATL-41` — what an error about this card will name it by. */
@@ -1189,6 +1322,14 @@ interface Move {
   /** Null when the card was dropped in the column it was already in. */
   columnId: string | null
   position: number
+  /**
+   * The section of a divided column the card lands on, by name, and where the
+   * board draws it while the request is in the air. Null for a drop on a
+   * column that is not divided — every column but the board's last, and most
+   * of those.
+   */
+  outcome: string | null
+  outcomeIndex: number | null
   /**
    * The goal to put the card on, or null to take it off the one it is on.
    * Left out entirely — as opposed to null — when the drop said nothing about
@@ -1280,8 +1421,10 @@ function Column({
   tasks,
   isFirst,
   collapsed,
+  collapsedOutcomes,
   forbidden,
   onToggleCollapse,
+  onToggleOutcome,
   onOpenTask,
   onMoveSubStatus,
   onAddTask,
@@ -1295,12 +1438,20 @@ function Column({
   isFirst: boolean
   collapsed: boolean
   /**
+   * Ids of the outcome sections folded away, board-wide — see `useFolded`. A
+   * section's id is its column's plus its index, which is what a fold survives
+   * a rename by naming instead of the label.
+   */
+  collapsedOutcomes: string[]
+  /**
    * Whether the card currently in the air may not be dropped here — its
    * template's own stages rule this column out. False the rest of the time,
    * including while nothing is being dragged.
    */
   forbidden: boolean
   onToggleCollapse: () => void
+  /** Fold or unfold one outcome section, by its id — see `collapsedOutcomes`. */
+  onToggleOutcome: (id: string) => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
   /** Open the whole form, which is where a card is written. */
@@ -1444,7 +1595,34 @@ function Column({
             </div>
           )}
 
-          {part === 'head' ? null : (
+          {part === 'head' ? null : column.outcomes.length ? (
+            // A divided column is still one column: one heading, one count,
+            // one place on the board. What it has instead of a single stack of
+            // cards is a stack per way the work can have ended, each its own
+            // drop target, so which one a card is in is something you set by
+            // putting it there.
+            <div className={styles.sections}>
+              {column.outcomes.map((label, index) => {
+                const outcomeId = `${column.id}:${index}`
+                return (
+                  <OutcomeSection
+                    key={index}
+                    label={label}
+                    dropId={`${OUTCOME_PREFIX}${index}::${dropId}`}
+                    // Cards written before the column was divided, and any left
+                    // behind by a section that was renamed away, sit in the
+                    // first: better an honest heading than a stack with none.
+                    tasks={tasks.filter((task) => (task.outcome_index ?? 0) === index)}
+                    members={members}
+                    collapsed={collapsedOutcomes.includes(outcomeId)}
+                    onToggleCollapse={() => onToggleOutcome(outcomeId)}
+                    onOpenTask={onOpenTask}
+                    onMoveSubStatus={onMoveSubStatus}
+                  />
+                )
+              })}
+            </div>
+          ) : (
             <div className={styles.cards}>
               {tasks.map((task) => (
                 <TaskCard
@@ -1465,6 +1643,83 @@ function Column({
           ) : (
             <div className={styles.foot} />
           )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * One section of a divided column: how the work ended, and what ended that way.
+ *
+ * Its own drop target, and its own heading with its own count — a column's
+ * count is still the sum of them, but "3 done, 1 cancelled" is the sentence
+ * dividing the column was for. The heading stays when the section is empty,
+ * because an empty section is the drop target that puts the first card in it.
+ *
+ * Bordered and tinted as a panel of its own, the way a column reads as a
+ * panel against the board behind it — a rule between two stretches of the
+ * same colour stops reading as a division the moment there are three of
+ * them; a box does not.
+ *
+ * Its cards can be folded away behind the heading, the same fold a whole
+ * column has and for the same reason: a section nobody is triaging today is
+ * still a heading and a count worth keeping in view. It stays a drop target
+ * either way, so a card can be put into a folded section without opening it
+ * first.
+ */
+function OutcomeSection({
+  label,
+  dropId,
+  tasks,
+  members,
+  collapsed,
+  onToggleCollapse,
+  onOpenTask,
+  onMoveSubStatus,
+}: {
+  label: string
+  dropId: string
+  tasks: Task[]
+  members: Person[]
+  collapsed: boolean
+  onToggleCollapse: () => void
+  onOpenTask: (taskId: string) => void
+  onMoveSubStatus: (taskId: string, index: number) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: dropId })
+  const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
+
+  return (
+    <section
+      ref={setNodeRef}
+      className={`${styles.section} ${isOver ? styles.sectionOver : ''}`}
+      aria-label={collapsed ? `${label}, ${counted}, collapsed` : `${label}, ${counted}`}
+    >
+      <h4 className={styles.sectionHead}>
+        <Button
+          variant="ghost"
+          small
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+          onClick={onToggleCollapse}
+        >
+          <span aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+        </Button>
+        <span className={styles.sectionLabel}>{label}</span>
+        <span className={styles.count}>{tasks.length}</span>
+      </h4>
+      {collapsed ? null : (
+        <div className={styles.cards}>
+          {tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              members={members}
+              onOpen={() => onOpenTask(task.id)}
+              onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+            />
+          ))}
         </div>
       )}
     </section>
@@ -1575,11 +1830,13 @@ function TaskCardBody({
   onMoveSubStatus?: (index: number) => void
 }) {
   const active = task.status === 'active'
-  /* Cancelling the work is what stops it owing anybody a date, so a dropped
-     card wears neither the tab nor the date that would otherwise stand in for
-     it. A red "12d late" shouting from a card nobody is going to do is the
-     loudest wrong thing the board could say. */
-  const dated = task.status !== 'cancelled'
+  /* Cancelling the work is what stops it owing anybody a date, and finishing
+     it does the same — a card already in the board's last column has nothing
+     left to be late for. Neither wears the tab nor the date that would
+     otherwise stand in for it: a red "12d late" shouting from a card that is
+     done, same as one nobody is going to do, is the loudest wrong thing the
+     board could say. */
+  const dated = task.status !== 'cancelled' && task.finished_at === null
   /* The next date owed rather than the last column's: a card wanted in Review
      by Friday is late on Saturday, whatever the end of the board says. The
      server settles a date once the card reaches the column it was for, so a
@@ -1824,6 +2081,8 @@ function ColumnDialog({
   projectKey,
   column,
   canDelete,
+  isLast,
+  maxOutcomes,
   announce,
   onDone,
   onClose,
@@ -1831,6 +2090,14 @@ function ColumnDialog({
   projectKey: string
   column: BoardColumn | null
   canDelete: boolean
+  /**
+   * Whether this is the board's last column, which is the only one that can be
+   * divided into outcomes. A new column is added to the right, so it will be —
+   * but it is not one yet, and offering the sections before the column exists
+   * is asking about a thing that has nowhere to go.
+   */
+  isLast: boolean
+  maxOutcomes: number
   announce: (message: string) => void
   onDone: () => Promise<void>
   onClose: () => void
@@ -1838,7 +2105,9 @@ function ColumnDialog({
   const [form, setForm] = useState<ColumnInput>({
     name: column?.name ?? '',
     description: column?.description ?? '',
+    outcomes: column?.outcomes ?? [],
   })
+  const outcomes = form.outcomes ?? []
 
   const save = useMutation({
     mutationFn: (input: ColumnInput) =>
@@ -1859,8 +2128,13 @@ function ColumnDialog({
     },
   })
 
-  const complete = form.name.trim() && form.description.trim()
+  const complete =
+    form.name.trim() && form.description.trim() && outcomes.every((label) => label.trim())
   const error = save.error ?? remove.error
+
+  function setOutcomes(next: string[]) {
+    setForm({ ...form, outcomes: next })
+  }
 
   return (
     <Modal
@@ -1912,6 +2186,56 @@ function ColumnDialog({
             placeholder="Waiting on PR review or QA"
           />
         </Field>
+
+        {/* Only at the end of the board. An outcome is how a piece of work
+            ended, and nothing ends in the middle of one. */}
+        {column && isLast ? (
+          <Field
+            label="Outcomes"
+            hint={`How work can end here — up to ${maxOutcomes} sections this column is divided into. Leave it empty to draw no distinction.`}
+          >
+            <div className={styles.outcomes}>
+              {outcomes.map((label, index) => (
+                <div key={index} className={styles.outcomeRow}>
+                  <span className={styles.outcomeNumber}>{index + 1}</span>
+                  <input
+                    value={label}
+                    maxLength={40}
+                    className={styles.grow}
+                    aria-label={`Outcome ${index + 1}`}
+                    placeholder={['Done', 'Cancelled', 'In prod'][index] ?? 'Outcome'}
+                    onChange={(event) =>
+                      setOutcomes(
+                        outcomes.map((one, at) => (at === index ? event.target.value : one)),
+                      )
+                    }
+                  />
+                  <Button
+                    small
+                    variant="ghost"
+                    aria-label={`Remove outcome ${index + 1}`}
+                    onClick={() => setOutcomes(outcomes.filter((_, at) => at !== index))}
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+              {outcomes.length < maxOutcomes ? (
+                <Button small variant="ghost" onClick={() => setOutcomes([...outcomes, ''])}>
+                  + Add an outcome
+                </Button>
+              ) : null}
+              {/* Said here rather than left to the refusal: the cards are
+                  already in the sections, and what becomes of them is the
+                  thing anybody shortening the list is actually asking. */}
+              {column.outcomes.length > outcomes.length ? (
+                <p className={styles.note}>
+                  Cards in a section you have taken away move to the last one still standing.
+                </p>
+              ) : null}
+            </div>
+          </Field>
+        ) : null}
       </ModalBody>
     </Modal>
   )

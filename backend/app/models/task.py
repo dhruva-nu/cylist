@@ -7,11 +7,14 @@ two lists the reader has to interleave by timestamp.
 One rule shapes half the columns below: **a sub-task is work on a card, not a
 card on the board.** It keeps its reference, its owner, its due date, its
 comments and its history; what it does not have is a column. So ``column_id``
-and ``position`` belong to top-level cards alone, and ``finished_at`` — which
-is what "done" means once there is no last column to be in — belongs to
-sub-tasks alone. Both facts are check constraints rather than conventions,
-because a row that is half on the board and half off it is not a state any
-code here knows how to read.
+and ``position`` belong to top-level cards alone, which is a check constraint
+rather than a convention, because a row that is half on the board and half off
+it is not a state any code here knows how to read.
+
+``finished_at`` is the one field the two kinds share, arrived at from different
+directions: a sub-task is finished by being ticked off, a card by being moved
+into the board's last column. Both write the same timestamp, so *when did this
+stop being work* is one question with one answer wherever it is asked.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.board import BoardColumn
 from app.models.goal import Goal
 from app.models.person import Person
 from app.models.project import Project
@@ -185,13 +189,6 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "AND (parent_id IS NULL) = (position IS NOT NULL)",
             name="placed_by_parentage",
         ),
-        # Done is a place on the board for a card, and a moment for a sub-task.
-        # A top-level card holding a finishing time would be a second answer to
-        # a question the board has already answered, and the two could disagree.
-        CheckConstraint(
-            "finished_at IS NULL OR parent_id IS NOT NULL",
-            name="finished_only_by_subtasks",
-        ),
         # A card can be split into at most 4 stages — enough to read as a
         # position along a bar, not so many that a segment on a board card is
         # too narrow to point at.
@@ -214,6 +211,14 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         CheckConstraint(
             "goal_id IS NULL OR parent_id IS NULL",
             name="goal_only_on_cards",
+        ),
+        # An outcome is a section of a column, so only something in a column
+        # can be in one. Which section is a valid one is a question about the
+        # column's own list and is answered in the service — see
+        # ``Task.outcome_index``.
+        CheckConstraint(
+            "outcome_index IS NULL OR (parent_id IS NULL AND outcome_index >= 0)",
+            name="outcome_only_on_cards",
         ),
     )
 
@@ -244,6 +249,26 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     position: Mapped[int | None] = mapped_column(Integer)
     """Top to bottom within the column, contiguous from zero. Null on a
     sub-task, which is ordered by ``sub_number`` under its parent instead."""
+
+    outcome_index: Mapped[int | None] = mapped_column(Integer)
+    """Which of the column's ``outcomes`` this card ended on, or null.
+
+    Null on everything not in a column that draws the distinction, which is
+    every card on most boards: outcomes belong to the board's last column
+    alone. Set when a card arrives there and cleared when it leaves — see
+    :func:`app.services.tasks.move`.
+
+    An index rather than the label, so renaming "In prod" to "Released"
+    renames it on every card that landed there rather than stranding them under
+    a heading that no longer exists. The cost is that shortening the list has
+    to say what becomes of the cards past its end, which
+    :func:`app.services.columns.update` does by moving them to the last section
+    still standing.
+
+    Orthogonal to ``finished_at`` and to ``status``, which is the point of
+    having it: *when* the work stopped, *whether* it is moving, and *how* it
+    ended are three questions, and a board that had only the first two had to
+    answer the third by adding a column."""
 
     title: Mapped[str] = mapped_column(String(200), nullable=False)
 
@@ -306,16 +331,24 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    """When this sub-task was finished, or null while it is still open.
+    """When this task was finished, or null while it is still open.
 
-    Only a sub-task can hold one — see ``finished_only_by_subtasks``. A card on
-    the board is finished by being in the board's last column, and that is the
-    board's answer to give.
+    Set two ways, and cleared the same two: a sub-task is ticked off, and a card
+    is moved into the board's last column — see
+    :func:`app.services.tasks.set_finished` and :func:`app.services.tasks.move`.
+    Not a constraint, because the rule is about a board the row cannot see: no
+    column knows it is the last one, and the position that makes it so changes
+    the moment a column is added to its right.
 
-    A timestamp rather than a flag because the question asked of a settled
-    sub-task is nearly always *when*: the day's report wants it, and a boolean
-    that has to be joined against the activity trail to answer it is a boolean
-    that was the wrong shape."""
+    Which is also why the field is worth writing at all rather than being read
+    off the board every time it is asked. A card that was done in June and was
+    moved back out in July was still done in June, and the day's report, a
+    goal's progress and a card's own history all have to be able to say so.
+
+    A timestamp rather than a flag because the question asked of a settled task
+    is nearly always *when*: the day's report wants it, and a boolean that has
+    to be joined against the activity trail to answer it is a boolean that was
+    the wrong shape."""
 
     template_id: Mapped[UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True),
@@ -376,6 +409,10 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     project: Mapped[Project] = relationship(lazy="selectin")
     assignee: Mapped[Person] = relationship(lazy="selectin")
+    column: Mapped[BoardColumn | None] = relationship(lazy="selectin")
+    """The column the card is in, loaded with it so ``outcome_index`` can be
+    read back as the label it points at. Null on a sub-task, which is in
+    none."""
     template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
     goal: Mapped[Goal | None] = relationship(lazy="selectin")
 
@@ -431,6 +468,20 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         if self.parent is not None:
             return f"{self.parent.reference}-{self.sub_number}"
         return f"{self.project.key}-{self.number}"
+
+    @property
+    def outcome(self) -> str | None:
+        """How the work ended, as the label rather than the index.
+
+        Null wherever the card is not in a section: no index, no column, or an
+        index the column's list no longer reaches — which
+        :func:`app.services.columns.update` settles as it happens, so the last
+        of those is a belt-and-braces read rather than a state to expect.
+        """
+        if self.outcome_index is None or self.column is None:
+            return None
+        outcomes = self.column.outcomes
+        return outcomes[self.outcome_index] if self.outcome_index < len(outcomes) else None
 
     @property
     def is_settled(self) -> bool:

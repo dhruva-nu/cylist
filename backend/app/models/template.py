@@ -28,7 +28,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.board import BoardColumn
+from app.models.board import MAX_OUTCOMES, OUTCOME_LABEL_MAX_LENGTH, BoardColumn
 
 NAME_MAX_LENGTH = 80
 SUB_STAGE_LABEL_MAX_LENGTH = 60
@@ -90,6 +90,12 @@ class TemplateStage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             f"cardinality(sub_stage_labels) <= {SUB_STAGE_MAX_COUNT}",
             name="sub_stage_max_count",
         ),
+        # Mirrors BoardColumn.outcomes for the same reason: this list names a
+        # subset of that one, and a subset cannot be longer than the set.
+        CheckConstraint(
+            f"cardinality(allowed_outcomes) <= {MAX_OUTCOMES}",
+            name="allowed_outcome_max_count",
+        ),
     )
 
     template_id: Mapped[UUID] = mapped_column(
@@ -116,6 +122,25 @@ class TemplateStage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     left to right — loaded onto the card's own ``sub_statuses`` the moment it
     lands here. May be empty: a template can name a column its cards are
     allowed in without asking anything of them there."""
+
+    allowed_outcomes: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(OUTCOME_LABEL_MAX_LENGTH)),
+        nullable=False,
+        default=list,
+        server_default=sql_text("'{}'"),
+    )
+    """Which of the column's outcomes this template's cards may end on.
+
+    Names rather than indices, unlike the index a card carries: this is written
+    by hand against a list the author is reading, and a template that survived
+    a reordering of the column by pointing at the wrong section would be worse
+    than one that survived a rename by no longer matching.
+
+    Empty is unrestricted, the same silence ``stages`` itself keeps: a template
+    may say where its cards go without saying how they are allowed to end. Only
+    meaningful on the stage for a column that has outcomes at all — every other
+    stage's list is empty and stays that way. See
+    :func:`app.services.templates.require_outcome_permitted`."""
 
     template: Mapped[TaskTemplate] = relationship(back_populates="stages")
     column: Mapped[BoardColumn] = relationship(lazy="selectin")

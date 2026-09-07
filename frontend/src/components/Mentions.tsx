@@ -26,6 +26,13 @@ interface MentionBoxProps {
   maxLength?: number
   'aria-label'?: string
   /**
+   * What enter does when no suggestion is showing — submit the line, in a box
+   * that is a composer rather than a field. While the list is open enter picks
+   * a name instead, which is why this is offered here rather than left to the
+   * caller's own `onKeyDown`: the box is the only thing that knows.
+   */
+  onEnter?: (() => void) | undefined
+  /**
    * For the wrapper, not the field. The suggestion list is positioned against
    * the wrapper, so the wrapper has to be the element the surrounding layout
    * sizes — a row that stretched the input inside a wrapper that had not
@@ -52,6 +59,7 @@ export function MentionBox({
   placeholder,
   maxLength,
   'aria-label': label,
+  onEnter,
   className,
 }: MentionBoxProps) {
   const field = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
@@ -82,7 +90,13 @@ export function MentionBox({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
-    if (!matches.length) return
+    if (!matches.length) {
+      if (event.key === 'Enter' && onEnter) {
+        event.preventDefault()
+        onEnter()
+      }
+      return
+    }
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       setHighlighted((current) => (current + 1) % matches.length)

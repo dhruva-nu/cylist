@@ -157,6 +157,12 @@ export interface BoardColumn {
   name: string
   description: string
   position: number
+  /**
+   * The sections this column is divided into, left to right — "Done",
+   * "Cancelled", "In prod". Only the board's last column may have any, and
+   * empty is the ordinary case: a column that draws no distinction.
+   */
+  outcomes: string[]
   task_count: number
 }
 
@@ -165,11 +171,15 @@ export interface Board {
   columns: BoardColumn[]
   min_columns: number
   max_columns: number
+  /** How many sections the last column may be divided into. */
+  max_outcomes: number
 }
 
 export interface ColumnInput {
   name: string
   description: string
+  /** Sent only for the board's last column; anywhere else it must be empty. */
+  outcomes?: string[]
 }
 
 /**
@@ -188,6 +198,9 @@ export interface TemplateStage {
   /** The sub-stages a card passes through here, left to right. May be empty:
    * a column can be named without asking anything of the card there. */
   sub_stage_labels: string[]
+  /** Which of this column's outcomes the template's cards may end on. Empty
+   * means all of them, the same silence `sub_stage_labels` keeps. */
+  allowed_outcomes: string[]
 }
 
 /**
@@ -225,7 +238,7 @@ export interface Template {
 export interface TemplateInput {
   name: string
   description?: string
-  stages?: { column_id: string; sub_stage_labels: string[] }[]
+  stages?: { column_id: string; sub_stage_labels: string[]; allowed_outcomes: string[] }[]
 }
 
 /** What a `status_change` entry carries. Empty on a comment somebody typed. */
@@ -425,8 +438,16 @@ export interface Task {
   comment_count: number
   checklist: ChecklistItem[]
   /**
-   * When this sub-task was ticked off, or null while it is open. Always null on
-   * a card, which is finished by being in the board's last column instead.
+   * How the work ended: the section of the board's last column this card is
+   * in, by name. Null on every card that is not in a column divided that way.
+   */
+  outcome: string | null
+  /** Which of the column's `outcomes` that is. Null exactly when `outcome` is. */
+  outcome_index: number | null
+  /**
+   * When this task was finished, or null while it is open. A sub-task is
+   * finished by being ticked off; a card by being moved into the board's last
+   * column, and moving it back out clears this.
    */
   finished_at: string | null
   /**
@@ -821,10 +842,12 @@ export const api = {
     request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: body(input) }),
   deleteTask: (taskRef: string) =>
     request<{ ok: boolean }>(`/tasks/${taskRef}`, { method: 'DELETE' }),
-  moveTask: (taskRef: string, columnId: string, position: number) =>
+  /** `outcome` names a section of the board's last column; left out, a card
+   * arriving there lands on the first one its template allows. */
+  moveTask: (taskRef: string, columnId: string, position: number, outcome?: string | null) =>
     request<TaskDetail>(`/tasks/${taskRef}/move`, {
       method: 'POST',
-      body: body({ column_id: columnId, position }),
+      body: body({ column_id: columnId, position, ...(outcome ? { outcome } : {}) }),
     }),
   /** Ticks a sub-task off, or puts it back. The only way one is finished:
    * a sub-task is not on the board, so there is no last column to move it to. */

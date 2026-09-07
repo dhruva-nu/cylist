@@ -361,7 +361,18 @@ function TaskDetailView({
               the thing that answers the same question for it instead. An empty
               Column would read as one that failed to load. */}
           {task.parent_id === null ? (
-            <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+            // The column is where a card is; the date beside it is when being
+            // there started meaning done. Shown only once there is one, so a
+            // card still on its way says where it is and nothing more.
+            <ReadField label="Column">
+              {column?.name ?? '—'}
+              {task.outcome ? <span className={styles.role}>· {task.outcome}</span> : null}
+              {task.finished_at ? (
+                <span className={styles.role}>
+                  · finished {formatDue(task.finished_at.slice(0, 10))}
+                </span>
+              ) : null}
+            </ReadField>
           ) : (
             <ReadField label="Finished">
               {task.finished_at ? formatDue(task.finished_at.slice(0, 10)) : 'Not yet'}
@@ -384,7 +395,13 @@ function TaskDetailView({
         ) : null}
 
         <ReadField label="Sub-tasks">
-          <SubtasksRead task={task} onOpenTask={onOpenTask} announce={announce} onDone={onDone} />
+          <SubtasksRead
+            task={task}
+            members={members}
+            onOpenTask={onOpenTask}
+            announce={announce}
+            onDone={onDone}
+          />
         </ReadField>
 
         <ReadField label="Timeline">
@@ -1282,6 +1299,7 @@ function TaskForm({
           >
             <Subtasks
               task={task}
+              members={members}
               onOpenTask={onOpenTask}
               onSplit={onSplit}
               announce={announce}
@@ -1759,12 +1777,15 @@ function SubtaskCardRow({
  */
 function Subtasks({
   task,
+  members,
   onOpenTask,
   onSplit,
   announce,
   onDone,
 }: {
   task: TaskDetail
+  /** The people a checklist item may tag, and whose tags it draws. */
+  members: Person[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   onSplit?: ((parentRef: string) => void) | undefined
   announce: (message: string) => void
@@ -1810,6 +1831,7 @@ function Subtasks({
           <ChecklistRow
             key={item.id}
             item={item}
+            members={members}
             busy={busy}
             onSetState={(state) => setState.mutate({ id: item.id, state })}
             onRemove={() => remove.mutate(item.id)}
@@ -1821,18 +1843,21 @@ function Subtasks({
         ) : null}
 
         <div className={styles.composer}>
-          <input
+          {/* Enter is the list's own gesture — type a line, press enter, type
+              the next — and it is also how the suggestion list accepts a name.
+              The box stops the key while the list is open, so the tag is taken
+              first and the item is added by the enter after it. */}
+          <MentionBox
             value={title}
+            onChange={setTitle}
+            members={members}
+            className={styles.grow}
             aria-label="Add a checklist item"
             maxLength={200}
-            onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && title.trim()) {
-                event.preventDefault()
-                add.mutate(title.trim())
-              }
+            onEnter={() => {
+              if (title.trim()) add.mutate(title.trim())
             }}
-            placeholder="Add a checklist item…"
+            placeholder="Add a checklist item, @ to tag someone…"
           />
           <Button
             small
@@ -1891,11 +1916,14 @@ function Subtasks({
  */
 function SubtasksRead({
   task,
+  members,
   onOpenTask,
   announce,
   onDone,
 }: {
   task: TaskDetail
+  /** Only to draw the `@` tags in a checklist item as tags. */
+  members: Person[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
@@ -1924,6 +1952,7 @@ function SubtasksRead({
         <ChecklistRow
           key={item.id}
           item={item}
+          members={members}
           busy={busy}
           onSetState={(state) => setState.mutate({ id: item.id, state })}
         />
@@ -1965,11 +1994,14 @@ function SubtasksRead({
  */
 function ChecklistRow({
   item,
+  members,
   busy,
   onSetState,
   onRemove,
 }: {
   item: ChecklistItem
+  /** Only to draw the `@` tags in the title as tags. */
+  members: Person[]
   busy: boolean
   onSetState: (state: ChecklistState) => void
   onRemove?: (() => void) | undefined
@@ -1985,7 +2017,9 @@ function ChecklistRow({
           disabled={busy}
           onChange={(event) => onSetState(event.target.checked ? 'done' : 'open')}
         />
-        <span className={item.state === 'cancelled' ? styles.struck : ''}>{item.title}</span>
+        <span className={item.state === 'cancelled' ? styles.struck : ''}>
+          <Tagged text={item.title} members={members} />
+        </span>
       </label>
       {onRemove ? (
         <span className={styles.checkActions}>

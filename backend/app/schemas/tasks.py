@@ -301,6 +301,15 @@ class TaskMove(Schema):
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+    outcome: str | None = Field(
+        default=None,
+        description=(
+            "Which of the column's outcomes the card lands on, by name — 'Done', 'Cancelled', "
+            "'In prod'. Only the board's last column has any, and only if the board was "
+            "divided that way. Left out, a card arriving there lands on the first one; "
+            "moving anywhere else clears the card's outcome whatever this says."
+        ),
+    )
 
 
 class TaskFinish(Schema):
@@ -446,9 +455,18 @@ class TaskRead(Schema):
         description="Tick-box sub-tasks. Every one must be done or cancelled before the card "
         "can reach the board's last column."
     )
+    outcome: str | None = Field(
+        description="How the work ended: the section of the board's last column this card is "
+        "in, by name. Null on every card that is not in a column divided that way."
+    )
+    outcome_index: int | None = Field(
+        description="Which of the column's `outcomes` that is, counted from the left. Null "
+        "exactly when `outcome` is."
+    )
     finished_at: datetime | None = Field(
-        description="When this sub-task was ticked off. Null while it is open, and always null "
-        "on a card, which is finished by being in the board's last column instead."
+        description="When this task was finished, and null while it is open. A sub-task is "
+        "finished by being ticked off; a card is finished by being moved into the board's last "
+        "column, and moving it back out clears this."
     )
     open_subtask_count: int = Field(
         description="Sub-tasks — cards and tick boxes together — that are neither finished nor "

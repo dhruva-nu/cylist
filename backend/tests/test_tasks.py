@@ -617,6 +617,102 @@ class TestDeleting:
         assert entries[0]["payload"] == {"reference": "ATL-1"}
 
 
+class TestFinishedByTheLastColumn:
+    """A card is done by being in the board's last column, and it says so.
+
+    The board already answered "is this card done" by where the card was; what
+    it could not answer is *when*, or that a card was ever done at all once it
+    had been dragged back out. Both are `finished_at`.
+    """
+
+    async def test_arriving_in_the_last_column_finishes_a_card(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        assert task["finished_at"] is None
+        done = (await _columns(signed_in))[-1]["id"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()
+
+        assert moved["finished_at"] is not None
+
+    async def test_leaving_it_reopens_the_card(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        columns = await _columns(signed_in)
+        await signed_in.post(
+            f"/tasks/{task['id']}/move", json={"column_id": columns[-1]["id"], "position": 0}
+        )
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": columns[0]["id"], "position": 0}
+            )
+        ).json()
+
+        assert moved["finished_at"] is None
+
+    async def test_a_move_within_the_last_column_keeps_the_original_time(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Reordering is not a second finishing: the card never stopped being done."""
+        person = await _setup(signed_in)
+        first = await _create(signed_in, person, title="First")
+        second = await _create(signed_in, person, title="Second")
+        done = (await _columns(signed_in))[-1]["id"]
+        await signed_in.post(f"/tasks/{second['id']}/move", json={"column_id": done, "position": 0})
+        finished = (
+            await signed_in.post(
+                f"/tasks/{first['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()["finished_at"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{first['id']}/move", json={"column_id": done, "position": 1}
+            )
+        ).json()
+
+        assert moved["finished_at"] == finished
+
+    async def test_the_column_that_was_last_stops_finishing_cards(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Last is a position, not a column. A new column to the right takes it."""
+        person = await _setup(signed_in)
+        was_last = (await _columns(signed_in))[-1]["id"]
+        await signed_in.post(
+            "/projects/ATL/columns",
+            json={"name": "In staging", "description": "Deployed where it can be looked at."},
+        )
+        task = await _create(signed_in, person)
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": was_last, "position": 0}
+            )
+        ).json()
+
+        assert moved["finished_at"] is None
+
+    async def test_a_card_is_still_not_finished_by_being_ticked_off(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Done is where a card is. `finish` is the sub-task's gesture, and says so."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+
+        refused = await signed_in.post(f"/tasks/{task['id']}/finish", json={"finished": True})
+
+        assert refused.status_code == 422
+        assert "last column" in refused.json()["error"]["message"]
+
+
 class TestMoving:
     async def test_moves_a_card_to_another_column(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

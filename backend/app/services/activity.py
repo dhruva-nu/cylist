@@ -237,9 +237,30 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
         return f"Changed the {_listed(str(field) for field in fields)}." if fields else "Updated."
     if entry.verb == "task.moved":
         column = next((change for change in changes if change["field"] == "column"), None)
+        # A move into the board's last column finishes the card and a move out
+        # of it reopens one, and either is the part of the sentence worth
+        # reading — "Moved from Done to In progress." is where it went, not
+        # what it now is.
+        settled = next((change for change in changes if change["field"] == "finished"), None)
+        # Where the last column is divided into sections, which of them the card
+        # ended in — the answer to "how", which the column alone stopped being
+        # able to give the moment there was more than one way off the board.
+        landed = next((change for change in changes if change["field"] == "outcome"), None)
+        ended_as = landed["to"] if landed is not None else None
+        if settled is None:
+            ending = f" Ended as {ended_as}." if ended_as else ""
+        elif settled["to"] == "open":
+            ending = " Reopened."
+        else:
+            ending = f" Finished as {ended_as}." if ended_as else " Finished."
+
         if column is not None:
-            return moved(column["from"], column["to"])
-        return moved(None, (columns or {}).get(str(payload.get("column_id"))))
+            return moved(column["from"], column["to"]) + ending
+        # A card dragged between two sections of the column it was already in
+        # has not moved, so the sentence is the ending on its own.
+        if landed is not None:
+            return ending.strip()
+        return moved(None, (columns or {}).get(str(payload.get("column_id")))) + ending
     if entry.verb == "task.finished":
         # Worded as the sub-task's own line, because that is the card whose
         # history it is written to. The parent it belongs to is named on every

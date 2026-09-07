@@ -5,8 +5,8 @@ but "asap" and "week" were one team's words for it, and a card marked ASAP had
 to be translated by everybody who read it. Every existing row moves to the
 level it already meant, so no card changes urgency here, only wording.
 
-Revision ID: 0016
-Revises: 0015
+Revision ID: 0018
+Revises: 0017
 Created: 2026-09-08
 """
 
@@ -22,8 +22,8 @@ _LEVELS = ("p0", "p1", "p2", "p3")
 
 _RENAMED = {"urgent": "p0", "asap": "p1", "week": "p2", "someday": "p3"}
 
-revision: str = "0016"
-down_revision: str | None = "0015"
+revision: str = "0018"
+down_revision: str | None = "0017"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

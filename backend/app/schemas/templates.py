@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
+from app.models.board import MAX_OUTCOMES
 from app.models.template import NAME_MAX_LENGTH, SUB_STAGE_MAX_COUNT
 from app.schemas.common import Schema
 
@@ -42,16 +43,38 @@ class StageInput(Schema):
         ),
     )
 
+    allowed_outcomes: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_OUTCOMES,
+        description=(
+            "Which of this column's outcomes the template's cards may end on, by name. "
+            "Meaningful only on the board's last column, which is the only one with any. "
+            "Empty means all of them — a template may say where its cards go without "
+            "saying how they are allowed to end."
+        ),
+    )
+
     @field_validator("sub_stage_labels")
     @classmethod
     def _clean(cls, value: list[str]) -> list[str]:
         return _clean_labels(value)
+
+    @field_validator("allowed_outcomes")
+    @classmethod
+    def _clean_outcomes(cls, value: list[str]) -> list[str]:
+        cleaned = [label.strip() for label in value]
+        if any(not label for label in cleaned):
+            raise ValueError("an outcome must not be blank")
+        return cleaned
 
 
 class StageRead(Schema):
     column_id: UUID
     column_name: str = Field(description="So a stage reads without the board's columns beside it.")
     sub_stage_labels: list[str]
+    allowed_outcomes: list[str] = Field(
+        description="The column's outcomes this template's cards may end on. Empty means all."
+    )
 
 
 class TemplateCreate(Schema):
