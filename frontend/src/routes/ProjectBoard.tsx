@@ -80,6 +80,7 @@ import {
   tokenize,
   type Suggestion,
 } from './boardSearch'
+import { flip, flipsForAll, laneFolded, type LaneFill } from './laneFolds'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
 import { GoalChip } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
@@ -366,6 +367,15 @@ export function ProjectBoard() {
     setFolded: setFoldedLanes,
     toggle: toggleLane,
   } = useFolded(`cylist.board.lanes.folded.${projectKey}`)
+  /**
+   * The lanes whose fold has been flipped since the quick filter was set.
+   *
+   * Kept apart from the remembered folds above, and thrown away whenever the
+   * filter changes, because a fold made against one filter's answer means
+   * nothing against the next one's — see `laneFolds`.
+   */
+  const [flippedLanes, setFlippedLanes] = useState<string[]>([])
+  useEffect(() => setFlippedLanes([]), [quickGoal, quickStatus])
   const { grouped, setGrouped } = useLaneMode(projectKey)
   const { message, announce } = useAnnouncer()
 
@@ -584,12 +594,17 @@ export function ProjectBoard() {
    * lane is the drop target that puts the first card on a goal. A settled goal
    * only appears while it still has cards on the board, because a lane for
    * work that has stopped is a row of nothing that never goes away.
+   *
+   * Checked against every card on the board, not `visibleTasks`: a settled
+   * goal's lane has to survive a search or a quick filter that happens to
+   * match none of its cards, or the lane folding — which expects a lane with
+   * no match to fold shut, not to disappear — never gets the chance to fold
+   * it.
    */
+  const allTasks = tasks.data ?? []
   const lanes = [
     ...goalList
-      .filter(
-        (goal) => goal.status === 'open' || visibleTasks.some((task) => task.goal_id === goal.id),
-      )
+      .filter((goal) => goal.status === 'open' || allTasks.some((task) => task.goal_id === goal.id))
       .map((goal) => ({ key: goal.id, goal })),
     { key: NO_GOAL_LANE, goal: null },
   ]
@@ -609,6 +624,31 @@ export function ProjectBoard() {
 
   const tasksIn = (laneKey: string, columnId: string) =>
     (byColumn.get(columnId) ?? []).filter((task) => (task.goal_id ?? NO_GOAL_LANE) === laneKey)
+
+  /**
+   * Whether a quick filter is narrowing the board, which is what hands the
+   * lane folds over to it: ask for one goal, or for what is blocked, and the
+   * lanes holding an answer open themselves while the rest fold down to their
+   * headings, so the cards you asked for are the board rather than a row
+   * somewhere under the ones you did not.
+   *
+   * Only the two dropdowns count. The search box narrows the board as sharply,
+   * but it narrows it a keystroke at a time — lanes folding and unfolding
+   * under a half-typed word is the board moving while you write.
+   */
+  const filtering = quickGoal !== 'all' || quickStatus !== 'all'
+  /** Every lane, and whether the filter left it holding anything. */
+  const laneFills: LaneFill[] = lanes.map(({ key }) => ({
+    key,
+    empty: columns.every((column) => tasksIn(key, column.id).length === 0),
+  }))
+  const foldOfLane = new Map(
+    laneFills.map((fill) => [
+      fill.key,
+      laneFolded(fill, { filtering, folded: foldedLanes, flipped: flippedLanes }),
+    ]),
+  )
+  const isLaneFolded = (key: string) => foldOfLane.get(key) ?? false
 
   // A column's own draggable id is prefixed to keep it out of the task id
   // namespace — the two are otherwise both plain UUIDs.
@@ -684,16 +724,20 @@ export function ProjectBoard() {
   }
 
   function onToggleLane(laneKey: string, name: string) {
-    toggleLane(laneKey)
-    announce(foldedLanes.includes(laneKey) ? `${name} expanded.` : `${name} folded away.`)
+    const wasFolded = isLaneFolded(laneKey)
+    if (filtering) setFlippedLanes(flip(flippedLanes, laneKey))
+    else toggleLane(laneKey)
+    announce(wasFolded ? `${name} expanded.` : `${name} folded away.`)
   }
 
   /** One gesture for the whole board: everything away, or everything back. */
-  const everyLaneFolded = lanes.length > 0 && lanes.every((lane) => foldedLanes.includes(lane.key))
+  const everyLaneFolded = lanes.length > 0 && laneFills.every((fill) => isLaneFolded(fill.key))
 
   function onFoldAllLanes() {
-    setFoldedLanes(everyLaneFolded ? [] : lanes.map((lane) => lane.key))
-    announce(everyLaneFolded ? 'Every lane expanded.' : 'Every lane folded away.')
+    const folding = !everyLaneFolded
+    if (filtering) setFlippedLanes(flipsForAll(laneFills, folding))
+    else setFoldedLanes(folding ? lanes.map((lane) => lane.key) : [])
+    announce(folding ? 'Every lane folded away.' : 'Every lane expanded.')
   }
 
   function onDragStart(event: DragStartEvent) {
@@ -878,7 +922,7 @@ export function ProjectBoard() {
             </div>
 
             {lanes.map(({ key, goal }) => {
-              const laneFolded = foldedLanes.includes(key)
+              const folded = isLaneFolded(key)
               const name = goal?.name ?? 'No goal'
               return (
                 <section key={key} className={styles.lane} aria-label={name}>
@@ -889,7 +933,7 @@ export function ProjectBoard() {
                       (total, column) => total + tasksIn(key, column.id).length,
                       0,
                     )}
-                    folded={laneFolded}
+                    folded={folded}
                     rowId={`lane-${key}`}
                     onToggleFold={() => onToggleLane(key, name)}
                     onAdd={() => {
@@ -897,7 +941,7 @@ export function ProjectBoard() {
                       setCreatingTask(true)
                     }}
                   />
-                  {laneFolded ? null : (
+                  {folded ? null : (
                     <div
                       id={`lane-${key}`}
                       className={styles.laneRow}
