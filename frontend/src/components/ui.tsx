@@ -460,21 +460,21 @@ export function StatusIcon({ status, size = 14 }: { status: TaskStatus; size?: n
 export function PriorityIcon({ priority, size = 14 }: { priority: TaskPriority; size?: number }) {
   // One shape rotated through four positions, so the four values read as one
   // scale: two chevrons up, one up, level, one down.
-  if (priority === 'urgent') {
+  if (priority === 'p0') {
     return (
       <Glyph size={size} weight={1.8}>
         <path d="M3.5 8.5 8 4l4.5 4.5M3.5 12 8 7.5l4.5 4.5" />
       </Glyph>
     )
   }
-  if (priority === 'asap') {
+  if (priority === 'p1') {
     return (
       <Glyph size={size} weight={1.8}>
         <path d="M3.5 10.2 8 5.8l4.5 4.4" />
       </Glyph>
     )
   }
-  if (priority === 'week') {
+  if (priority === 'p2') {
     return (
       <Glyph size={size} weight={1.8}>
         <path d="M3.5 6.4h9M3.5 9.6h9" />

@@ -51,6 +51,7 @@ from app.models.task import (
     CommentKind,
     Task,
     TaskChecklistItem,
+    TaskColumnDueDate,
     TaskComment,
     TaskStatus,
     TaskWaitingOn,
@@ -59,6 +60,7 @@ from app.models.template import TaskTemplate
 from app.schemas.tasks import (
     ChecklistItemCreate,
     ChecklistItemUpdate,
+    ColumnDueDateInput,
     CommentCreate,
     TaskCreate,
     TaskMove,
@@ -66,6 +68,33 @@ from app.schemas.tasks import (
     TaskUpdate,
 )
 from app.services import columns, goals, projects, templates
+
+
+class ColumnDue(NamedTuple):
+    """A date a card is wanted in one column by, read against the board.
+
+    ``met`` is not stored anywhere: it is where the card is. Once the card has
+    reached the column, the day it was wanted there is behind it, and nothing
+    further is owed on that date.
+    """
+
+    column_id: UUID
+    column_name: str
+    due_date: date
+    met: bool
+
+
+class BoardDates(NamedTuple):
+    """Every date a card owes, and the one it owes next.
+
+    ``next_due`` is the date a card is drawn with: the soonest of the dates it
+    has not met yet, the card's own ``due_date`` — the last column's — among
+    them. Null once the card is done, which is what takes the overdue mark off
+    a finished card and off every column deadline it has already passed.
+    """
+
+    per_column: list[ColumnDue]
+    next_due: date | None
 
 
 class Split(NamedTuple):
@@ -200,8 +229,19 @@ async def create(
     # Relationships are only populated by a SELECT, and a just-inserted row has
     # not had one. Load them now so callers can read them without lazy IO.
     await session.refresh(
-        task, ["project", "assignee", "template", "goal", "waiting_on", "parent", "checklist"]
+        task,
+        [
+            "project",
+            "assignee",
+            "template",
+            "goal",
+            "waiting_on",
+            "parent",
+            "checklist",
+            "column_due_dates",
+        ],
     )
+    await set_column_due_dates(session, task, data.column_due_dates)
     return task
 
 
@@ -294,12 +334,14 @@ async def update(
 
     Raises:
         UnprocessableRequestError: if a new assignee is not a project member,
-            or if a new template does not allow the column the card is already
-            sitting in. Retyping a card is not a way to move it, and
+            if a new template does not allow the column the card is already
+            sitting in, or if a per-column date names a column this card cannot
+            be dated in. Retyping a card is not a way to move it, and
             silently moving it would be worse: the card would leave the column
             somebody was looking at it in.
     """
     before = _snapshot(task)
+    dated_before = _dated(task)
 
     # Only the fields in _CLEARABLE can be emptied. A null anywhere else is a
     # client sending back a field it never filled in, not a request to erase a
@@ -309,6 +351,12 @@ async def update(
         for field, value in data.model_dump(exclude_unset=True).items()
         if value is not None or field in _CLEARABLE
     }
+
+    # Rows of their own rather than a column on the task, so they are written
+    # through their own call and taken out of the plain field loop below.
+    fields.pop("column_due_dates", None)
+    if data.column_due_dates is not None:
+        await set_column_due_dates(session, task, data.column_due_dates)
 
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
@@ -351,7 +399,105 @@ async def update(
 
     await session.flush()
     await session.refresh(task, ["assignee", "template", "goal"])
-    return task, await _diff(session, before, _snapshot(task))
+    changes = await _diff(session, before, _snapshot(task))
+    moved_dates = await _column_dates_changed(session, task, dated_before)
+    if moved_dates is not None:
+        changes.append(moved_dates)
+    return task, changes
+
+
+async def set_column_due_dates(
+    session: AsyncSession, task: Task, entries: list[ColumnDueDateInput]
+) -> None:
+    """Replace the dates a card is wanted in particular columns by.
+
+    The whole set at once, because that is how the dates are read: a schedule
+    across the board rather than a field per column. An empty list takes them
+    all off.
+
+    The last column is refused rather than accepted and stored twice: a card is
+    done when it reaches the end of the board, so the day it is wanted there is
+    the card's own ``due_date``, and a second place to write it is a second
+    answer that can disagree with the first.
+
+    Raises:
+        UnprocessableRequestError: if the task is a sub-task, which is not on
+            the board and so passes through no columns; if a column is on
+            another project's board; or if one of them is the board's last.
+    """
+    if not entries and not task.column_due_dates:
+        return
+
+    if entries and task.parent_id is not None:
+        raise UnprocessableRequestError(
+            f"{task.reference} is a sub-task, so it is not on the board and passes through no "
+            "columns. Give it a due date of its own instead.",
+            details={"reference": task.reference},
+        )
+
+    board = await columns.list_for_project(session, task.project)
+    by_id = {column.id: column for column in board}
+    for entry in entries:
+        column = by_id.get(entry.column_id)
+        if column is None:
+            raise UnprocessableRequestError(
+                "That column is on a different project's board.",
+                details={"column_id": str(entry.column_id)},
+            )
+        if column.id == board[-1].id:
+            raise UnprocessableRequestError(
+                f"{column.name} is the end of the board, so the day a card is wanted there is "
+                "the day the work is wanted done. Send that as `due_date`.",
+                details={"column": column.name},
+            )
+
+    # Emptied and flushed before the new rows are added, so replacing a column's
+    # date is a delete and an insert rather than an insert onto its own key.
+    task.column_due_dates.clear()
+    await session.flush()
+    task.column_due_dates = [
+        TaskColumnDueDate(task_id=task.id, column_id=entry.column_id, due_date=entry.due_date)
+        for entry in entries
+    ]
+    await session.flush()
+
+
+def board_dates(task: Task, board: list[BoardColumn]) -> BoardDates:
+    """Read a card's dates against the board it is on.
+
+    Each per-column date is marked met or not by where the card has got to, and
+    the soonest of the unmet ones — the card's own ``due_date`` among them — is
+    what the card is working towards now. A card in the last column owes
+    nothing: it is done, and so is every deadline it passed on the way.
+
+    The soonest rather than the leftmost, because what a date is for is saying
+    whether the card is late: the one that will make it late first is the one
+    to draw.
+    """
+    named = {column.id: column for column in board}
+    here = named[task.column_id].position if task.column_id in named else None
+
+    entries = [
+        ColumnDue(
+            column_id=row.column_id,
+            column_name=named[row.column_id].name,
+            due_date=row.due_date,
+            met=here is not None and here >= named[row.column_id].position,
+        )
+        for row in task.column_due_dates
+        if row.column_id in named
+    ]
+    entries.sort(key=lambda entry: named[entry.column_id].position)
+
+    finished = (
+        task.finished_at is not None
+        if task.parent_id is not None
+        else bool(board) and task.column_id == board[-1].id
+    )
+    pending = [entry.due_date for entry in entries if not entry.met]
+    if task.due_date is not None and not finished:
+        pending.append(task.due_date)
+    return BoardDates(entries, min(pending) if pending else None)
 
 
 async def set_sub_status(
@@ -891,6 +1037,45 @@ async def subtask_owners(session: AsyncSession, task_ids: list[UUID]) -> dict[UU
 def _snapshot(task: Task) -> dict[str, Any]:
     """The tracked fields of a task as they stand, for diffing against later."""
     return {field: getattr(task, field) for field in _TRACKED}
+
+
+def _dated(task: Task) -> dict[UUID, date]:
+    """Which columns this card is dated in, and when.
+
+    Copied out of the relationship rather than snapshotted with the rest of the
+    fields: the collection is rewritten in place, so a reference to it taken
+    beforehand would report the state afterwards.
+    """
+    return {row.column_id: row.due_date for row in task.column_due_dates}
+
+
+async def _column_dates_changed(
+    session: AsyncSession, task: Task, before: dict[UUID, date]
+) -> dict[str, Any] | None:
+    """Describe a change to a card's per-column dates, or nothing if none.
+
+    Read in board order and by column name, the way the dates themselves are
+    read: "Review 2026-09-20, QA 2026-09-25" says what changed, where a list of
+    column ids says only that something did.
+    """
+    after = _dated(task)
+    if after == before:
+        return None
+
+    board = await columns.list_for_project(session, task.project)
+    return {
+        "field": "column_due_dates",
+        "label": "column due dates",
+        "from": _dates_said(before, board),
+        "to": _dates_said(after, board),
+    }
+
+
+def _dates_said(dates: dict[UUID, date], board: list[BoardColumn]) -> str | None:
+    said = [
+        f"{column.name} {dates[column.id].isoformat()}" for column in board if column.id in dates
+    ]
+    return ", ".join(said) or None
 
 
 async def _diff(

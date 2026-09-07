@@ -224,11 +224,32 @@ class TestWhatChanged:
 
         await signed_in.patch(
             f"/tasks/{task['reference']}",
-            json={"title": "Renamed", "priority": "urgent", "due_date": "2026-10-01"},
+            json={"title": "Renamed", "priority": "p0", "due_date": "2026-10-01"},
         )
 
         entry = (await _history(signed_in, task["reference"]))[0]
         assert entry["summary"] == "Changed the title, priority and due date."
+
+    async def test_a_column_date_is_named_by_its_column(self, signed_in: AsyncClient) -> None:
+        """A list of column ids would say only that something changed."""
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi)
+        todo = (await _columns(signed_in))[0]["id"]
+
+        await signed_in.patch(
+            f"/tasks/{task['reference']}",
+            json={"column_due_dates": [{"column_id": todo, "due_date": "2026-08-20"}]},
+        )
+
+        entry = (await _history(signed_in, task["reference"]))[0]
+        assert entry["changes"] == [
+            {
+                "field": "column_due_dates",
+                "label": "column due dates",
+                "from": None,
+                "to": "To do 2026-08-20",
+            }
+        ]
 
     async def test_a_cleared_reference_reads_as_nothing(self, signed_in: AsyncClient) -> None:
         aditi, _ = await _setup(signed_in)

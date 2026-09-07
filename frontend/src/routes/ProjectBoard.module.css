@@ -724,37 +724,37 @@
 }
 
 /* The only level that gets a fill. Its ground is --blocked-soft rather than a
-   wash of its own: urgent and overdue are the two things on a card that mean
-   drop what you are doing, and they are meant to read as the same alarm. */
-.priority_urgent {
+   wash of its own: p0 and overdue are the two things on a card that mean drop
+   what you are doing, and they are meant to read as the same alarm. */
+.priority_p0 {
   padding: 3px 7px;
   border-radius: var(--radius-control);
   background: var(--blocked-soft);
-  color: var(--priority-urgent);
+  color: var(--priority-p0);
 }
 
-.priority_asap {
-  color: var(--priority-asap);
+.priority_p1 {
+  color: var(--priority-p1);
 }
 
-.priority_week {
-  color: var(--priority-week);
+.priority_p2 {
+  color: var(--priority-p2);
 }
 
-.priority_someday {
-  color: var(--priority-someday);
+.priority_p3 {
+  color: var(--priority-p3);
 }
 
 /* The two pills that carry a wash of their own, on the two cards that are
    already washed in it.
 
-   An urgent card that is also blocked drew --blocked-soft on --blocked-soft,
+   A p0 card that is also blocked drew --blocked-soft on --blocked-soft,
    and a card due today that is on hold drew --hold-soft on --hold-soft: in
    both cases the pill kept its ink and lost its shape entirely. --paper, for
    the same reason .pill below takes it — the card is carrying the colour, so
    what sits on top of it has to be the thing that is not. */
-.hold .priority_urgent,
-.blocked .priority_urgent,
+.hold .priority_p0,
+.blocked .priority_p0,
 .hold .dueLate,
 .blocked .dueLate,
 .hold .dueToday,
@@ -902,8 +902,8 @@
   font-size: 11px;
 }
 
-/* --blocked-soft on --blocked, the same pairing the urgent priority takes.
-   Overdue and urgent are meant to read as one alarm rather than two. */
+/* --blocked-soft on --blocked, the same pairing p0 takes. Overdue and p0 are
+   meant to read as one alarm rather than two. */
 .dueLate {
   background: var(--blocked-soft);
   color: var(--blocked);
