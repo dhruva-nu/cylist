@@ -1,0 +1,52 @@
+name: Deploy staging
+
+# Manual only. Pushing to `staging` runs CI's test jobs and stops there — the
+# deploy onto :8001 happens when you ask for it here, and not before. That is
+# the whole point of this file existing separately from ci.yml.
+#
+# Unlike CI's `main` deploy, this does not `needs:` the test jobs: the push to
+# `staging` has already run them, and their result is on the commit for you to
+# read before triggering. What you get instead is control over *when* staging
+# moves — a merge into `staging` no longer restarts it underneath you.
+on:
+  workflow_dispatch: {}
+
+# One staging deploy at a time, and never a half-finished one. Two runs of
+# scripts/deploy.sh against the same stack would fight over the same containers,
+# and a deploy cancelled between `alembic upgrade` and the restart leaves the
+# server in a state nobody chose — so a second trigger queues behind the first
+# instead of replacing it.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy staging to dnu-home-1
+    runs-on: [self-hosted, cylist]
+    environment:
+      name: staging
+      url: https://dnu-home-1.tail222f46.ts.net:8443
+
+    steps:
+      # GitHub's "Run workflow" dropdown offers every branch, and the checkout
+      # below follows whichever you picked. Staging is production's rehearsal
+      # from the `staging` branch; any other branch belongs on dev, which is
+      # built for exactly that. So say so rather than quietly putting a feature
+      # branch on :8001.
+      - name: Check branch
+        if: github.ref != 'refs/heads/staging'
+        # Through the environment, not `${{ }}` inside the script: a branch name
+        # is attacker-shaped text, and this shell is the self-hosted runner's.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "::error::Deploy staging runs from the staging branch, not $REF_NAME — use Deploy dev for other branches."
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      # Builds the image, dumps the database, migrates, restarts the stack and
+      # waits for /api/v1/health — the same script production and dev use.
+      - name: Deploy
+        run: scripts/deploy.sh staging

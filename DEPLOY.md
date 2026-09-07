@@ -177,8 +177,17 @@ make staging-logs       # follow it
 make staging-ps         # what is running
 ```
 
-Push to `staging` and CI does the deploy for you, on the same self-hosted
-runner, gated on the same three test jobs.
+Staging is deployed when you ask for it, and not on every push. Pushing to
+`staging` runs CI's three test jobs and stops there; the deploy is
+[`.github/workflows/deploy-staging.yml`](.github/workflows/deploy-staging.yml),
+triggered by hand from the Actions tab (`workflow_dispatch`) on the same
+self-hosted runner. Run it from the `staging` branch — from any other branch it
+fails on its first step rather than putting that branch on :8001, which is what
+dev is for.
+
+So the test result is still there to read before you trigger, on the commit the
+push produced; what the workflow no longer does is decide *when* staging moves.
+A merge into `staging` leaves whatever is running on :8001 running.
 
 ### What differs from production, and why
 
@@ -259,10 +268,11 @@ follows whatever you picked — so the loop is: push work to a branch, run this
 workflow against that branch, poke at it on the tailnet, and only once it
 looks right does it earn a place on `staging`.
 
-It does not wait on CI's test jobs the way the `main` and `staging` deploys
-do. That is deliberate — dev exists so half-finished work can be looked at
-before it is finished, not after it has already cleared the bar staging
-demands.
+It does not wait on CI's test jobs the way the `main` deploy does. That is
+deliberate — dev exists so half-finished work can be looked at before it is
+finished, not after it has already cleared the bar staging demands. (Staging's
+own deploy does not wait on them either, but for a different reason: the push
+to `staging` has already run them.)
 
 ```bash
 make dev-deploy   # build, migrate, restart          (scripts/deploy.sh dev)
@@ -280,7 +290,7 @@ make dev-down     # stop it (volumes kept)
 | port | `127.0.0.1:8001` | `127.0.0.1:8002` |
 | served at | `:8443` | `:9443` |
 | secrets | `~/cylist-staging` | `~/cylist-dev` |
-| deploy trigger | push to `staging` | manual, any branch |
+| deploy trigger | manual, `staging` only | manual, any branch |
 | data | copied from production | its own, empty to start |
 | `CYLIST_ENVIRONMENT` | `staging` | `preview` |
 
