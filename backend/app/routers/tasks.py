@@ -9,12 +9,14 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.models.board import BoardColumn
 from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
@@ -25,6 +27,7 @@ from app.schemas.tasks import (
     ChecklistItemCreate,
     ChecklistItemRead,
     ChecklistItemUpdate,
+    ColumnDueDateRead,
     CommentCreate,
     CommentRead,
     SubStatusMove,
@@ -84,7 +87,12 @@ def _read(
     comment_count: int,
     split: tasks.Split = tasks.Split(0, 0),
     owners: list[Person] | None = None,
+    board: list[BoardColumn] | None = None,
 ) -> TaskRead:
+    # Without the board a card's dates cannot be told met from unmet, so they
+    # are left off rather than guessed at. The one caller that does this is the
+    # sub-task listing, and a sub-task passes through no columns anyway.
+    dates = tasks.board_dates(task, board or [])
     return TaskRead(
         id=task.id,
         project_id=task.project_id,
@@ -102,6 +110,16 @@ def _read(
         sub_statuses=task.sub_statuses,
         sub_status_index=task.sub_status_index,
         due_date=task.due_date,
+        column_due_dates=[
+            ColumnDueDateRead(
+                column_id=entry.column_id,
+                column_name=entry.column_name,
+                due_date=entry.due_date,
+                met=entry.met,
+            )
+            for entry in dates.per_column
+        ],
+        next_due_date=dates.next_due,
         assignee=PersonRead.model_validate(task.assignee),
         status=task.status,
         template_id=task.template_id,
@@ -126,24 +144,50 @@ def _read(
 async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]:
     """Render a set of cards, with the counts a card cannot answer alone.
 
-    Comment counts, sub-task progress and sub-task owners each take one query
-    for the whole set rather than one per card. Public because the goals router
-    draws the same cards on a goal's page: a card should read identically
-    wherever it is listed, which it only does if one function is drawing it.
+    Comment counts, sub-task progress, sub-task owners and the boards the cards
+    sit on each take one query for the whole set rather than one per card.
+    Public because the goals router draws the same cards on a goal's page: a
+    card should read identically wherever it is listed, which it only does if
+    one function is drawing it.
     """
     ids = [task.id for task in found]
     counts = await tasks.comment_counts(session, ids)
     split = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
+    boards = await _boards(session, found)
     return [
         _read(
             task,
             counts.get(task.id, 0),
             split.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
+            boards.get(task.project_id),
         )
         for task in found
     ]
+
+
+async def _boards(session: AsyncSession, found: list[Task]) -> dict[UUID, list[BoardColumn]]:
+    """The columns of every board these cards are on, left to right.
+
+    A card's dates only mean anything against the order of its own board — met
+    is "the card has got this far" — and a listing is nearly always one board,
+    so it is one query for all of them rather than one per card. Nearly, not
+    always: a day's report reaches across projects.
+    """
+    project_ids = {task.project_id for task in found}
+    if not project_ids:
+        return {}
+
+    rows = await session.scalars(
+        select(BoardColumn)
+        .where(BoardColumn.project_id.in_(project_ids))
+        .order_by(BoardColumn.position)
+    )
+    boards: dict[UUID, list[BoardColumn]] = {}
+    for column in rows:
+        boards.setdefault(column.project_id, []).append(column)
+    return boards
 
 
 async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
@@ -152,9 +196,14 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     ids = [task.id, *(child.id for child in children)]
     counts = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
+    board = await columns.list_for_project(session, task.project)
     return TaskDetail(
         **_read(
-            task, len(timeline), counts.get(task.id, tasks.Split(0, 0)), owners.get(task.id)
+            task,
+            len(timeline),
+            counts.get(task.id, tasks.Split(0, 0)),
+            owners.get(task.id),
+            board,
         ).model_dump(),
         comments=[_comment(entry) for entry in timeline],
         # A sub-task cannot be split again, so its own counts are always zero —

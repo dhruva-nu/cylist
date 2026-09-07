@@ -69,6 +69,8 @@ function task(title: string, onGoal: string | null): Task {
     sub_statuses: [],
     sub_status_index: null,
     due_date: null,
+    column_due_dates: [],
+    next_due_date: null,
     assignee: ADITI,
     status: 'active',
     template_id: null,

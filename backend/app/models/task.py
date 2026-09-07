@@ -284,6 +284,10 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     due_date: Mapped[date | None] = mapped_column(Date)
     """When the work is wanted by, or null when nobody has said.
 
+    The date for the end of the board: a card is done when it reaches the last
+    column, so the day it is wanted done is the day it is wanted there. Dates
+    for the columns before that one are :class:`TaskColumnDueDate` rows.
+
     Optional because a date invented to get past a form is worse than no date
     at all: it makes the card overdue on a day nobody chose, and an overdue
     marker that fires on a guess is one the board learns to ignore. A card
@@ -407,6 +411,17 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         lazy="selectin",
     )
 
+    column_due_dates: Mapped[list[TaskColumnDueDate]] = relationship(
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+    """The dates this card is wanted in particular columns by.
+
+    Unordered here: they are read in board order, and the board's order is a
+    fact about the columns rather than about this card."""
+
     @property
     def reference(self) -> str:
         """``ATL-41``, or ``ATL-41-2`` for a sub-task on the board.
@@ -448,6 +463,51 @@ class TaskWaitingOn(Base, TimestampMixin):
         ForeignKey("person.id", ondelete="CASCADE"),
         primary_key=True,
     )
+
+
+class TaskColumnDueDate(Base, TimestampMixin):
+    """The day a card is wanted in one particular column by.
+
+    A board's columns are stages the work passes through, and a card that has
+    to be finished by the end of the month usually has to be in review well
+    before that. Until now only the end of the line could be dated, so the
+    intermediate deadlines lived in somebody's head.
+
+    One row per column at most, and only for the columns somebody cared to
+    date: a board of six columns with two deadlines on it has two rows here,
+    not six with four nulls. The last column is not among them — a card is done
+    when it reaches the end of the board, so the date for the end of the board
+    is ``Task.due_date``, and a second place to write it would be a second
+    answer that could disagree.
+
+    Whether a date has been *met* is not stored either. It is where the card
+    is: once the card has reached the column, the day it was wanted there is
+    behind it, and a flag saying so would be a copy of the board that could
+    fall out of step with it.
+    """
+
+    __tablename__ = "task_column_due_date"
+
+    task_id: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    column_id: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("board_column.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    """``ON DELETE CASCADE``, unlike ``Task.column_id``, which has no
+    ``ondelete`` at all: a column holding cards must not be deleted out from
+    under them, but a deadline for a column that no longer exists is a date
+    with nothing to be due in."""
+
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    """Not nullable: a row with no date is a row that should not be here."""
+
+    task: Mapped[Task] = relationship(back_populates="column_due_dates")
 
 
 class TaskComment(Base, UUIDPrimaryKeyMixin, TimestampMixin):

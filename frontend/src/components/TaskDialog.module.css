@@ -371,6 +371,58 @@
   font-weight: 700;
 }
 
+/* --- Column dates -------------------------------------------------------- */
+
+/* A schedule reads as a list of columns down one margin and their dates down
+   another, so the column names line up and the eye runs down the dates. */
+.columnDates {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content max-content;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.columnDates li {
+  display: contents;
+}
+
+.columnDateName {
+  color: var(--ink-2);
+}
+
+/* A date the card has passed is kept but quietened: it says what the schedule
+   was without asking for anything, which is what being behind the card means. */
+.columnDateMet .columnDateName,
+.columnDateMet span {
+  color: var(--ink-3);
+}
+
+.columnDateNote {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* The date box and the + that opens the columns behind it, on one line. */
+.dueRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.dueRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* One sentence at the head of a panel, saying what the panel is for. */
+.note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
 /* --- Sub-tasks ----------------------------------------------------------- */
 
 .subtasks {

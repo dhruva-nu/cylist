@@ -67,6 +67,7 @@ import {
   type BoardColumn,
   type ChecklistItem,
   type ChecklistState,
+  type ColumnDueDate,
   type Goal,
   type Person,
   type Task,
@@ -244,7 +245,9 @@ function TaskDetailView({
   onClose,
 }: DialogProps & { task: TaskDetail; members: Person[]; onEdit: () => void }) {
   const column = columns.find((candidate) => candidate.id === task.column_id)
-  const late = isOverdue(task.due_date)
+  // A card that owes nothing is never late: once it is done, the day it was
+  // wanted done is a fact about the past rather than something outstanding.
+  const late = task.next_due_date !== null && isOverdue(task.due_date)
   const statusLabel = STATUSES.find((option) => option.value === task.status)?.label ?? task.status
 
   const edit = (
@@ -337,6 +340,21 @@ function TaskDetailView({
             </span>
           </ReadField>
         </div>
+
+        {/* The dates before the last column's, which is the one above. A date
+            the card has already reached is kept rather than dropped — it is
+            what the schedule was, and reading only the dates still ahead would
+            make a card halfway through look like a card that was never
+            scheduled — but it is said quietly and asks for nothing. */}
+        {task.column_due_dates.length ? (
+          <ReadField label="Column dates">
+            <ul className={styles.columnDates}>
+              {task.column_due_dates.map((entry) => (
+                <ColumnDateRead key={entry.column_id} entry={entry} />
+              ))}
+            </ul>
+          </ReadField>
+        ) : null}
 
         <div className={styles.readPair}>
           {/* A sub-task is in no column, so the row that would name one says
@@ -600,6 +618,27 @@ function shown(value: string | number | string[] | null): string {
   return text.length > LONGEST ? `${text.slice(0, LONGEST - 1)}…` : text
 }
 
+/**
+ * One column's date, said as what it still asks for.
+ *
+ * Three states and not four: reached, late, and simply ahead. A date the card
+ * has passed is never late however long ago it was — the card got there, and
+ * the schedule has moved on to the next column.
+ */
+function ColumnDateRead({ entry }: { entry: ColumnDueDate }) {
+  const late = !entry.met && isOverdue(entry.due_date)
+  return (
+    <li className={entry.met ? styles.columnDateMet : undefined}>
+      <span className={styles.columnDateName}>{entry.column_name}</span>
+      <span className={late ? styles.late : ''}>
+        {late ? '⚠ ' : ''}
+        {formatDue(entry.due_date)}
+      </span>
+      {entry.met ? <span className={styles.columnDateNote}>reached</span> : null}
+    </li>
+  )
+}
+
 /** A labelled row of the detail view. The `Field` twin for text with no input. */
 function ReadField({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -685,6 +724,23 @@ function TaskForm({
    * thing that knows where it went.
    */
   const [subStatusIndex, setSubStatusIndex] = useState(task?.sub_status_index ?? 0)
+  /**
+   * A date per column, keyed by column — the shape the panel edits, not the
+   * shape the API takes. A record keyed by column is what "the date in this
+   * box" means; the list of pairs the API wants is built from it on save, with
+   * the empty boxes dropped.
+   */
+  const [columnDates, setColumnDates] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      (task?.column_due_dates ?? []).map((entry) => [entry.column_id, entry.due_date]),
+    ),
+  )
+  /**
+   * Whether the column-dates tab is showing. A card that has none starts
+   * without it: most cards are wanted done by a date and no more than that, and
+   * a tab of six empty date boxes on every card is six questions nobody asked.
+   */
+  const [scheduling, setScheduling] = useState(Boolean(task?.column_due_dates.length))
   const [columnId, setColumnId] = useState(task?.column_id ?? firstColumn.id)
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'active')
   const [reason, setReason] = useState('')
@@ -710,6 +766,13 @@ function TaskForm({
   const retyping = task !== null && form.template_id !== task.template_id
   /** Whether this card is one that can be on a goal at all. */
   const onGoal = task ? task.parent_id === null : !parentRef
+  /** Whether this card passes through columns, and so can be dated in them. */
+  const onBoard = task ? task.parent_id === null : !parentRef
+  /** The columns a date can be set for: every one but the last, which is `due_date`. */
+  const stages = columns.slice(0, -1)
+  const lastColumn = columns[columns.length - 1]
+  /** How far along the board the card has got, so a date behind it says so. */
+  const here = columns.findIndex((column) => column.id === task?.column_id)
 
   const save = useMutation({
     mutationFn: async () => {
@@ -717,6 +780,19 @@ function TaskForm({
         ...form,
         sub_statuses: form.sub_statuses.map((label) => label.trim()),
         due_date: form.due_date || null,
+        // Sent whole on a card, and never on a sub-task. Empty boxes are
+        // dropped rather than sent as nulls: a column with no date is a column
+        // with no row, which is also how a date is taken off again.
+        ...(onBoard
+          ? {
+              column_due_dates: stages
+                .filter((column) => columnDates[column.id])
+                .map((column) => ({
+                  column_id: column.id,
+                  due_date: columnDates[column.id] as string,
+                })),
+            }
+          : {}),
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
@@ -840,6 +916,12 @@ function TaskForm({
         !form.sub_statuses.every((label) => label.trim()) ||
         Boolean(stalling && !reason.trim()),
     },
+    // Opened by the + beside the due date, and it stays open once a card has
+    // dates on it: a schedule you had to go and ask for once should be in front
+    // of you every time afterwards.
+    ...(onBoard && scheduling
+      ? [{ id: 'dates' as const, label: 'Column dates', incomplete: false }]
+      : []),
     ...(task ? [{ id: 'work' as const, label: 'Sub-tasks & comments', incomplete: false }] : []),
   ]
 
@@ -987,12 +1069,36 @@ function TaskForm({
           hidden={tab !== 'details'}
         >
           <FieldPair>
-            <Field label="Due date">
-              <input
-                type="date"
-                value={form.due_date ?? ''}
-                onChange={(event) => setForm({ ...form, due_date: event.target.value })}
-              />
+            <Field
+              label="Due date"
+              {...(onBoard ? { hint: `When it is wanted done — in ${lastColumn?.name}.` } : {})}
+            >
+              <div className={styles.dueRow}>
+                <input
+                  type="date"
+                  value={form.due_date ?? ''}
+                  onChange={(event) => setForm({ ...form, due_date: event.target.value })}
+                />
+                {/* The way in to the dates before this one. A card is dated at
+                    the end of the board by default and the columns on the way
+                    are asked for, not offered: most cards want one date, and a
+                    form that opens with six is a form that reads as six
+                    questions. */}
+                {onBoard ? (
+                  <Button
+                    variant="ghost"
+                    small
+                    title="Set a date per column"
+                    aria-label="Set a date per column"
+                    onClick={() => {
+                      setScheduling(true)
+                      setTab('dates')
+                    }}
+                  >
+                    +
+                  </Button>
+                ) : null}
+              </div>
             </Field>
             <Field label="Assignee" required>
               <select
@@ -1136,6 +1242,36 @@ function TaskForm({
           )}
         </div>
 
+        {onBoard && scheduling ? (
+          <div
+            className={styles.panel}
+            role="tabpanel"
+            id="task-panel-dates"
+            aria-labelledby="task-tab-dates"
+            hidden={tab !== 'dates'}
+          >
+            <p className={styles.note}>
+              The day this card is wanted in each column. Any of them, none of them — a column left
+              empty simply has no date. The last column is the card&rsquo;s due date, on Details.
+            </p>
+            {stages.map((column, index) => (
+              <Field
+                key={column.id}
+                label={column.name}
+                {...(index <= here ? { hint: 'The card has already been here.' } : {})}
+              >
+                <input
+                  type="date"
+                  value={columnDates[column.id] ?? ''}
+                  onChange={(event) =>
+                    setColumnDates({ ...columnDates, [column.id]: event.target.value })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+        ) : null}
+
         {task ? (
           <div
             className={styles.panel}
@@ -1225,7 +1361,7 @@ function Comments({
   )
 }
 
-type TabId = 'basics' | 'details' | 'work'
+type TabId = 'basics' | 'details' | 'dates' | 'work'
 
 interface Tab {
   id: TabId

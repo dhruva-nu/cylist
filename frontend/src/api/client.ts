@@ -390,8 +390,20 @@ export interface Task {
   sub_statuses: string[]
   /** Index into `sub_statuses` of the current stage. Null when the list is empty. */
   sub_status_index: number | null
-  /** When it is wanted by, `YYYY-MM-DD`. Null when the card has no date. */
+  /**
+   * When the card is wanted in the board's last column, `YYYY-MM-DD` — which is
+   * when the work is wanted done. Null when the card has no date.
+   */
   due_date: string | null
+  /** Dates for the columns before the last one, in board order. */
+  column_due_dates: ColumnDueDate[]
+  /**
+   * The date the card is working towards now: the soonest of the dates it has
+   * not met, `due_date` among them. Null once the card is done. This is the
+   * date a card is drawn with — `due_date` is the end of the line, this is the
+   * next thing owed.
+   */
+  next_due_date: string | null
   assignee: Person
   status: TaskStatus
   /** The template this card was created from, if any. Null is unrestricted. */
@@ -438,6 +450,25 @@ export interface TaskDetail extends Task {
   subtasks: Task[]
 }
 
+/**
+ * A date a card is wanted in one particular column by.
+ *
+ * The last column is not among these: a card is done when it reaches the end of
+ * the board, so the date for the end of the board is the card's own `due_date`.
+ */
+export interface ColumnDueDateInput {
+  column_id: string
+  /** `YYYY-MM-DD`. */
+  due_date: string
+}
+
+export interface ColumnDueDate extends ColumnDueDateInput {
+  /** That column's name, so a date reads without the board beside it. */
+  column_name: string
+  /** Whether the card has reached that column. A met date is behind the card. */
+  met: boolean
+}
+
 /** The fields of a task the board can edit. Status moves separately. */
 export interface TaskInput {
   title: string
@@ -446,8 +477,14 @@ export interface TaskInput {
   priority: TaskPriority
   /** Up to 4 short stage labels. Moving between them happens on the board. */
   sub_statuses: string[]
-  /** `YYYY-MM-DD`, or null for a card with no date. */
+  /** `YYYY-MM-DD`, or null for a card with no date. The last column's date. */
   due_date: string | null
+  /**
+   * Dates for the columns on the way there. Sent whole: what goes up replaces
+   * every per-column date the card had. Never sent for a sub-task, which is not
+   * on the board.
+   */
+  column_due_dates?: ColumnDueDateInput[]
   assignee_id: string
   /** One of the project's templates, or null for a card with no template. */
   template_id: string | null

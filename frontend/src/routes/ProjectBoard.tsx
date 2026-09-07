@@ -1580,7 +1580,16 @@ function TaskCardBody({
      it. A red "12d late" shouting from a card nobody is going to do is the
      loudest wrong thing the board could say. */
   const dated = task.status !== 'cancelled'
-  const tab = dated ? dueTabMark(task.due_date) : null
+  /* The next date owed rather than the last column's: a card wanted in Review
+     by Friday is late on Saturday, whatever the end of the board says. The
+     server settles a date once the card reaches the column it was for, so a
+     card that has arrived stops being asked for it — and a card in the last
+     column, which is done, owes nothing at all. */
+  const owed = dated ? task.next_due_date : null
+  const stage =
+    task.column_due_dates.find((entry) => !entry.met && entry.due_date === owed)?.column_name ??
+    null
+  const tab = dueTabMark(owed, stage)
 
   return (
     <>
@@ -1662,7 +1671,7 @@ function TaskCardBody({
             so it stays down here as the date itself and the card never says it
             twice. No date, no mark either way — a dash where a date goes reads
             as a date that failed to load. */}
-        {dated && !tab ? <DueMark iso={task.due_date} /> : null}
+        {!tab ? <DueMark iso={owed} column={stage} /> : null}
         {/* The name of the colour on the rail. A rail on its own is a legend
             you have to have learned; with the name beside it, one card teaches
             you the rest of the column. Last of the left-hand half and hard
@@ -1933,11 +1942,13 @@ interface DueTabMark {
  * only telling you something, and it stays down in the small print as the date
  * itself. Nothing that returns null here has been dropped — see the strip.
  */
-function dueTabMark(iso: string | null): DueTabMark | null {
+function dueTabMark(iso: string | null, column: string | null = null): DueTabMark | null {
   if (!iso) return null
 
   const days = daysUntilDue(iso)
-  const on = formatDueLong(iso)
+  // Named only in the sentence, never on the tab: the tab is four characters
+  // wide by design, and what it is asking for is the same either way.
+  const on = `${formatDueLong(iso)}${column ? ` in ${column}` : ''}`
 
   // Overdue always earns one, however long ago. A date does not stop mattering
   // because it passed a fortnight ago, and the count is the part anybody acts
@@ -2016,43 +2027,45 @@ function DueTab({ mark }: { mark: DueTabMark }) {
  *
  * The visible text is abbreviated in four of the five states, so each mark
  * carries the whole sentence as well — spoken instead of the abbreviation, and
- * shown on hover.
+ * shown on hover. `column` is named in that sentence when the date is a stage's
+ * rather than the card's own: the mark itself is the same either way, because
+ * what it is asking for is the same.
  */
-function DueMark({ iso }: { iso: string | null }) {
+function DueMark({ iso, column }: { iso: string | null; column: string | null }) {
   const bucket = dueBucket(iso)
   if (iso === null || bucket.kind === 'none') return null
 
-  const on = `due ${formatDueLong(iso)}`
+  const when = `${formatDueLong(iso)}${column ? ` in ${column}` : ''}`
   const { className, icon, text, said } = {
     late: {
       className: styles.dueLate,
       icon: <AlertIcon size={13} />,
       text: `${'days' in bucket ? bucket.days : 0}d late`,
-      said: `${'days' in bucket ? bucket.days : 0} days late, ${on}`,
+      said: `${'days' in bucket ? bucket.days : 0} days late, due ${when}`,
     },
     today: {
       className: styles.dueToday,
       icon: <ClockIcon size={13} />,
       text: 'Today',
-      said: `Due today, ${formatDueLong(iso)}`,
+      said: `Due today, ${when}`,
     },
     tomorrow: {
       className: styles.dueTomorrow,
       icon: <CalendarIcon size={13} />,
       text: 'Tomorrow',
-      said: `Due tomorrow, ${formatDueLong(iso)}`,
+      said: `Due tomorrow, ${when}`,
     },
     soon: {
       className: styles.dueSoon,
       icon: <CalendarIcon size={13} />,
       text: formatDue(iso),
-      said: `Due ${formatDueLong(iso)}`,
+      said: `Due ${when}`,
     },
     later: {
       className: styles.dueLater,
       icon: <CalendarIcon size={13} />,
       text: formatDue(iso),
-      said: `Due ${formatDueLong(iso)}`,
+      said: `Due ${when}`,
     },
   }[bucket.kind]
 
