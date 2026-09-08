@@ -166,6 +166,11 @@ cylist files ls ATL                   cylist vault reveal ATL Logins/Stripe --sh
 Names work where a human would use one — `--assignee "Aditi K"`, `--column "In progress"`
 — and an ambiguous name is an error rather than a guess. Every command takes `--json`.
 
+Each project carries what its agents work from, under its **Agents** tab: skills
+you upload for them to follow, and a scratchpad they write one-line findings back
+onto. `note_learned` is how an agent leaves something it worked out the hard way,
+capped at 280 characters so the next one reads the pad rather than skimming it.
+
 The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
 It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an
 agent is never offered a tool that will always fail. See `mcp/README.md` for the
