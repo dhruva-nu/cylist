@@ -71,6 +71,14 @@ def test_board_marks_a_blocked_card_in_words(run: Runner) -> None:
     assert "[blocked] ATL-2" in result.out
 
 
+def test_board_says_when_an_agent_needs_you(run: Runner) -> None:
+    """The border the web board draws, in words a terminal can carry."""
+    result = run("board", "ATL")
+    assert "agent: needs you" in result.out
+    # One card only: ATL-1 has no session on it and says nothing about agents.
+    assert result.out.count("agent:") == 1
+
+
 def test_board_stacks_when_the_terminal_is_narrow(
     run: Runner, monkeypatch: pytest.MonkeyPatch
 ) -> None:

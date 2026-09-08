@@ -169,6 +169,7 @@ def _task(
         "open_subtask_count": 0,
         "subtask_count": 0,
         "subtask_assignees": [],
+        "agent_session": None,
         "checklist": [],
         "subtasks": [],
         "created_at": "2026-02-01T09:00:00Z",
@@ -199,9 +200,21 @@ GOAL = {
     },
     "created_at": "2026-02-01T09:00:00Z",
 }
-TASK_TWO = _task(
-    TASK_TWO_ID, 2, DOING_ID, "Switch the invoice job over", status="blocked", waiting_on=[LENA]
-)
+TASK_TWO = {
+    **_task(
+        TASK_TWO_ID, 2, DOING_ID, "Switch the invoice job over", status="blocked", waiting_on=[LENA]
+    ),
+    # A card with an agent on it that has stopped to ask something — the state
+    # the board and the terminal both have to be able to show.
+    "agent_session": {
+        "state": "waiting",
+        "count": 1,
+        "reason": "permission",
+        "client_name": "ATL-2",
+        "since": "2026-02-06T09:10:00Z",
+        "last_seen_at": "2026-02-06T09:10:00Z",
+    },
+}
 
 SUBTASK = {
     **_task(SUBTASK_ID, 2, DOING_ID, "Drain the old queue"),
@@ -514,6 +527,30 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         )
     if path.endswith("/comments") and method == "POST":
         return httpx.Response(201, json=TIMELINE[0])
+
+    if "/agent-sessions/" in path and method == "PUT":
+        body = json.loads(request.content)
+        task_ref, _, session_id = path.removeprefix("/tasks/").partition("/agent-sessions/")
+        return httpx.Response(
+            200,
+            json={
+                "id": "0192f3c4-0012-7000-8000-000000000001",
+                "task_id": TASK_ONE_ID,
+                "actor_label": "board-tidy agent",
+                "client_session_id": session_id,
+                "client_name": body.get("client_name"),
+                "state": body["state"],
+                "reason": body.get("reason"),
+                "note": None,
+                "started_at": "2026-02-06T09:00:00Z",
+                "state_changed_at": "2026-02-06T09:00:00Z",
+                "last_seen_at": "2026-02-06T09:00:00Z",
+                "ended_at": "2026-02-06T09:00:00Z" if body["state"] == "done" else None,
+                "dismissed_at": None,
+                "is_stale": False,
+                "task_ref": task_ref,
+            },
+        )
 
     if path == "/people" and method == "GET":
         kind = request.url.params.get("kind")

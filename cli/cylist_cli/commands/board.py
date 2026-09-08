@@ -15,6 +15,19 @@ MAX_COLUMN = 32
 STATUS_MARK = {"active": "", "hold": "[hold] ", "blocked": "[blocked] "}
 """Words, not colour. A board pasted into a ticket keeps its meaning."""
 
+AGENT_MARK = {
+    "working": "agent: working",
+    "waiting": "agent: needs you",
+    "done": "agent: finished",
+    "stale": "agent: silent",
+}
+"""What the web board draws as the card's border, said in words.
+
+Its own line under the reference rather than a prefix on it: a column here is
+thirty-two characters at its widest, and a prefix long enough to say which of
+the four states this is would push the reference off the end of it.
+"""
+
 
 def register(subparsers: Any) -> None:
     board = subparsers.add_parser(
@@ -59,6 +72,9 @@ def _card_lines(task: dict[str, Any], width: int) -> list[str]:
     """One card: its reference, its title wrapped, and who has it."""
     mark = STATUS_MARK.get(str(task.get("status")), "")
     lines = [output.truncate(f"{mark}{task['reference']}", width)]
+    agent = AGENT_MARK.get(str((task.get("agent_session") or {}).get("state")), "")
+    if agent:
+        lines.append(output.truncate(agent, width))
     lines.extend(output.wrap(str(task["title"]), width))
     assignee = task.get("assignee") or {}
     if assignee.get("name"):
