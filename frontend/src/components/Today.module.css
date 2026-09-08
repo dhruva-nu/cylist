@@ -1,0 +1,203 @@
+/*
+ * Today's work: the count on the sidebar's button, and the list it opens.
+ *
+ * The board's own card shape, compressed: what the card is on one line, the
+ * marks it carries on the next. Every colour is a token, so the list reads
+ * in both themes without a value of its own — see the note at the top of
+ * tokens.css.
+ */
+
+/* When there is nothing to list, or nothing to list it from. */
+.aside {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* How many cards are behind the strip, worn on it — and on the collapsed
+   rail, where the strip itself is not on screen either.
+ *
+ * No margin of its own. It sits in two places with opposite ideas of where it
+ * belongs: out at the far end of the strip, where the folding sections keep
+ * theirs, and dead centre of the rail under the handle. Each container
+ * already says which — the strip is `space-between` and the rail centres its
+ * items — and a `margin-left: auto` for the first was what pushed it off
+ * centre in the second. */
+.count,
+.countLate {
+  padding: 1px 8px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* Anything overdue turns the count, because that is the part of the number
+   that changes what you do next. */
+.countLate {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+.groupName,
+.groupNameLate {
+  margin: 0 0 6px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.groupNameLate {
+  color: var(--blocked);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A button now rather than a link, so it needs a button's defaults taken back
+   off it: full width, no chrome of its own, and its text left where text
+   goes. */
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--paper-2);
+}
+
+.head {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.reference {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Two lines and then an ellipsis. A card's title is the only thing on the row
+   that tells you which piece of work it is, so it gets more room than a
+   single line — and a stop, because a sidebar full of one card's title is a
+   sidebar holding one card. */
+.title {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The priority chevron, in the four inks the board uses for it. */
+.prio {
+  display: inline-flex;
+  align-items: center;
+}
+
+.priority_p0 {
+  color: var(--priority-p0);
+}
+
+.priority_p1 {
+  color: var(--priority-p1);
+}
+
+.priority_p2 {
+  color: var(--priority-p2);
+}
+
+.priority_p3 {
+  color: var(--priority-p3);
+}
+
+/* Which of the four states a card is in, said in full, because a row here
+   carries no tint of its own to say it. Active is never drawn: it is the
+   baseline, and a word on every row would be a word carrying nothing. */
+.pill {
+  padding: 0 7px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.pill_hold {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.pill_blocked {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+/* A cancelled card is filtered out before it reaches a row — see `today.ts` —
+   but the pill is written for all four states rather than three, because a
+   list of states with a hole in it is the kind of thing that stays wrong when
+   the filter changes. */
+.pill_cancelled,
+.pill_active {
+  background: var(--paper-2);
+  color: var(--ink-3);
+}
+
+/* When an overdue card was wanted. The date itself rather than a day count:
+   the group heading already said these are late, and the date is what you
+   quote in the conversation about it. */
+.late {
+  margin-left: auto;
+  color: var(--blocked);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

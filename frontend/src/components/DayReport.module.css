@@ -1,3 +1,12 @@
+/*
+ * The day report: a line in the sidebar, and the dialog that line opens.
+ *
+ * Back at a dialog's 620px after a spell as a sidebar panel a third of that,
+ * so the metrics are back with it — the stepper on one line, an entry's time
+ * pinned beside what happened rather than wrapping above it, and the window
+ * the report covered in the footer bar beside the button that copies it.
+ */
+
 .picker {
   display: flex;
   gap: 6px;
@@ -51,6 +60,29 @@
   font-size: 13px;
 }
 
+/* A line of the report that opens the card it names.
+ *
+ * Stripped back to the text it wraps rather than drawn as a button: these sit
+ * inside a report, and a list of six buttons where there were six sentences
+ * would read as a toolbar. What says it is a target is the pointer and the
+ * hover — plus the focus ring, which is the browser's own and is left alone.
+ */
+.open {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.open:hover {
+  text-decoration: underline;
+}
+
 /* A card and its day: the heading is the card, the lines under it are the day. */
 .card {
   padding: 12px 0;
@@ -68,6 +100,28 @@
   align-items: baseline;
   flex-wrap: wrap;
   margin-bottom: 6px;
+}
+
+/* The head as a button: the same row, with everything a button brings of its
+   own taken back off it. The width is stated because a button shrinks to its
+   content, and a head that did would pull the column pill in against the
+   title instead of leaving it out at the edge where the other cards' are. */
+.cardOpen {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Only the title, because the reference is grey by design and the pill beside
+   it carries a background of its own — underlining all three would draw a rule
+   across the row. */
+.cardOpen:hover .title {
+  text-decoration: underline;
 }
 
 .reference {
@@ -146,7 +200,7 @@
 /* Which window the report covered, kept beside the button that copies it. */
 .zone {
   margin-right: auto;
+  align-self: center;
   color: var(--ink-3);
   font-size: 12px;
-  align-self: center;
 }
