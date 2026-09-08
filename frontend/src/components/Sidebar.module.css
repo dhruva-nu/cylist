@@ -1,0 +1,219 @@
+/*
+ * The sidebar, and the button in the bar that shows it.
+ *
+ * Painted on `--paper` against a page on `--bg`, with a line down its left
+ * edge: the page is the ground and this is a panel laid beside it, which is
+ * the same relationship a card has to the page it sits on.
+ */
+
+.toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--ink);
+}
+
+/* Open, the button wears the same mark the tabs wear when they are the page
+   you are on — the control and the panel it opened saying the same thing. */
+.toggle[data-open='true'] {
+  border-color: transparent;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+/* The filled third. `currentColor` at a low opacity rather than a token, so it
+   stays in step with whichever of the two states the button is in. */
+.toggleFill {
+  fill: currentColor;
+  fill-opacity: 0.22;
+  stroke: none;
+}
+
+.sidebar {
+  display: flex;
+  flex: 0 0 var(--sidebar-width, 336px);
+  flex-direction: column;
+  width: var(--sidebar-width, 336px);
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+  /* Its own scroll. The day report is as long as the day was, and a sidebar
+     that grew the frame would take the page's scroll away from the page. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * Under 900px there is no width to give away, so the panel stops being a
+ * column of the frame and covers the right-hand edge instead.
+ *
+ * No scrim behind it and no focus trap in front: this is a complementary
+ * region rather than a dialog, the page underneath stays usable, and the
+ * toggle that opened it is still where it was. What it does get is Escape —
+ * see the effect in Sidebar.tsx, which is gated on this same width.
+ */
+.overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(var(--sidebar-width, 336px), 100vw);
+  box-shadow: var(--shadow-lg);
+}
+
+.section {
+  border-bottom: 1px solid var(--line);
+}
+
+.section h2 {
+  margin: 0;
+}
+
+/* The heading is the button, so the whole strip is the target. */
+.sectionHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 18px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sectionHead:hover {
+  color: var(--ink);
+}
+
+.sectionName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.sectionBody {
+  padding: 0 18px 18px;
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: flex-start;
+}
+
+.settingLabel {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.settingHint {
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* The three theme choices. A segmented control, the shape it had in the bar —
+   with room here to say all three words at a size meant to be read rather than
+   squeezed past. */
+.theme {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+}
+
+.theme button {
+  flex: 1;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme button:hover {
+  color: var(--ink);
+}
+
+.theme button.themeOn {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+/*
+ * The way out of the overlay.
+ *
+ * Only rendered in that shape — see `Sidebar.tsx`. As a column of the frame
+ * the panel covers nothing and the toggle in the bar is still there to press
+ * again; as an overlay that toggle is directly underneath this panel, and a
+ * drawer whose only exit is Escape is a drawer a pointer cannot shut.
+ */
+.close {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 12px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--ink);
+}
