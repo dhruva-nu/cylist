@@ -1,42 +1,247 @@
 /*
- * The sidebar. Always there, so there is no button here to show it.
+ * The sidebar, in its two widths: the panel, and the rail it collapses to.
  *
- * Painted on `--paper` against a page on `--bg`, with a line down its left
+ * Painted on `--paper` against a page on `--bg`, with a line down its right
  * edge: the page is the ground and this is a panel laid beside it, which is
- * the same relationship a card has to the page it sits on.
+ * the same relationship a card has to the page it sits on. The rail keeps
+ * both — same ground, same line, same edge — so collapsing reads as the panel
+ * narrowing rather than as something else appearing where it was.
+ *
+ * Every edge here is the inner one: the panel is against the window's left,
+ * so the side it shares with the page is its right, and stacked it is above
+ * the page, so the side it shares is its bottom.
+ *
+ * Both widths are drawn at once, one over the other in a single grid cell,
+ * and the box's own width is what moves between them. A box that went from
+ * holding a panel to holding a rail would have nothing to interpolate; a box
+ * going 336px → 46px has, and under `overflow: hidden` the panel is clipped as
+ * it goes rather than reflowing itself into a column too narrow to hold it.
  */
 
 .sidebar {
-  display: flex;
+  /*
+   * How wide the rail is, how long the box takes to get between the two
+   * widths, and the curve it takes getting there.
+   *
+   * Just over a fifth of a second: long enough to read as one movement rather
+   * than a jump, short enough that somebody collapsing the panel to get at the
+   * board is not left waiting for the pixels. The curve leaves quickly and
+   * settles slowly, which is what makes a width change read as something being
+   * moved rather than something being resized.
+   */
+  --sidebar-rail: 46px;
+  --sidebar-glide: 220ms;
+  --sidebar-easing: cubic-bezier(0.32, 0.72, 0, 1);
+
+  display: grid;
   flex: 0 0 var(--sidebar-width, 336px);
+  width: var(--sidebar-width, 336px);
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+  /* The panel is the taller layer and it is the one that scrolls, so the
+     clipping happens here and the scrolling one level in. */
+  overflow: hidden;
+  transition:
+    flex-basis var(--sidebar-glide) var(--sidebar-easing),
+    width var(--sidebar-glide) var(--sidebar-easing);
+}
+
+.shut {
+  flex-basis: var(--sidebar-rail);
+  width: var(--sidebar-rail);
+}
+
+/*
+ * The two layers, stacked.
+ *
+ * Hidden is the base state and showing is the override, because the two need
+ * different timing on `visibility` and writing it this way says so once. On
+ * the way out it waits for the fade to finish, so the layer does not vanish
+ * mid-dissolve; on the way in it flips immediately, because a layer fading up
+ * from nothing has to be there to be seen. Either way `visibility` — not
+ * `opacity` alone — is what takes the hidden layer out of the tab order and
+ * off a screen reader, so the panel's controls are not a second set of
+ * targets behind the rail.
+ */
+.rail,
+.panel {
+  grid-area: 1 / 1;
+  min-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity calc(var(--sidebar-glide) * 0.7) var(--sidebar-easing),
+    visibility 0s linear calc(var(--sidebar-glide) * 0.7);
+}
+
+.showing > .panel,
+.shut > .rail {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity calc(var(--sidebar-glide) * 0.7) var(--sidebar-easing),
+    visibility 0s linear 0s;
+}
+
+/* Its own width rather than the cell's, so it is clipped by the box narrowing
+   instead of being reflowed by it — a column of headings that re-wrapped on
+   every frame of the animation would be the animation. Its own scroll too:
+   nothing in here is long today, but a panel that grew the frame to fit a
+   section added tomorrow would be taking the page's scroll away from the
+   page. */
+.panel {
+  display: flex;
   flex-direction: column;
   width: var(--sidebar-width, 336px);
-  border-left: 1px solid var(--line);
-  background: var(--paper);
-  /* Its own scroll. The day report is as long as the day was, and a sidebar
-     that grew the frame would take the page's scroll away from the page. */
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
 /*
+ * Collapsed: a rail against the same edge, wide enough for the handle that
+ * brings the panel back and the count of what is due today, and nothing else.
+ *
+ * Not `display: none` on the panel and not a floating button over the page.
+ * A rail is what makes collapsing safe — the frame still has a left-hand
+ * column, so the page does not reflow into the space and back out of it, and
+ * there is no width at which the way to Settings is a control somebody has to
+ * go looking for.
+ */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  width: var(--sidebar-rail);
+  padding: 12px 0;
+}
+
+/* What the rail is, said down it. Vertical because a 46px column has no room
+   for the word across, and `aria-hidden` on it in the markup because the
+   landmark it sits in is already labelled — read out, this would be the word
+   "Sidebar" twice. */
+.railName {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+}
+
+/*
  * Under 900px the frame stacks rather than sharing a row — see `.frame` in
  * Shell.module.css, which is what takes the scroll there. A full-width panel
- * under the page, with the line moved to its top edge because that is now
+ * over the page, with the line moved to its bottom edge because that is now
  * where the page it is beside actually is.
  *
- * No overlay and no drawer at any width. With nothing to reopen it, a panel
- * that hid itself on a narrow display would be a panel whose Settings you
- * could not reach at all.
+ * Over rather than under, because on this side the panel comes first in the
+ * markup and a stacked column should not have to argue with that — see the
+ * note in `Shell.tsx`. What makes that bearable is the handle: a reader who
+ * does not want a panel's worth of scrolling above every page collapses it
+ * once, and it stays collapsed to the strip below.
+ *
+ * No overlay and no drawer at any width, in any state. Even collapsed the
+ * panel is still on screen, so there is nowhere Settings goes out of reach.
+ *
+ * And no animation. Stacked, the two layers are not two widths of one box —
+ * they are two heights, and the box has to take the height of whichever is
+ * showing or the page below it sits under a column of nothing. So the hidden
+ * one is gone outright rather than faded, and there is no width change left
+ * to glide.
  */
 @media (max-width: 899px) {
   .sidebar {
     flex: none;
     width: 100%;
-    border-top: 1px solid var(--line);
-    border-left: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow: visible;
+    transition: none;
+  }
+
+  .shut {
+    flex: none;
+    width: 100%;
+  }
+
+  .rail,
+  .panel {
+    transition: none;
+  }
+
+  .showing > .rail,
+  .shut > .panel {
+    display: none;
+  }
+
+  .panel {
+    width: 100%;
     overflow-y: visible;
   }
+
+  .rail {
+    flex-direction: row;
+    gap: 10px;
+    justify-content: flex-start;
+    width: 100%;
+    padding: 10px 18px;
+  }
+
+  .railName {
+    writing-mode: horizontal-tb;
+  }
+}
+
+/* Asked not to animate, do not animate. The panel still opens and shuts; it
+   just arrives rather than travels. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .rail,
+  .panel {
+    transition: none;
+  }
+}
+
+/* The panel's own top strip, holding the handle and nothing else. Sticky, so
+   the way out is where you left it however far down the sections you have
+   scrolled; on `--paper` so they do not show through underneath it. */
+.panelHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-start;
+  padding: 10px 12px 4px;
+  background: var(--paper);
+}
+
+/* The handle, in both shapes. Drawn as the bar's other marks are — a 1px
+   outline and a control radius — so it reads as chrome rather than as
+   something belonging to the section under it. */
+.handle {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.handle:hover {
+  background: var(--paper-2);
+  color: var(--ink);
 }
 
 .section {
@@ -67,8 +272,16 @@
   cursor: pointer;
 }
 
-.sectionHead:hover {
+.sectionHead:hover:not(:disabled) {
   color: var(--ink);
+}
+
+/* Off a project there is no day to list or report on. Dimmed rather than
+   hidden: a row that comes and goes as you navigate is a sidebar that looks
+   like it is losing things. */
+.sectionHead:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .sectionName {

@@ -13,13 +13,27 @@
  * Left to itself the server cuts in UTC, and an evening's work in Kolkata
  * would show up in tomorrow's report.
  *
- * It used to be a dialog, opened from a button beside the project's title.
- * That was the wrong shape twice over. A report is something you read *while*
- * looking at the work it is about — and a dialog is the one place you cannot
- * be looking at anything else — and it was reachable from the hub alone, so
- * reading yesterday from the board meant leaving the board. In the sidebar it
- * is beside whatever screen you are on, and stepping back through a week no
- * longer covers the thing you are stepping back through.
+ * It is a button in the sidebar and a dialog over the page — the shape it had
+ * before it became a section that folded open, and the right one. A report is
+ * a thing you ask for: you want a whole day at the width a day of work is
+ * written at, you read it, you copy it, and you put it away. A panel a third
+ * of that width had it competing with the page for room it did not need most
+ * of the time, and a fold is a poor way to ask for anything — there is no
+ * moment at which you have *requested* a report, only a section that happens
+ * to be open.
+ *
+ * What the sidebar keeps is where you ask from. The old button hung off the
+ * project hub alone, so reading yesterday from the board meant leaving the
+ * board to do it; here it is beside every screen, and the report opens over
+ * whichever one you are on.
+ *
+ * Every card the report names opens. A report that only tells you what
+ * happened leaves you to go and find the card it happened to, which means a
+ * search box and the reference typed out by hand — for the sake of a card the
+ * report is already holding the reference of. So the head of a card's day is
+ * a button, and it opens the same dialog the board opens, over the report.
+ * What does not open is a card that is gone: a day can hold the last things
+ * that ever happened to something since deleted, and those lines stay as text.
  */
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
@@ -27,7 +41,9 @@ import { useMatchRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type DayReport, type TaskDay, type TaskHistoryEntry } from '../api/client'
 import { localToday } from './dates'
-import { SidebarSection } from './SidebarSection'
+import { Modal, ModalBody } from './Modal'
+import { OpenCard } from './OpenCard'
+import { SidebarAction } from './SidebarSection'
 import { Button, EmptyState, ErrorBanner } from './ui'
 import styles from './DayReport.module.css'
 
@@ -48,22 +64,64 @@ function shiftDay(day: string, by: number): string {
   return new Date(Date.UTC(year, month - 1, date + by)).toISOString().slice(0, 10)
 }
 
-export function DayReportPanel({ folded, onToggle }: { folded: boolean; onToggle: () => void }) {
+/**
+ * The button in the sidebar, and everything it opens.
+ *
+ * Both dialogs are held here rather than one inside the other. Rendered as
+ * siblings, a card comes out on top of the report simply by being second, and
+ * closing it leaves the report exactly as it was — which is the point of
+ * opening a card *from* a report rather than instead of one.
+ */
+export function DayReportPanel() {
   const matchRoute = useMatchRoute()
   const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+  const projectKey = match ? match.projectKey : null
+
+  const [reporting, setReporting] = useState(false)
+  /** The card being read over the report, by reference — which is what the
+   * report holds and what `/tasks/{ref}` takes, so there is nothing to look up
+   * before opening one. */
+  const [reading, setReading] = useState<string | null>(null)
 
   return (
-    <SidebarSection name="Day report" folded={folded} onToggle={onToggle}>
-      {match ? (
-        <Day projectKey={match.projectKey} />
-      ) : (
-        <p className={styles.aside}>Open a project to read its day.</p>
-      )}
-    </SidebarSection>
+    /* No count on this one. Today's is worth carrying because it changes on
+       its own and you want to be told; a report is as long as the day was,
+       and a number saying so is a number nobody acts on. */
+    <SidebarAction
+      name="Day report"
+      disabled={projectKey === null}
+      title={projectKey === null ? 'Open a project to read a day of it' : undefined}
+      onOpen={() => setReporting(true)}
+    >
+      {reporting && projectKey !== null ? (
+        <ReportDialog
+          projectKey={projectKey}
+          onOpenCard={setReading}
+          onClose={() => setReporting(false)}
+        />
+      ) : null}
+
+      {reading !== null && projectKey !== null ? (
+        <OpenCard
+          projectKey={projectKey}
+          reference={reading}
+          onOpen={setReading}
+          onClose={() => setReading(null)}
+        />
+      ) : null}
+    </SidebarAction>
   )
 }
 
-function Day({ projectKey }: { projectKey: string }) {
+function ReportDialog({
+  projectKey,
+  onOpenCard,
+  onClose,
+}: {
+  projectKey: string
+  onOpenCard: (reference: string) => void
+  onClose: () => void
+}) {
   const [day, setDay] = useState(localToday)
   const [copied, setCopied] = useState(false)
   const zone = localZone()
@@ -97,66 +155,80 @@ function Day({ projectKey }: { projectKey: string }) {
   const shown = report.data
 
   return (
-    <div className={styles.panel}>
-      <div className={styles.picker}>
-        <Button
-          small
-          variant="ghost"
-          aria-label="The day before"
-          onClick={() => go(shiftDay(day, -1))}
-        >
-          ‹
-        </Button>
-        <label className={styles.dayField}>
-          <span className="visually-hidden">Which day to report on</span>
-          <input
-            type="date"
-            value={day}
-            max={today}
-            onChange={(event) => go(event.currentTarget.value || today)}
-          />
-        </label>
-        <Button
-          small
-          variant="ghost"
-          aria-label="The day after"
-          // Tomorrow cannot hold anything yet, so there is nothing to go to.
-          disabled={day >= today}
-          onClick={() => go(shiftDay(day, 1))}
-        >
-          ›
-        </Button>
-        <Button small variant="ghost" disabled={day === today} onClick={() => go(today)}>
-          Today
-        </Button>
-      </div>
-
-      {report.error ? <ErrorBanner>{report.error.message}</ErrorBanner> : null}
-      {shown === undefined && report.isFetching ? <EmptyState>Reading the day…</EmptyState> : null}
-      {shown ? <Report report={shown} /> : null}
-
-      {/* Under the report rather than over it: the window it covered and the
-          button that copies it are both things you want once you have read
-          it, and a footer of chrome above a report you have not read yet is
-          a footer in the way. */}
-      {shown ? (
-        <div className={styles.foot}>
+    <Modal
+      title="Day report"
+      onClose={onClose}
+      footer={
+        <>
+          <span className={styles.zone}>Midnight to midnight, {shown?.timezone ?? zone}</span>
           <Button
-            small
             variant="go"
-            disabled={shown.entry_count === 0}
-            onClick={() => void copy(shown.markdown)}
+            disabled={!shown || shown.entry_count === 0}
+            onClick={() => shown && void copy(shown.markdown)}
           >
             {copied ? 'Copied' : 'Copy as Markdown'}
           </Button>
-          <span className={styles.zone}>Midnight to midnight, {shown.timezone}</span>
+          <Button onClick={onClose}>Close</Button>
+        </>
+      }
+    >
+      <ModalBody>
+        <div className={styles.picker}>
+          <Button
+            small
+            variant="ghost"
+            aria-label="The day before"
+            onClick={() => go(shiftDay(day, -1))}
+          >
+            ‹
+          </Button>
+          <label className={styles.dayField}>
+            <span className="visually-hidden">Which day to report on</span>
+            <input
+              type="date"
+              value={day}
+              max={today}
+              onChange={(event) => go(event.currentTarget.value || today)}
+            />
+          </label>
+          <Button
+            small
+            variant="ghost"
+            aria-label="The day after"
+            // Tomorrow cannot hold anything yet, so there is nothing to go to.
+            disabled={day >= today}
+            onClick={() => go(shiftDay(day, 1))}
+          >
+            ›
+          </Button>
+          <Button small variant="ghost" disabled={day === today} onClick={() => go(today)}>
+            Today
+          </Button>
         </div>
-      ) : null}
-    </div>
+
+        {report.error ? <ErrorBanner>{report.error.message}</ErrorBanner> : null}
+        {shown === undefined && report.isFetching ? (
+          <EmptyState>Reading the day…</EmptyState>
+        ) : null}
+        {shown ? <Report report={shown} onOpen={onOpenCard} /> : null}
+      </ModalBody>
+    </Modal>
   )
 }
 
-function Report({ report }: { report: DayReport }) {
+/**
+ * Whether there is still a card behind a line of the report.
+ *
+ * A card names the column it is in and a sub-task names its parent; something
+ * with neither has been deleted, and the report is holding the last things
+ * that ever happened to it. That one is text — a button that opened a 404 is
+ * worse than no button.
+ */
+function stillThere(card: TaskDay): boolean {
+  return card.column !== null || card.parent !== null
+}
+
+function Report({ report, onOpen }: { report: DayReport; onOpen: (reference: string) => void }) {
   return (
     <div className={styles.report}>
       <p className={styles.headline}>{report.headline}</p>
@@ -169,7 +241,20 @@ function Report({ report }: { report: DayReport }) {
               .filter((card) => card.finished)
               .map((card) => (
                 <li key={card.reference}>
-                  <b>{card.reference}</b> {card.title}
+                  {stillThere(card) ? (
+                    <button
+                      type="button"
+                      className={styles.open}
+                      title={`Open ${card.reference}`}
+                      onClick={() => onOpen(card.reference)}
+                    >
+                      <b>{card.reference}</b> {card.title}
+                    </button>
+                  ) : (
+                    <>
+                      <b>{card.reference}</b> {card.title}
+                    </>
+                  )}
                 </li>
               ))}
           </ul>
@@ -180,7 +265,7 @@ function Report({ report }: { report: DayReport }) {
         <section>
           <h3 className={styles.section}>Cards</h3>
           {report.tasks.map((card) => (
-            <Card key={card.reference} card={card} />
+            <Card key={card.reference} card={card} onOpen={onOpen} />
           ))}
         </section>
       ) : null}
@@ -199,20 +284,40 @@ function Report({ report }: { report: DayReport }) {
   )
 }
 
-function Card({ card }: { card: TaskDay }) {
+function Card({ card, onOpen }: { card: TaskDay; onOpen: (reference: string) => void }) {
+  const head = (
+    <>
+      <span className={styles.reference}>{card.reference}</span>
+      <span className={styles.title}>{card.title}</span>
+      {/* Where this piece of work stands: a card names its column, a sub-task
+          names the card it belongs to, and something with neither has been
+          deleted. Read straight off the column, an absent one would make
+          every sub-task in the report look deleted. */}
+      <span className={card.finished ? styles.done : styles.where}>
+        {card.column ?? (card.parent ? `of ${card.parent}` : 'deleted')}
+      </span>
+    </>
+  )
+
   return (
     <div className={styles.card}>
-      <div className={styles.cardHead}>
-        <span className={styles.reference}>{card.reference}</span>
-        <span className={styles.title}>{card.title}</span>
-        {/* Where this piece of work stands: a card names its column, a sub-task
-            names the card it belongs to, and something with neither has been
-            deleted. Read straight off the column, an absent one would make
-            every sub-task in the report look deleted. */}
-        <span className={card.finished ? styles.done : styles.where}>
-          {card.column ?? (card.parent ? `of ${card.parent}` : 'deleted')}
-        </span>
-      </div>
+      {/* The head opens the card and the lines beneath it stay text. The head
+          is what names the card — reference, title and where it is — so it is
+          the part of the block that is *about* the card rather than about a
+          thing that happened to it, and it is one target rather than a row of
+          them. */}
+      {stillThere(card) ? (
+        <button
+          type="button"
+          className={`${styles.cardHead} ${styles.cardOpen}`}
+          title={`Open ${card.reference}`}
+          onClick={() => onOpen(card.reference)}
+        >
+          {head}
+        </button>
+      ) : (
+        <div className={styles.cardHead}>{head}</div>
+      )}
       <div className={styles.entries}>
         {card.entries.map((entry) => (
           <Entry key={entry.id} entry={entry} />

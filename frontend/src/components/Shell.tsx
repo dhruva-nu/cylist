@@ -53,19 +53,29 @@ export function Shell() {
   return (
     <>
       {/*
-        Eight tab stops sit between the top of the page and the content —
-        wordmark, six tabs, the breadcrumb. Tabbing past them on every
-        navigation is the sort of thing that makes a keyboard unusable, so
-        there is a way over them.
+        The whole sidebar and eight more tab stops sit between the top of the
+        page and the content — the panel's handle and its sections, then the
+        wordmark, six tabs and the breadcrumb. Tabbing past all of that on
+        every navigation is the sort of thing that makes a keyboard unusable,
+        so there is a way over it. It matters more now than it did with the
+        panel on the other side, where it came after the content rather than
+        before it.
       */}
       <a href="#content" className={styles.skip}>
         Skip to content
       </a>
-      {/* The window's remaining height, split into the page and the sidebar
+      {/* The window's remaining height, split into the sidebar and the page
           beside it. The bar sits inside the page's own column rather than
           above both, so the navigation is as wide as the content it belongs
-          to rather than running on underneath the panel. */}
+          to rather than running on underneath the panel.
+
+          The sidebar is first here because it is first on screen. Down the
+          left-hand edge it has to come before the page in the markup too —
+          reading order and tab order following the layout rather than
+          contradicting it — which is also what puts the panel above the page
+          rather than below it once the frame stacks. */}
       <div className={styles.frame}>
+        <Sidebar />
         <div className={styles.column}>
           <div className={`${styles.top} ${page}`}>
             <div className={styles.bar}>
@@ -83,7 +93,6 @@ export function Shell() {
             <Outlet />
           </main>
         </div>
-        <Sidebar />
       </div>
     </>
   )

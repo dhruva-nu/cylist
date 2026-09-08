@@ -20,8 +20,8 @@
 }
 
 /*
- * The window's remaining height, laid out as a row: the page in one column and
- * the sidebar beside it.
+ * The window's remaining height, laid out as a row: the sidebar in one column
+ * and the page beside it.
  *
  * `min-height: 0` because a flex item will not shrink below its content
  * without it, and the page's column has to be allowed to be shorter than what
@@ -36,8 +36,8 @@
 
 /* Everything that is not the sidebar: the bar, the breadcrumbs and the page.
    `min-width: 0` so the sidebar beside it narrows this column instead of
-   pushing it off the right-hand edge — a flex item defaults to refusing to
-   shrink below its content, and a board's worth of columns is very wide
+   pushing it off the window's other edge — a flex item defaults to refusing
+   to shrink below its content, and a board's worth of columns is very wide
    content. */
 .column {
   display: flex;
@@ -49,7 +49,9 @@
 
 /*
  * Under 900px there is no width to share, so the row becomes a column: the
- * page, and the sidebar under it.
+ * sidebar, and the page under it — markup order, which on this side is also
+ * screen order. See the note on `.sidebar` in Sidebar.module.css for why the
+ * two are not worth prising apart here.
  *
  * The scroll has to move with it. Above this width `.wrap` is the one thing
  * that scrolls and the frame is exactly the window's height, which is what

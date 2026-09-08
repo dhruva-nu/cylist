@@ -1,5 +1,5 @@
 /**
- * The right-hand sidebar: the things you consult while working, rather than
+ * The left-hand sidebar: the things you consult while working, rather than
  * the things you navigate to.
  *
  * A project's areas are places you go and stay, and they are tabs in the bar
@@ -8,21 +8,41 @@
  * board for, and all of which used to be a dialog over the top of whatever you
  * were doing.
  *
- * It is a column of the frame and it is always there. Not a drawer over the
- * page and not something you open: the page narrows to make room for it, which
- * is the whole point of consulting something beside your work instead of on
- * top of it. A panel you have to open first is a panel you forget is there,
- * and one that can be shut is one whose count of overdue cards nobody sees.
+ * It is a column of the frame down the left-hand edge rather than a drawer
+ * over the page: the page narrows to make room for it, which is the whole
+ * point of consulting something beside your work instead of on top of it.
  *
- * Under 900px there is no width to give away, so the frame stacks instead —
- * page first, panel under it, the frame itself taking the scroll. Nothing is
- * hidden at any width, because with no control to bring it back, hiding it
- * would be the one change that made Settings unreachable.
+ * It collapses, and what it collapses to is the reason it is allowed to. Not
+ * away — to a rail against the same edge, holding the handle that brings it
+ * back and the count of what is due today. So the two objections to a panel
+ * that shuts both go: there is no state in which Settings is unreachable, and
+ * no state in which three overdue cards are behind something you forgot was
+ * there. What the rail buys is the width, which is the one thing a board four
+ * columns wide actually wants back.
  *
- * Sections stack and each folds. That is what makes this extensible without a
- * tab bar to redesign every time something is added: a new section is one more
- * entry in the column, and it opens or folds on its own without arguing with
- * its neighbours over which one is showing.
+ * Collapsed or not is remembered between visits, and it collapses by gliding
+ * rather than by swapping: the two widths are drawn one over the other and
+ * the box's own width is the thing that moves. See the note over the markup,
+ * and `--sidebar-glide` in the stylesheet for the timing.
+ *
+ * Both widths stay mounted while it does. That used to be the thing to avoid,
+ * back when every section was a live query and a shut panel refetching what
+ * nobody was looking at was a cost paid on every screen — but the sections
+ * are strips now, and the one query left is the count, which the rail asks
+ * for anyway under the same key.
+ *
+ * Under 900px the frame stacks instead — panel first, page under it, the
+ * frame itself taking the scroll — and the rail becomes a strip across the
+ * top rather than a column down the side. Panel first because on this side it
+ * is first in the markup as well as first on screen, and a stacked column
+ * that reversed the two would be putting tab order and reading order at odds
+ * to save a scroll the handle already saves.
+ *
+ * Sections stack, and each either folds open in place or opens over the page.
+ * That is what makes this extensible without a tab bar to redesign every time
+ * something is added: a new section is one more entry in the column, and it
+ * behaves on its own without arguing with its neighbours over which one is
+ * showing.
  */
 
 import {
@@ -36,7 +56,7 @@ import {
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
 import { DayReportPanel } from './DayReport'
 import { SidebarSection } from './SidebarSection'
-import { Today } from './Today'
+import { Today, TodayCount } from './Today'
 import styles from './Sidebar.module.css'
 
 const THEME_LABELS: Record<ThemeChoice, string> = {
@@ -45,7 +65,40 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
   system: 'System',
 }
 
+/**
+ * Not `cylist.sidebar.open`, which this replaces.
+ *
+ * That key was written on mount with whatever the panel happened to be
+ * showing, so every browser that ever loaded the app holds a value under it —
+ * and a value nobody chose cannot be told apart from one somebody did. Only a
+ * press of the handle writes this one, so what is under it is always an
+ * answer rather than an echo of the default.
+ */
+const OPEN_KEY = 'cylist.sidebar.showing'
 const FOLDED_KEY = 'cylist.sidebar.folded'
+
+/**
+ * Whether the panel is showing, remembered between visits.
+ *
+ * Collapsed on a first visit, at every width. The panel is a third of a
+ * narrow window and a board wants every pixel of the rest, so what somebody
+ * arrives to is their work with a rail beside it — and the rail is not
+ * nothing: it holds the handle and the count of what is due today, which is
+ * the one thing in the panel worth seeing before you have asked for it.
+ * Anybody who wants the panel opens it once and it stays open.
+ *
+ * Every touch of localStorage is wrapped, for the reason `theme.ts` gives:
+ * reading it throws outright in a private window, and a frame that will not
+ * render is a worse outcome than a preference that is not remembered.
+ */
+function readOpen(): boolean {
+  try {
+    return window.localStorage.getItem(OPEN_KEY) === 'true'
+  } catch {
+    // A private window. Collapsed is the answer for a first visit anyway.
+    return false
+  }
+}
 
 /**
  * Which sections are folded away, remembered by name.
@@ -54,12 +107,12 @@ const FOLDED_KEY = 'cylist.sidebar.folded'
  * section added later starts open rather than having to be listed to be seen
  * at all.
  *
- * On a first visit the day report is folded and nothing else is. It is by far
- * the longest section — a whole day of a project, however busy the day was —
- * and open by default it would push everything above it out of view before
- * anybody had said they wanted to read it.
+ * Nothing is folded on a first visit. The day report used to be, being by far
+ * the longest thing in the panel; it is a button now and opens over the page,
+ * so what is left here is a short list and one preference, and both are worth
+ * more open than the scroll they cost.
  */
-const FOLDED_TO_BEGIN_WITH = ['Day report']
+const FOLDED_TO_BEGIN_WITH: string[] = []
 
 function readFolded(): string[] {
   let stored: string | null = null
@@ -84,7 +137,25 @@ function readFolded(): string[] {
 }
 
 export function Sidebar() {
+  const [open, setOpen] = useState<boolean>(readOpen)
   const [folded, setFolded] = useState<string[]>(readFolded)
+
+  /**
+   * Show or hide the panel, and remember which.
+   *
+   * Written here, on the press, rather than in an effect watching `open`.
+   * An effect would also fire on the first render, storing the default as
+   * though it had been chosen — which is exactly what made the old key
+   * useless.
+   */
+  const showSidebar = useCallback((showing: boolean) => {
+    setOpen(showing)
+    try {
+      window.localStorage.setItem(OPEN_KEY, String(showing))
+    } catch {
+      // It still holds for this visit; it just will not be remembered.
+    }
+  }, [])
 
   useEffect(() => {
     try {
@@ -101,27 +172,99 @@ export function Sidebar() {
   }, [])
 
   return (
-    <aside className={styles.sidebar} aria-label="Sidebar">
-      {/* Today's work at the top. It is the section whose answer changes hour
-          to hour, and the one worth having in the corner of your eye;
-          Settings is the one you set once and leave, so it sits at the
-          bottom. */}
-      <Today folded={folded.includes('Today')} onToggle={() => toggleSection('Today')} />
-      {/* The day behind you, under the day in front of you. It is the longest
-          section by far, so it sits below the list it would otherwise push off
-          the top of the panel. */}
-      <DayReportPanel
-        folded={folded.includes('Day report')}
-        onToggle={() => toggleSection('Day report')}
-      />
-      <SidebarSection
-        name="Settings"
-        folded={folded.includes('Settings')}
-        onToggle={() => toggleSection('Settings')}
-      >
-        <SettingsSection />
-      </SidebarSection>
+    <aside
+      className={`${styles.sidebar} ${open ? styles.showing : styles.shut}`}
+      aria-label="Sidebar"
+    >
+      {/*
+        Two layers in one box, stacked in a single grid cell, with the box's
+        width the thing that moves between them. That is what makes the change
+        an animation rather than a jump: a panel swapped for a rail has nothing
+        to interpolate, while a box going 336px → 46px does, and the layer on
+        the way out can fade while the one on the way in fades up.
+
+        Both are always mounted, which used to be the thing worth avoiding —
+        the sections were live queries and a shut panel refetching what nobody
+        was looking at was a cost on every screen. They are not any more.
+        Today and the day report are strips that fetch nothing until their
+        dialog is opened, Settings is local state, and the one query left is
+        the count — which the rail asks for anyway, under the same key, so
+        react-query answers both from one request.
+
+        The hidden layer goes `visibility: hidden` once it has faded, so it
+        leaves the tab order and the accessibility tree rather than sitting
+        there as a second set of controls nobody can see.
+      */}
+      <div className={styles.rail}>
+        <Handle open={false} onToggle={() => showSidebar(true)} />
+        {/* The one thing worth saying from a 46px rail: how much is wanted
+            today, and in red if any of it is late. It is the count the Today
+            strip carries, and it is here for exactly the reason a panel that
+            can be shut needs it to be — a number nobody can see is a number
+            that stops being worth keeping. */}
+        <TodayCount />
+        <span className={styles.railName} aria-hidden="true">
+          Sidebar
+        </span>
+      </div>
+
+      <div className={styles.panel}>
+        {/* Sticky, so the way out of the panel is where you left it however
+            far down the sections you have scrolled. */}
+        <div className={styles.panelHead}>
+          <Handle open onToggle={() => showSidebar(false)} />
+        </div>
+        {/* Today's work at the top. It is the one whose answer changes hour to
+            hour, and its count is the thing worth having in the corner of your
+            eye; Settings is the one you set once and leave, so it sits at the
+            bottom. */}
+        <Today />
+        {/* The day behind you, under the day in front of you. Both are strips
+            that open over the page rather than sections that fold: a list you
+            consult and a report you ask for are both things you want at a
+            dialog's width and then want gone. Settings is the one thing here
+            that really is a panel — a preference you set in place — so it is
+            the one that still folds. */}
+        <DayReportPanel />
+        <SidebarSection
+          name="Settings"
+          folded={folded.includes('Settings')}
+          onToggle={() => toggleSection('Settings')}
+        >
+          <SettingsSection />
+        </SidebarSection>
+      </div>
     </aside>
+  )
+}
+
+/**
+ * The control that collapses the panel, and the one that brings it back.
+ *
+ * One component in both shapes on purpose: it is the same control, in the same
+ * place — hard against the left-hand edge — and a reader who has learnt where
+ * the handle is should not have to learn it twice.
+ *
+ * The chevron points where pressing it sends the panel: left, off the edge, to
+ * put it away; right, back over the page, to bring it out. It lives in the
+ * panel rather than up in the bar, which is where the toggle used to be —
+ * a button in one corner of the frame acting on something in the other is a
+ * button you have to be told about.
+ */
+function Handle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const says = open ? 'Collapse the sidebar' : 'Expand the sidebar'
+
+  return (
+    <button
+      type="button"
+      className={styles.handle}
+      aria-expanded={open}
+      aria-label={says}
+      title={says}
+      onClick={onToggle}
+    >
+      <span aria-hidden="true">{open ? '‹' : '›'}</span>
+    </button>
   )
 }
 

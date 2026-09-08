@@ -34,7 +34,17 @@ const ME = person('me', 'Dhruva', true)
 const ADITI = person('aditi', 'Aditi K')
 
 function column(id: string, name: string, position: number): BoardColumn {
-  return { id, project_id: 'project-1', name, description: '', position, task_count: 0 }
+  // No outcomes: none of these tests turn on how the last column is divided,
+  // and empty is the ordinary case for every column anyway.
+  return {
+    id,
+    project_id: 'project-1',
+    name,
+    description: '',
+    position,
+    outcomes: [],
+    task_count: 0,
+  }
 }
 
 const TO_DO = column('col-todo', 'To do', 0)
@@ -68,10 +78,17 @@ function card(
     title: reference,
     description: '',
     type: 'feature',
-    priority: fields.priority ?? 'someday',
+    priority: fields.priority ?? 'p3',
     sub_statuses: [],
     sub_status_index: null,
     due_date: fields.due === undefined ? TODAY : fields.due,
+    // No per-column dates on these fixtures, and with none the date a card is
+    // working towards is its final one. Keeping the two in step is what makes
+    // `due` still mean, in a test, what it has always meant here.
+    column_due_dates: [],
+    next_due_date: fields.due === undefined ? TODAY : fields.due,
+    outcome: null,
+    outcome_index: null,
     assignee: fields.assignee ?? ME,
     status: fields.status ?? 'active',
     template_id: null,
@@ -120,7 +137,7 @@ describe('which cards are today’s work', () => {
     // Membership is the due date's question alone. An urgent card with no date
     // is work to schedule, not work for today, and putting it here would mean
     // the list never emptied.
-    const work = todaysWork([card('A-1', { due: null, priority: 'urgent' })], BOARD, ME, TODAY)
+    const work = todaysWork([card('A-1', { due: null, priority: 'p0' })], BOARD, ME, TODAY)
 
     expect(todaysWorkCount(work)).toBe(0)
   })
@@ -194,10 +211,10 @@ describe('what order today’s work is in', () => {
   it('puts the most urgent of today’s cards first', () => {
     const work = todaysWork(
       [
-        card('A-1', { priority: 'someday' }),
-        card('A-2', { priority: 'urgent' }),
-        card('A-3', { priority: 'week' }),
-        card('A-4', { priority: 'asap' }),
+        card('A-1', { priority: 'p3' }),
+        card('A-2', { priority: 'p0' }),
+        card('A-3', { priority: 'p2' }),
+        card('A-4', { priority: 'p1' }),
       ],
       BOARD,
       ME,
@@ -209,13 +226,13 @@ describe('what order today’s work is in', () => {
 
   it('puts the longest-overdue card first, whatever its priority', () => {
     // How long a card has been late outranks priority in this group: three
-    // weeks over is a conversation to have, and a `someday` card that old is
-    // more pressing than an urgent one that slipped yesterday.
+    // weeks over is a conversation to have, and a P3 card that old is more
+    // pressing than a P0 that slipped yesterday.
     const work = todaysWork(
       [
-        card('A-1', { due: '2026-09-07', priority: 'urgent' }),
-        card('A-2', { due: '2026-08-18', priority: 'someday' }),
-        card('A-3', { due: '2026-09-02', priority: 'asap' }),
+        card('A-1', { due: '2026-09-07', priority: 'p0' }),
+        card('A-2', { due: '2026-08-18', priority: 'p3' }),
+        card('A-3', { due: '2026-09-02', priority: 'p1' }),
       ],
       BOARD,
       ME,
@@ -228,8 +245,8 @@ describe('what order today’s work is in', () => {
   it('breaks a shared due date with priority', () => {
     const work = todaysWork(
       [
-        card('A-1', { due: '2026-09-05', priority: 'week' }),
-        card('A-2', { due: '2026-09-05', priority: 'urgent' }),
+        card('A-1', { due: '2026-09-05', priority: 'p2' }),
+        card('A-2', { due: '2026-09-05', priority: 'p0' }),
       ],
       BOARD,
       ME,
@@ -252,7 +269,7 @@ describe('what order today’s work is in', () => {
 
   it('does not reorder the array it was given', () => {
     // `sort` is in place, and these cards are the board's own query cache.
-    const cards = [card('A-1', { priority: 'someday' }), card('A-2', { priority: 'urgent' })]
+    const cards = [card('A-1', { priority: 'p3' }), card('A-2', { priority: 'p0' })]
     const order = refs(cards)
 
     todaysWork(cards, BOARD, ME, TODAY)

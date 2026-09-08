@@ -50,3 +50,56 @@ export function SidebarSection({
     </section>
   )
 }
+
+/**
+ * A section of the sidebar that is a control rather than something that folds.
+ *
+ * Today and the day report are both of these: a list you consult and a report
+ * you ask for, each wanted at a dialog's width and then wanted gone. Neither
+ * is a panel you keep open beside your work, which is what a fold is for.
+ *
+ * Drawn as the folding heads are, down to the strip, the ink and the hover —
+ * the sidebar is a stack of rows and one row in a different livery would read
+ * as something bolted on rather than as the third of three. What it does not
+ * wear is their chevron, which is the whole of the difference: a chevron says
+ * this opens *downwards, here*, and these open over the page. No
+ * `aria-expanded` either, for the same reason — there is nothing beneath this
+ * to be expanded.
+ */
+export function SidebarAction({
+  name,
+  note,
+  disabled = false,
+  title,
+  onOpen,
+  children,
+}: {
+  name: string
+  /** What is waiting behind it, said on the strip — the count on Today. */
+  note?: ReactNode
+  /** Nothing to open: off a project, neither of these has anything to say. */
+  disabled?: boolean
+  /** Why it is disabled, since a strip with no chevron has nowhere to say so.
+   * `| undefined` because `exactOptionalPropertyTypes` is on and callers pass
+   * the reason or nothing, in one expression. */
+  title?: string | undefined
+  onOpen: () => void
+  /** What it opens. Rendered here so the dialog lives with the control. */
+  children?: ReactNode
+}) {
+  return (
+    <section className={styles.section}>
+      <button
+        type="button"
+        className={styles.sectionHead}
+        disabled={disabled}
+        title={title}
+        onClick={onOpen}
+      >
+        <span className={styles.sectionName}>{name}</span>
+        {note}
+      </button>
+      {children}
+    </section>
+  )
+}

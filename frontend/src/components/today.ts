@@ -11,6 +11,13 @@
  * today is a wrong answer nobody goes looking for. It is plain array work,
  * easiest to get right on its own and to test the same way.
  *
+ * The date read is `next_due_date` — the soonest date the card has not met,
+ * which since CYLIST-25 may belong to a column on the way rather than to the
+ * end of the line. That is the date the board draws a card with, and a list
+ * called "today" sitting beside a board has to agree with it: on `due_date`
+ * this would miss a card wanted in review this morning and claim one is free
+ * all week when three of its columns are owed before Friday.
+ *
  * Dates are compared as the `YYYY-MM-DD` strings the API sends, which sort
  * lexicographically into date order. Deliberately no `Date` anywhere here:
  * the one boundary that needs a clock is "what is today", and that is the
@@ -20,12 +27,13 @@
 
 import type { BoardColumn, Person, Task, TaskPriority } from '../api/client'
 
-/** Most urgent first. The four values are a scale, and this is it. */
+/** Most urgent first. The four values are a scale, and this is it — so the
+ * rank is the number in the name, and a fifth level would be one more line. */
 const PRIORITY_RANK: Record<TaskPriority, number> = {
-  urgent: 0,
-  asap: 1,
-  week: 2,
-  someday: 3,
+  p0: 0,
+  p1: 1,
+  p2: 2,
+  p3: 3,
 }
 
 export interface TodayWork {
@@ -64,17 +72,19 @@ export function todaysWork(
     if (task.status === 'cancelled') return false
     if (done !== null && task.column_id === done) return false
     if (me && task.assignee.id !== me.id) return false
-    return task.due_date !== null && task.due_date <= today
+    return task.next_due_date !== null && task.next_due_date <= today
   })
 
   return {
     overdue: mine
-      .filter((task) => task.due_date !== null && task.due_date < today)
+      .filter((task) => task.next_due_date !== null && task.next_due_date < today)
       // Oldest first: how long a card has been late is the whole of what makes
       // one overdue card more pressing than another, and it outranks priority
       // here for that reason. Priority still breaks the ties.
-      .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? '') || byPriority(a, b)),
-    due: mine.filter((task) => task.due_date === today).sort(byPriority),
+      .sort(
+        (a, b) => (a.next_due_date ?? '').localeCompare(b.next_due_date ?? '') || byPriority(a, b),
+      ),
+    due: mine.filter((task) => task.next_due_date === today).sort(byPriority),
   }
 }
 

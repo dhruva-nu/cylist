@@ -1,8 +1,8 @@
 /*
- * Today's work, at the width a sidebar has.
+ * Today's work: the count on the sidebar's button, and the list it opens.
  *
  * The board's own card shape, compressed: what the card is on one line, the
- * marks it carries on the next. Every colour is a token, so the panel reads
+ * marks it carries on the next. Every colour is a token, so the list reads
  * in both themes without a value of its own — see the note at the top of
  * tokens.css.
  */
@@ -21,12 +21,17 @@
   gap: 16px;
 }
 
-/* How many cards are behind a folded heading. Sits between the section's name
-   and its chevron, so folding the panel away does not fold away the fact that
-   there is work in it. */
+/* How many cards are behind the strip, worn on it — and on the collapsed
+   rail, where the strip itself is not on screen either.
+ *
+ * No margin of its own. It sits in two places with opposite ideas of where it
+ * belongs: out at the far end of the strip, where the folding sections keep
+ * theirs, and dead centre of the rail under the handle. Each container
+ * already says which — the strip is `space-between` and the rail centres its
+ * items — and a `margin-left: auto` for the first was what pushed it off
+ * centre in the second. */
 .count,
 .countLate {
-  margin-left: auto;
   padding: 1px 8px;
   border-radius: var(--radius-control);
   background: var(--paper-2);
@@ -69,14 +74,23 @@
   list-style: none;
 }
 
+/* A button now rather than a link, so it needs a button's defaults taken back
+   off it: full width, no chrome of its own, and its text left where text
+   goes. */
 .row {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  width: 100%;
   padding: 7px 8px;
+  border: 0;
   border-radius: 10px;
+  background: none;
   color: var(--ink);
+  font: inherit;
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .row:hover {
@@ -127,20 +141,20 @@
   align-items: center;
 }
 
-.priority_urgent {
-  color: var(--priority-urgent);
+.priority_p0 {
+  color: var(--priority-p0);
 }
 
-.priority_asap {
-  color: var(--priority-asap);
+.priority_p1 {
+  color: var(--priority-p1);
 }
 
-.priority_week {
-  color: var(--priority-week);
+.priority_p2 {
+  color: var(--priority-p2);
 }
 
-.priority_someday {
-  color: var(--priority-someday);
+.priority_p3 {
+  color: var(--priority-p3);
 }
 
 /* Which of the four states a card is in, said in full, because a row here

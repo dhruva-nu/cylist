@@ -1,45 +1,20 @@
 /*
- * The day report, as a sidebar panel.
+ * The day report: a line in the sidebar, and the dialog that line opens.
  *
- * It was a dialog, and a dialog is 640px of room; this is a column a third of
- * that. So the report's own parts are unchanged in kind and tighter in fit:
- * the day stepper wraps rather than overflowing, an entry's time sits on the
- * line with what happened and wraps beneath it when there is no room, and the
- * window it covered moved from a footer bar to a line under the report.
+ * Back at a dialog's 620px after a spell as a sidebar panel a third of that,
+ * so the metrics are back with it — the stepper on one line, an entry's time
+ * pinned beside what happened rather than wrapping above it, and the window
+ * the report covered in the footer bar beside the button that copies it.
  */
-
-/* When there is no project to read a day of. */
-.aside {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
 
 .picker {
   display: flex;
-  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
 
-/* Takes the room the four buttons leave, so the field shrinks instead of
-   pushing "Today" onto a line of its own. */
-.dayField {
-  flex: 1 1 96px;
-  min-width: 0;
-}
-
 .dayField input {
-  width: 100%;
-  min-width: 0;
-  padding: 6px 8px;
+  padding: 7px 10px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
   background: var(--paper);
@@ -51,16 +26,16 @@
 .report {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
 
 .headline {
   margin: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 700;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .section {
@@ -75,21 +50,42 @@
 
 .finished {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 18px;
   color: var(--ink);
-  font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 .finished b {
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: 13px;
+}
+
+/* A line of the report that opens the card it names.
+ *
+ * Stripped back to the text it wraps rather than drawn as a button: these sit
+ * inside a report, and a list of six buttons where there were six sentences
+ * would read as a toolbar. What says it is a target is the pointer and the
+ * hover — plus the focus ring, which is the browser's own and is left alone.
+ */
+.open {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.open:hover {
+  text-decoration: underline;
 }
 
 /* A card and its day: the heading is the card, the lines under it are the day. */
 .card {
-  padding: 10px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -106,24 +102,45 @@
   margin-bottom: 6px;
 }
 
+/* The head as a button: the same row, with everything a button brings of its
+   own taken back off it. The width is stated because a button shrinks to its
+   content, and a head that did would pull the column pill in against the
+   title instead of leaving it out at the edge where the other cards' are. */
+.cardOpen {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Only the title, because the reference is grey by design and the pill beside
+   it carries a background of its own — underlining all three would draw a rule
+   across the row. */
+.cardOpen:hover .title {
+  text-decoration: underline;
+}
+
 .reference {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .title {
-  min-width: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
   font-weight: 700;
 }
 
 /* Where the card stands now — the column it is in, or that it is gone. */
 .where,
 .done {
-  padding: 1px 8px;
+  margin-left: auto;
+  padding: 1px 9px;
   border-radius: var(--radius-control);
   background: var(--paper-2);
   color: var(--ink-3);
@@ -143,19 +160,12 @@
   gap: 4px;
 }
 
-/* Wraps, at this width. The time is 40px of a 300px column and what happened
-   is a sentence — pinned to one line the sentence got a third of the row and
-   broke into six of them. Wrapping puts the time on the first line with as
-   much of the sentence as fits and the rest underneath, which is how a
-   timestamped line reads on paper anyway. */
 .entry {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 10px;
   align-items: baseline;
   margin: 0;
   color: var(--ink-2);
-  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -163,7 +173,7 @@
    comment can carry a pasted URL, so a word with no spaces in it breaks rather
    than stretching the report. */
 .what {
-  flex: 1 1 60%;
+  flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -172,7 +182,7 @@
   flex: 0 0 auto;
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -187,17 +197,10 @@
   font-weight: 700;
 }
 
-/* What you do with the report once you have read it, and what it covered. */
-.foot {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
+/* Which window the report covered, kept beside the button that copies it. */
 .zone {
+  margin-right: auto;
+  align-self: center;
   color: var(--ink-3);
   font-size: 12px;
 }
