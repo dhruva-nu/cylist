@@ -8,11 +8,16 @@
  * board for, and all of which used to be a dialog over the top of whatever you
  * were doing.
  *
- * It is a column of the frame rather than a drawer floating over it: on a wide
- * display the page narrows and nothing is covered, which is the whole point of
- * consulting something beside your work instead of on top of it. Under 900px
- * there is no room to give away, so it becomes an overlay against the right
- * edge — and there, where it does cover the page, Escape closes it.
+ * It is a column of the frame and it is always there. Not a drawer over the
+ * page and not something you open: the page narrows to make room for it, which
+ * is the whole point of consulting something beside your work instead of on
+ * top of it. A panel you have to open first is a panel you forget is there,
+ * and one that can be shut is one whose count of overdue cards nobody sees.
+ *
+ * Under 900px there is no width to give away, so the frame stacks instead —
+ * page first, panel under it, the frame itself taking the scroll. Nothing is
+ * hidden at any width, because with no control to bring it back, hiding it
+ * would be the one change that made Settings unreachable.
  *
  * Sections stack and each folds. That is what makes this extensible without a
  * tab bar to redesign every time something is added: a new section is one more
@@ -40,73 +45,7 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
   system: 'System',
 }
 
-/** Where the sidebar stops being a column of the frame and starts covering it.
- * The same number as the `max-width` in the stylesheet, and it has to be: the
- * keyboard behaviour differs between the two shapes, so the script has to know
- * which one the CSS chose. */
-const OVERLAY_WIDTH = 900
-
-const OPEN_KEY = 'cylist.sidebar.open'
 const FOLDED_KEY = 'cylist.sidebar.folded'
-
-/**
- * Whether the sidebar is showing, remembered between visits.
- *
- * With nothing remembered it opens on a display wide enough to hold it beside
- * the page and stays shut on one that is not — an overlay covering the page
- * before anybody asked for it is a worse first impression than a control they
- * have to find.
- *
- * Every touch of localStorage is wrapped, for the reason `theme.ts` gives:
- * reading it throws outright in a private window, and a frame that will not
- * render is a worse outcome than a preference that is not remembered.
- */
-function readOpen(): boolean {
-  try {
-    const stored = window.localStorage.getItem(OPEN_KEY)
-    if (stored === 'true') return true
-    if (stored === 'false') return false
-  } catch {
-    // Fall through to the width, which is the answer for a first visit anyway.
-  }
-  return window.innerWidth >= OVERLAY_WIDTH
-}
-
-export function useSidebar(): { open: boolean; toggle: () => void; close: () => void } {
-  const [open, setOpen] = useState<boolean>(readOpen)
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(OPEN_KEY, String(open))
-    } catch {
-      // It still holds for this visit; it just will not be remembered.
-    }
-  }, [open])
-
-  const toggle = useCallback(() => setOpen((showing) => !showing), [])
-  const close = useCallback(() => setOpen(false), [])
-
-  return { open, toggle, close }
-}
-
-/** Whether the sidebar is currently the overlay shape rather than a column.
- * Watched rather than read once, so dragging a window narrow moves the
- * keyboard behaviour with the layout instead of leaving them disagreeing. */
-function useOverlay(): boolean {
-  const [overlay, setOverlay] = useState(
-    () => window.matchMedia(`(max-width: ${OVERLAY_WIDTH - 1}px)`).matches,
-  )
-
-  useEffect(() => {
-    const query = window.matchMedia(`(max-width: ${OVERLAY_WIDTH - 1}px)`)
-    const onChange = (event: MediaQueryListEvent) => setOverlay(event.matches)
-    query.addEventListener('change', onChange)
-    setOverlay(query.matches)
-    return () => query.removeEventListener('change', onChange)
-  }, [])
-
-  return overlay
-}
 
 /**
  * Which sections are folded away, remembered by name.
@@ -144,42 +83,7 @@ function readFolded(): string[] {
   }
 }
 
-/**
- * The toggle in the header, and the panel it shows.
- *
- * The button lives in the bar so it sits with the other chrome, and the panel
- * is a column of the frame further down — two places in the tree for one
- * control, which is why the state is a hook the Shell owns rather than
- * something either half keeps to itself.
- */
-export function SidebarToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      className={styles.toggle}
-      aria-expanded={open}
-      aria-controls="sidebar"
-      aria-label={open ? 'Close the sidebar' : 'Open the sidebar'}
-      title={open ? 'Close the sidebar' : 'Open the sidebar'}
-      onClick={onToggle}
-      data-open={open}
-    >
-      {/* A panel with its right-hand third filled: the shape of what the button
-          does, at the size the bar's other marks are drawn. */}
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <rect x="2.4" y="3.6" width="15.2" height="12.8" rx="2.4" />
-        <path d="M13 3.6v12.8" />
-        <path
-          className={styles.toggleFill}
-          d="M13 3.6h2.2a2.4 2.4 0 0 1 2.4 2.4v8a2.4 2.4 0 0 1-2.4 2.4H13z"
-        />
-      </svg>
-    </button>
-  )
-}
-
-export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const overlay = useOverlay()
+export function Sidebar() {
   const [folded, setFolded] = useState<string[]>(readFolded)
 
   useEffect(() => {
@@ -196,44 +100,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     )
   }, [])
 
-  // Only while it is covering the page. As a column it covers nothing, and
-  // Escape there would be a key that closes something the user is reading
-  // beside their work for no reason they asked for — and would fight the
-  // dialogs, which listen for the same key on the same document.
-  useEffect(() => {
-    if (!open || !overlay) return
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [open, overlay, onClose])
-
-  // Unmounted rather than hidden. Every section here is a live query, and a
-  // shut sidebar that keeps refetching what nobody is looking at is a cost
-  // paid on every screen in the app.
-  if (!open) return null
-
   return (
-    <aside
-      id="sidebar"
-      className={`${styles.sidebar} ${overlay ? styles.overlay : ''}`}
-      aria-label="Sidebar"
-    >
-      {/* A way out, for the one shape that needs one. As a column of the frame
-          the toggle in the bar is still there to press again; as an overlay it
-          is directly underneath this panel, so without this the only way back
-          to the page is the keyboard. */}
-      {overlay ? (
-        <button type="button" className={styles.close} onClick={onClose}>
-          Close
-          <span aria-hidden="true">✕</span>
-        </button>
-      ) : null}
-      {/* Today's work first. It is the section you open the sidebar for, and
-          the one whose answer changes hour to hour; Settings is the one you
-          set once and leave, so it sits at the bottom. */}
+    <aside className={styles.sidebar} aria-label="Sidebar">
+      {/* Today's work at the top. It is the section whose answer changes hour
+          to hour, and the one worth having in the corner of your eye;
+          Settings is the one you set once and leave, so it sits at the
+          bottom. */}
       <Today folded={folded.includes('Today')} onToggle={() => toggleSection('Today')} />
       {/* The day behind you, under the day in front of you. It is the longest
           section by far, so it sits below the list it would otherwise push off
