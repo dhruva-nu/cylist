@@ -6,6 +6,7 @@ readable next to unrelated variables. See ``.env.example`` for the full list.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -15,6 +16,19 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["dev", "test", "preview", "staging", "prod"]
+
+AGENT_SESSION_STALE_AFTER = timedelta(minutes=10)
+"""How long a working agent session may go unheard from before the board stops
+believing it.
+
+A Claude Code session reports in on every prompt and tool call, and at least
+once a minute while a long turn runs; one silent for ten minutes has almost
+certainly been killed without its ``SessionEnd`` hook firing. The row stays
+``working`` in the database — nothing reaps it — and the read model calls it
+stale instead, so a crashed agent never pulses on a card forever. A constant
+rather than a setting: it is a fact about the hook's cadence, not about the
+deployment.
+"""
 
 
 class Settings(BaseSettings):

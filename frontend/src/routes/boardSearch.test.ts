@@ -90,6 +90,7 @@ function task(title: string, onGoal: string | null): Task {
     open_subtask_count: 0,
     subtask_count: 0,
     subtask_assignees: [],
+    agent_session: null,
     created_at: '2026-01-01T00:00:00Z',
   }
 }

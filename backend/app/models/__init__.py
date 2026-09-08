@@ -6,6 +6,7 @@ to the imports below.
 """
 
 from app.models.activity import Activity, Channel
+from app.models.agent_session import AgentSession, AgentSessionReason, AgentSessionState
 from app.models.api_token import ApiToken, TokenKind
 from app.models.base import Base
 from app.models.board import BoardColumn
@@ -30,6 +31,9 @@ from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 
 __all__ = [
     "Activity",
+    "AgentSession",
+    "AgentSessionReason",
+    "AgentSessionState",
     "ApiToken",
     "Base",
     "Blob",

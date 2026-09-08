@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 
 from app.models.task import ChecklistState, CommentKind, TaskPriority, TaskStatus, TaskType
 from app.schemas.activity import HistoryEntry
+from app.schemas.agent_sessions import AgentPresence, AgentSessionRead
 from app.schemas.common import Schema
 from app.schemas.people import PersonRead
 
@@ -480,6 +481,13 @@ class TaskRead(Schema):
         description="Who owns this card's sub-tasks, in sub-number order and each named once. "
         "The board shows these faces because it no longer shows where the sub-tasks are."
     )
+    agent_session: AgentPresence | None = Field(
+        default=None,
+        description="Who is working on this card right now, if an agent is: the one state "
+        "the card's border shows, reduced from every harness session on it. `waiting` means "
+        "it needs a human; `working` is live; `done` is finished and not yet dismissed; "
+        "`stale` is a working session nobody has heard from. Null when no agent is on it.",
+    )
     created_at: datetime
 
 
@@ -487,6 +495,11 @@ class TaskDetail(TaskRead):
     """One task with its timeline, its sub-tasks and its checklist."""
 
     comments: list[CommentRead]
+    agent_sessions: list[AgentSessionRead] = Field(
+        default_factory=list,
+        description="Every harness session on this card still worth showing: the open ones "
+        "first, then the finished ones nobody has dismissed.",
+    )
     subtasks: list[TaskRead] = Field(
         description="Sub-tasks with a reference of their own, in sub-number order. They are "
         "not on the board, so this is the only place they are listed."

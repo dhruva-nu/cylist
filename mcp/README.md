@@ -140,6 +140,12 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
   That column alone can be divided into up to three outcomes — "Done",
   "Cancelled", "In prod" — which `get_project` lists beside it and `move_task`
   takes by name; a template can narrow which of them its own cards may end on.
+- **Progress is reported by the harness, not by the agent.** A Claude Code
+  session bound to a card with `cylist work ATL-41` or `/work ATL-41` shows on
+  the board as working, waiting on a human, or done, driven by the harness's
+  lifecycle hooks. There is no tool for it and nothing to announce;
+  `agent_session` on a card is what it looks like from the outside, and
+  `get_task`'s `agent_sessions` says which sessions have been on it.
 - **Goals gate their own closing.** `set_goal_status(..., "achieved")` is
   refused while a card on the goal is neither in the board's last column nor
   cancelled, and the refusal names every card holding it open. Dropping a goal

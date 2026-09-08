@@ -80,6 +80,7 @@ import {
   tokenize,
   type Suggestion,
 } from './boardSearch'
+import { agentIndicator, hasLiveAgent } from './agentState'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
 import { GoalChip } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
@@ -376,6 +377,12 @@ export function ProjectBoard() {
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
     queryFn: () => api.listTasks(projectKey),
+    // Only while an agent is on some card. Its hooks write to the server
+    // without anything in this tab having changed, so the board has to ask;
+    // a board with no agent on it changes only when somebody here acts, and
+    // every mutation already refetches. Polling, not SSE — see CYLIST-37.
+    refetchInterval: (query) => (hasLiveAgent(query.state.data ?? []) ? 10_000 : false),
+    refetchIntervalInBackground: false,
   })
   // Needed for `who:` search matches and its autocomplete, and for the `@`
   // tags in a stage label — not for the assignee on a card, which every card
@@ -1794,6 +1801,7 @@ function TaskCard({
   onMoveSubStatus: (index: number) => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
+  const agent = agentIndicator(task.agent_session, new Date())
 
   return (
     <article
@@ -1822,6 +1830,8 @@ function TaskCard({
         `${TYPE_LABELS[task.type]} ${task.reference}: ${task.title}`,
         task.parent_reference ? `a sub-task of ${task.parent_reference}` : null,
         task.goal_name ? `on ${task.goal_name}` : null,
+        // The border is colour and motion alone, so the words go here too.
+        agent ? [agent.label, agent.detail].filter(Boolean).join(', ') : null,
       ]
         .filter(Boolean)
         .join(', ')}
@@ -1835,6 +1845,9 @@ function TaskCard({
         styles.task,
         styles[`type_${task.type}`],
         styles[task.status],
+        // The agent channel is the outer border, which nothing else on the
+        // card uses — the rail is already contested three ways.
+        agent && styles[agent.className],
         isDragging && styles.dragging,
       ]
         .filter(Boolean)
@@ -1883,6 +1896,10 @@ function TaskCardBody({
     task.column_due_dates.find((entry) => !entry.met && entry.due_date === owed)?.column_name ??
     null
   const tab = dueTabMark(owed, stage)
+  /* The one line the border needs words for. Drawn in the same slot and at the
+     same weight as "Waiting on @First": both are the card saying who it is
+     waiting on, and this one is waiting on you. */
+  const agent = agentIndicator(task.agent_session, new Date())
 
   return (
     <>
@@ -1899,6 +1916,19 @@ function TaskCardBody({
           members={members}
           onMove={onMoveSubStatus}
         />
+      ) : null}
+
+      {agent ? (
+        <div className={`${styles.waiting} ${styles.agentLine}`}>
+          <span className={styles.agentDot} aria-hidden="true" />
+          <span className={styles.at}>{agent.label}</span>
+          {agent.detail ? <span className={styles.agentDetail}>· {agent.detail}</span> : null}
+          {task.agent_session && task.agent_session.count > 1 ? (
+            <span className={styles.agentCount} title={`${task.agent_session.count} sessions`}>
+              {task.agent_session.count}
+            </span>
+          ) : null}
+        </div>
       ) : null}
 
       {task.waiting_on.length ? (

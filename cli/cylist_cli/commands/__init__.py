@@ -13,10 +13,12 @@ from cylist_cli.commands import (
     board,
     files,
     goals,
+    hook,
     people,
     projects,
     tasks,
     vault,
+    work,
 )
 
 REGISTRARS = (
@@ -29,6 +31,8 @@ REGISTRARS = (
     files.register,
     vault.register,
     activity.register,
+    work.register,
+    hook.register,
 )
 
 __all__ = ["REGISTRARS"]

@@ -29,9 +29,12 @@ class Context:
             self._client = self.build_client(self.config.require_token())
         return self._client
 
-    def build_client(self, token: str, url: str | None = None) -> Client:
-        """A client for an arbitrary token — used by ``login`` to check one."""
-        return Client(url or self.config.url, token, transport=self.transport)
+    def build_client(
+        self, token: str, url: str | None = None, *, timeout: httpx.Timeout | None = None
+    ) -> Client:
+        """A client for an arbitrary token — used by ``login`` to check one, and
+        by ``hook`` for one that must give up quickly."""
+        return Client(url or self.config.url, token, transport=self.transport, timeout=timeout)
 
     def close(self) -> None:
         if self._client is not None:
