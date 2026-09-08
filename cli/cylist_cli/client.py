@@ -32,7 +32,17 @@ JsonList = list[JsonDict]
 class Client:
     """A session against one Cylist server."""
 
-    def __init__(self, url: str, token: str, *, transport: httpx.BaseTransport | None = None):
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        timeout: httpx.Timeout | None = None,
+    ):
+        """``timeout`` overrides :data:`TIMEOUT` for a caller that cannot wait —
+        the Claude Code hook sits on the path of every prompt, and a server
+        that is down must cost it a second, not thirty."""
         self.url = url.rstrip("/")
         self._http = httpx.Client(
             base_url=f"{self.url}{API_PREFIX}",
@@ -41,7 +51,7 @@ class Client:
                 "Accept": "application/json",
                 "User-Agent": "cylist-cli",
             },
-            timeout=TIMEOUT,
+            timeout=timeout or TIMEOUT,
             transport=transport,
             follow_redirects=True,
         )

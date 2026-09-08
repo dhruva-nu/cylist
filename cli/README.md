@@ -96,12 +96,46 @@ cylist vault add ATL Logins/Billing/Twilio [--username …] [--value-stdin]
 
 cylist activity [--project ATL] [--entity task] [--limit 20]
 cylist whoami
+
+cylist work ATL-41 [-- --model opus]   open Claude Code on a card
+cylist hook install                    wire the board up to Claude Code's hooks
+cylist hook uninstall
 ```
 
 Every command takes `--json`, which prints the API's own response unshaped —
 what `curl` would have returned. Nothing is renamed or flattened on the way
 through, so a script built on `cylist --json` and one built on `curl` see the
 same documents.
+
+## Showing an agent's work on the board
+
+`cylist hook install` adds one command — `cylist hook` — to Claude Code's
+user-level `settings.json`, on six lifecycle events, and writes a `/work`
+slash command beside it. It never touches hooks you already have, and running
+it again only points it at wherever the binary is now.
+
+After that, a Claude Code session bound to a card shows up on the board while
+it runs: the card's border pulses while the agent is working, turns amber the
+moment it is waiting on you — a permission prompt, or just the end of its turn
+— and green when the session ends. Nothing the model does or says is involved;
+the harness's own hooks report it.
+
+Two ways to bind a session, and nothing else binds one:
+
+```
+cylist work ATL-41       start a session on a card
+/work ATL-41             bind the session you are already in
+/work off                unbind it
+```
+
+A prompt that merely mentions `ATL-41` never binds — "don't touch ATL-41"
+would otherwise put you on it. An unbound session makes no requests at all, so
+the sessions you run on other projects never appear on any board.
+
+`cylist hook` is not a command to run yourself. It reads one JSON event from
+stdin, always exits 0, and prints nothing but the JSON Claude Code expects —
+a board that is down, a token that is missing, a malformed event: none of them
+may cost you a prompt. Set `CYLIST_HOOK_DEBUG=1` to see why it did nothing.
 
 ## Names, not ids
 

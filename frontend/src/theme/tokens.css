@@ -53,6 +53,13 @@
   --blocked: #bd3939;
   --blocked-soft: #fbe3e3;
 
+  /* An agent on a card — the card's outer border while a session is working.
+     A teal, so it stays readable beside every other colour a card can wear:
+     the goal violet (#8B5CF6 on CYLIST-G3), the amber of hold, the red of
+     blocked, the green of done. 4.6:1 on --paper-2 as text. */
+  --agent: #0e7c86;
+  --agent-soft: #d9f0f2;
+
   --scrim: rgb(40 60 70 / 50%);
   --shadow: 0 1px 3px rgb(40 60 70 / 8%), 0 10px 30px -18px rgb(40 60 70 / 25%);
   --shadow-lg: 0 2px 6px rgb(40 60 70 / 8%), 0 24px 60px -24px rgb(40 60 70 / 35%);
@@ -142,6 +149,8 @@
   --dark-hold-soft: #463617;
   --dark-blocked: #f18080;
   --dark-blocked-soft: #472222;
+  --dark-agent: #4fc3cf;
+  --dark-agent-soft: #16383c;
   --dark-scrim: rgb(0 0 0 / 62%);
   --dark-focus: #f7c948;
   --dark-shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
@@ -193,6 +202,8 @@
     --hold-soft: var(--dark-hold-soft);
     --blocked: var(--dark-blocked);
     --blocked-soft: var(--dark-blocked-soft);
+    --agent: var(--dark-agent);
+    --agent-soft: var(--dark-agent-soft);
     --priority-p0: var(--dark-priority-p0);
     --priority-p1: var(--dark-priority-p1);
     --priority-p2: var(--dark-priority-p2);
@@ -228,6 +239,8 @@
   --hold-soft: var(--dark-hold-soft);
   --blocked: var(--dark-blocked);
   --blocked-soft: var(--dark-blocked-soft);
+  --agent: var(--dark-agent);
+  --agent-soft: var(--dark-agent-soft);
   --priority-p0: var(--dark-priority-p0);
   --priority-p1: var(--dark-priority-p1);
   --priority-p2: var(--dark-priority-p2);

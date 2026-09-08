@@ -88,15 +88,26 @@ def main(argv: Sequence[str] | None = None, *, transport: httpx.BaseTransport | 
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    ctx = Context(
-        config=configuration.load(args.server_url),
-        as_json=bool(args.as_json),
-        transport=transport,
-    )
+    # A command that must never fail — the Claude Code hook, which would take a
+    # prompt down with it — says so, and gets its errors swallowed rather than
+    # reported. Every other command reports and exits 1.
+    quiet = bool(getattr(args, "swallow_errors", False))
+
+    try:
+        config = configuration.load(args.server_url)
+    except CylistError as exc:
+        if quiet:
+            return EXIT_OK
+        _report(exc, as_json=bool(args.as_json))
+        return EXIT_FAILURE
+
+    ctx = Context(config=config, as_json=bool(args.as_json), transport=transport)
 
     try:
         args.handler(args, ctx)
     except CylistError as exc:
+        if quiet:
+            return EXIT_OK
         _report(exc, as_json=ctx.as_json)
         return EXIT_FAILURE
     except KeyboardInterrupt:  # pragma: no cover - depends on a real terminal

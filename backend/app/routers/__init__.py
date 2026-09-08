@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from app.routers import (
     activity,
+    agent_sessions,
     auth,
     columns,
     files,
@@ -40,6 +41,8 @@ api_router.include_router(templates.router)
 api_router.include_router(tasks.router)
 # After `tasks`, whose cards a goal's page lists and whose `_read` it borrows.
 api_router.include_router(goals.router)
+# After `tasks` too, for the same `resolved_task` every task path shares.
+api_router.include_router(agent_sessions.router)
 api_router.include_router(files.router)
 api_router.include_router(activity.router)
 

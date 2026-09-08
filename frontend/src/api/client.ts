@@ -378,6 +378,57 @@ export interface DayReport {
   markdown: string
 }
 
+export type AgentSessionState = 'working' | 'waiting' | 'done'
+export type AgentSessionReason =
+  'turn_ended' | 'permission' | 'idle' | 'question' | 'moved' | 'session_ended'
+
+/** One harness session — a Claude Code conversation — on one card. */
+export interface AgentSessionRead {
+  id: string
+  task_id: string
+  /** The name of the token the hook reports with. */
+  actor_label: string
+  /** The harness's own id for the conversation. */
+  client_session_id: string
+  /** The session's display name, if known. Usually the card's reference. */
+  client_name: string | null
+  state: AgentSessionState
+  reason: AgentSessionReason | null
+  note: string | null
+  started_at: string
+  /** When `state` last changed. */
+  state_changed_at: string
+  /** When the hook last reported in. */
+  last_seen_at: string
+  ended_at: string | null
+  dismissed_at: string | null
+  /** A `working` session not heard from for long enough that the board no
+   * longer believes it. Computed by the server, never stored. */
+  is_stale: boolean
+}
+
+export type AgentPresenceState = 'working' | 'waiting' | 'done' | 'stale'
+
+/**
+ * What a card says about the agents on it, reduced to the one state its border
+ * shows. `waiting` wins over `working` wins over `done`; a `stale` session is
+ * ignored while another is live and shown only when it is all that is left.
+ */
+export interface AgentPresence {
+  state: AgentPresenceState
+  /** How many sessions this summarises: the open ones while any is open, the
+   * finished-but-undismissed ones once none are. */
+  count: number
+  /** The deciding session's reason. */
+  reason: AgentSessionReason | null
+  /** The deciding session's name. */
+  client_name: string | null
+  /** When the deciding session entered its state. */
+  since: string
+  /** When the deciding session last reported in. */
+  last_seen_at: string
+}
+
 export interface Task {
   id: string
   project_id: string
@@ -462,6 +513,11 @@ export interface Task {
    * The board shows these faces because it no longer shows where the work is.
    */
   subtask_assignees: Person[]
+  /**
+   * Who is working on this card right now, if an agent is — the one state the
+   * card's border shows. Null when no agent is on it, which is most cards.
+   */
+  agent_session: AgentPresence | null
   created_at: string
 }
 
@@ -469,6 +525,9 @@ export interface TaskDetail extends Task {
   comments: TaskComment[]
   /** Sub-tasks with a reference of their own, in sub-number order. */
   subtasks: Task[]
+  /** Every harness session on this card still worth showing: the open ones
+   * first, then the finished ones nobody has dismissed. */
+  agent_sessions: AgentSessionRead[]
 }
 
 /**
@@ -824,6 +883,12 @@ export const api = {
    */
   getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
     request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
+  /** The agent sessions on a card: open first, then finished-but-undismissed. */
+  listAgentSessions: (taskRef: string) =>
+    request<AgentSessionRead[]>(`/tasks/${taskRef}/agent-sessions`),
+  /** Clear the finished sessions off a card. The ones still running stay. */
+  dismissAgentSessions: (taskRef: string) =>
+    request<void>(`/tasks/${taskRef}/agent-sessions/dismiss`, { method: 'POST' }),
   createTask: (ref: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */

@@ -64,6 +64,7 @@ import { Link } from '@tanstack/react-router'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
+  type AgentSessionRead,
   type BoardColumn,
   type ChecklistItem,
   type ChecklistState,
@@ -80,6 +81,7 @@ import {
   type TaskType,
   type Template,
 } from '../api/client'
+import { agentIndicator, silentFor, waitingDetail } from '../routes/agentState'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
@@ -404,6 +406,16 @@ function TaskDetailView({
           />
         </ReadField>
 
+        {task.agent_sessions.length ? (
+          <ReadField label="Agents">
+            <AgentSessions
+              taskRef={task.reference}
+              taskId={task.id}
+              sessions={task.agent_sessions}
+            />
+          </ReadField>
+        ) : null}
+
         <ReadField label="Timeline">
           <div className={styles.timeline}>
             {task.comments.length ? (
@@ -418,6 +430,118 @@ function TaskDetailView({
       </ModalBody>
     </Modal>
   )
+}
+
+/**
+ * The Claude Code sessions that have been on this card, and what became of them.
+ *
+ * The card's border says one thing about all of them — whichever needs a human
+ * first. This is where the rest is: which session, since when, and how long
+ * ago it last said anything. A card worked on from two terminals shows two
+ * rows, which is the whole reason the border carries a count.
+ *
+ * Dismiss clears the finished ones. It appears only once there is something
+ * to clear: a session still running cannot be dismissed, only stopped, and a
+ * button that would refuse is worse than one that is not there. Editing the
+ * card does the same thing without the button — the server treats a person
+ * touching the card as having seen what the agent left.
+ */
+function AgentSessions({
+  taskRef,
+  taskId,
+  sessions,
+}: {
+  taskRef: string
+  taskId: string
+  sessions: AgentSessionRead[]
+}) {
+  const queryClient = useQueryClient()
+  const now = new Date()
+  const finished = sessions.filter((session) => session.ended_at !== null)
+
+  const dismiss = useMutation({
+    mutationFn: () => api.dismissAgentSessions(taskRef),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['board'] }),
+      ])
+    },
+  })
+
+  return (
+    <div className={styles.agentSessions}>
+      {dismiss.error ? <ErrorBanner>{dismiss.error.message}</ErrorBanner> : null}
+
+      {sessions.map((session) => (
+        <div key={session.id} className={styles.agentSession}>
+          <div className={styles.agentSessionLine}>
+            <span className={styles.agentSessionName}>
+              {session.client_name ?? session.actor_label}
+            </span>
+            <span className={styles.agentSessionState}>{sessionState(session, now)}</span>
+          </div>
+          <div className={styles.agentSessionWhen}>
+            {/* The record is what says a person did not do this — the same
+                wording the history below uses. */}
+            <span className={styles.agent}>agent</span>
+            {session.actor_label}
+            <span className={styles.role}>
+              · started {formatWhen(session.started_at)} · last seen{' '}
+              {silentFor(session.last_seen_at, now)} ago
+            </span>
+          </div>
+        </div>
+      ))}
+
+      {finished.length ? (
+        <div className={styles.agentSessionActions}>
+          <Button small onClick={() => dismiss.mutate()} disabled={dismiss.isPending}>
+            {dismiss.isPending ? 'Dismissing…' : 'Dismiss'}
+          </Button>
+          <span className={styles.empty}>
+            {finished.length === 1
+              ? 'Takes the finished session off the board.'
+              : `Takes the ${finished.length} finished sessions off the board.`}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** One session's state, in the words the card's border uses. */
+function sessionState(session: AgentSessionRead, now: Date): string {
+  if (session.ended_at !== null) {
+    return session.reason === 'moved' ? 'moved to another card' : 'finished'
+  }
+  if (session.state === 'waiting') return `needs you — ${waitingDetail(session.reason)}`
+  if (session.is_stale) {
+    const indicator = agentIndicator(
+      {
+        state: 'stale',
+        count: 1,
+        reason: session.reason,
+        client_name: session.client_name,
+        since: session.state_changed_at,
+        last_seen_at: session.last_seen_at,
+      },
+      now,
+    )
+    return indicator?.label.toLowerCase() ?? 'silent'
+  }
+  return 'working'
+}
+
+/** A moment, to the minute, the way the history above renders one. */
+function formatWhen(iso: string): string {
+  return new Date(iso).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 /**

@@ -15,12 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.clock import now
 from app.db import SessionDependency
 from app.models.board import BoardColumn
 from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
 from app.routers.projects import resolved_project
+from app.schemas.agent_sessions import AgentPresence
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.tasks import (
@@ -41,7 +43,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import activity, columns, tasks
+from app.services import activity, agent_sessions, columns, tasks
 
 router = APIRouter(tags=["tasks"])
 
@@ -88,6 +90,7 @@ def _read(
     split: tasks.Split = tasks.Split(0, 0),
     owners: list[Person] | None = None,
     board: list[BoardColumn] | None = None,
+    presence: AgentPresence | None = None,
 ) -> TaskRead:
     # Without the board a card's dates cannot be told met from unmet, so they
     # are left off rather than guessed at. The one caller that does this is the
@@ -139,6 +142,7 @@ def _read(
         open_subtask_count=split.open,
         subtask_count=split.total,
         subtask_assignees=[PersonRead.model_validate(person) for person in owners or []],
+        agent_session=presence,
         created_at=task.created_at,
     )
 
@@ -157,6 +161,10 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
     split = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
     boards = await _boards(session, found)
+    # One query for the agents on every card, and a moment fixed once so that
+    # "stale" means the same thing on every card of the same list.
+    agents = await agent_sessions.for_tasks(session, ids)
+    moment = now()
     return [
         _read(
             task,
@@ -164,6 +172,7 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
             split.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
             boards.get(task.project_id),
+            agent_sessions.presence(agents.get(task.id, []), moment),
         )
         for task in found
     ]
@@ -199,6 +208,8 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     counts = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
     board = await columns.list_for_project(session, task.project)
+    agents = await agent_sessions.list_for_task(session, task)
+    moment = now()
     return TaskDetail(
         **_read(
             task,
@@ -206,8 +217,10 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
             counts.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
             board,
+            agent_sessions.presence(agents, moment),
         ).model_dump(),
         comments=[_comment(entry) for entry in timeline],
+        agent_sessions=[agent_sessions.read(row, moment) for row in agents],
         # A sub-task cannot be split again, so its own counts are always zero —
         # asked for all the same, because the loop that reads them does not know
         # which of these is which and a special case here would be a lie waiting

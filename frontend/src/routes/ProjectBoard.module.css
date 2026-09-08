@@ -500,6 +500,13 @@
 /* A colour bar rather than a tinted card alone: what it stands for has to
    survive being glanced at from across the room.
 
+   The rail is one channel and the outer border is another, and they say
+   different things. The rail is what the card *is* — its goal, its status,
+   its type. The border is who is on it right now: an agent session, drawn by
+   the `.agent*` rules further down, and nothing else touches it. Kept apart
+   because the rail is already contested three ways, and a fourth claimant on
+   it would have had to lose to one of them.
+
    Three things want the rail now, and they are ordered rather than merged. A
    card on a goal wears that goal's colour, set as `--card-rail` on the card
    itself, because the goal has nowhere else on a board to be. Failing that it
@@ -598,6 +605,116 @@
 .cancelled .title {
   color: var(--ink-3);
   text-decoration: line-through;
+}
+
+/* An agent on the card: the outer border, which nothing else on a card draws.
+
+   After `.hold`, `.blocked` and `.cancelled` on purpose — those set the border
+   transparent to let the tint carry the card, and a class weighs the same as a
+   class, so the agent border wins only by being written later. Moving this
+   block above them would silently switch the border off on every held card
+   an agent picks up.
+
+   `border-color` and a one-pixel ring together, because a card's surface may
+   already be amber or red and a one-pixel line in one colour is not enough to
+   read on every tint it lands on. */
+.agentWorking,
+.agentWaiting,
+.agentDone,
+.agentStale {
+  --agent-ring: var(--agent);
+
+  border-color: var(--agent-ring);
+  box-shadow: 0 0 0 1px var(--agent-ring);
+}
+
+/* Working breathes. The ring's alpha rises and falls rather than the border
+   itself moving, so nothing on the board changes size or position — the card
+   is only ever brighter or dimmer. */
+.agentWorking {
+  animation: agent-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes agent-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--agent-ring);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 4px transparent,
+      0 0 0 1px var(--agent-ring);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agentWorking {
+    animation: none;
+  }
+}
+
+/* Waiting is the amber the board already uses for "somebody has to do
+   something" — because somebody does, and it is you. Static, so a card that
+   needs you does not also demand you watch it. */
+.agentWaiting {
+  --agent-ring: var(--hold);
+}
+
+/* Finished is green and stays until dismissed — the border is the board
+   saying "come and look", and a message that removed itself would be one
+   you could miss. */
+.agentDone {
+  --agent-ring: var(--ok);
+}
+
+/* Stale is a working session nobody has heard from: the process probably
+   died. Dashed grey, so it reads as an outline of an agent rather than one. */
+.agentStale {
+  --agent-ring: var(--line-2);
+
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.agentStale .agentLine {
+  color: var(--ink-3);
+}
+
+/* The words under the title. `.waiting` gives the line its size and colour;
+   this only adds the mark in front, coloured by the same variable the border
+   is, so the line and the ring can never disagree about what state it is. */
+.agentLine {
+  gap: 6px;
+}
+
+.agentDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--agent-ring, var(--agent));
+}
+
+.agentStale .agentDot {
+  background: transparent;
+  border: 1.5px dashed var(--agent-ring);
+}
+
+.agentDetail {
+  color: var(--ink-2);
+}
+
+/* How many sessions the one border stands for. Only drawn past one. */
+.agentCount {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--agent-soft);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
 }
 
 /* The card's one line of chrome, under the title.
