@@ -37,7 +37,7 @@ from app.schemas.files import (
     LinkCreate,
 )
 from app.schemas.people import PersonRead
-from app.services import activity, files
+from app.services import activity, blobs, files
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["files"])
@@ -453,6 +453,6 @@ async def download_item(
 
     return FileResponse(
         store.locate(item.blob.path),
-        media_type=item.mime or files.DEFAULT_MIME,
+        media_type=item.mime or blobs.DEFAULT_MIME,
         filename=item.name,
     )
