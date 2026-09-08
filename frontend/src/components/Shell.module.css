@@ -35,15 +35,43 @@
 }
 
 /* Everything that is not the sidebar: the bar, the breadcrumbs and the page.
-   `min-width: 0` so opening the sidebar narrows this column instead of pushing
-   it off the right-hand edge — a flex item defaults to refusing to shrink
-   below its content, and a board's worth of columns is very wide content. */
+   `min-width: 0` so the sidebar beside it narrows this column instead of
+   pushing it off the right-hand edge — a flex item defaults to refusing to
+   shrink below its content, and a board's worth of columns is very wide
+   content. */
 .column {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+/*
+ * Under 900px there is no width to share, so the row becomes a column: the
+ * page, and the sidebar under it.
+ *
+ * The scroll has to move with it. Above this width `.wrap` is the one thing
+ * that scrolls and the frame is exactly the window's height, which is what
+ * keeps the bar in place; stacked, that would put the whole sidebar below the
+ * bottom of a window nothing can scroll. So the frame takes the scroll here
+ * and the page inside it goes back to being as tall as its content.
+ */
+@media (max-width: 899px) {
+  .frame {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .column {
+    flex: none;
+    min-height: 0;
+  }
+
+  .wrap {
+    flex: none;
+    overflow: visible;
+  }
 }
 
 .top {
