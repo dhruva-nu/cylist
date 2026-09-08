@@ -1,10 +1,9 @@
 /**
  * A project's six areas.
  *
- * Five are live: the board, its goals, the file store, the vault and the
- * people on the project, each summarised by the counts behind its card. The
- * sixth, what an agent needs to work here, is a placeholder — see
- * `routes/Agents.tsx`.
+ * All six are live: the board, its goals, the file store, the vault, the
+ * people on the project, and what its agents work from — each summarised by
+ * the counts behind its card.
  *
  * The day report used to sit beside the title, on the reasoning that the cards
  * are places you go and stay while a report is something you take away. The
@@ -187,9 +186,18 @@ export function ProjectHub() {
           title="Agents"
           to="/p/$projectKey/agents"
           projectKey={projectKey}
-          meta={<span className={styles.badge}>Placeholder</span>}
+          meta={
+            <>
+              <span>
+                {project.skill_count} {project.skill_count === 1 ? 'skill' : 'skills'}
+              </span>
+              <span>
+                {project.agent_note_count} {project.agent_note_count === 1 ? 'note' : 'notes'}
+              </span>
+            </>
+          }
         >
-          The skills, documentation and instructions an agent needs to operate Cylist here.
+          The skills you hand an agent, and the scratchpad it writes back what it learned on.
         </Tool>
       </div>
     </>

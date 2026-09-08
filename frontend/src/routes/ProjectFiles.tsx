@@ -32,6 +32,7 @@ import {
   type Person,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from '../components/Modal'
+import { formatSize, formatStamp } from '../components/format'
 import { PageHead } from '../components/Shell'
 import { Avatar, Button, ErrorBanner, LiveRegion, cardStyles, useAnnouncer } from '../components/ui'
 import styles from './ProjectFiles.module.css'
@@ -84,23 +85,6 @@ function badgeOf(name: string): { kind: string; label: string } {
   const kind = BADGES[extension]
   if (kind) return { kind, label: extension.slice(0, 4).toUpperCase() }
   return { kind: 'other', label: extension ? extension.slice(0, 3).toUpperCase() : 'FILE' }
-}
-
-const UNITS = ['bytes', 'KB', 'MB', 'GB', 'TB']
-
-function formatSize(bytes: number | null): string {
-  if (bytes === null) return '—'
-  let size = bytes
-  let unit = 0
-  while (size >= 1024 && unit < UNITS.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-  return `${unit === 0 ? size : size.toFixed(size < 10 ? 1 : 0)} ${UNITS[unit]}`
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 /** Every folder id from the root down to this one, empty if it is not in there. */
@@ -625,7 +609,7 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: () => void }) {
           <span className={styles.muted}>—</span>
         )}
       </td>
-      <td className={styles.mono}>{formatDate(item.created_at)}</td>
+      <td className={styles.mono}>{formatStamp(item.created_at)}</td>
       <td>
         <div className={styles.actions}>
           {isLink && item.url ? (
