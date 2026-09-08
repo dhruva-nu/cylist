@@ -69,6 +69,13 @@ way, every one of them has to be finished or cancelled before the parent can be
 moved into the board's last column, and `move_task` refuses that too, naming
 what is still outstanding.
 
+Progress is reported for you. When a session is bound to a card — someone ran
+`cylist work ATL-41`, or typed `/work ATL-41` — the harness's own hooks tell
+the board when you are working, when you are waiting on a human, and when the
+session ends. You do not need to announce that you have started or finished,
+and there is no tool for it; `agent_session` on a card is what that reporting
+looks like from the outside.
+
 The board's last column is where a card is done: moving one in records the
 moment it was finished, and moving it back out reopens it. That column alone
 may be divided into up to three **outcomes** — "Done", "Cancelled", "In prod" —
@@ -136,8 +143,10 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "List the cards on a project's board, in board order. Returns each "
             "task's reference (like 'ATL-41'), title, type, status, column, "
             "assignee, due date and who it is waiting on, plus the board's "
-            "columns so you can tell which card is where. Optionally filter by "
-            "status or assignee."
+            "columns so you can tell which card is where. 'agent_session' says "
+            "who is working on a card right now, if an agent is: 'working', "
+            "'waiting' (it needs a human), 'done', or 'stale' (a session nobody "
+            "has heard from). Optionally filter by status or assignee."
         ),
     )
     async def list_tasks(
@@ -171,7 +180,11 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         description=(
             "Get one task with its whole timeline. Returns the task's fields and "
             "every comment and status change on it, oldest first — a status "
-            "change carries the reason it was given and who it was waiting on."
+            "change carries the reason it was given and who it was waiting on. "
+            "'agent_session' says whether an agent is on this card right now, and "
+            "'agent_sessions' lists each harness session on it with what became "
+            "of it — worth reading before you start, so two of you are not on "
+            "the same card without knowing."
         ),
     )
     async def get_task(
