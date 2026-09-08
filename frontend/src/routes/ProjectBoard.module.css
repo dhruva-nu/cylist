@@ -38,6 +38,51 @@
   font-family: inherit;
 }
 
+/* Only while there is something to clear, so the placeholder — which is the
+   longest string the box ever holds — keeps the full width it is written
+   for. Nothing the user is reading moves: the text is left-aligned, and the
+   button appears on the same keystroke that makes room for it. */
+.search input.clearable {
+  padding-right: 42px;
+}
+
+/* Inside the box rather than beside it: a control that empties the input is
+   part of the input, and one parked in the toolbar would be a fourth button
+   in a strip that already reads as three.
+
+   Square, so the round shape it takes on hover is a circle, and offset from
+   the input's own height rather than the wrapper's — the wrapper grows by the
+   suggestion list, which would otherwise drag the × down the box every time
+   a tag is typed. */
+.clearSearch {
+  --size: 28px;
+
+  position: absolute;
+  top: calc((var(--control, 44px) - var(--size)) / 2);
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size);
+  height: var(--size);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-2);
+
+  /* The glyph is a multiplication sign, which sits small in the font at the
+     size the label around it is set in. */
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clearSearch:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
 .suggestions {
   position: absolute;
   z-index: 5;
