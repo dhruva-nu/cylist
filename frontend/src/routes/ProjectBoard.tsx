@@ -1081,6 +1081,13 @@ export function ProjectBoard() {
  * list of the matching columns or people — arrow keys to move through it,
  * enter or a click to accept, escape to dismiss it without losing the token
  * being typed.
+ *
+ * A query long enough to be worth tagging is long enough to be a nuisance to
+ * select and delete, so once there is anything in the box an × sits at its
+ * right to empty it in one go. It appears only when there is something to
+ * clear — an × over an empty box is a control that does nothing — and hands
+ * focus back to the input, because clearing the search is almost always the
+ * start of the next one rather than the end of searching.
  */
 function SearchBar({
   query,
@@ -1097,6 +1104,7 @@ function SearchBar({
 }) {
   const [highlighted, setHighlighted] = useState(0)
   const [dismissed, setDismissed] = useState(false)
+  const input = useRef<HTMLInputElement>(null)
   const suggestions = dismissed ? [] : suggestionsFor(activeToken(query), columns, members, goals)
 
   function pick(suggestion: Suggestion) {
@@ -1104,10 +1112,22 @@ function SearchBar({
     setHighlighted(0)
   }
 
+  function clear() {
+    onChange('')
+    // The list is keyed off the token being typed, so emptying the box closes
+    // it anyway; the reset is for the next query, which would otherwise open
+    // its list still dismissed and with a stale row highlighted.
+    setDismissed(false)
+    setHighlighted(0)
+    input.current?.focus()
+  }
+
   return (
     <div className={styles.search}>
       <input
+        ref={input}
         type="text"
+        className={query ? styles.clearable : undefined}
         value={query}
         onChange={(event) => {
           onChange(event.target.value)
@@ -1137,6 +1157,22 @@ function SearchBar({
         aria-autocomplete="list"
         aria-expanded={suggestions.length > 0}
       />
+      {query ? (
+        <button
+          type="button"
+          className={styles.clearSearch}
+          aria-label="Clear the search"
+          // Both, and each for its own reason: mousedown to swallow the focus
+          // the pointer would otherwise take off the input, click to do the
+          // work — a keyboard press on the button raises click and no
+          // mousedown at all, and clearing on mousedown alone leaves the ×
+          // dead to everyone tabbing to it.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={clear}
+        >
+          ×
+        </button>
+      ) : null}
       {suggestions.length ? (
         <ul className={styles.suggestions} role="listbox">
           {suggestions.map((suggestion, index) => (
