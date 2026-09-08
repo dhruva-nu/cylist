@@ -12,15 +12,24 @@
  * The day is cut in this browser's own zone, which is sent with the request.
  * Left to itself the server cuts in UTC, and an evening's work in Kolkata
  * would show up in tomorrow's report.
+ *
+ * It used to be a dialog, opened from a button beside the project's title.
+ * That was the wrong shape twice over. A report is something you read *while*
+ * looking at the work it is about — and a dialog is the one place you cannot
+ * be looking at anything else — and it was reachable from the hub alone, so
+ * reading yesterday from the board meant leaving the board. In the sidebar it
+ * is beside whatever screen you are on, and stepping back through a week no
+ * longer covers the thing you are stepping back through.
  */
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useMatchRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type DayReport, type TaskDay, type TaskHistoryEntry } from '../api/client'
 import { localToday } from './dates'
-import { Modal, ModalBody } from './Modal'
+import { SidebarSection } from './SidebarSection'
 import { Button, EmptyState, ErrorBanner } from './ui'
-import styles from './DayReportDialog.module.css'
+import styles from './DayReport.module.css'
 
 /** The zone this browser is in, as an IANA name the server can cut a day by. */
 function localZone(): string {
@@ -39,13 +48,22 @@ function shiftDay(day: string, by: number): string {
   return new Date(Date.UTC(year, month - 1, date + by)).toISOString().slice(0, 10)
 }
 
-export function DayReportDialog({
-  projectKey,
-  onClose,
-}: {
-  projectKey: string
-  onClose: () => void
-}) {
+export function DayReportPanel({ folded, onToggle }: { folded: boolean; onToggle: () => void }) {
+  const matchRoute = useMatchRoute()
+  const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+
+  return (
+    <SidebarSection name="Day report" folded={folded} onToggle={onToggle}>
+      {match ? (
+        <Day projectKey={match.projectKey} />
+      ) : (
+        <p className={styles.aside}>Open a project to read its day.</p>
+      )}
+    </SidebarSection>
+  )
+}
+
+function Day({ projectKey }: { projectKey: string }) {
   const [day, setDay] = useState(localToday)
   const [copied, setCopied] = useState(false)
   const zone = localZone()
@@ -79,64 +97,62 @@ export function DayReportDialog({
   const shown = report.data
 
   return (
-    <Modal
-      title="Day report"
-      onClose={onClose}
-      footer={
-        <>
-          <span className={styles.zone}>Midnight to midnight, {shown?.timezone ?? zone}</span>
+    <div className={styles.panel}>
+      <div className={styles.picker}>
+        <Button
+          small
+          variant="ghost"
+          aria-label="The day before"
+          onClick={() => go(shiftDay(day, -1))}
+        >
+          ‹
+        </Button>
+        <label className={styles.dayField}>
+          <span className="visually-hidden">Which day to report on</span>
+          <input
+            type="date"
+            value={day}
+            max={today}
+            onChange={(event) => go(event.currentTarget.value || today)}
+          />
+        </label>
+        <Button
+          small
+          variant="ghost"
+          aria-label="The day after"
+          // Tomorrow cannot hold anything yet, so there is nothing to go to.
+          disabled={day >= today}
+          onClick={() => go(shiftDay(day, 1))}
+        >
+          ›
+        </Button>
+        <Button small variant="ghost" disabled={day === today} onClick={() => go(today)}>
+          Today
+        </Button>
+      </div>
+
+      {report.error ? <ErrorBanner>{report.error.message}</ErrorBanner> : null}
+      {shown === undefined && report.isFetching ? <EmptyState>Reading the day…</EmptyState> : null}
+      {shown ? <Report report={shown} /> : null}
+
+      {/* Under the report rather than over it: the window it covered and the
+          button that copies it are both things you want once you have read
+          it, and a footer of chrome above a report you have not read yet is
+          a footer in the way. */}
+      {shown ? (
+        <div className={styles.foot}>
           <Button
+            small
             variant="go"
-            disabled={!shown || shown.entry_count === 0}
-            onClick={() => shown && void copy(shown.markdown)}
+            disabled={shown.entry_count === 0}
+            onClick={() => void copy(shown.markdown)}
           >
             {copied ? 'Copied' : 'Copy as Markdown'}
           </Button>
-          <Button onClick={onClose}>Close</Button>
-        </>
-      }
-    >
-      <ModalBody>
-        <div className={styles.picker}>
-          <Button
-            small
-            variant="ghost"
-            aria-label="The day before"
-            onClick={() => go(shiftDay(day, -1))}
-          >
-            ‹
-          </Button>
-          <label className={styles.dayField}>
-            <span className="visually-hidden">Which day to report on</span>
-            <input
-              type="date"
-              value={day}
-              max={today}
-              onChange={(event) => go(event.currentTarget.value || today)}
-            />
-          </label>
-          <Button
-            small
-            variant="ghost"
-            aria-label="The day after"
-            // Tomorrow cannot hold anything yet, so there is nothing to go to.
-            disabled={day >= today}
-            onClick={() => go(shiftDay(day, 1))}
-          >
-            ›
-          </Button>
-          <Button small variant="ghost" disabled={day === today} onClick={() => go(today)}>
-            Today
-          </Button>
+          <span className={styles.zone}>Midnight to midnight, {shown.timezone}</span>
         </div>
-
-        {report.error ? <ErrorBanner>{report.error.message}</ErrorBanner> : null}
-        {shown === undefined && report.isFetching ? (
-          <EmptyState>Reading the day…</EmptyState>
-        ) : null}
-        {shown ? <Report report={shown} /> : null}
-      </ModalBody>
-    </Modal>
+      ) : null}
+    </div>
   )
 }
 

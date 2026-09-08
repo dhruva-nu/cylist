@@ -29,6 +29,7 @@ import {
   type ReactNode,
 } from 'react'
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
+import { DayReportPanel } from './DayReport'
 import { SidebarSection } from './SidebarSection'
 import { Today } from './Today'
 import styles from './Sidebar.module.css'
@@ -107,17 +108,39 @@ function useOverlay(): boolean {
   return overlay
 }
 
-/** Which sections are folded away, remembered by name. Kept the way the
- * board's folded columns are: a list of what is shut, so a section added later
- * starts open rather than having to be listed to be seen. */
+/**
+ * Which sections are folded away, remembered by name.
+ *
+ * Kept the way the board's folded columns are: a list of what is *shut*, so a
+ * section added later starts open rather than having to be listed to be seen
+ * at all.
+ *
+ * On a first visit the day report is folded and nothing else is. It is by far
+ * the longest section — a whole day of a project, however busy the day was —
+ * and open by default it would push everything above it out of view before
+ * anybody had said they wanted to read it.
+ */
+const FOLDED_TO_BEGIN_WITH = ['Day report']
+
 function readFolded(): string[] {
+  let stored: string | null = null
   try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(FOLDED_KEY) ?? '')
-    return Array.isArray(stored)
-      ? stored.filter((name): name is string => typeof name === 'string')
-      : []
+    stored = window.localStorage.getItem(FOLDED_KEY)
   } catch {
-    return []
+    // A private window. The defaults are the right answer there too.
+    return FOLDED_TO_BEGIN_WITH
+  }
+  if (stored === null) return FOLDED_TO_BEGIN_WITH
+
+  try {
+    const parsed: unknown = JSON.parse(stored)
+    // An empty list is a real answer — every section deliberately open — so it
+    // is honoured rather than falling back to the defaults.
+    return Array.isArray(parsed)
+      ? parsed.filter((name): name is string => typeof name === 'string')
+      : FOLDED_TO_BEGIN_WITH
+  } catch {
+    return FOLDED_TO_BEGIN_WITH
   }
 }
 
@@ -212,6 +235,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           the one whose answer changes hour to hour; Settings is the one you
           set once and leave, so it sits at the bottom. */}
       <Today folded={folded.includes('Today')} onToggle={() => toggleSection('Today')} />
+      {/* The day behind you, under the day in front of you. It is the longest
+          section by far, so it sits below the list it would otherwise push off
+          the top of the panel. */}
+      <DayReportPanel
+        folded={folded.includes('Day report')}
+        onToggle={() => toggleSection('Day report')}
+      />
       <SidebarSection
         name="Settings"
         folded={folded.includes('Settings')}

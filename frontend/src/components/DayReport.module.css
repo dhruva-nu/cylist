@@ -1,11 +1,45 @@
+/*
+ * The day report, as a sidebar panel.
+ *
+ * It was a dialog, and a dialog is 640px of room; this is a column a third of
+ * that. So the report's own parts are unchanged in kind and tighter in fit:
+ * the day stepper wraps rather than overflowing, an entry's time sits on the
+ * line with what happened and wraps beneath it when there is no room, and the
+ * window it covered moved from a footer bar to a line under the report.
+ */
+
+/* When there is no project to read a day of. */
+.aside {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .picker {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
 
+/* Takes the room the four buttons leave, so the field shrinks instead of
+   pushing "Today" onto a line of its own. */
+.dayField {
+  flex: 1 1 96px;
+  min-width: 0;
+}
+
 .dayField input {
-  padding: 7px 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
   background: var(--paper);
@@ -17,16 +51,16 @@
 .report {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .headline {
   margin: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .section {
@@ -41,19 +75,21 @@
 
 .finished {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 16px;
   color: var(--ink);
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .finished b {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 400;
 }
 
 /* A card and its day: the heading is the card, the lines under it are the day. */
 .card {
-  padding: 12px 0;
+  padding: 10px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -73,20 +109,21 @@
 .reference {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .title {
+  min-width: 0;
   color: var(--ink);
   font-family: var(--font-ui);
+  font-size: 13px;
   font-weight: 700;
 }
 
 /* Where the card stands now — the column it is in, or that it is gone. */
 .where,
 .done {
-  margin-left: auto;
-  padding: 1px 9px;
+  padding: 1px 8px;
   border-radius: var(--radius-control);
   background: var(--paper-2);
   color: var(--ink-3);
@@ -106,12 +143,19 @@
   gap: 4px;
 }
 
+/* Wraps, at this width. The time is 40px of a 300px column and what happened
+   is a sentence — pinned to one line the sentence got a third of the row and
+   broke into six of them. Wrapping puts the time on the first line with as
+   much of the sentence as fits and the rest underneath, which is how a
+   timestamped line reads on paper anyway. */
 .entry {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   align-items: baseline;
   margin: 0;
   color: var(--ink-2);
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -119,7 +163,7 @@
    comment can carry a pasted URL, so a word with no spaces in it breaks rather
    than stretching the report. */
 .what {
-  flex: 1 1 auto;
+  flex: 1 1 60%;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -128,7 +172,7 @@
   flex: 0 0 auto;
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -143,10 +187,17 @@
   font-weight: 700;
 }
 
-/* Which window the report covered, kept beside the button that copies it. */
+/* What you do with the report once you have read it, and what it covered. */
+.foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .zone {
-  margin-right: auto;
   color: var(--ink-3);
   font-size: 12px;
-  align-self: center;
 }
