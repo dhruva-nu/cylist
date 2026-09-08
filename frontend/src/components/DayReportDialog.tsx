@@ -17,6 +17,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type DayReport, type TaskDay, type TaskHistoryEntry } from '../api/client'
+import { localToday } from './dates'
 import { Modal, ModalBody } from './Modal'
 import { Button, EmptyState, ErrorBanner } from './ui'
 import styles from './DayReportDialog.module.css'
@@ -24,14 +25,6 @@ import styles from './DayReportDialog.module.css'
 /** The zone this browser is in, as an IANA name the server can cut a day by. */
 function localZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-}
-
-/** Today as `YYYY-MM-DD`, in local terms rather than UTC's. */
-function localToday(): string {
-  const now = new Date()
-  const month = `${now.getMonth() + 1}`.padStart(2, '0')
-  const day = `${now.getDate()}`.padStart(2, '0')
-  return `${now.getFullYear()}-${month}-${day}`
 }
 
 /**

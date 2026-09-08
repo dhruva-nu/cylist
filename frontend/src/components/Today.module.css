@@ -1,0 +1,189 @@
+/*
+ * Today's work, at the width a sidebar has.
+ *
+ * The board's own card shape, compressed: what the card is on one line, the
+ * marks it carries on the next. Every colour is a token, so the panel reads
+ * in both themes without a value of its own — see the note at the top of
+ * tokens.css.
+ */
+
+/* When there is nothing to list, or nothing to list it from. */
+.aside {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* How many cards are behind a folded heading. Sits between the section's name
+   and its chevron, so folding the panel away does not fold away the fact that
+   there is work in it. */
+.count,
+.countLate {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* Anything overdue turns the count, because that is the part of the number
+   that changes what you do next. */
+.countLate {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+.groupName,
+.groupNameLate {
+  margin: 0 0 6px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.groupNameLate {
+  color: var(--blocked);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.row:hover {
+  background: var(--paper-2);
+}
+
+.head {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.reference {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Two lines and then an ellipsis. A card's title is the only thing on the row
+   that tells you which piece of work it is, so it gets more room than a
+   single line — and a stop, because a sidebar full of one card's title is a
+   sidebar holding one card. */
+.title {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The priority chevron, in the four inks the board uses for it. */
+.prio {
+  display: inline-flex;
+  align-items: center;
+}
+
+.priority_urgent {
+  color: var(--priority-urgent);
+}
+
+.priority_asap {
+  color: var(--priority-asap);
+}
+
+.priority_week {
+  color: var(--priority-week);
+}
+
+.priority_someday {
+  color: var(--priority-someday);
+}
+
+/* Which of the four states a card is in, said in full, because a row here
+   carries no tint of its own to say it. Active is never drawn: it is the
+   baseline, and a word on every row would be a word carrying nothing. */
+.pill {
+  padding: 0 7px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.pill_hold {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.pill_blocked {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+/* A cancelled card is filtered out before it reaches a row — see `today.ts` —
+   but the pill is written for all four states rather than three, because a
+   list of states with a hole in it is the kind of thing that stays wrong when
+   the filter changes. */
+.pill_cancelled,
+.pill_active {
+  background: var(--paper-2);
+  color: var(--ink-3);
+}
+
+/* When an overdue card was wanted. The date itself rather than a day count:
+   the group heading already said these are late, and the date is what you
+   quote in the conversation about it. */
+.late {
+  margin-left: auto;
+  color: var(--blocked);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

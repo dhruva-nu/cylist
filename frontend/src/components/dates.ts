@@ -19,6 +19,26 @@ export function localDate(iso: string): Date {
   return new Date(year, month - 1, day)
 }
 
+/**
+ * Today, as the `YYYY-MM-DD` the API speaks.
+ *
+ * Cut in the reader's own zone rather than UTC's, which is the same reason
+ * `localDate` above exists: `new Date().toISOString()` is tomorrow's date for
+ * an evening in Kolkata, so a card due today would file itself as overdue and
+ * a day report would ask the server for a day that has not happened.
+ *
+ * Here rather than beside whichever screen needed it first, because three of
+ * them now ask what today is — the due ramp, the day report and the sidebar's
+ * list of today's work — and three midnights worked out in three places is
+ * precisely the drift this file exists to make impossible.
+ */
+export function localToday(): string {
+  const now = new Date()
+  const month = `${now.getMonth() + 1}`.padStart(2, '0')
+  const day = `${now.getDate()}`.padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
 export function formatDue(iso: string): string {
   return localDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
