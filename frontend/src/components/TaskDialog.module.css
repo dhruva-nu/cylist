@@ -803,3 +803,55 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
+/* The agent sessions on a card. One row each, quiet: the card's border has
+   already said the thing worth noticing, and this is the detail behind it. */
+.agentSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agentSession {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 11px;
+  border-left: 2px solid var(--agent);
+}
+
+.agentSessionLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.agentSessionName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.agentSessionState {
+  flex: none;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.agentSessionWhen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.agentSessionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
