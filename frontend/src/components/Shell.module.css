@@ -19,6 +19,63 @@
   transform: none;
 }
 
+/*
+ * The window's remaining height, laid out as a row: the sidebar in one column
+ * and the page beside it.
+ *
+ * `min-height: 0` because a flex item will not shrink below its content
+ * without it, and the page's column has to be allowed to be shorter than what
+ * it holds — that is what makes `.wrap` inside it the thing that scrolls
+ * rather than the document.
+ */
+.frame {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Everything that is not the sidebar: the bar, the breadcrumbs and the page.
+   `min-width: 0` so the sidebar beside it narrows this column instead of
+   pushing it off the window's other edge — a flex item defaults to refusing
+   to shrink below its content, and a board's worth of columns is very wide
+   content. */
+.column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * Under 900px there is no width to share, so the row becomes a column: the
+ * sidebar, and the page under it — markup order, which on this side is also
+ * screen order. See the note on `.sidebar` in Sidebar.module.css for why the
+ * two are not worth prising apart here.
+ *
+ * The scroll has to move with it. Above this width `.wrap` is the one thing
+ * that scrolls and the frame is exactly the window's height, which is what
+ * keeps the bar in place; stacked, that would put the whole sidebar below the
+ * bottom of a window nothing can scroll. So the frame takes the scroll here
+ * and the page inside it goes back to being as tall as its content.
+ */
+@media (max-width: 899px) {
+  .frame {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .column {
+    flex: none;
+    min-height: 0;
+  }
+
+  .wrap {
+    flex: none;
+    overflow: visible;
+  }
+}
+
 .top {
   position: sticky;
   top: 0;
@@ -97,36 +154,6 @@
   display: flex;
   gap: 12px;
   align-items: center;
-}
-
-.theme {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--paper);
-}
-
-.theme button {
-  padding: 4px 10px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.theme button:hover {
-  color: var(--ink);
-}
-
-.theme button.themeOn {
-  background: var(--brand-soft);
-  color: var(--brand-ink);
 }
 
 .nav {

@@ -13,6 +13,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type Goal, type GoalInput, type GoalStatus, type Person } from '../api/client'
 import { GOAL_STATUS_LABELS } from './GoalMarks'
+import { MentionBox } from './Mentions'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { Button, ErrorBanner, readableInkOn } from './ui'
 import styles from './GoalDialog.module.css'
@@ -152,10 +153,15 @@ export function GoalDialog({
           />
         </Field>
 
-        <Field label="What does reaching it mean?">
-          <textarea
+        {/* Tagged like a card's description and a comment, because it is read
+            like one: a goal says what reaching it means, and half of what that
+            means is who it means it for. */}
+        <Field label="What does reaching it mean?" hint="Type @ to tag someone on the project.">
+          <MentionBox
+            multiline
             value={form.description ?? ''}
-            onChange={(event) => setForm({ ...form, description: event.target.value })}
+            onChange={(description) => setForm({ ...form, description })}
+            members={members}
             placeholder="Filters, sorting and saved searches, on every list in the product."
           />
         </Field>

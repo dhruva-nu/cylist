@@ -47,6 +47,7 @@ def _template(template: TaskTemplate, task_count: int) -> TemplateRead:
                 column_id=stage.column_id,
                 column_name=stage.column.name,
                 sub_stage_labels=stage.sub_stage_labels,
+                allowed_outcomes=stage.allowed_outcomes,
             )
             for stage in stages
         ],

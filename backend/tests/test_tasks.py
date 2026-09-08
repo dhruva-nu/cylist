@@ -70,19 +70,19 @@ class TestCreating:
         assert task["assignee"]["name"] == "Aditi K"
         assert task["comments"] == []
 
-    async def test_priority_defaults_to_someday(self, signed_in: AsyncClient) -> None:
+    async def test_priority_defaults_to_p3(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
 
         task = await _create(signed_in, person)
 
-        assert task["priority"] == "someday"
+        assert task["priority"] == "p3"
 
     async def test_priority_can_be_set_on_creation(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, priority="urgent")
+        task = await _create(signed_in, person, priority="p0")
 
-        assert task["priority"] == "urgent"
+        assert task["priority"] == "p0"
 
     async def test_an_unknown_priority_is_refused(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -361,11 +361,11 @@ class TestUpdating:
     async def test_priority_can_be_changed(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         task = await _create(signed_in, person)
-        assert task["priority"] == "someday"
+        assert task["priority"] == "p3"
 
-        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"priority": "asap"})).json()
+        updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"priority": "p1"})).json()
 
-        assert updated["priority"] == "asap"
+        assert updated["priority"] == "p1"
 
     async def test_sub_statuses_can_be_added(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -617,6 +617,102 @@ class TestDeleting:
         assert entries[0]["payload"] == {"reference": "ATL-1"}
 
 
+class TestFinishedByTheLastColumn:
+    """A card is done by being in the board's last column, and it says so.
+
+    The board already answered "is this card done" by where the card was; what
+    it could not answer is *when*, or that a card was ever done at all once it
+    had been dragged back out. Both are `finished_at`.
+    """
+
+    async def test_arriving_in_the_last_column_finishes_a_card(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        assert task["finished_at"] is None
+        done = (await _columns(signed_in))[-1]["id"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()
+
+        assert moved["finished_at"] is not None
+
+    async def test_leaving_it_reopens_the_card(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        columns = await _columns(signed_in)
+        await signed_in.post(
+            f"/tasks/{task['id']}/move", json={"column_id": columns[-1]["id"], "position": 0}
+        )
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": columns[0]["id"], "position": 0}
+            )
+        ).json()
+
+        assert moved["finished_at"] is None
+
+    async def test_a_move_within_the_last_column_keeps_the_original_time(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Reordering is not a second finishing: the card never stopped being done."""
+        person = await _setup(signed_in)
+        first = await _create(signed_in, person, title="First")
+        second = await _create(signed_in, person, title="Second")
+        done = (await _columns(signed_in))[-1]["id"]
+        await signed_in.post(f"/tasks/{second['id']}/move", json={"column_id": done, "position": 0})
+        finished = (
+            await signed_in.post(
+                f"/tasks/{first['id']}/move", json={"column_id": done, "position": 0}
+            )
+        ).json()["finished_at"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{first['id']}/move", json={"column_id": done, "position": 1}
+            )
+        ).json()
+
+        assert moved["finished_at"] == finished
+
+    async def test_the_column_that_was_last_stops_finishing_cards(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Last is a position, not a column. A new column to the right takes it."""
+        person = await _setup(signed_in)
+        was_last = (await _columns(signed_in))[-1]["id"]
+        await signed_in.post(
+            "/projects/ATL/columns",
+            json={"name": "In staging", "description": "Deployed where it can be looked at."},
+        )
+        task = await _create(signed_in, person)
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": was_last, "position": 0}
+            )
+        ).json()
+
+        assert moved["finished_at"] is None
+
+    async def test_a_card_is_still_not_finished_by_being_ticked_off(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Done is where a card is. `finish` is the sub-task's gesture, and says so."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+
+        refused = await signed_in.post(f"/tasks/{task['id']}/finish", json={"finished": True})
+
+        assert refused.status_code == 422
+        assert "last column" in refused.json()["error"]["message"]
+
+
 class TestMoving:
     async def test_moves_a_card_to_another_column(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -795,6 +891,232 @@ class TestListing:
         await _setup(signed_in)
 
         assert (await signed_in.get("/projects/ATL/tasks")).json() == []
+
+
+class TestColumnDueDates:
+    """A card can be dated per column, not only at the end of the board.
+
+    The board a card is on is what these dates are read against: which of them
+    are behind the card, and which one it is working towards now.
+    """
+
+    @staticmethod
+    async def _three(client: AsyncClient) -> list[dict[str, Any]]:
+        """A board of To do → Review → Done, so there is a middle to date."""
+        await client.post(
+            "/projects/ATL/columns",
+            json={"name": "Review", "description": "Written and waiting on a second pair of eyes."},
+        )
+        board = await _columns(client)
+        by_name = {column["name"]: column["id"] for column in board}
+        ordered = [by_name["To do"], by_name["Review"], by_name["Done"]]
+        await client.put("/projects/ATL/columns/order", json={"column_ids": ordered})
+        return list((await client.get("/projects/ATL/columns")).json()["columns"])
+
+    async def test_dates_are_read_in_board_order_and_named(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo, review, _ = await self._three(signed_in)
+
+        task = await _create(
+            signed_in,
+            person,
+            column_due_dates=[
+                {"column_id": review["id"], "due_date": "2026-08-20"},
+                {"column_id": todo["id"], "due_date": "2026-08-10"},
+            ],
+        )
+
+        assert [
+            (entry["column_name"], entry["due_date"]) for entry in task["column_due_dates"]
+        ] == [
+            ("To do", "2026-08-10"),
+            ("Review", "2026-08-20"),
+        ]
+
+    async def test_a_column_the_card_sits_in_is_already_met(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo, review, _ = await self._three(signed_in)
+
+        task = await _create(
+            signed_in,
+            person,
+            column_due_dates=[
+                {"column_id": todo["id"], "due_date": "2026-08-10"},
+                {"column_id": review["id"], "due_date": "2026-08-20"},
+            ],
+        )
+
+        assert [entry["met"] for entry in task["column_due_dates"]] == [True, False]
+
+    async def test_the_next_date_is_the_soonest_still_owed(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        _, review, _ = await self._three(signed_in)
+
+        task = await _create(
+            signed_in,
+            person,
+            due_date="2026-09-01",
+            column_due_dates=[{"column_id": review["id"], "due_date": "2026-08-20"}],
+        )
+
+        assert task["next_due_date"] == "2026-08-20"
+
+    async def test_reaching_the_column_settles_its_date(self, signed_in: AsyncClient) -> None:
+        """The card's own comment on CYLIST-25: the prompt goes away when it is met."""
+        person = await _setup(signed_in)
+        _, review, _ = await self._three(signed_in)
+        task = await _create(
+            signed_in,
+            person,
+            due_date="2026-09-01",
+            column_due_dates=[{"column_id": review["id"], "due_date": "2026-08-20"}],
+        )
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": review["id"], "position": 0}
+            )
+        ).json()
+
+        assert moved["column_due_dates"][0]["met"] is True
+        assert moved["next_due_date"] == "2026-09-01"
+
+    async def test_a_card_in_the_last_column_owes_nothing(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        _, review, done = await self._three(signed_in)
+        task = await _create(
+            signed_in,
+            person,
+            due_date="2026-09-01",
+            column_due_dates=[{"column_id": review["id"], "due_date": "2026-08-20"}],
+        )
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/move", json={"column_id": done["id"], "position": 0}
+            )
+        ).json()
+
+        assert moved["next_due_date"] is None
+
+    async def test_the_last_column_is_the_cards_own_due_date(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        done = (await _columns(signed_in))[-1]["id"]
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks",
+            json=_task(person, column_due_dates=[{"column_id": done, "due_date": "2026-08-20"}]),
+        )
+
+        assert response.status_code == 422
+        assert "due_date" in response.json()["error"]["message"]
+
+    async def test_a_column_named_twice_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo = (await _columns(signed_in))[0]["id"]
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks",
+            json=_task(
+                person,
+                column_due_dates=[
+                    {"column_id": todo, "due_date": "2026-08-10"},
+                    {"column_id": todo, "due_date": "2026-08-11"},
+                ],
+            ),
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_column_on_another_board_is_refused(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+        await signed_in.post("/projects", json=HERMES)
+        theirs = (await _columns(signed_in, "HRM"))[0]["id"]
+
+        response = await signed_in.patch(
+            f"/tasks/{task['id']}",
+            json={"column_due_dates": [{"column_id": theirs, "due_date": "2026-08-20"}]},
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_subtask_passes_through_no_columns(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo = (await _columns(signed_in))[0]["id"]
+        task = await _create(signed_in, person)
+
+        response = await signed_in.post(
+            f"/tasks/{task['reference']}/subtasks",
+            json=_task(
+                person,
+                title="Write the migration",
+                column_due_dates=[{"column_id": todo, "due_date": "2026-08-20"}],
+            ),
+        )
+
+        assert response.status_code == 422
+
+    async def test_the_whole_set_is_replaced(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo, review, _ = await self._three(signed_in)
+        task = await _create(
+            signed_in,
+            person,
+            column_due_dates=[{"column_id": todo["id"], "due_date": "2026-08-10"}],
+        )
+
+        updated = (
+            await signed_in.patch(
+                f"/tasks/{task['id']}",
+                json={"column_due_dates": [{"column_id": review["id"], "due_date": "2026-08-20"}]},
+            )
+        ).json()
+
+        assert [entry["column_name"] for entry in updated["column_due_dates"]] == ["Review"]
+
+    async def test_an_empty_list_takes_them_all_off(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo = (await _columns(signed_in))[0]["id"]
+        task = await _create(
+            signed_in, person, column_due_dates=[{"column_id": todo, "due_date": "2026-08-10"}]
+        )
+
+        updated = (
+            await signed_in.patch(f"/tasks/{task['id']}", json={"column_due_dates": []})
+        ).json()
+
+        assert updated["column_due_dates"] == []
+
+    async def test_leaving_them_out_leaves_them_alone(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        todo = (await _columns(signed_in))[0]["id"]
+        task = await _create(
+            signed_in, person, column_due_dates=[{"column_id": todo, "due_date": "2026-08-10"}]
+        )
+
+        updated = (
+            await signed_in.patch(f"/tasks/{task['id']}", json={"title": "Dedupe webhooks"})
+        ).json()
+
+        assert len(updated["column_due_dates"]) == 1
+
+    async def test_a_deleted_column_takes_its_dates_with_it(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        """A deadline for a column that no longer exists is a date with nothing
+        to be due in — unlike the card in a column, which blocks the delete."""
+        person = await _setup(signed_in)
+        _, review, _ = await self._three(signed_in)
+        task = await _create(
+            signed_in,
+            person,
+            column_due_dates=[{"column_id": review["id"], "due_date": "2026-08-20"}],
+        )
+
+        assert (await signed_in.delete(f"/columns/{review['id']}")).status_code == 200
+        refreshed = (await signed_in.get(f"/tasks/{task['id']}")).json()
+        assert refreshed["column_due_dates"] == []
 
 
 class TestCascade:

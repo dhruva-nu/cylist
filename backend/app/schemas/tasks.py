@@ -31,6 +31,40 @@ def _clean_sub_statuses(value: list[str]) -> list[str]:
     return cleaned
 
 
+class ColumnDueDateInput(Schema):
+    """A date this card is wanted in one column by."""
+
+    column_id: UUID = Field(
+        description=(
+            "One of the project's columns, and not the last one: a card is done "
+            "when it reaches the end of the board, so the date for the last "
+            "column is the card's own `due_date`."
+        )
+    )
+    due_date: date
+
+
+class ColumnDueDateRead(ColumnDueDateInput):
+    """One of those dates, with what a reader needs to make sense of it."""
+
+    column_name: str = Field(description="That column's name, so a card reads alone.")
+    met: bool = Field(
+        description=(
+            "Whether the card has reached that column. A met date is behind the "
+            "card and stops being asked anything of — it never reads as late, "
+            "and `next_due_date` skips it."
+        )
+    )
+
+
+def _one_date_per_column(value: list[ColumnDueDateInput]) -> list[ColumnDueDateInput]:
+    """Refuse a column named twice: two dates for one column is two answers."""
+    named = [entry.column_id for entry in value]
+    if len(named) != len(set(named)):
+        raise ValueError("a column can only be given one due date")
+    return value
+
+
 class TaskCreate(Schema):
     """A new card. It lands in the board's first column.
 
@@ -45,7 +79,7 @@ class TaskCreate(Schema):
     )
     type: TaskType
     priority: TaskPriority = Field(
-        default=TaskPriority.SOMEDAY, description="0 (urgent) to 3 (someday). Defaults to someday."
+        default=TaskPriority.P3, description="`p0` (drop everything) to `p3`. Defaults to `p3`."
     )
     sub_statuses: list[str] = Field(
         default_factory=list,
@@ -58,7 +92,19 @@ class TaskCreate(Schema):
     )
     due_date: date | None = Field(
         default=None,
-        description="When it is wanted by. Omit it — or send null — for a card with no date.",
+        description=(
+            "When it is wanted by — which is when it is wanted in the board's "
+            "last column. Omit it — or send null — for a card with no date."
+        ),
+    )
+    column_due_dates: list[ColumnDueDateInput] = Field(
+        default_factory=list,
+        description=(
+            "Dates for the columns on the way there: the day it is wanted in "
+            "Review, in QA. Any subset of the board's columns, the last one "
+            "excepted — that one is `due_date`. Refused on a sub-task, which is "
+            "not on the board."
+        ),
     )
     assignee_id: UUID = Field(description="Must be a member of the project.")
     template_id: UUID | None = Field(
@@ -95,6 +141,11 @@ class TaskCreate(Schema):
     @classmethod
     def _clean_sub_statuses(cls, value: list[str]) -> list[str]:
         return _clean_sub_statuses(value)
+
+    @field_validator("column_due_dates")
+    @classmethod
+    def _one_per_column(cls, value: list[ColumnDueDateInput]) -> list[ColumnDueDateInput]:
+        return _one_date_per_column(value)
 
     @field_validator("jira_ref", "pr_ref")
     @classmethod
@@ -186,6 +237,15 @@ class TaskUpdate(Schema):
             "fields here, null means clear rather than leave alone."
         ),
     )
+    column_due_dates: list[ColumnDueDateInput] | None = Field(
+        default=None,
+        description=(
+            "Replaces every per-column date the card has: send the whole set, "
+            "an empty list to take them all off, or leave it out to leave them "
+            "alone. A list rather than a patch per column because that is how "
+            "the dates are read — as one schedule across the board."
+        ),
+    )
     assignee_id: UUID | None = None
     template_id: UUID | None = Field(
         default=None,
@@ -216,6 +276,13 @@ class TaskUpdate(Schema):
     def _clean_sub_statuses(cls, value: list[str] | None) -> list[str] | None:
         return None if value is None else _clean_sub_statuses(value)
 
+    @field_validator("column_due_dates")
+    @classmethod
+    def _one_per_column(
+        cls, value: list[ColumnDueDateInput] | None
+    ) -> list[ColumnDueDateInput] | None:
+        return None if value is None else _one_date_per_column(value)
+
     @field_validator("jira_ref", "pr_ref")
     @classmethod
     def _optional(cls, value: str | None) -> str | None:
@@ -234,6 +301,15 @@ class TaskMove(Schema):
 
     column_id: UUID
     position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+    outcome: str | None = Field(
+        default=None,
+        description=(
+            "Which of the column's outcomes the card lands on, by name — 'Done', 'Cancelled', "
+            "'In prod'. Only the board's last column has any, and only if the board was "
+            "divided that way. Left out, a card arriving there lands on the first one; "
+            "moving anywhere else clears the card's outcome whatever this says."
+        ),
+    )
 
 
 class TaskFinish(Schema):
@@ -341,7 +417,19 @@ class TaskRead(Schema):
     sub_status_index: int | None = Field(
         description="Index into `sub_statuses` of the current stage. Null when the list is empty."
     )
-    due_date: date | None = Field(description="Null when the card has no date.")
+    due_date: date | None = Field(
+        description="When the card is wanted in the board's last column. Null when it has no date."
+    )
+    column_due_dates: list[ColumnDueDateRead] = Field(
+        description="Dates for the columns before the last one, in board order. Empty on a "
+        "card nobody has dated a stage of, and always empty on a sub-task."
+    )
+    next_due_date: date | None = Field(
+        description="The date the card is working towards now: the soonest of its unmet dates, "
+        "`due_date` among them. Null once the card is done — in the last column, or ticked off "
+        "if it is a sub-task — and null when it is dated nowhere. This is the date to draw on a "
+        "card: `due_date` is the end of the line, this is the next thing owed."
+    )
     assignee: PersonRead
     status: TaskStatus
     template_id: UUID | None = Field(
@@ -367,9 +455,18 @@ class TaskRead(Schema):
         description="Tick-box sub-tasks. Every one must be done or cancelled before the card "
         "can reach the board's last column."
     )
+    outcome: str | None = Field(
+        description="How the work ended: the section of the board's last column this card is "
+        "in, by name. Null on every card that is not in a column divided that way."
+    )
+    outcome_index: int | None = Field(
+        description="Which of the column's `outcomes` that is, counted from the left. Null "
+        "exactly when `outcome` is."
+    )
     finished_at: datetime | None = Field(
-        description="When this sub-task was ticked off. Null while it is open, and always null "
-        "on a card, which is finished by being in the board's last column instead."
+        description="When this task was finished, and null while it is open. A sub-task is "
+        "finished by being ticked off; a card is finished by being moved into the board's last "
+        "column, and moving it back out clears this."
     )
     open_subtask_count: int = Field(
         description="Sub-tasks — cards and tick boxes together — that are neither finished nor "

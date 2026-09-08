@@ -6,7 +6,7 @@ agents can use it as readily as you can.
 
 | Area | What it holds |
 | --- | --- |
-| **Kanban board** | Tasks as cards across 2–8 named columns, each of which folds down to a rail when you would rather not look at it. A card that goes *on hold* or *blocked* must say why, and can name the person it is waiting on. |
+| **Kanban board** | Tasks as cards across 2–8 named columns, each of which folds down to a rail when you would rather not look at it. A card that goes *on hold* or *blocked* must say why, and can name the person it is waiting on. The last column is where a card is done, and can be divided into up to three outcomes — Done, Cancelled, In prod — so the board says how work ended as well as that it did. |
 | **Goals** | The epics a board's cards are written under. Each has a colour of its own, which every card on it wears down its left-hand edge, and a page listing what is left on it. Cards are grouped into lanes by goal on the board when you want to read it that way. |
 | **Files** | Folders of uploaded files, with SharePoint and Google Drive links sitting alongside them. |
 | **Vault** | Logins, keys and links in trees you shape yourself. Secrets are encrypted at rest and revealed only on request. |
@@ -135,12 +135,13 @@ built SPA, in front of a Postgres that publishes no port at all.
 a bad release back.
 
 **Staging** is the same machine, the same image and the same deploy script, on
-:8001 and on the tailnet only. The `staging` branch deploys itself there, and
-`make staging-refresh` reloads it from production's database and files — so what
-it rehearses is a real release against real rows.
+:8001 and on the tailnet only. It holds the `staging` branch, deployed when you
+ask for it rather than on every push, and `make staging-refresh` reloads it from
+production's database and files — so what it rehearses is a real release against
+real rows.
 
 ```bash
-make staging-deploy    # or just push to `staging`
+make staging-deploy    # or run the "Deploy staging" workflow from `staging`
 make staging-refresh   # reload it from production
 ```
 

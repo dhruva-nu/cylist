@@ -41,6 +41,7 @@ def _read(column: BoardColumn, task_count: int) -> ColumnRead:
         name=column.name,
         description=column.description,
         position=column.position,
+        outcomes=list(column.outcomes),
         task_count=task_count,
     )
 

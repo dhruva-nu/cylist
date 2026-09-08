@@ -76,8 +76,9 @@ prod-ps: ## Show what the production stack is running
 # --- Staging, on the same machine -------------------------------------------
 # Staging is production's shape with production's data: the same image built the
 # same way, the same one-container deploy, restored from a production dump by
-# `staging-refresh`. It listens on :8001, and CI deploys it on every push to the
-# `staging` branch.
+# `staging-refresh`. It listens on :8001, and it is deployed when you ask for it
+# — `staging-deploy` below, or the "Deploy staging" workflow run from the
+# `staging` branch — rather than on every push to it.
 #
 # Because it is restored from production it holds real vault ciphertext, and its
 # app.env carries the production vault key. Its secrets are production secrets.

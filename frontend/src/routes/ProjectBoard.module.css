@@ -38,6 +38,51 @@
   font-family: inherit;
 }
 
+/* Only while there is something to clear, so the placeholder — which is the
+   longest string the box ever holds — keeps the full width it is written
+   for. Nothing the user is reading moves: the text is left-aligned, and the
+   button appears on the same keystroke that makes room for it. */
+.search input.clearable {
+  padding-right: 42px;
+}
+
+/* Inside the box rather than beside it: a control that empties the input is
+   part of the input, and one parked in the toolbar would be a fourth button
+   in a strip that already reads as three.
+
+   Square, so the round shape it takes on hover is a circle, and offset from
+   the input's own height rather than the wrapper's — the wrapper grows by the
+   suggestion list, which would otherwise drag the × down the box every time
+   a tag is typed. */
+.clearSearch {
+  --size: 28px;
+
+  position: absolute;
+  top: calc((var(--control, 44px) - var(--size)) / 2);
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size);
+  height: var(--size);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-2);
+
+  /* The glyph is a multiplication sign, which sits small in the font at the
+     size the label around it is set in. */
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clearSearch:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
 .suggestions {
   position: absolute;
   z-index: 5;
@@ -346,6 +391,93 @@
   overflow-y: auto;
 }
 
+/* A divided column: one stack per way the work can have ended, filling the
+   column between them the way a single stack of cards fills it. Padded and
+   gapped rather than run edge to edge, so the boxes inside read as sitting
+   in the column rather than as the column itself cut into thirds. */
+.sections {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+}
+
+/* Its own bordered, rounded panel — not a rule between two otherwise
+   identical stretches of the column. A 1px line reads as noise the moment
+   there is a third section to tell apart from the other two; a box that
+   looks like a place of its own reads at a glance regardless of how many
+   there are. */
+.section {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+/* The heading strip is tinted so it reads as the section's own header rather
+   than a caption floating over the cards — the same relationship a card's
+   head has to its body, just drawn a size down. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 4px 10px 4px 4px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The label between the fold button and the count, given the room to take —
+   and to give up first, eliding, when the section is narrower than its name. */
+.sectionLabel {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Its own surface against the tinted strip round it, the way `.count`
+   everywhere else on the board sits against `--paper-2`. */
+.sectionHead .count {
+  background: var(--paper);
+}
+
+/* The same welcome a column gives a card held over it, drawn a section at a
+   time — otherwise a card in the air over a divided column has three targets
+   and no way to tell which one has it. A ring rather than just a wash, so it
+   reads next to the section's own border rather than blending into it. */
+.sectionOver {
+  border-color: var(--brand-ink);
+  box-shadow: inset 0 0 0 1px var(--brand-ink);
+}
+
+.sectionOver .sectionHead {
+  background: var(--brand-soft);
+}
+
+.sectionOver .cards {
+  background: var(--brand-soft);
+}
+
+/* Inside a section the stack is as short as its cards: the section's own
+   heading is already the floor a drop can land on. */
+.section .cards {
+  flex: 0 0 auto;
+  min-height: 34px;
+  overflow: visible;
+}
+
 .task {
   position: relative;
   display: flex;
@@ -637,37 +769,37 @@
 }
 
 /* The only level that gets a fill. Its ground is --blocked-soft rather than a
-   wash of its own: urgent and overdue are the two things on a card that mean
-   drop what you are doing, and they are meant to read as the same alarm. */
-.priority_urgent {
+   wash of its own: p0 and overdue are the two things on a card that mean drop
+   what you are doing, and they are meant to read as the same alarm. */
+.priority_p0 {
   padding: 3px 7px;
   border-radius: var(--radius-control);
   background: var(--blocked-soft);
-  color: var(--priority-urgent);
+  color: var(--priority-p0);
 }
 
-.priority_asap {
-  color: var(--priority-asap);
+.priority_p1 {
+  color: var(--priority-p1);
 }
 
-.priority_week {
-  color: var(--priority-week);
+.priority_p2 {
+  color: var(--priority-p2);
 }
 
-.priority_someday {
-  color: var(--priority-someday);
+.priority_p3 {
+  color: var(--priority-p3);
 }
 
 /* The two pills that carry a wash of their own, on the two cards that are
    already washed in it.
 
-   An urgent card that is also blocked drew --blocked-soft on --blocked-soft,
+   A p0 card that is also blocked drew --blocked-soft on --blocked-soft,
    and a card due today that is on hold drew --hold-soft on --hold-soft: in
    both cases the pill kept its ink and lost its shape entirely. --paper, for
    the same reason .pill below takes it — the card is carrying the colour, so
    what sits on top of it has to be the thing that is not. */
-.hold .priority_urgent,
-.blocked .priority_urgent,
+.hold .priority_p0,
+.blocked .priority_p0,
 .hold .dueLate,
 .blocked .dueLate,
 .hold .dueToday,
@@ -815,8 +947,8 @@
   font-size: 11px;
 }
 
-/* --blocked-soft on --blocked, the same pairing the urgent priority takes.
-   Overdue and urgent are meant to read as one alarm rather than two. */
+/* --blocked-soft on --blocked, the same pairing p0 takes. Overdue and p0 are
+   meant to read as one alarm rather than two. */
 .dueLate {
   background: var(--blocked-soft);
   color: var(--blocked);
@@ -1076,6 +1208,59 @@
   margin: 0;
   color: var(--ink-3);
   font-size: 13px;
+}
+
+/* The list of ways work can end in the last column. Shaped like the stage
+   editor in the card dialog — a number, a box, a way to take it out — because
+   it is the same gesture and there is no reason for it to be a second one. */
+.outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.outcomeRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  align-self: stretch;
+}
+
+.outcomeRow .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.outcomeRow button {
+  flex-shrink: 0;
+  min-width: 32px;
+  padding-inline: 6px;
+}
+
+/* Which section this is, left to right — the order the column draws them in,
+   and the order a card lands in when a move names none. */
+.outcomeNumber {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The whole of a confirmation, rather than a footnote under a field the way
+   `.note` is — so it is read at the size of the question it is asking. */
+.confirm {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
 }
 
 .spacer {

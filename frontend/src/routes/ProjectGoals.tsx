@@ -15,7 +15,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Goal } from '../api/client'
+import { api, type Goal, type Person } from '../api/client'
 import { GoalDialog } from '../components/GoalDialog'
 import { GOAL_STATUS_LABELS, GoalProgressBar, GoalTargetMark } from '../components/GoalMarks'
 import { PageHead } from '../components/Shell'
@@ -25,6 +25,7 @@ import {
   EmptyState,
   ErrorBanner,
   LiveRegion,
+  Tagged,
   cardStyles,
   useAnnouncer,
 } from '../components/ui'
@@ -139,7 +140,12 @@ export function ProjectGoals() {
       {view === 'list' && open.length ? (
         <div className={styles.grid}>
           {open.map((goal) => (
-            <GoalCard key={goal.id} goal={goal} projectKey={projectKey} />
+            <GoalCard
+              key={goal.id}
+              goal={goal}
+              projectKey={projectKey}
+              members={members.data?.members ?? []}
+            />
           ))}
         </div>
       ) : null}
@@ -152,7 +158,12 @@ export function ProjectGoals() {
           <h2 className={styles.settledHead}>Settled</h2>
           <div className={styles.grid}>
             {settled.map((goal) => (
-              <GoalCard key={goal.id} goal={goal} projectKey={projectKey} />
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                projectKey={projectKey}
+                members={members.data?.members ?? []}
+              />
             ))}
           </div>
         </>
@@ -342,7 +353,16 @@ function GoalPin({ goal, projectKey }: { goal: Goal; projectKey: string }) {
   )
 }
 
-function GoalCard({ goal, projectKey }: { goal: Goal; projectKey: string }) {
+function GoalCard({
+  goal,
+  projectKey,
+  members,
+}: {
+  goal: Goal
+  projectKey: string
+  /** Only to draw the description's `@` tags as tags. */
+  members: Person[]
+}) {
   const { total, done, open } = goal.progress
 
   return (
@@ -366,7 +386,11 @@ function GoalCard({ goal, projectKey }: { goal: Goal; projectKey: string }) {
       </div>
 
       <h3>{goal.name}</h3>
-      {goal.description ? <p>{goal.description}</p> : null}
+      {goal.description ? (
+        <p>
+          <Tagged text={goal.description} members={members} />
+        </p>
+      ) : null}
 
       <GoalProgressBar goal={goal} />
 

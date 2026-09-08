@@ -79,8 +79,8 @@ export interface ProjectSummary extends Project {
 }
 
 export type TaskType = 'feature' | 'bug' | 'chore'
-/** How soon a task needs attention. `urgent` is 0, `someday` is 3 — the default. */
-export type TaskPriority = 'urgent' | 'asap' | 'week' | 'someday'
+/** How soon a task needs attention. `p0` is drop everything, `p3` the default. */
+export type TaskPriority = 'p0' | 'p1' | 'p2' | 'p3'
 export type TaskStatus = 'active' | 'hold' | 'blocked' | 'cancelled'
 /** Where one tick-box sub-task has got to. `done` and `cancelled` both settle it. */
 export type ChecklistState = 'open' | 'done' | 'cancelled'
@@ -157,6 +157,12 @@ export interface BoardColumn {
   name: string
   description: string
   position: number
+  /**
+   * The sections this column is divided into, left to right — "Done",
+   * "Cancelled", "In prod". Only the board's last column may have any, and
+   * empty is the ordinary case: a column that draws no distinction.
+   */
+  outcomes: string[]
   task_count: number
 }
 
@@ -165,11 +171,15 @@ export interface Board {
   columns: BoardColumn[]
   min_columns: number
   max_columns: number
+  /** How many sections the last column may be divided into. */
+  max_outcomes: number
 }
 
 export interface ColumnInput {
   name: string
   description: string
+  /** Sent only for the board's last column; anywhere else it must be empty. */
+  outcomes?: string[]
 }
 
 /**
@@ -188,6 +198,9 @@ export interface TemplateStage {
   /** The sub-stages a card passes through here, left to right. May be empty:
    * a column can be named without asking anything of the card there. */
   sub_stage_labels: string[]
+  /** Which of this column's outcomes the template's cards may end on. Empty
+   * means all of them, the same silence `sub_stage_labels` keeps. */
+  allowed_outcomes: string[]
 }
 
 /**
@@ -225,7 +238,7 @@ export interface Template {
 export interface TemplateInput {
   name: string
   description?: string
-  stages?: { column_id: string; sub_stage_labels: string[] }[]
+  stages?: { column_id: string; sub_stage_labels: string[]; allowed_outcomes: string[] }[]
 }
 
 /** What a `status_change` entry carries. Empty on a comment somebody typed. */
@@ -390,8 +403,20 @@ export interface Task {
   sub_statuses: string[]
   /** Index into `sub_statuses` of the current stage. Null when the list is empty. */
   sub_status_index: number | null
-  /** When it is wanted by, `YYYY-MM-DD`. Null when the card has no date. */
+  /**
+   * When the card is wanted in the board's last column, `YYYY-MM-DD` — which is
+   * when the work is wanted done. Null when the card has no date.
+   */
   due_date: string | null
+  /** Dates for the columns before the last one, in board order. */
+  column_due_dates: ColumnDueDate[]
+  /**
+   * The date the card is working towards now: the soonest of the dates it has
+   * not met, `due_date` among them. Null once the card is done. This is the
+   * date a card is drawn with — `due_date` is the end of the line, this is the
+   * next thing owed.
+   */
+  next_due_date: string | null
   assignee: Person
   status: TaskStatus
   /** The template this card was created from, if any. Null is unrestricted. */
@@ -413,8 +438,16 @@ export interface Task {
   comment_count: number
   checklist: ChecklistItem[]
   /**
-   * When this sub-task was ticked off, or null while it is open. Always null on
-   * a card, which is finished by being in the board's last column instead.
+   * How the work ended: the section of the board's last column this card is
+   * in, by name. Null on every card that is not in a column divided that way.
+   */
+  outcome: string | null
+  /** Which of the column's `outcomes` that is. Null exactly when `outcome` is. */
+  outcome_index: number | null
+  /**
+   * When this task was finished, or null while it is open. A sub-task is
+   * finished by being ticked off; a card by being moved into the board's last
+   * column, and moving it back out clears this.
    */
   finished_at: string | null
   /**
@@ -438,6 +471,25 @@ export interface TaskDetail extends Task {
   subtasks: Task[]
 }
 
+/**
+ * A date a card is wanted in one particular column by.
+ *
+ * The last column is not among these: a card is done when it reaches the end of
+ * the board, so the date for the end of the board is the card's own `due_date`.
+ */
+export interface ColumnDueDateInput {
+  column_id: string
+  /** `YYYY-MM-DD`. */
+  due_date: string
+}
+
+export interface ColumnDueDate extends ColumnDueDateInput {
+  /** That column's name, so a date reads without the board beside it. */
+  column_name: string
+  /** Whether the card has reached that column. A met date is behind the card. */
+  met: boolean
+}
+
 /** The fields of a task the board can edit. Status moves separately. */
 export interface TaskInput {
   title: string
@@ -446,8 +498,14 @@ export interface TaskInput {
   priority: TaskPriority
   /** Up to 4 short stage labels. Moving between them happens on the board. */
   sub_statuses: string[]
-  /** `YYYY-MM-DD`, or null for a card with no date. */
+  /** `YYYY-MM-DD`, or null for a card with no date. The last column's date. */
   due_date: string | null
+  /**
+   * Dates for the columns on the way there. Sent whole: what goes up replaces
+   * every per-column date the card had. Never sent for a sub-task, which is not
+   * on the board.
+   */
+  column_due_dates?: ColumnDueDateInput[]
   assignee_id: string
   /** One of the project's templates, or null for a card with no template. */
   template_id: string | null
@@ -784,10 +842,12 @@ export const api = {
     request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: body(input) }),
   deleteTask: (taskRef: string) =>
     request<{ ok: boolean }>(`/tasks/${taskRef}`, { method: 'DELETE' }),
-  moveTask: (taskRef: string, columnId: string, position: number) =>
+  /** `outcome` names a section of the board's last column; left out, a card
+   * arriving there lands on the first one its template allows. */
+  moveTask: (taskRef: string, columnId: string, position: number, outcome?: string | null) =>
     request<TaskDetail>(`/tasks/${taskRef}/move`, {
       method: 'POST',
-      body: body({ column_id: columnId, position }),
+      body: body({ column_id: columnId, position, ...(outcome ? { outcome } : {}) }),
     }),
   /** Ticks a sub-task off, or puts it back. The only way one is finished:
    * a sub-task is not on the board, so there is no last column to move it to. */

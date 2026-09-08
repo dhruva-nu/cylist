@@ -67,6 +67,7 @@ import {
   type BoardColumn,
   type ChecklistItem,
   type ChecklistState,
+  type ColumnDueDate,
   type Goal,
   type Person,
   type Task,
@@ -103,11 +104,18 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
 
 const TYPES: TaskType[] = ['feature', 'bug', 'chore']
 
-const PRIORITIES: { value: TaskPriority; label: string }[] = [
-  { value: 'urgent', label: 'Urgent' },
-  { value: 'asap', label: 'ASAP' },
-  { value: 'week', label: 'This week' },
-  { value: 'someday', label: 'Someday' },
+/**
+ * The four levels, and what each one asks of whoever picks the card up.
+ *
+ * The label is the level alone — it is what the chip and the board carry, and
+ * a level is the whole of what P0 means to anyone who has read one before. The
+ * gloss is for the picker, where somebody is choosing between them.
+ */
+const PRIORITIES: { value: TaskPriority; label: string; means: string }[] = [
+  { value: 'p0', label: 'P0', means: 'drop what you are doing' },
+  { value: 'p1', label: 'P1', means: 'as soon as P0 is clear' },
+  { value: 'p2', label: 'P2', means: 'this week' },
+  { value: 'p3', label: 'P3', means: 'some time' },
 ]
 
 interface DialogProps {
@@ -237,7 +245,9 @@ function TaskDetailView({
   onClose,
 }: DialogProps & { task: TaskDetail; members: Person[]; onEdit: () => void }) {
   const column = columns.find((candidate) => candidate.id === task.column_id)
-  const late = isOverdue(task.due_date)
+  // A card that owes nothing is never late: once it is done, the day it was
+  // wanted done is a fact about the past rather than something outstanding.
+  const late = task.next_due_date !== null && isOverdue(task.due_date)
   const statusLabel = STATUSES.find((option) => option.value === task.status)?.label ?? task.status
 
   const edit = (
@@ -331,12 +341,38 @@ function TaskDetailView({
           </ReadField>
         </div>
 
+        {/* The dates before the last column's, which is the one above. A date
+            the card has already reached is kept rather than dropped — it is
+            what the schedule was, and reading only the dates still ahead would
+            make a card halfway through look like a card that was never
+            scheduled — but it is said quietly and asks for nothing. */}
+        {task.column_due_dates.length ? (
+          <ReadField label="Column dates">
+            <ul className={styles.columnDates}>
+              {task.column_due_dates.map((entry) => (
+                <ColumnDateRead key={entry.column_id} entry={entry} />
+              ))}
+            </ul>
+          </ReadField>
+        ) : null}
+
         <div className={styles.readPair}>
           {/* A sub-task is in no column, so the row that would name one says
               the thing that answers the same question for it instead. An empty
               Column would read as one that failed to load. */}
           {task.parent_id === null ? (
-            <ReadField label="Column">{column?.name ?? '—'}</ReadField>
+            // The column is where a card is; the date beside it is when being
+            // there started meaning done. Shown only once there is one, so a
+            // card still on its way says where it is and nothing more.
+            <ReadField label="Column">
+              {column?.name ?? '—'}
+              {task.outcome ? <span className={styles.role}>· {task.outcome}</span> : null}
+              {task.finished_at ? (
+                <span className={styles.role}>
+                  · finished {formatDue(task.finished_at.slice(0, 10))}
+                </span>
+              ) : null}
+            </ReadField>
           ) : (
             <ReadField label="Finished">
               {task.finished_at ? formatDue(task.finished_at.slice(0, 10)) : 'Not yet'}
@@ -359,7 +395,13 @@ function TaskDetailView({
         ) : null}
 
         <ReadField label="Sub-tasks">
-          <SubtasksRead task={task} onOpenTask={onOpenTask} announce={announce} onDone={onDone} />
+          <SubtasksRead
+            task={task}
+            members={members}
+            onOpenTask={onOpenTask}
+            announce={announce}
+            onDone={onDone}
+          />
         </ReadField>
 
         <ReadField label="Timeline">
@@ -593,6 +635,27 @@ function shown(value: string | number | string[] | null): string {
   return text.length > LONGEST ? `${text.slice(0, LONGEST - 1)}…` : text
 }
 
+/**
+ * One column's date, said as what it still asks for.
+ *
+ * Three states and not four: reached, late, and simply ahead. A date the card
+ * has passed is never late however long ago it was — the card got there, and
+ * the schedule has moved on to the next column.
+ */
+function ColumnDateRead({ entry }: { entry: ColumnDueDate }) {
+  const late = !entry.met && isOverdue(entry.due_date)
+  return (
+    <li className={entry.met ? styles.columnDateMet : undefined}>
+      <span className={styles.columnDateName}>{entry.column_name}</span>
+      <span className={late ? styles.late : ''}>
+        {late ? '⚠ ' : ''}
+        {formatDue(entry.due_date)}
+      </span>
+      {entry.met ? <span className={styles.columnDateNote}>reached</span> : null}
+    </li>
+  )
+}
+
 /** A labelled row of the detail view. The `Field` twin for text with no input. */
 function ReadField({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -660,7 +723,7 @@ function TaskForm({
     title: task?.title ?? '',
     description: task?.description ?? '',
     type: task?.type ?? 'feature',
-    priority: task?.priority ?? 'someday',
+    priority: task?.priority ?? 'p3',
     sub_statuses: task?.sub_statuses ?? [],
     // The date input's empty value is '', not null; the mutation turns it back
     // into the null the API reads as "no date".
@@ -678,6 +741,23 @@ function TaskForm({
    * thing that knows where it went.
    */
   const [subStatusIndex, setSubStatusIndex] = useState(task?.sub_status_index ?? 0)
+  /**
+   * A date per column, keyed by column — the shape the panel edits, not the
+   * shape the API takes. A record keyed by column is what "the date in this
+   * box" means; the list of pairs the API wants is built from it on save, with
+   * the empty boxes dropped.
+   */
+  const [columnDates, setColumnDates] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      (task?.column_due_dates ?? []).map((entry) => [entry.column_id, entry.due_date]),
+    ),
+  )
+  /**
+   * Whether the column-dates tab is showing. A card that has none starts
+   * without it: most cards are wanted done by a date and no more than that, and
+   * a tab of six empty date boxes on every card is six questions nobody asked.
+   */
+  const [scheduling, setScheduling] = useState(Boolean(task?.column_due_dates.length))
   const [columnId, setColumnId] = useState(task?.column_id ?? firstColumn.id)
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'active')
   const [reason, setReason] = useState('')
@@ -703,6 +783,13 @@ function TaskForm({
   const retyping = task !== null && form.template_id !== task.template_id
   /** Whether this card is one that can be on a goal at all. */
   const onGoal = task ? task.parent_id === null : !parentRef
+  /** Whether this card passes through columns, and so can be dated in them. */
+  const onBoard = task ? task.parent_id === null : !parentRef
+  /** The columns a date can be set for: every one but the last, which is `due_date`. */
+  const stages = columns.slice(0, -1)
+  const lastColumn = columns[columns.length - 1]
+  /** How far along the board the card has got, so a date behind it says so. */
+  const here = columns.findIndex((column) => column.id === task?.column_id)
 
   const save = useMutation({
     mutationFn: async () => {
@@ -710,6 +797,19 @@ function TaskForm({
         ...form,
         sub_statuses: form.sub_statuses.map((label) => label.trim()),
         due_date: form.due_date || null,
+        // Sent whole on a card, and never on a sub-task. Empty boxes are
+        // dropped rather than sent as nulls: a column with no date is a column
+        // with no row, which is also how a date is taken off again.
+        ...(onBoard
+          ? {
+              column_due_dates: stages
+                .filter((column) => columnDates[column.id])
+                .map((column) => ({
+                  column_id: column.id,
+                  due_date: columnDates[column.id] as string,
+                })),
+            }
+          : {}),
         jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
         pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
       }
@@ -833,6 +933,12 @@ function TaskForm({
         !form.sub_statuses.every((label) => label.trim()) ||
         Boolean(stalling && !reason.trim()),
     },
+    // Opened by the + beside the due date, and it stays open once a card has
+    // dates on it: a schedule you had to go and ask for once should be in front
+    // of you every time afterwards.
+    ...(onBoard && scheduling
+      ? [{ id: 'dates' as const, label: 'Column dates', incomplete: false }]
+      : []),
     ...(task ? [{ id: 'work' as const, label: 'Sub-tasks & comments', incomplete: false }] : []),
   ]
 
@@ -915,7 +1021,7 @@ function TaskForm({
               >
                 {PRIORITIES.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {option.label} — {option.means}
                   </option>
                 ))}
               </select>
@@ -980,12 +1086,36 @@ function TaskForm({
           hidden={tab !== 'details'}
         >
           <FieldPair>
-            <Field label="Due date">
-              <input
-                type="date"
-                value={form.due_date ?? ''}
-                onChange={(event) => setForm({ ...form, due_date: event.target.value })}
-              />
+            <Field
+              label="Due date"
+              {...(onBoard ? { hint: `When it is wanted done — in ${lastColumn?.name}.` } : {})}
+            >
+              <div className={styles.dueRow}>
+                <input
+                  type="date"
+                  value={form.due_date ?? ''}
+                  onChange={(event) => setForm({ ...form, due_date: event.target.value })}
+                />
+                {/* The way in to the dates before this one. A card is dated at
+                    the end of the board by default and the columns on the way
+                    are asked for, not offered: most cards want one date, and a
+                    form that opens with six is a form that reads as six
+                    questions. */}
+                {onBoard ? (
+                  <Button
+                    variant="ghost"
+                    small
+                    title="Set a date per column"
+                    aria-label="Set a date per column"
+                    onClick={() => {
+                      setScheduling(true)
+                      setTab('dates')
+                    }}
+                  >
+                    +
+                  </Button>
+                ) : null}
+              </div>
             </Field>
             <Field label="Assignee" required>
               <select
@@ -1129,6 +1259,36 @@ function TaskForm({
           )}
         </div>
 
+        {onBoard && scheduling ? (
+          <div
+            className={styles.panel}
+            role="tabpanel"
+            id="task-panel-dates"
+            aria-labelledby="task-tab-dates"
+            hidden={tab !== 'dates'}
+          >
+            <p className={styles.note}>
+              The day this card is wanted in each column. Any of them, none of them — a column left
+              empty simply has no date. The last column is the card&rsquo;s due date, on Details.
+            </p>
+            {stages.map((column, index) => (
+              <Field
+                key={column.id}
+                label={column.name}
+                {...(index <= here ? { hint: 'The card has already been here.' } : {})}
+              >
+                <input
+                  type="date"
+                  value={columnDates[column.id] ?? ''}
+                  onChange={(event) =>
+                    setColumnDates({ ...columnDates, [column.id]: event.target.value })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+        ) : null}
+
         {task ? (
           <div
             className={styles.panel}
@@ -1139,6 +1299,7 @@ function TaskForm({
           >
             <Subtasks
               task={task}
+              members={members}
               onOpenTask={onOpenTask}
               onSplit={onSplit}
               announce={announce}
@@ -1218,7 +1379,7 @@ function Comments({
   )
 }
 
-type TabId = 'basics' | 'details' | 'work'
+type TabId = 'basics' | 'details' | 'dates' | 'work'
 
 interface Tab {
   id: TabId
@@ -1616,12 +1777,15 @@ function SubtaskCardRow({
  */
 function Subtasks({
   task,
+  members,
   onOpenTask,
   onSplit,
   announce,
   onDone,
 }: {
   task: TaskDetail
+  /** The people a checklist item may tag, and whose tags it draws. */
+  members: Person[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   onSplit?: ((parentRef: string) => void) | undefined
   announce: (message: string) => void
@@ -1667,6 +1831,7 @@ function Subtasks({
           <ChecklistRow
             key={item.id}
             item={item}
+            members={members}
             busy={busy}
             onSetState={(state) => setState.mutate({ id: item.id, state })}
             onRemove={() => remove.mutate(item.id)}
@@ -1678,18 +1843,21 @@ function Subtasks({
         ) : null}
 
         <div className={styles.composer}>
-          <input
+          {/* Enter is the list's own gesture — type a line, press enter, type
+              the next — and it is also how the suggestion list accepts a name.
+              The box stops the key while the list is open, so the tag is taken
+              first and the item is added by the enter after it. */}
+          <MentionBox
             value={title}
+            onChange={setTitle}
+            members={members}
+            className={styles.grow}
             aria-label="Add a checklist item"
             maxLength={200}
-            onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && title.trim()) {
-                event.preventDefault()
-                add.mutate(title.trim())
-              }
+            onEnter={() => {
+              if (title.trim()) add.mutate(title.trim())
             }}
-            placeholder="Add a checklist item…"
+            placeholder="Add a checklist item, @ to tag someone…"
           />
           <Button
             small
@@ -1748,11 +1916,14 @@ function Subtasks({
  */
 function SubtasksRead({
   task,
+  members,
   onOpenTask,
   announce,
   onDone,
 }: {
   task: TaskDetail
+  /** Only to draw the `@` tags in a checklist item as tags. */
+  members: Person[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
@@ -1781,6 +1952,7 @@ function SubtasksRead({
         <ChecklistRow
           key={item.id}
           item={item}
+          members={members}
           busy={busy}
           onSetState={(state) => setState.mutate({ id: item.id, state })}
         />
@@ -1822,11 +1994,14 @@ function SubtasksRead({
  */
 function ChecklistRow({
   item,
+  members,
   busy,
   onSetState,
   onRemove,
 }: {
   item: ChecklistItem
+  /** Only to draw the `@` tags in the title as tags. */
+  members: Person[]
   busy: boolean
   onSetState: (state: ChecklistState) => void
   onRemove?: (() => void) | undefined
@@ -1842,7 +2017,9 @@ function ChecklistRow({
           disabled={busy}
           onChange={(event) => onSetState(event.target.checked ? 'done' : 'open')}
         />
-        <span className={item.state === 'cancelled' ? styles.struck : ''}>{item.title}</span>
+        <span className={item.state === 'cancelled' ? styles.struck : ''}>
+          <Tagged text={item.title} members={members} />
+        </span>
       </label>
       {onRemove ? (
         <span className={styles.checkActions}>

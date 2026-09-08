@@ -340,7 +340,7 @@ async def test_two_edits_an_hour_apart_are_still_two_things(
     half of itself."""
     reference = await make_task(signed_in, project)
     await signed_in.patch(f"/tasks/{reference}", json={"title": "Wire up billing properly"})
-    await signed_in.patch(f"/tasks/{reference}", json={"priority": "urgent"})
+    await signed_in.patch(f"/tasks/{reference}", json={"priority": "p0"})
 
     report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
 

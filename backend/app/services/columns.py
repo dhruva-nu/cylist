@@ -1,8 +1,15 @@
-"""Board columns, and the two rules that keep a board a board.
+"""Board columns, and the rules that keep a board a board.
 
 A board holds between two and eight columns. Both ends are enforced here
 rather than in the database, because "how many columns are there" is a count
 across rows that no ``CHECK`` constraint can see.
+
+The board's **last** column is the same kind of fact, and it carries two
+meanings the others do not: a card in it is finished — see
+:func:`app.services.tasks.move` — and it alone may be divided into *outcomes*,
+the up-to-three sections that say how the work ended. Both follow a position
+rather than a column, so both are checked here and in ``tasks`` rather than
+written into either row.
 """
 
 from __future__ import annotations
@@ -145,18 +152,77 @@ async def create(session: AsyncSession, project: Project, data: ColumnCreate) ->
         name=data.name,
         description=data.description,
         position=existing,
+        outcomes=data.outcomes,
     )
     session.add(column)
     await session.flush()
+    await _strip_stale_outcomes(session, project.id)
     return column
 
 
 async def update(session: AsyncSession, column: BoardColumn, data: ColumnUpdate) -> BoardColumn:
-    """Apply a partial update. Position moves through :func:`reorder`."""
-    for field, value in data.model_dump(exclude_unset=True).items():
+    """Apply a partial update. Position moves through :func:`reorder`.
+
+    Rewriting the outcomes settles the cards standing in them in the same
+    breath, because a card pointing past the end of a shorter list is in a
+    section that is not there — see :func:`_resettle`.
+
+    Raises:
+        UnprocessableRequestError: if outcomes are given for a column that is
+            not the board's last.
+    """
+    fields = data.model_dump(exclude_unset=True)
+    outcomes = fields.get("outcomes")
+    if outcomes is not None:
+        await _require_last(session, column, outcomes)
+
+    for field, value in fields.items():
         setattr(column, field, value)
     await session.flush()
+
+    if outcomes is not None:
+        await _resettle(session, column)
     return column
+
+
+async def _require_last(session: AsyncSession, column: BoardColumn, outcomes: list[str]) -> None:
+    """Refuse outcomes anywhere but at the end of the board.
+
+    An outcome is how a piece of work *ended*, and nothing ends in the middle
+    of a board: sections on a column cards still move out of would be a second
+    kind of column, drawn like an ending and meaning nothing of the sort.
+    Clearing them is allowed anywhere, so a column that loses the last place
+    to a new one on its right can be tidied up.
+    """
+    if not outcomes:
+        return
+    finished = await last(session, column.project_id)
+    if finished.id == column.id:
+        return
+    raise UnprocessableRequestError(
+        f"Only the board's last column can be divided into outcomes, and that is "
+        f"{finished.name}. {column.name} is one cards still move out of.",
+        details={"last_column": finished.name, "last_column_id": str(finished.id)},
+    )
+
+
+async def _resettle(session: AsyncSession, column: BoardColumn) -> None:
+    """Put the cards in this column back into a section that exists.
+
+    A shortened list leaves cards pointing past its end; they land in the last
+    section still standing, which is the nearest thing to where they were. An
+    emptied list takes every card out of a section, because there are none.
+    """
+    cards = list(
+        await session.scalars(
+            select(Task).where(Task.column_id == column.id, Task.outcome_index.is_not(None))
+        )
+    )
+    ceiling = len(column.outcomes) - 1
+    for card in cards:
+        card.outcome_index = None if ceiling < 0 else min(card.outcome_index or 0, ceiling)
+    if cards:
+        await session.flush()
 
 
 async def delete(session: AsyncSession, column: BoardColumn) -> None:
@@ -189,6 +255,7 @@ async def delete(session: AsyncSession, column: BoardColumn) -> None:
     await session.delete(column)
     await session.flush()
     await _renumber(session, project_id)
+    await _strip_stale_outcomes(session, project_id)
 
 
 async def reorder(
@@ -213,7 +280,31 @@ async def reorder(
     for position, column_id in enumerate(column_ids):
         by_id[column_id].position = position
     await session.flush()
+    await _strip_stale_outcomes(session, project.id)
     return [by_id[column_id] for column_id in column_ids]
+
+
+async def _strip_stale_outcomes(session: AsyncSession, project_id: UUID) -> None:
+    """Take the outcomes off any column that is no longer the board's last.
+
+    Last is a position, so a column loses the title without being touched: a
+    new column is added to its right, the board is reordered, the column that
+    was last is deleted. Whichever it was, sections left standing in the middle
+    of a board would go on saying work ended there, and cards would go on
+    sitting in them.
+    """
+    board = list(
+        await session.scalars(
+            select(BoardColumn)
+            .where(BoardColumn.project_id == project_id)
+            .order_by(BoardColumn.position)
+        )
+    )
+    for column in board[:-1]:
+        if column.outcomes:
+            column.outcomes = []
+            await session.flush()
+            await _resettle(session, column)
 
 
 async def _renumber(session: AsyncSession, project_id: UUID) -> None:

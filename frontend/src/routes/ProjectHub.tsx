@@ -4,18 +4,21 @@
  * All five are live: the board, its goals, the file store, the vault and the
  * people on the project, each summarised by the counts behind its card.
  *
- * The day report sits beside the title rather than becoming a sixth card. The
- * cards are places you go and stay; a report is something you take away, so it
- * opens over the hub and closes again.
+ * The day report used to sit beside the title, on the reasoning that the cards
+ * are places you go and stay while a report is something you take away. The
+ * second half of that was right and the conclusion was wrong: a thing you take
+ * away belongs somewhere you can take it from wherever you are, not on the one
+ * screen you have to come back to. It is a section of the sidebar now — see
+ * `components/DayReport.tsx` — and reads beside the board rather than over the
+ * hub.
  */
 
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { api } from '../api/client'
-import { DayReportDialog } from '../components/DayReportDialog'
 import { PageHead } from '../components/Shell'
-import { Button, EmptyState, ErrorBanner, Eyebrow, cardStyles } from '../components/ui'
+import { EmptyState, ErrorBanner, Eyebrow, cardStyles } from '../components/ui'
 import styles from './ProjectHub.module.css'
 
 const ICONS = {
@@ -57,7 +60,6 @@ const ICONS = {
 
 export function ProjectHub() {
   const { projectKey } = useParams({ from: '/p/$projectKey' })
-  const [reporting, setReporting] = useState(false)
   const summary = useQuery({
     queryKey: ['project-summary', projectKey],
     queryFn: () => api.getProjectSummary(projectKey),
@@ -70,21 +72,9 @@ export function ProjectHub() {
 
   return (
     <>
-      <PageHead
-        eyebrow={<Eyebrow>{project.key}</Eyebrow>}
-        title={project.name}
-        actions={
-          <Button variant="go" onClick={() => setReporting(true)}>
-            Day report
-          </Button>
-        }
-      >
+      <PageHead eyebrow={<Eyebrow>{project.key}</Eyebrow>} title={project.name}>
         {project.description || 'No description yet.'}
       </PageHead>
-
-      {reporting ? (
-        <DayReportDialog projectKey={projectKey} onClose={() => setReporting(false)} />
-      ) : null}
 
       <div className={styles.grid}>
         <Tool
