@@ -29,6 +29,8 @@ import {
   type ReactNode,
 } from 'react'
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
+import { SidebarSection } from './SidebarSection'
+import { Today } from './Today'
 import styles from './Sidebar.module.css'
 
 const THEME_LABELS: Record<ThemeChoice, string> = {
@@ -206,52 +208,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <span aria-hidden="true">✕</span>
         </button>
       ) : null}
-      <Section
+      {/* Today's work first. It is the section you open the sidebar for, and
+          the one whose answer changes hour to hour; Settings is the one you
+          set once and leave, so it sits at the bottom. */}
+      <Today folded={folded.includes('Today')} onToggle={() => toggleSection('Today')} />
+      <SidebarSection
         name="Settings"
         folded={folded.includes('Settings')}
         onToggle={() => toggleSection('Settings')}
       >
         <SettingsSection />
-      </Section>
+      </SidebarSection>
     </aside>
-  )
-}
-
-/**
- * One foldable section.
- *
- * The heading is the button, so the whole strip is the target rather than a
- * chevron beside a label — and `aria-expanded` on it is what says the strip
- * shows and hides what follows it.
- */
-function Section({
-  name,
-  folded,
-  onToggle,
-  children,
-}: {
-  name: string
-  folded: boolean
-  onToggle: () => void
-  children: ReactNode
-}) {
-  return (
-    <section className={styles.section}>
-      <h2>
-        <button
-          type="button"
-          className={styles.sectionHead}
-          aria-expanded={!folded}
-          onClick={onToggle}
-        >
-          <span className={styles.sectionName}>{name}</span>
-          <span className={styles.chevron} aria-hidden="true">
-            {folded ? '▸' : '▾'}
-          </span>
-        </button>
-      </h2>
-      {folded ? null : <div className={styles.sectionBody}>{children}</div>}
-    </section>
   )
 }
 
