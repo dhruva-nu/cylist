@@ -1,52 +1,10 @@
 /*
- * The sidebar, and the button in the bar that shows it.
+ * The sidebar. Always there, so there is no button here to show it.
  *
  * Painted on `--paper` against a page on `--bg`, with a line down its left
  * edge: the page is the ground and this is a panel laid beside it, which is
  * the same relationship a card has to the page it sits on.
  */
-
-.toggle {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--paper);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-
-.toggle:hover {
-  color: var(--ink);
-}
-
-/* Open, the button wears the same mark the tabs wear when they are the page
-   you are on — the control and the panel it opened saying the same thing. */
-.toggle[data-open='true'] {
-  border-color: transparent;
-  background: var(--brand-soft);
-  color: var(--brand-ink);
-}
-
-.toggle svg {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linejoin: round;
-}
-
-/* The filled third. `currentColor` at a low opacity rather than a token, so it
-   stays in step with whichever of the two states the button is in. */
-.toggleFill {
-  fill: currentColor;
-  fill-opacity: 0.22;
-  stroke: none;
-}
 
 .sidebar {
   display: flex;
@@ -62,22 +20,23 @@
 }
 
 /*
- * Under 900px there is no width to give away, so the panel stops being a
- * column of the frame and covers the right-hand edge instead.
+ * Under 900px the frame stacks rather than sharing a row — see `.frame` in
+ * Shell.module.css, which is what takes the scroll there. A full-width panel
+ * under the page, with the line moved to its top edge because that is now
+ * where the page it is beside actually is.
  *
- * No scrim behind it and no focus trap in front: this is a complementary
- * region rather than a dialog, the page underneath stays usable, and the
- * toggle that opened it is still where it was. What it does get is Escape —
- * see the effect in Sidebar.tsx, which is gated on this same width.
+ * No overlay and no drawer at any width. With nothing to reopen it, a panel
+ * that hid itself on a narrow display would be a panel whose Settings you
+ * could not reach at all.
  */
-.overlay {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 20;
-  width: min(var(--sidebar-width, 336px), 100vw);
-  box-shadow: var(--shadow-lg);
+@media (max-width: 899px) {
+  .sidebar {
+    flex: none;
+    width: 100%;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    overflow-y: visible;
+  }
 }
 
 .section {
@@ -187,33 +146,4 @@
 .theme button.themeOn {
   background: var(--brand-soft);
   color: var(--brand-ink);
-}
-
-/*
- * The way out of the overlay.
- *
- * Only rendered in that shape — see `Sidebar.tsx`. As a column of the frame
- * the panel covers nothing and the toggle in the bar is still there to press
- * again; as an overlay that toggle is directly underneath this panel, and a
- * drawer whose only exit is Escape is a drawer a pointer cannot shut.
- */
-.close {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-  width: 100%;
-  padding: 12px 18px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: none;
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.close:hover {
-  color: var(--ink);
 }

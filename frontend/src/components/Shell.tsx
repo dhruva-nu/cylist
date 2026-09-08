@@ -4,7 +4,7 @@ import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode } from 'react'
 import { api } from '../api/client'
-import { Sidebar, SidebarToggle, useSidebar } from './Sidebar'
+import { Sidebar } from './Sidebar'
 import { Avatar } from './ui'
 import styles from './Shell.module.css'
 
@@ -49,27 +49,22 @@ export function Shell() {
   // reading-width column every other screen sits in.
   const wide = Boolean(matchRoute({ to: '/p/$projectKey/board' }))
   const page = usePageWidth() ?? ''
-  // Owned here rather than inside the sidebar, because the control that opens
-  // it is in the bar and the panel it opens is further down the tree — two
-  // places for one piece of state.
-  const sidebar = useSidebar()
 
   return (
     <>
       {/*
         Eight tab stops sit between the top of the page and the content —
-        wordmark, six tabs, the sidebar toggle, the breadcrumb. Tabbing past
-        them on every navigation is the sort of thing that makes a keyboard
-        unusable, so there is a way over them.
+        wordmark, six tabs, the breadcrumb. Tabbing past them on every
+        navigation is the sort of thing that makes a keyboard unusable, so
+        there is a way over them.
       */}
       <a href="#content" className={styles.skip}>
         Skip to content
       </a>
       {/* The window's remaining height, split into the page and the sidebar
           beside it. The bar sits inside the page's own column rather than
-          above both, so opening the sidebar narrows the navigation along with
-          the content it belongs to instead of leaving it running underneath
-          the panel. */}
+          above both, so the navigation is as wide as the content it belongs
+          to rather than running on underneath the panel. */}
       <div className={styles.frame}>
         <div className={styles.column}>
           <div className={`${styles.top} ${page}`}>
@@ -79,7 +74,6 @@ export function Shell() {
               </Link>
               <ProjectTabs />
               <div className={styles.right}>
-                <SidebarToggle open={sidebar.open} onToggle={sidebar.toggle} />
                 <You />
               </div>
             </div>
@@ -89,7 +83,7 @@ export function Shell() {
             <Outlet />
           </main>
         </div>
-        <Sidebar open={sidebar.open} onClose={sidebar.close} />
+        <Sidebar />
       </div>
     </>
   )
