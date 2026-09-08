@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.models.activity import Activity
 from app.schemas.activity import FieldChange, HistoryEntry
+from app.services import agent_sessions
 
 
 async def record(
@@ -59,6 +60,12 @@ async def record(
         payload=payload or {},
     )
     session.add(entry)
+    # A write to a card is also news about the agents on it: an agent's own
+    # write is proof it is alive, a person's write clears the finished ones.
+    # Done here because this is the one place every mutation already passes.
+    await agent_sessions.touch_from_activity(
+        session, principal, verb, entity_type=entity_type, entity_id=entity_id
+    )
     return entry
 
 
@@ -331,6 +338,13 @@ _WORDS = {
     "client": "client",
 }
 
+_AGENT_WAITING = {
+    "turn_ended": "The agent finished its turn and is waiting for your reply.",
+    "permission": "The agent is waiting for permission to run something.",
+    "idle": "The agent has been waiting for a prompt for a while.",
+    "question": "The agent asked you a question.",
+}
+
 _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     # --- The project itself -------------------------------------------------
     "project.created": lambda p: f"Started the project {p.get('name') or p.get('key')}.",
@@ -382,6 +396,21 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "token.issued": lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
     "token.revoked": lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
     "session.started": lambda p: "Signed in.",
+    # --- Agents on a card. Written by the harness's hooks, one line per change
+    #     of state and never per heartbeat --------------------------------------
+    "agent_session.started": lambda p: (
+        f"An agent started working on this card ({p.get('client_name')})."
+        if p.get("client_name")
+        else "An agent started working on this card."
+    ),
+    "agent_session.waiting": lambda p: _AGENT_WAITING.get(
+        str(p.get("reason")), "The agent is waiting on you."
+    ),
+    "agent_session.finished": lambda p: (
+        f"The agent moved on to {p.get('moved_to')}."
+        if p.get("reason") == "moved" and p.get("moved_to")
+        else "The agent's session ended."
+    ),
 }
 
 
