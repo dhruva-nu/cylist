@@ -16,11 +16,12 @@ const OWNER_COLOUR = '#4a7b8c'
  * How wide the screen you are on is allowed to be.
  *
  * Three answers rather than the two there used to be. The board is its own
- * container and takes the window; People, Files and Vault are a directory, a
- * table and two trees, none of which is reading matter, and the 1180px column
- * they used to sit in spent a quarter of a wide display on empty margin while
- * squeezing the content into more, thinner pieces than it wanted; everything
- * else is prose and stays where prose belongs.
+ * container and takes the window; People, Files, Vault and the rest of a
+ * project's areas are a directory, a table and two trees, none of which is
+ * reading matter, and the 1180px column they used to sit in spent a quarter
+ * of a wide display on empty margin while squeezing the content into more,
+ * thinner pieces than it wanted; everything else is prose and stays where
+ * prose belongs.
  *
  * The value lands on the frame as a custom property, so the bar and the
  * breadcrumbs line up with the page rather than each carrying a width of their
@@ -32,6 +33,7 @@ function usePageWidth(): string | undefined {
   if (matchRoute({ to: '/p/$projectKey/board' })) return styles.pageBoard
   if (
     matchRoute({ to: '/p/$projectKey' }) ||
+    matchRoute({ to: '/p/$projectKey/agents' }) ||
     matchRoute({ to: '/p/$projectKey/people' }) ||
     matchRoute({ to: '/p/$projectKey/files' }) ||
     matchRoute({ to: '/p/$projectKey/goals' }) ||
@@ -116,7 +118,7 @@ function You() {
   )
 }
 
-/** Tabs across a project's four areas. Hidden outside a project. */
+/** Tabs across a project's areas. Hidden outside a project. */
 function ProjectTabs() {
   const matchRoute = useMatchRoute()
   const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
@@ -148,6 +150,13 @@ function ProjectTabs() {
       >
         People
       </Link>
+      <Link
+        to="/p/$projectKey/agents"
+        params={{ projectKey }}
+        activeProps={{ className: 'active' }}
+      >
+        Agents
+      </Link>
     </nav>
   )
 }
@@ -155,6 +164,7 @@ function ProjectTabs() {
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+  const onAgents = matchRoute({ to: '/p/$projectKey/agents' })
   const onBoard = matchRoute({ to: '/p/$projectKey/board' })
   const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
@@ -171,7 +181,9 @@ function Breadcrumbs() {
           ? 'Vault'
           : onPeople
             ? 'People'
-            : null
+            : onAgents
+              ? 'Agents'
+              : null
 
   if (!inProject) {
     return (

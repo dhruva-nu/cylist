@@ -1,8 +1,10 @@
 /**
- * A project's five areas.
+ * A project's six areas.
  *
- * All five are live: the board, its goals, the file store, the vault and the
- * people on the project, each summarised by the counts behind its card.
+ * Five are live: the board, its goals, the file store, the vault and the
+ * people on the project, each summarised by the counts behind its card. The
+ * sixth, what an agent needs to work here, is a placeholder — see
+ * `routes/Agents.tsx`.
  *
  * The day report used to sit beside the title, on the reasoning that the cards
  * are places you go and stay while a report is something you take away. The
@@ -46,6 +48,14 @@ const ICONS = {
       <circle cx="12" cy="12" r="8" />
       <circle cx="12" cy="12" r="4" />
       <circle cx="12" cy="12" r="1" fill="currentColor" />
+    </svg>
+  ),
+  agents: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <rect x="4" y="7" width="16" height="12" rx="3" />
+      <path d="M12 7V4" />
+      <circle cx="9.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   ),
   people: (
@@ -171,6 +181,16 @@ export function ProjectHub() {
         >
           Logins, keys and links in trees you shape yourself.
         </Tool>
+
+        <Tool
+          icon={ICONS.agents}
+          title="Agents"
+          to="/p/$projectKey/agents"
+          projectKey={projectKey}
+          meta={<span className={styles.badge}>Placeholder</span>}
+        >
+          The skills, documentation and instructions an agent needs to operate Cylist here.
+        </Tool>
       </div>
     </>
   )
@@ -190,6 +210,7 @@ function Tool({
   children: ReactNode
   meta?: ReactNode
   to?:
+    | '/p/$projectKey/agents'
     | '/p/$projectKey/board'
     | '/p/$projectKey/goals'
     | '/p/$projectKey/files'

@@ -1,0 +1,63 @@
+/* The three places agent material will live. Same measure as a project hub's
+   tools: these are areas you go to, not rows in a list.
+
+   `auto-fit`, because there are only three of them and this is a wide page —
+   an unfilled `auto-fill` track still takes its width, which would hold the
+   space out to the right and leave the three sitting left of centre. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 300px));
+  justify-content: center;
+  gap: 20px;
+}
+
+.resource {
+  min-height: 240px;
+  padding: 30px 22px 24px;
+  align-items: center;
+  text-align: center;
+}
+
+.resource h3 {
+  font-size: 20px;
+}
+
+.resource p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.illustration {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  margin-bottom: 4px;
+  border-radius: 24px;
+  background: var(--paper-2);
+}
+
+.illustration svg {
+  width: 42px;
+  height: 42px;
+  color: var(--ink-2);
+}
+
+.meta {
+  display: flex;
+  justify-content: center;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.badge {
+  padding: 2px 10px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
