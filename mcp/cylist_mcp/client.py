@@ -56,6 +56,30 @@ class ApiClient:
         clean = {key: value for key, value in params.items() if value is not None}
         return await self._send("GET", path, params=clean)
 
+    async def get_text(self, path: str, *, max_chars: int) -> tuple[str, bool]:
+        """Fetch a path as text, for a download rather than a JSON document.
+
+        Returns the text and whether it was cut short. Capped because the other
+        end of this is a model's context window: a skill is meant to be a page
+        of instructions, and one that turns out to be a megabyte should arrive
+        truncated with a note rather than filling the window.
+        """
+        try:
+            response = await self._http.get(path, headers={"Accept": "*/*"})
+        except httpx.RequestError as exc:
+            raise CylistError(
+                f"Cannot reach the Cylist API at {self.url}: {exc}",
+                code="unreachable",
+            ) from exc
+
+        if response.status_code >= httpx.codes.BAD_REQUEST:
+            raise _api_error(response)
+
+        body = response.text
+        if len(body) > max_chars:
+            return body[:max_chars], True
+        return body, False
+
     async def post(self, path: str, body: dict[str, Any] | None = None) -> Any:
         return await self._send("POST", path, json=body if body is not None else {})
 

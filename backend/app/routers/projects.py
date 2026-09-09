@@ -26,7 +26,7 @@ from app.schemas.projects import (
     ProjectSummary,
     ProjectUpdate,
 )
-from app.services import activity, columns, files, goals, projects, tasks, vault
+from app.services import activity, agents, columns, files, goals, projects, tasks, vault
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -124,6 +124,7 @@ async def get_summary(
     task_counts = await tasks.status_counts(session, project)
     contents = await files.counts(session, project)
     stored = await vault.counts(session, project)
+    agent_material = await agents.counts(session, project)
     goal_count, open_goals = await goals.counts_for_project(session, project)
     return ProjectSummary(
         **_read(project).model_dump(),
@@ -139,6 +140,8 @@ async def get_summary(
         file_count=contents.items,
         vault_tree_count=stored.trees,
         vault_secret_count=stored.secrets,
+        skill_count=agent_material.skills,
+        agent_note_count=agent_material.notes,
     )
 
 

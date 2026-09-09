@@ -76,6 +76,10 @@ export interface ProjectSummary extends Project {
   vault_tree_count: number
   /** Credentials stored across every tree. */
   vault_secret_count: number
+  /** Skills uploaded for this project's agents. */
+  skill_count: number
+  /** Lines on the agent scratchpad. */
+  agent_note_count: number
 }
 
 export type TaskType = 'feature' | 'bug' | 'chore'
@@ -660,6 +664,35 @@ export interface ProjectInput {
   description?: string
 }
 
+/** An uploaded skill: a packaged job an agent can be handed. */
+export interface Skill {
+  id: string
+  project_id: string
+  name: string
+  description: string | null
+  size: number
+  mime: string
+  added_by: Person | null
+  created_at: string
+}
+
+/** One line on a project's agent scratchpad. */
+export interface AgentNote {
+  id: string
+  project_id: string
+  body: string
+  /**
+   * The credential that wrote it — a token's label, or the owner for a
+   * browser session. What tells an agent's line from a person's.
+   */
+  author_label: string
+  added_by: Person | null
+  created_at: string
+}
+
+/** The scratchpad's cap, mirrored from the server so the box can count down. */
+export const NOTE_MAX_LENGTH = 280
+
 export type ItemKind = 'file' | 'link'
 export type ItemSource = 'upload' | 'sharepoint' | 'gdrive' | 'other'
 
@@ -845,6 +878,29 @@ export const api = {
   deleteItem: (id: string) => request<{ ok: boolean }>(`/items/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a file's bytes from — used as an anchor's href. */
   downloadUrl: (id: string) => `${API_BASE}/items/${id}/download`,
+  listSkills: (ref: string) => request<Skill[]>(`/projects/${ref}/skills`),
+  uploadSkill: (ref: string, file: File, description?: string, addedBy?: string | null) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (description) form.append('description', description)
+    if (addedBy) form.append('added_by', addedBy)
+    return request<Skill>(`/projects/${ref}/skills`, { method: 'POST', body: form })
+  },
+  updateSkill: (id: string, input: { description: string | null }) =>
+    request<Skill>(`/skills/${id}`, { method: 'PATCH', body: body(input) }),
+  deleteSkill: (id: string) => request<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
+  /** Where the browser fetches a skill's bytes from — used as an anchor's href. */
+  skillDownloadUrl: (id: string) => `${API_BASE}/skills/${id}/download`,
+
+  listAgentNotes: (ref: string) => request<AgentNote[]>(`/projects/${ref}/agent-notes`),
+  addAgentNote: (ref: string, note: string) =>
+    request<AgentNote>(`/projects/${ref}/agent-notes`, {
+      method: 'POST',
+      body: body({ body: note }),
+    }),
+  deleteAgentNote: (id: string) =>
+    request<{ ok: boolean }>(`/agent-notes/${id}`, { method: 'DELETE' }),
+
   listColumns: (ref: string) => request<Board>(`/projects/${ref}/columns`),
   createColumn: (ref: string, input: ColumnInput) =>
     request<BoardColumn>(`/projects/${ref}/columns`, { method: 'POST', body: body(input) }),
