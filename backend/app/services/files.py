@@ -19,7 +19,6 @@ renamed, moved or deleted — see :func:`_ensure_not_the_root`.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from typing import NamedTuple
 from uuid import UUID
 
@@ -28,29 +27,18 @@ from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import (
-    ConflictError,
-    NotFoundError,
-    PayloadTooLargeError,
-    UnprocessableRequestError,
-)
-from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
+from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.models.file import FileItem, Folder, ItemKind, ItemSource
 from app.models.person import Person
 from app.models.project import Project
 from app.schemas.files import FolderCreate, FolderUpdate, ItemUpdate, LinkCreate, clean_name
-from app.storage import BlobStore, BlobTooLargeError
-
-CHUNK_BYTES = 1 << 20
-"""How much of an upload is held in memory at once. Starlette has already
-spooled anything past its own megabyte to a temporary file, so this bounds the
-copy from there into the blob store rather than the receive itself."""
+from app.services import blobs
+from app.storage import BlobStore
 
 MAX_DEPTH = 32
 """How deep a folder may sit, the root counting as the first level. A cap
 rather than a guess: it makes every walk up the tree terminate, so a cycle that
 somehow reached the database surfaces as a 422 instead of a hung request."""
-
-DEFAULT_MIME = "application/octet-stream"
 
 
 class Counts(NamedTuple):
@@ -218,7 +206,7 @@ async def delete_folder(session: AsyncSession, store: BlobStore, folder: Folder)
     blob_ids = await _blob_ids_under(session, folder)
     await session.execute(delete(Folder).where(Folder.id == folder.id))
     await session.flush()
-    await _collect_garbage(session, store, blob_ids)
+    await blobs.collect_garbage(session, store, blob_ids)
 
 
 # --- Items -----------------------------------------------------------------
@@ -250,20 +238,7 @@ async def upload(
     await _ensure_name_is_free(session, folder, name)
     await _ensure_person_exists(session, added_by)
 
-    try:
-        stored = await store.write(_chunks(source), max_bytes=max_bytes)
-    except BlobTooLargeError as exc:
-        raise PayloadTooLargeError(
-            f"That file is larger than the {max_bytes // (1024 * 1024)} MB upload limit.",
-            details={"max_bytes": max_bytes},
-        ) from exc
-
-    mime = source.content_type or DEFAULT_MIME
-    blob = await session.scalar(select(Blob).where(Blob.sha256 == stored.sha256))
-    if blob is None:
-        blob = Blob(sha256=stored.sha256, size=stored.size, mime=mime, path=stored.path)
-        session.add(blob)
-        await session.flush()
+    blob, size, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
 
     return await _add_item(
         session,
@@ -273,7 +248,7 @@ async def upload(
             name=name,
             blob_id=blob.id,
             source=ItemSource.UPLOAD,
-            size=stored.size,
+            size=size,
             mime=mime,
             added_by=added_by,
         ),
@@ -366,7 +341,7 @@ async def delete_item(session: AsyncSession, store: BlobStore, item: FileItem) -
     blob_ids = {item.blob_id} if item.blob_id is not None else set()
     await session.delete(item)
     await session.flush()
-    await _collect_garbage(session, store, blob_ids)
+    await blobs.collect_garbage(session, store, blob_ids)
 
 
 async def counts(session: AsyncSession, project: Project) -> Counts:
@@ -389,17 +364,6 @@ async def counts(session: AsyncSession, project: Project) -> Counts:
 
 
 # --- Internals -------------------------------------------------------------
-
-
-async def _chunks(source: UploadFile, size: int = CHUNK_BYTES) -> AsyncIterator[bytes]:
-    """Read an upload a chunk at a time.
-
-    Deliberately not ``await source.read()``: that would pull however many
-    hundred megabytes the client sent into memory, only to hand them to a store
-    that is going to write them out again anyway.
-    """
-    while chunk := await source.read(size):
-        yield chunk
 
 
 def _filename_of(source: UploadFile) -> str:
@@ -544,29 +508,3 @@ async def _blob_ids_under(session: AsyncSession, folder: Folder) -> set[UUID]:
             )
         )
     )
-
-
-async def _collect_garbage(session: AsyncSession, store: BlobStore, blob_ids: set[UUID]) -> None:
-    """Delete the blobs among these that nothing points at any more.
-
-    Rows go before bytes. The reverse order would, if the transaction were
-    rolled back afterwards, leave a row promising content that is no longer
-    there; this way the worst case is an unreferenced file on disk, which
-    nothing can reach and which the next upload of the same content replaces.
-    """
-    if not blob_ids:
-        return
-
-    still_referenced = set(
-        await session.scalars(select(FileItem.blob_id).where(FileItem.blob_id.in_(blob_ids)))
-    )
-    orphaned = list(
-        await session.scalars(select(Blob).where(Blob.id.in_(blob_ids - still_referenced)))
-    )
-    if not orphaned:
-        return
-
-    await session.execute(delete(Blob).where(Blob.id.in_([blob.id for blob in orphaned])))
-    await session.flush()
-    for blob in orphaned:
-        await store.remove(blob.path)

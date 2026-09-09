@@ -7,6 +7,7 @@
 
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { Shell } from './components/Shell'
+import { Agents } from './routes/Agents'
 import { GoalPage } from './routes/GoalPage'
 import { Home } from './routes/Home'
 import { ProjectBoard } from './routes/ProjectBoard'
@@ -68,6 +69,14 @@ const projectPeopleRoute = createRoute({
   component: ProjectPeople,
 })
 
+// A project's area, not the platform's: an agent's token is scoped per
+// project, so what it may do on one board is not what it may do on the next.
+const projectAgentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/p/$projectKey/agents',
+  component: Agents,
+})
+
 const projectVaultRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/p/$projectKey/vault',
@@ -83,6 +92,7 @@ const routeTree = rootRoute.addChildren([
   projectFilesRoute,
   projectVaultRoute,
   projectPeopleRoute,
+  projectAgentsRoute,
 ])
 
 export const router = createRouter({ routeTree })

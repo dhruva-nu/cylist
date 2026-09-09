@@ -115,6 +115,10 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `list_people` | the directory, or one project's members |
 | `list_files` | folders and items, by path |
 | `add_link` | file a URL into a folder |
+| `list_skills` | the skills uploaded for a project's agents |
+| `read_skill` | one skill's own text — the instructions to follow |
+| `read_scratchpad` | what agents before you learned about this project |
+| `note_learned` | leave one line on the scratchpad, 280 characters |
 | `list_vault` | trees and structure — never a value |
 | `read_activity` | the audit feed |
 | `day_report` | what was done on a project on one day, with a paste-ready note |

@@ -1,5 +1,10 @@
 /* Who you are, above the projects you start. A row rather than a tile: it is
-   one fact about the whole screen, not another thing in the grid. */
+   one fact about the whole screen, not another thing in the grid.
+
+   Capped and centred rather than run to the page's full width. The row holds
+   a face, three short lines and one button, and stretched across a wide
+   display it put the button a screen away from the name it belongs to — the
+   grid below is what the width is for. */
 .me {
   display: flex;
 
@@ -8,6 +13,8 @@
   gap: 16px;
   align-items: center;
   width: 100%;
+  max-width: 940px;
+  margin-inline: auto;
   margin-bottom: 24px;
   padding: 16px 20px;
   text-align: left;
@@ -79,9 +86,19 @@
   color: var(--brand-ink);
 }
 
+/* A tile keeps its size and the row centres. Widening the page adds cards to
+   the row rather than stretching the ones already in it, which is what `1fr`
+   tracks would have done — three projects as three very wide cards.
+
+   `auto-fit` rather than `auto-fill` so that centring means what it says: an
+   unfilled `auto-fill` track still takes its 300px, so two projects on a wide
+   display sat left of centre with the empty tracks holding the space out to
+   the right. `auto-fit` collapses them, and the cards that exist are what
+   gets centred. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 300px));
+  justify-content: center;
   gap: 20px;
 }
 

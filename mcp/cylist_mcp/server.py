@@ -35,6 +35,16 @@ from cylist_mcp.errors import CylistError
 
 VAULT_REVEAL = "vault:reveal"
 
+NOTE_MAX_CHARS = 280
+"""The scratchpad's own cap, restated here so the tool description can say it.
+The server enforces it; a model that knows the number in advance writes one
+sentence rather than a paragraph and a 422."""
+
+SKILL_MAX_CHARS = 40_000
+"""How much of a skill `read_skill` will return. A skill is a page of
+instructions; anything past this is not one, and filling a context window
+with it would be the wrong failure."""
+
 INSTRUCTIONS = """\
 Cylist is a project manager: each project has a Kanban board, a people
 directory, files and a vault of credentials.
@@ -68,6 +78,15 @@ so `move_task` refuses one and `finish_subtask` is what completes it. Either
 way, every one of them has to be finished or cancelled before the parent can be
 moved into the board's last column, and `move_task` refuses that too, naming
 what is still outstanding.
+
+Each project carries what its agents work from. `list_skills` and `read_skill`
+give you the procedures somebody has already written down for this project —
+worth a look before improvising one. `read_scratchpad` is the shorter and more
+important half: one-line notes that agents before you left about this project
+specifically, newest first. Read it before you start on a project you do not
+know, and when you work something out the hard way that is not in the code, the
+board or the README, leave it there with `note_learned`. One sentence. It is
+not a progress log — the board already reports that.
 
 Progress is reported for you. When a session is bound to a card — someone ran
 `cylist work ATL-41`, or typed `/work ATL-41` — the harness's own hooks tell
@@ -875,6 +894,105 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                 timezone=timezone or local_timezone(),
             )
             return {"report": report}
+
+        return await _guard(call)
+
+    # --- Skills and the scratchpad -----------------------------------------
+
+    @server.tool(
+        name="list_skills",
+        description=(
+            "List the skills uploaded for a project's agents — packaged jobs "
+            "you can be handed, such as tidying a board or writing a day "
+            "report. Returns each one's name, description and size, not its "
+            "content; read_skill fetches that. Worth calling before you "
+            "improvise a procedure that somebody has already written down."
+        ),
+    )
+    async def list_skills(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            return {"skills": await client.get(f"/projects/{project}/skills")}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="read_skill",
+        description=(
+            "Read one skill's own text, by the name list_skills gave. Skills "
+            "are usually markdown: instructions written for you to follow. "
+            f"Truncated past {SKILL_MAX_CHARS} characters, which is said in "
+            "the result when it happens."
+        ),
+    )
+    async def read_skill(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        name: Annotated[str, Field(description="The skill's name, e.g. 'board-tidy.md'.")],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            skills = await client.get(f"/projects/{project}/skills")
+            match = next((one for one in skills if one.get("name") == name), None)
+            if match is None:
+                available = sorted(str(one.get("name")) for one in skills)
+                raise CylistError(
+                    f"{project} has no skill called {name!r}."
+                    + (f" It has: {', '.join(available)}." if available else " It has none."),
+                    code="not_found",
+                    details={"name": name, "available": available},
+                )
+            text, truncated = await client.get_text(
+                f"/skills/{match['id']}/download", max_chars=SKILL_MAX_CHARS
+            )
+            return {"skill": match, "content": text, "truncated": truncated}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="read_scratchpad",
+        description=(
+            "Read a project's agent scratchpad: short lines that agents before "
+            "you wrote down when they learned something about this project the "
+            "hard way. Newest first. Read it before you start work on a "
+            "project you do not already know."
+        ),
+    )
+    async def read_scratchpad(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            return {"notes": await client.get(f"/projects/{project}/agent-notes")}
+
+        return await _guard(call)
+
+    @server.tool(
+        name="note_learned",
+        description=(
+            "Write one line onto a project's agent scratchpad, for something "
+            "you worked out that the next agent would otherwise have to work "
+            "out again. Keep it to a sentence — the cap is "
+            f"{NOTE_MAX_CHARS} characters and newlines are folded into "
+            "spaces. Write what is not already in the code, the board or the "
+            "README: a surprising constraint, a command that does not work "
+            "here, a convention nothing states. Do not use it as a progress "
+            "log; the board already reports that."
+        ),
+    )
+    async def note_learned(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        note: Annotated[
+            str,
+            Field(
+                description="What you learned, in one sentence.",
+                max_length=NOTE_MAX_CHARS,
+            ),
+        ],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            written = await client.post(
+                f"/projects/{project}/agent-notes", {"body": " ".join(note.split())}
+            )
+            return {"note": written}
 
         return await _guard(call)
 

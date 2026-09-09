@@ -108,6 +108,14 @@
   --page-max: 1720px;
 }
 
+/* Home: a masthead over a grid of project cards. As wide as a roomy page —
+   the cards are what the width is for — but the heading stays centred over
+   the grid rather than becoming a row, which is the whole difference between
+   this and `.pageRoomy`. */
+.pageGallery {
+  --page-max: 1720px;
+}
+
 /* The board scrolls sideways and is its own container. */
 .pageBoard {
   --page-max: none;
@@ -238,10 +246,17 @@
    paragraph and then centred, leaving a quarter of the window empty down each
    side while the cards it was making room for wrapped early. Stating the width
    puts the cap back in charge: up to `--page-max`, and the window's own edge
-   below that. `min-width: 0` so the box can honour it. Reading pages keep the
-   old behaviour on purpose — prose has a measure, and a column that stops at
-   its own is centred exactly where it should be. */
-.pageRoomy.wrap {
+   below that. `min-width: 0` so the box can honour it.
+
+   Home needs the same for the same reason, and needed it worse: its widest
+   sentence is one line of description, so the column it was laid out around
+   came to about half the reading width and the project grid wrapped after two
+   cards on a display with room for five.
+
+   Reading pages keep the old behaviour on purpose — prose has a measure, and
+   a column that stops at its own is centred exactly where it should be. */
+.pageRoomy.wrap,
+.pageGallery.wrap {
   width: 100%;
   min-width: 0;
 }

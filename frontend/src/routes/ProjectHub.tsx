@@ -1,8 +1,9 @@
 /**
- * A project's five areas.
+ * A project's six areas.
  *
- * All five are live: the board, its goals, the file store, the vault and the
- * people on the project, each summarised by the counts behind its card.
+ * All six are live: the board, its goals, the file store, the vault, the
+ * people on the project, and what its agents work from — each summarised by
+ * the counts behind its card.
  *
  * The day report used to sit beside the title, on the reasoning that the cards
  * are places you go and stay while a report is something you take away. The
@@ -46,6 +47,14 @@ const ICONS = {
       <circle cx="12" cy="12" r="8" />
       <circle cx="12" cy="12" r="4" />
       <circle cx="12" cy="12" r="1" fill="currentColor" />
+    </svg>
+  ),
+  agents: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <rect x="4" y="7" width="16" height="12" rx="3" />
+      <path d="M12 7V4" />
+      <circle cx="9.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   ),
   people: (
@@ -171,6 +180,25 @@ export function ProjectHub() {
         >
           Logins, keys and links in trees you shape yourself.
         </Tool>
+
+        <Tool
+          icon={ICONS.agents}
+          title="Agents"
+          to="/p/$projectKey/agents"
+          projectKey={projectKey}
+          meta={
+            <>
+              <span>
+                {project.skill_count} {project.skill_count === 1 ? 'skill' : 'skills'}
+              </span>
+              <span>
+                {project.agent_note_count} {project.agent_note_count === 1 ? 'note' : 'notes'}
+              </span>
+            </>
+          }
+        >
+          The skills you hand an agent, and the scratchpad it writes back what it learned on.
+        </Tool>
       </div>
     </>
   )
@@ -190,6 +218,7 @@ function Tool({
   children: ReactNode
   meta?: ReactNode
   to?:
+    | '/p/$projectKey/agents'
     | '/p/$projectKey/board'
     | '/p/$projectKey/goals'
     | '/p/$projectKey/files'
