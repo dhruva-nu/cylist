@@ -70,9 +70,25 @@ class AgentSessionReason(StrEnum):
     SESSION_ENDED = "session_ended"
     """The harness exited, or the session was unbound with ``/work off``."""
 
+    CONNECTION_LOST = "connection_lost"
+    """The agent's socket went away without a goodbye — it dropped, or it went
+    quiet past the idle window. One reason for both, because a card cannot
+    show the difference; which it was is in the activity payload's ``cause``.
+
+    Distinct from ``session_ended``, which is a session that said it was
+    leaving. This one is the board noticing on its own."""
+
 
 def _enum(python_type: type[StrEnum], name: str) -> Enum:
-    """VARCHAR plus CHECK, never a native PG enum — see ``models/task.py``."""
+    """A VARCHAR of the values, never a native PG enum — see ``models/task.py``.
+
+    No check constraint comes with it: ``create_constraint`` is left at its
+    default of ``False``, so the members are enforced here and not by the
+    database. What the database does keep is the *width* — the column is a
+    ``VARCHAR`` sized to the longest member — so a new member longer than
+    every existing one still needs a migration to widen it, as
+    ``connection_lost`` did in revision 0022.
+    """
     return Enum(
         python_type,
         name=name,
