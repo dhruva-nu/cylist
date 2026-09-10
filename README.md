@@ -112,6 +112,43 @@ progress → Dev in one day arrives as the one move it amounted to, and a
 comment's line quotes what was said rather than reporting that something was
 said.
 
+### Logs
+
+The `activity` trail above is what *people and agents did*. The log is the
+other record: what the *process* did — requests served, credentials refused,
+blobs written, exceptions nobody caught. They are kept apart deliberately, so
+the log does not become a second audit trail that nobody can query.
+
+Every line carries the id of the request that produced it, and that id goes
+back to the caller as `X-Request-ID`. So a report of "it failed at about
+half past two" becomes one `grep`:
+
+```bash
+make prod-logs | grep 7f3a2b1c9d04
+```
+
+which gives the access line, whatever the services said while serving it, and
+the traceback underneath — provably all the same request, however many were in
+flight. A caller that sets `X-Request-ID` itself keeps its own, which is how a
+CLI or MCP run ties its logs to the server's.
+
+Logs go to stderr, which is what `make logs` and `make prod-logs` follow.
+To also keep them in a file on the server, set one variable:
+
+```bash
+CYLIST_LOG_TO_FILE=true
+```
+
+They land in `CYLIST_DATA_DIR/logs/cylist.log` — inside the volume every
+deployment already mounts and backs up — and rotate at 10 MB, five files deep.
+`CYLIST_LOG_LEVEL` and `CYLIST_LOG_FORMAT` (`text` or `json`) are the other two
+knobs; see `backend/.env.example` for all of them, and [DEPLOY.md](DEPLOY.md)
+for reading them on the server.
+
+Credentials never appear in the log — no tokens, no cookies, not even their
+hashes — and neither do request bodies or query strings. That is a property
+worth keeping: it is what makes a log safe to paste into a bug report.
+
 ## Secrets and backups
 
 `CYLIST_VAULT_KEY` encrypts every vault secret with AES-256-GCM. **If you lose
