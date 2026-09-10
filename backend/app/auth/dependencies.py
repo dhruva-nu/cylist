@@ -7,6 +7,20 @@ A request authenticates with either
 
 Both resolve to a row in ``api_token``, so there is one lookup path and one
 place where revocation and expiry are enforced.
+
+Everything here reads a :class:`~starlette.requests.HTTPConnection` rather
+than a ``Request``, because a WebSocket is not one. FastAPI fills a
+``Request``-annotated parameter only on an http scope; on a websocket scope
+it fills a ``WebSocket``-annotated one instead and leaves the ``Request``
+unset, which fails at call time rather than at import. ``HTTPConnection`` is
+the base of both and carries everything this module wants — headers, cookies
+and a path to log.
+
+:func:`current_principal` is the dependency HTTP routes use.
+:func:`resolve_principal` is the same work without the dependency wiring, for
+callers that hold their own session — a realtime handler must, because
+:data:`~app.db.SessionDependency` would pin one database connection for the
+whole life of a socket.
 """
 
 from __future__ import annotations
@@ -18,6 +32,7 @@ from datetime import timedelta
 from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import HTTPConnection
 
 from app.auth.principal import Principal
 from app.auth.scopes import Scope, parse_scopes
@@ -37,13 +52,13 @@ _LAST_USED_RESOLUTION = timedelta(minutes=1)
 client does not turn every read into a write."""
 
 
-def _presented_credential(request: Request) -> tuple[str, Channel] | None:
+def _presented_credential(connection: HTTPConnection) -> tuple[str, Channel] | None:
     """Extract the credential and note which door it came through."""
-    header = request.headers.get("Authorization")
+    header = connection.headers.get("Authorization")
     if header and header.lower().startswith("bearer "):
         return header[7:].strip(), Channel.API
 
-    cookie = request.cookies.get(SESSION_COOKIE)
+    cookie = connection.cookies.get(SESSION_COOKIE)
     if cookie:
         return cookie, Channel.WEB
 
@@ -54,27 +69,39 @@ async def current_principal(
     request: Request,
     session: AsyncSession = SessionDependency,
 ) -> Principal:
+    """Resolve the caller of an HTTP request, or raise.
+
+    The dependency HTTP routes depend on. A realtime handler cannot use it —
+    see the module note — and calls :func:`resolve_principal` instead.
+    """
+    return await resolve_principal(request, session)
+
+
+async def resolve_principal(
+    connection: HTTPConnection,
+    session: AsyncSession,
+) -> Principal:
     """Resolve the caller, or raise :class:`UnauthorizedError`.
 
     The error message is intentionally identical for "no credential",
     "unknown credential" and "revoked credential" so it cannot be used to
     confirm that a particular token exists.
     """
-    presented = _presented_credential(request)
+    presented = _presented_credential(connection)
     if presented is None:
-        _refused(request, "no credential presented")
+        _refused(connection, "no credential presented")
         raise UnauthorizedError("Sign in or present an API token to use this endpoint.")
 
     plaintext, channel = presented
     if not looks_like_token(plaintext):
-        _refused(request, "malformed credential", channel=channel.value)
+        _refused(connection, "malformed credential", channel=channel.value)
         raise UnauthorizedError("That credential is not valid.")
 
     token = await session.scalar(
         select(ApiToken).where(ApiToken.token_hash == hash_token(plaintext))
     )
     if token is None:
-        _refused(request, "unknown credential", channel=channel.value)
+        _refused(connection, "unknown credential", channel=channel.value)
         raise UnauthorizedError("That credential is not valid.")
     if not token.is_usable:
         # Worth separating from "unknown" in the log even though the client is
@@ -82,7 +109,7 @@ async def current_principal(
         # to be legitimate and now needs a new one — an operational problem —
         # whereas an unknown one is somebody guessing.
         _refused(
-            request,
+            connection,
             "revoked or expired credential",
             channel=channel.value,
             token_id=str(token.id),
@@ -133,7 +160,7 @@ def require(*scopes: Scope) -> Callable[[Principal], Awaitable[Principal]]:
     return dependency
 
 
-def _refused(request: Request, reason: str, **context: object) -> None:
+def _refused(connection: HTTPConnection, reason: str, **context: object) -> None:
     """Note an authentication failure, and why it really failed.
 
     The client is told the same thing whichever of these happened, so that a
@@ -149,5 +176,5 @@ def _refused(request: Request, reason: str, **context: object) -> None:
     logger.warning(
         "Authentication refused: %s",
         reason,
-        extra={"context": {"path": request.url.path, **context}},
+        extra={"context": {"path": connection.url.path, **context}},
     )

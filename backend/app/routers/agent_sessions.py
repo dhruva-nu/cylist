@@ -18,7 +18,7 @@ from app.db import SessionDependency
 from app.models.task import Task
 from app.routers.tasks import resolved_task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
-from app.services import activity, agent_sessions
+from app.services import agent_reports, agent_sessions
 
 router = APIRouter(tags=["agent sessions"])
 
@@ -56,18 +56,7 @@ async def put_agent_session(
     API tokens only. A browser session is a person, and a person is not an
     agent whatever they type — that is a 403.
     """
-    result = await agent_sessions.upsert(session, principal, task, client_session_id, body)
-    for transition in result.transitions:
-        await activity.record(
-            session,
-            principal,
-            transition.verb,
-            entity_type="task",
-            entity_id=transition.task_id,
-            project_id=transition.project_id,
-            payload=transition.payload,
-        )
-    return agent_sessions.read(result.row, now())
+    return await agent_reports.report(session, principal, task, client_session_id, body)
 
 
 @router.get(

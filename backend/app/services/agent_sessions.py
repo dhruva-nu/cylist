@@ -177,6 +177,35 @@ def _finish(row: AgentSession, reason: AgentSessionReason, now: datetime) -> Non
     row.last_seen_at = now
 
 
+def close(
+    row: AgentSession,
+    reason: AgentSessionReason,
+    project_id: UUID,
+    now: datetime,
+    *,
+    cause: str | None = None,
+) -> Transition:
+    """End one row from outside a hook report, and say so in the trail.
+
+    For the endings nobody reported: a socket that dropped, a session too
+    quiet to still believe in, a process that restarted while agents were
+    running. :func:`upsert` is the wrong door for those — it exists to apply
+    what a *client* said, and walks the session off any other card on the way
+    — where this only closes the row in front of it.
+
+    ``cause`` is the detail the reason deliberately does not carry: one
+    ``connection_lost`` covers both a drop and an idle timeout, and this is
+    where the difference is written down for whoever comes looking.
+    """
+    _finish(row, reason, now)
+    return Transition(
+        "agent_session.finished",
+        row.task_id,
+        project_id,
+        _payload(row, cause=cause),
+    )
+
+
 def _verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     """Which line the trail gets for a change of state, if any.
 
@@ -191,7 +220,9 @@ def _verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     return "agent_session.finished"
 
 
-def _payload(row: AgentSession, *, moved_to: str | None = None) -> dict[str, Any]:
+def _payload(
+    row: AgentSession, *, moved_to: str | None = None, cause: str | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "client_session_id": row.client_session_id,
         "client_name": row.client_name,
@@ -199,6 +230,8 @@ def _payload(row: AgentSession, *, moved_to: str | None = None) -> dict[str, Any
     }
     if moved_to is not None:
         payload["moved_to"] = moved_to
+    if cause is not None:
+        payload["cause"] = cause
     return payload
 
 

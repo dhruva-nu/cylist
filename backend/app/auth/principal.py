@@ -17,7 +17,16 @@ class Principal:
     no handler can widen its own permissions part-way through.
     """
 
-    token_id: UUID
+    token_id: UUID | None
+    """The credential behind the caller, when there still is one.
+
+    ``None`` only where the actor is reconstructed from something that
+    outlived its token — an agent session whose row survived the key it was
+    written with. ``activity.actor_token_id`` is a nullable foreign key for
+    the same reason, and a made-up id would not satisfy it. Every principal
+    that came from a presented credential has one.
+    """
+
     label: str
     scopes: frozenset[Scope]
     channel: Channel
