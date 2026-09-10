@@ -81,6 +81,7 @@ import {
   type Suggestion,
 } from './boardSearch'
 import { agentIndicator, hasLiveAgent } from './agentState'
+import { useBoardSocket } from './useBoardSocket'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
 import { GoalChip } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
@@ -374,14 +375,18 @@ export function ProjectBoard() {
     queryKey: ['board', projectKey],
     queryFn: () => api.listColumns(projectKey),
   })
+  // The board is told about changes rather than asking for them: one socket
+  // per open board, and a refetch when it rings. See `useBoardSocket`.
+  const live = useBoardSocket(projectKey)
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
     queryFn: () => api.listTasks(projectKey),
-    // Only while an agent is on some card. Its hooks write to the server
-    // without anything in this tab having changed, so the board has to ask;
-    // a board with no agent on it changes only when somebody here acts, and
-    // every mutation already refetches. Polling, not SSE — see CYLIST-37.
-    refetchInterval: (query) => (hasLiveAgent(query.state.data ?? []) ? 10_000 : false),
+    // The fallback for when there is no socket — a proxy that will not carry
+    // an upgrade, a browser that refused one. It is the behaviour this board
+    // had before CYLIST-40 and it costs one boolean to keep, which is a good
+    // price for never being worse than we were.
+    refetchInterval: (query) =>
+      live.connected ? false : hasLiveAgent(query.state.data ?? []) ? 10_000 : false,
     refetchIntervalInBackground: false,
   })
   // Needed for `who:` search matches and its autocomplete, and for the `@`
