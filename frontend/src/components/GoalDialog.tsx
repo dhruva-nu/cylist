@@ -15,6 +15,7 @@ import { api, type Goal, type GoalInput, type GoalStatus, type Person } from '..
 import { GOAL_STATUS_LABELS } from './GoalMarks'
 import { MentionBox } from './Mentions'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
+import { useProjectFiles } from './projectFiles'
 import { Button, ErrorBanner, readableInkOn } from './ui'
 import styles from './GoalDialog.module.css'
 
@@ -85,6 +86,8 @@ export function GoalDialog({
         },
   )
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  /** For the `>` tag in the description, which is read like a card's. */
+  const files = useProjectFiles(projectKey)
 
   const save = useMutation({
     mutationFn: async (input: GoalInput) => {
@@ -156,12 +159,16 @@ export function GoalDialog({
         {/* Tagged like a card's description and a comment, because it is read
             like one: a goal says what reaching it means, and half of what that
             means is who it means it for. */}
-        <Field label="What does reaching it mean?" hint="Type @ to tag someone on the project.">
+        <Field
+          label="What does reaching it mean?"
+          hint="Type @ to tag someone on the project, > to tag one of its files."
+        >
           <MentionBox
             multiline
             value={form.description ?? ''}
             onChange={(description) => setForm({ ...form, description })}
             members={members}
+            files={files}
             placeholder="Filters, sorting and saved searches, on every list in the product."
           />
         </Field>

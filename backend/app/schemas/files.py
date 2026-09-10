@@ -117,6 +117,22 @@ class ItemRead(Schema):
     created_at: datetime
 
 
+class FiledItem(ItemRead):
+    """A row of the project-wide listing: an item, and where it is filed.
+
+    The path is for telling two files of the same name apart. It is a string
+    rather than a list of crumbs because nothing navigates with it — a picker
+    shows it beside the name, and the name is what a tag carries.
+    """
+
+    folder_path: str = Field(
+        description=(
+            "The folders between the project's root and this item, outermost"
+            " first, joined by `/`. Empty for an item at the top of the project."
+        )
+    )
+
+
 class FolderChildren(Schema):
     """What one folder holds — the right-hand pane of the files screen."""
 

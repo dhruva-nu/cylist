@@ -48,6 +48,18 @@ class Counts(NamedTuple):
     items: int
 
 
+class Filed(NamedTuple):
+    """One item, and the folders it sits under."""
+
+    item: FileItem
+
+    folder_path: str
+    """The folders between the root and this item, outermost first, joined by
+    ``/`` — ``"Contracts/2026"``, and empty for an item at the top of the
+    project. The root is left out because it *is* the project: repeating the
+    project's name in front of every path would say nothing."""
+
+
 # --- The root --------------------------------------------------------------
 
 
@@ -138,6 +150,34 @@ async def list_folders(session: AsyncSession, project: Project) -> list[Folder]:
             select(Folder).where(Folder.project_id == project.id).order_by(Folder.name)
         )
     )
+
+
+async def list_items(session: AsyncSession, project: Project) -> list[Filed]:
+    """Every file and link in the project, flat, each with where it is filed.
+
+    The tree flattened rather than walked: this answers "what files does this
+    project have", which is the question a picker asks — the `>` tag in a
+    description or a comment offers these names, and it offers all of them at
+    once because a name is how a file is referred to there, not a path.
+
+    Two queries whatever the shape of the tree. The path is assembled here from
+    the folder rows rather than asked of the database per item: the tree is
+    small, bounded by :data:`MAX_DEPTH`, and a recursive CTE would be a lot of
+    SQL to answer a question Python answers with a dictionary.
+    """
+    folders = await list_folders(session, project)
+    paths = _paths_of(folders)
+    items = list(
+        await session.scalars(
+            select(FileItem)
+            .where(FileItem.folder_id.in_([folder.id for folder in folders]))
+            # Folded rather than left to the database's collation: this is a
+            # list somebody reads down looking for a name, and "Tax portal"
+            # belongs between "readme.md" and "vat.xlsx" wherever it runs.
+            .order_by(func.lower(FileItem.name), FileItem.name)
+        )
+    )
+    return [Filed(item=item, folder_path=paths.get(item.folder_id, "")) for item in items]
 
 
 async def children(session: AsyncSession, folder: Folder) -> tuple[list[Folder], list[FileItem]]:
@@ -450,6 +490,30 @@ async def _destination(session: AsyncSession, project_id: UUID, parent_id: UUID 
             details={"parent_id": str(parent_id)},
         )
     return parent
+
+
+def _paths_of(folders: list[Folder]) -> dict[UUID, str]:
+    """Where each folder sits, keyed by its id — see :attr:`Filed.folder_path`.
+
+    Walks up from each folder rather than down from the root, so a row whose
+    parent is somehow missing costs itself and nothing else. :data:`MAX_DEPTH`
+    bounds the walk, which is what makes a cycle in the data a short path
+    instead of a hung request.
+    """
+    by_id = {folder.id: folder for folder in folders}
+    paths: dict[UUID, str] = {}
+
+    for folder in folders:
+        names: list[str] = []
+        current: Folder | None = folder
+        for _ in range(MAX_DEPTH):
+            if current is None or current.parent_id is None:
+                break
+            names.append(current.name)
+            current = by_id.get(current.parent_id)
+        paths[folder.id] = "/".join(reversed(names))
+
+    return paths
 
 
 async def _ancestors(session: AsyncSession, folder: Folder) -> list[Folder]:

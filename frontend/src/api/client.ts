@@ -737,6 +737,18 @@ export interface FileItem {
   created_at: string
 }
 
+/**
+ * An item with where it is filed — a row of the project-wide flat listing.
+ *
+ * The path is what tells two files of the same name apart in a picker. It is
+ * a string of folder names because nothing navigates with it: a `>` tag
+ * carries the name, and the path is only shown beside it.
+ */
+export interface FiledItem extends FileItem {
+  /** Folder names between the root and the item, `/`-joined; empty at the top. */
+  folder_path: string
+}
+
 export interface FolderChildren {
   folder: Folder
   /** The folders above this one, outermost first, ending with it. */
@@ -864,6 +876,11 @@ export const api = {
     request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
+  /**
+   * Every file and link in the project, flat — what a `>` tag is completed
+   * from, and what one is recognised against when prose is read back.
+   */
+  listProjectItems: (ref: string) => request<FiledItem[]>(`/projects/${ref}/items`),
 
   uploadFile: (folderId: string, file: File, addedBy?: string | null) => {
     const form = new FormData()

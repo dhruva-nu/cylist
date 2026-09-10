@@ -328,6 +328,70 @@ class TestFolderContents:
         assert response.json()["error"]["code"] == "not_found"
 
 
+class TestEveryItemInAProject:
+    """The flat listing, which is what the `>` tag in prose is completed from."""
+
+    async def test_flattens_the_whole_tree(self, project: AsyncClient) -> None:
+        finance = await make_folder(project, "Finance inputs")
+        year = await make_folder(project, "2025", finance)
+        root = await root_id(project)
+        await upload(project, root, "readme.md", content_of("readme"))
+        await upload(project, year, "vat.xlsx", content_of("vat"))
+        await project.post(
+            f"/folders/{finance}/links",
+            json={"name": "Tax portal", "url": "https://tax.example/atlas", "source": "other"},
+        )
+
+        body = (await project.get("/projects/ATL/items")).json()
+
+        assert [(item["name"], item["folder_path"]) for item in body] == [
+            ("readme.md", ""),
+            ("Tax portal", "Finance inputs"),
+            ("vat.xlsx", "Finance inputs/2025"),
+        ]
+
+    async def test_an_item_at_the_top_has_no_path(self, project: AsyncClient) -> None:
+        """The root is the project, so naming it would say nothing."""
+        await upload(project, await root_id(project), "brief.pdf", BRIEF)
+
+        body = (await project.get("/projects/ATL/items")).json()
+
+        assert body[0]["folder_path"] == ""
+
+    async def test_carries_what_a_folder_listing_carries(self, project: AsyncClient) -> None:
+        """Same shape as `/children`, so one picker can read either."""
+        person = (await project.post("/people", json=UPLOADER)).json()["id"]
+        folder = await make_folder(project, "Briefs")
+        await upload(project, folder, "brief.pdf", BRIEF, added_by=person)
+
+        item = (await project.get("/projects/ATL/items")).json()[0]
+
+        assert item["kind"] == "file"
+        assert item["source"] == "upload"
+        assert item["size"] == len(BRIEF)
+        assert item["mime"] == "application/pdf"
+        assert item["added_by"]["name"] == UPLOADER["name"]
+        assert item["folder_id"] == folder
+
+    async def test_holds_only_this_project(self, project: AsyncClient) -> None:
+        await project.post("/projects", json=HERMES)
+        hermes_root = (await project.get("/projects/HRM/tree")).json()["id"]
+        await upload(project, hermes_root, "hermes.md", content_of("hermes"))
+        await upload(project, await root_id(project), "atlas.md", content_of("atlas"))
+
+        body = (await project.get("/projects/ATL/items")).json()
+
+        assert [item["name"] for item in body] == ["atlas.md"]
+
+    async def test_an_empty_project_lists_nothing(self, project: AsyncClient) -> None:
+        assert (await project.get("/projects/ATL/items")).json() == []
+
+    async def test_an_unknown_project_is_a_clean_404(self, project: AsyncClient) -> None:
+        response = await project.get("/projects/NOPE/items")
+
+        assert response.status_code == 404
+
+
 class TestMovingFolders:
     async def test_renames(self, project: AsyncClient) -> None:
         folder = await make_folder(project, "Finance")
