@@ -11,6 +11,7 @@ React app's TypeScript types, and later the CLI and MCP server.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
@@ -19,7 +20,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
+from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
+from app.core.request_log import RequestLogMiddleware
 from app.db import Database
 from app.routers import api_router
 from app.spa import mount_spa
@@ -27,6 +30,8 @@ from app.spa import mount_spa
 API_PREFIX = "/api/v1"
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
+
+logger = logging.getLogger(__name__)
 
 DESCRIPTION = """
 Cylist keeps a project's **board**, **files**, **vault** and **people** in one
@@ -43,12 +48,30 @@ def build_lifespan(settings: Settings) -> Lifespan:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # The first line in the file after a restart, and the one that answers
+        # "which build, pointed at what?" — the question every investigation
+        # of a deployment starts with, and the one a log without it cannot.
+        logger.info(
+            "Cylist starting",
+            extra={
+                "context": {
+                    "environment": settings.environment,
+                    "database": settings.safe_database_url,
+                    "data_dir": settings.data_dir,
+                    "log_level": settings.log_level,
+                    "log_to": describe_destination(settings),
+                }
+            },
+        )
         settings.blob_dir.mkdir(parents=True, exist_ok=True)
         app.state.database = Database(settings.database_url, echo=settings.database_echo)
         try:
             yield
         finally:
             await app.state.database.dispose()
+            # Logged after the pool is closed, so the line is a statement that
+            # shutdown finished rather than that it was attempted.
+            logger.info("Cylist stopped")
 
     return lifespan
 
@@ -60,6 +83,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     an app pointed at a throwaway database without touching the environment.
     """
     settings = settings or get_settings()
+
+    # Before anything else in the factory: whatever the rest of it has to say,
+    # including a complaint about the configuration, should already be going
+    # to the places this deployment asked for.
+    configure_logging(settings)
 
     app = FastAPI(
         title="Cylist",
@@ -88,6 +116,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    # Added last, so it is the outermost middleware: it times the whole stack
+    # including CORS, and it binds the request id before anything inside can
+    # log without one.
+    app.add_middleware(RequestLogMiddleware, api_prefix=API_PREFIX)
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=API_PREFIX)
