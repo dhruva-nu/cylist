@@ -164,8 +164,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "assignee, due date and who it is waiting on, plus the board's "
             "columns so you can tell which card is where. 'agent_session' says "
             "who is working on a card right now, if an agent is: 'working', "
-            "'waiting' (it needs a human), 'done', or 'stale' (a session nobody "
-            "has heard from). Optionally filter by status or assignee."
+            "'waiting' (it needs a human), or 'done' — which includes a session "
+            "whose connection was lost, distinguished by its 'reason'. "
+            "Optionally filter by status or assignee."
         ),
     )
     async def list_tasks(

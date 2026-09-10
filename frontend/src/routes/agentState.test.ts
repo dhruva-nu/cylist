@@ -75,12 +75,20 @@ describe('agentIndicator', () => {
     )
   })
 
-  it('says how long a stale agent has been silent', () => {
+  it('draws a lost connection as an outline, not as a finish', () => {
     const found = agentIndicator(
-      presence({ state: 'stale', last_seen_at: '2026-09-08T11:48:00Z' }),
+      presence({
+        state: 'done',
+        reason: 'connection_lost',
+        last_seen_at: '2026-09-08T11:48:00Z',
+      }),
       NOW,
     )
-    expect(found).toEqual({ className: 'agentStale', label: 'Agent silent for 12m' })
+    expect(found).toEqual({
+      className: 'agentStale',
+      label: 'Agent disconnected',
+      detail: 'last seen 12m ago',
+    })
   })
 })
 
@@ -115,8 +123,12 @@ describe('hasLiveAgent', () => {
     expect(hasLiveAgent([{ agent_session: presence({ state: 'waiting' }) }])).toBe(true)
   })
 
-  it('keeps going while a session is merely silent', () => {
-    expect(hasLiveAgent([{ agent_session: presence({ state: 'stale' }) }])).toBe(true)
+  it('stops once a session that was cut off has been recorded as over', () => {
+    // A dropped agent is `done` now, not a working row nobody has heard
+    // from — so there is nothing left to wait for.
+    expect(
+      hasLiveAgent([{ agent_session: presence({ state: 'done', reason: 'connection_lost' }) }]),
+    ).toBe(false)
   })
 
   it('is false once every session is over', () => {
