@@ -65,7 +65,7 @@ def run_in_background(ctx: Context, connect: Any) -> threading.Thread:
     return thread
 
 
-def tell(line: str) -> dict | None:
+def tell(line: str) -> dict[str, Any] | None:
     """Say something to the daemon over its real socket, as a hook would."""
     for _ in range(100):
         ack = ipc.send(SESSION, line, timeout=0.2)

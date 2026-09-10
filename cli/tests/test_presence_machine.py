@@ -10,13 +10,14 @@ the answers are exact.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from cylist_cli.presence import machine as m
 
 START = m.Machine(session="s-1", task="ATL-1", client_name="ATL-1")
 
 
-def frames(actions: list[m.Action]) -> list[dict]:
+def frames(actions: list[m.Action]) -> list[dict[str, Any]]:
     return [json.loads(a.frame) for a in actions if isinstance(a, m.Send)]
 
 
