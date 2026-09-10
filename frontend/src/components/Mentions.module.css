@@ -1,4 +1,5 @@
-/* Tagging a person with `@`. Reads from the tokens in theme/tokens.css. */
+/* Tagging a person with `@` or a file with `>`. Reads from the tokens in
+   theme/tokens.css. */
 
 .box {
   position: relative;
@@ -48,8 +49,36 @@
   background: var(--brand-soft);
 }
 
+/* A file's name can be long where a person's cannot, so the name is what
+   gives way: it truncates, and what it truncates in favour of is where the
+   file sits — the half of the row that tells two `report.pdf`s apart. */
+.suggestionName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .suggestionRole {
+  flex: none;
   margin-left: auto;
+  padding-left: 8px;
   color: var(--ink-3);
   font-size: 12px;
+}
+
+/* An avatar's footprint, so a list of files and a list of people line their
+   rows up the same way. */
+.glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  color: var(--ink-3);
+}
+
+.glyph svg {
+  width: 17px;
+  height: 17px;
 }

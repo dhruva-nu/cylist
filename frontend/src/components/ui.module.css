@@ -419,3 +419,23 @@
   color: var(--brand-ink);
   font-weight: 600;
 }
+
+/* A tagged file. The same pill as a name, drawn as what it is instead: paper
+   with a line around it, lettered in the link colour, so a sentence tagging a
+   person and a file says which is which before either is read. Underlined
+   only under the pointer — a paragraph with four of them in it is prose, not
+   a list of links. */
+.fileTag {
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--link);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.fileTag:hover,
+.fileTag:focus-visible {
+  text-decoration: underline;
+}

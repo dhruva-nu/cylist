@@ -26,6 +26,7 @@ from app.models.project import Project
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.files import (
+    FiledItem,
     FolderChildren,
     FolderCreate,
     FolderCrumb,
@@ -84,6 +85,12 @@ def _item(item: FileItem) -> ItemRead:
         added_by=PersonRead.model_validate(person) if person is not None else None,
         created_at=item.created_at,
     )
+
+
+def _filed(filed: files.Filed) -> FiledItem:
+    """An item plus where it is filed, built from the plain row's own shape so
+    the two listings cannot drift apart."""
+    return FiledItem(**_item(filed.item).model_dump(), folder_path=filed.folder_path)
 
 
 def _nest(folders: list[Folder]) -> list[FolderNode]:
@@ -358,6 +365,26 @@ async def add_link(
         payload={"name": item.name, "source": item.source.value},
     )
     return _item(item)
+
+
+@router.get(
+    "/projects/{project_ref}/items",
+    response_model=list[FiledItem],
+    summary="List every file and link in a project",
+)
+async def list_project_items(
+    project: Project = Depends(resolved_project),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+) -> list[FiledItem]:
+    """Every item in the project, flat and alphabetical, each with its path.
+
+    The tree without the tree, for the places that want a project's files as a
+    list of names: the `>` tag in a description or a comment is completed from
+    this, and so is anything else that has to recognise a file by name rather
+    than find it by walking. Use `/folders/{folder_id}/children` to browse.
+    """
+    return [_filed(filed) for filed in await files.list_items(session, project)]
 
 
 @router.get("/items/{item_id}", response_model=ItemRead, summary="Get a file or link")

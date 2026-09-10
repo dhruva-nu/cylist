@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { api, type BoardColumn, type Task } from '../api/client'
 import { GOAL_STATUS_LABELS, GoalProgressBar, GoalTargetMark } from '../components/GoalMarks'
 import { GoalDialog } from '../components/GoalDialog'
+import { useProjectFiles } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
 import { Field, Modal, ModalBody } from '../components/Modal'
@@ -61,6 +62,8 @@ export function GoalPage() {
     queryKey: ['board', projectKey],
     queryFn: () => api.listColumns(projectKey),
   })
+  /** For the `>` tags in the goal's description. */
+  const files = useProjectFiles(projectKey)
   const members = useQuery({
     queryKey: ['members', projectKey],
     queryFn: () => api.listMembers(projectKey),
@@ -181,7 +184,11 @@ export function GoalPage() {
             <h2>What it is</h2>
             <p>
               {found.description ? (
-                <Tagged text={found.description} members={members.data?.members ?? []} />
+                <Tagged
+                  text={found.description}
+                  members={members.data?.members ?? []}
+                  files={files}
+                />
               ) : (
                 'No description yet.'
               )}

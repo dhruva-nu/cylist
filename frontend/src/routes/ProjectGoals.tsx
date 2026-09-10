@@ -15,9 +15,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Goal, type Person } from '../api/client'
+import { api, type FiledItem, type Goal, type Person } from '../api/client'
 import { GoalDialog } from '../components/GoalDialog'
 import { GOAL_STATUS_LABELS, GoalProgressBar, GoalTargetMark } from '../components/GoalMarks'
+import { useProjectFiles } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
 import {
   Avatar,
@@ -86,6 +87,8 @@ export function ProjectGoals() {
     queryKey: ['goals', projectKey],
     queryFn: () => api.listGoals(projectKey),
   })
+  /** For the `>` tags in a goal's description, drawn as links to the files. */
+  const files = useProjectFiles(projectKey)
   const members = useQuery({
     queryKey: ['members', projectKey],
     queryFn: () => api.listMembers(projectKey),
@@ -145,6 +148,7 @@ export function ProjectGoals() {
               goal={goal}
               projectKey={projectKey}
               members={members.data?.members ?? []}
+              files={files}
             />
           ))}
         </div>
@@ -163,6 +167,7 @@ export function ProjectGoals() {
                 goal={goal}
                 projectKey={projectKey}
                 members={members.data?.members ?? []}
+                files={files}
               />
             ))}
           </div>
@@ -357,11 +362,14 @@ function GoalCard({
   goal,
   projectKey,
   members,
+  files,
 }: {
   goal: Goal
   projectKey: string
   /** Only to draw the description's `@` tags as tags. */
   members: Person[]
+  /** Likewise its `>` tags, which are drawn as links to the files. */
+  files: readonly FiledItem[]
 }) {
   const { total, done, open } = goal.progress
 
@@ -388,7 +396,7 @@ function GoalCard({
       <h3>{goal.name}</h3>
       {goal.description ? (
         <p>
-          <Tagged text={goal.description} members={members} />
+          <Tagged text={goal.description} members={members} files={files} />
         </p>
       ) : null}
 

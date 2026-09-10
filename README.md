@@ -55,7 +55,8 @@ run against real PostgreSQL, because the schema leans on `ARRAY`, `JSONB` and
 timezone-aware timestamps.
 
 The frontend half is Vitest over the parts of the UI that are plain functions
-rather than components — the `@`-tag matcher in `components/mentions.ts` — which
+rather than components — the tag matcher in `components/mentions.ts`, which
+reads `@somebody` and `>some file` out of prose — which
 is where a wrong answer is possible without anything looking broken.
 
 ## How it is put together
