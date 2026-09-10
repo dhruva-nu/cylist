@@ -16,6 +16,7 @@ every other request for the duration.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -25,6 +26,8 @@ from typing import IO
 from anyio import to_thread
 
 from app.storage.base import BlobStore, BlobTooLargeError, StoredBlob
+
+logger = logging.getLogger(__name__)
 
 TEMP_PREFIX = ".incoming-"
 """Dot-prefixed so a half-written upload is obviously not a blob if anyone
@@ -55,13 +58,37 @@ class LocalBlobStore(BlobStore):
                     raise BlobTooLargeError(max_bytes)
                 digest.update(chunk)
                 await to_thread.run_sync(incoming.write, chunk)
-        except BaseException:
+        except BaseException as error:
             await to_thread.run_sync(self._abandon, incoming)
+            # The one place that knows an upload was abandoned part-way. The
+            # request will be answered with a 413 or a disconnect and nothing
+            # else would say that bytes were written to the disk and then
+            # taken off it again.
+            logger.warning(
+                "Upload abandoned after %d bytes: %s",
+                size,
+                type(error).__name__,
+                extra={"context": {"bytes": size, "limit": max_bytes}},
+            )
             raise
 
         sha256 = digest.hexdigest()
         path = _relative_path(sha256)
         deduplicated = await to_thread.run_sync(self._commit, incoming, path)
+        # DEBUG, not INFO: the file row that results is already in the
+        # activity trail, where it is queryable. What this adds is the
+        # disk-side detail — the digest to find it under, and whether any
+        # bytes were actually written — which is a question asked while
+        # debugging storage, not while reading the log day to day.
+        logger.debug(
+            "Stored blob %s (%d bytes)%s",
+            sha256[:12],
+            size,
+            " — already held" if deduplicated else "",
+            extra={
+                "context": {"sha256": sha256, "bytes": size, "deduplicated": deduplicated},
+            },
+        )
         return StoredBlob(sha256=sha256, size=size, path=path, deduplicated=deduplicated)
 
     def locate(self, path: str) -> Path:
@@ -72,6 +99,10 @@ class LocalBlobStore(BlobStore):
 
     async def remove(self, path: str) -> None:
         await to_thread.run_sync(self._unlink, self.locate(path))
+        # INFO where storing is DEBUG, because this one is not reversible: if
+        # a blob turns out to have been deleted while a row still referred to
+        # it, this line is the only evidence of when that happened.
+        logger.info("Removed blob", extra={"context": {"path": path}})
 
     # --- Everything below runs in a worker thread --------------------------
 

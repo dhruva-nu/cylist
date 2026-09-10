@@ -138,6 +138,48 @@ It needs root unless you run `sudo tailscale set --operator=$USER` once, after
 which it does not. `tailscale serve status` shows where it currently points, and
 `sudo tailscale funnel --https=443 off` takes it back off the public internet.
 
+## Logs
+
+`make prod-logs` follows the running container, and for most questions that is
+the whole answer. Its limit is that it is Docker's buffer: `docker compose
+down` takes it with it, and so does enough traffic.
+
+For logs that outlive the container, add one line to `app.env` and redeploy:
+
+```bash
+CYLIST_LOG_TO_FILE=true
+```
+
+They are then written to `/data/logs/cylist.log` inside the container, which is
+the `cylist-data` volume — the same one holding uploaded files, so
+`scripts/backup.sh` already carries it. Rotation is at 10 MB with five files
+kept, so the most this can ever occupy is 60 MB; an unbounded log file on this
+machine would fill the disk and take Postgres down with it, which is a worse
+outage than the missing logs it was meant to prevent.
+
+Reading them on the server:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app tail -f /data/logs/cylist.log
+```
+
+Two other variables are worth knowing. `CYLIST_LOG_LEVEL=DEBUG` adds every
+static asset and every health check — for a problem being chased, not for
+leaving on. `CYLIST_LOG_FORMAT=json` writes one JSON object per line, including
+tracebacks, which is what to set if anything is ever pointed at these files:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app \
+  sh -c 'grep WARNING /data/logs/cylist.log' | jq -r '.context.path' | sort | uniq -c
+```
+
+Staging and dev take the same variables in their own `app.env`, and write to
+their own volumes.
+
+Every line carries the id of the request that produced it, and every response
+carries the same id in `X-Request-ID`. When somebody reports a failure, that id
+is the one thing worth asking them for.
+
 ## When a deploy fails
 
 **`permission denied ... /var/run/docker.sock`,** from a user who is in the
