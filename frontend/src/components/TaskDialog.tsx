@@ -69,6 +69,7 @@ import {
   type ChecklistItem,
   type ChecklistState,
   type ColumnDueDate,
+  type FiledItem,
   type Goal,
   type Person,
   type Task,
@@ -81,10 +82,11 @@ import {
   type TaskType,
   type Template,
 } from '../api/client'
-import { agentIndicator, silentFor, waitingDetail } from '../routes/agentState'
+import { silentFor, waitingDetail } from '../routes/agentState'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
+import { useProjectFiles } from './projectFiles'
 import {
   Avatar,
   Button,
@@ -176,6 +178,8 @@ export function TaskDialog(props: DialogProps) {
     queryKey: ['members', projectKey],
     queryFn: () => api.listMembers(projectKey),
   })
+  /** The project's files, for the `>` tags. Not waited for — see the hook. */
+  const files = useProjectFiles(projectKey)
 
   const loading = (taskId !== null && task.isPending) || members.isPending
   const error = task.error ?? members.error
@@ -204,12 +208,21 @@ export function TaskDialog(props: DialogProps) {
         {...props}
         task={null}
         members={members.data.members}
+        files={files}
         onCancel={onClose}
       />
     )
   }
 
-  return <TaskPanel key={detail.id} {...props} task={detail} members={members.data.members} />
+  return (
+    <TaskPanel
+      key={detail.id}
+      {...props}
+      task={detail}
+      members={members.data.members}
+      files={files}
+    />
+  )
 }
 
 /**
@@ -219,7 +232,9 @@ export function TaskDialog(props: DialogProps) {
  * unmounts it — cancelling really does discard the edits rather than leaving
  * them parked behind a flag.
  */
-function TaskPanel(props: DialogProps & { task: TaskDetail; members: Person[] }) {
+function TaskPanel(
+  props: DialogProps & { task: TaskDetail; members: Person[]; files: readonly FiledItem[] },
+) {
   const [editing, setEditing] = useState(false)
 
   if (editing) return <TaskForm {...props} onCancel={() => setEditing(false)} />
@@ -239,13 +254,19 @@ function TaskDetailView({
   projectKey,
   task,
   members,
+  files,
   columns,
   onOpenTask,
   announce,
   onDone,
   onEdit,
   onClose,
-}: DialogProps & { task: TaskDetail; members: Person[]; onEdit: () => void }) {
+}: DialogProps & {
+  task: TaskDetail
+  members: Person[]
+  files: readonly FiledItem[]
+  onEdit: () => void
+}) {
   const column = columns.find((candidate) => candidate.id === task.column_id)
   // A card that owes nothing is never late: once it is done, the day it was
   // wanted done is a fact about the past rather than something outstanding.
@@ -323,7 +344,7 @@ function TaskDetailView({
 
         <ReadField label="Description">
           <p className={styles.prose}>
-            <Tagged text={task.description} members={members} />
+            <Tagged text={task.description} members={members} files={files} />
           </p>
         </ReadField>
 
@@ -400,6 +421,7 @@ function TaskDetailView({
           <SubtasksRead
             task={task}
             members={members}
+            files={files}
             onOpenTask={onOpenTask}
             announce={announce}
             onDone={onDone}
@@ -419,7 +441,9 @@ function TaskDetailView({
         <ReadField label="Timeline">
           <div className={styles.timeline}>
             {task.comments.length ? (
-              task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
+              task.comments.map((entry) => (
+                <Entry key={entry.id} entry={entry} members={members} files={files} />
+              ))
             ) : (
               <span className={styles.empty}>Nothing has been said about this card yet.</span>
             )}
@@ -514,23 +538,13 @@ function AgentSessions({
 /** One session's state, in the words the card's border uses. */
 function sessionState(session: AgentSessionRead, now: Date): string {
   if (session.ended_at !== null) {
-    return session.reason === 'moved' ? 'moved to another card' : 'finished'
+    if (session.reason === 'moved') return 'moved to another card'
+    if (session.reason === 'connection_lost') {
+      return `disconnected — last seen ${silentFor(session.last_seen_at, now)} ago`
+    }
+    return 'finished'
   }
   if (session.state === 'waiting') return `needs you — ${waitingDetail(session.reason)}`
-  if (session.is_stale) {
-    const indicator = agentIndicator(
-      {
-        state: 'stale',
-        count: 1,
-        reason: session.reason,
-        client_name: session.client_name,
-        since: session.state_changed_at,
-        last_seen_at: session.last_seen_at,
-      },
-      now,
-    )
-    return indicator?.label.toLowerCase() ?? 'silent'
-  }
   return 'working'
 }
 
@@ -828,6 +842,7 @@ function TaskForm({
   defaultGoalId,
   task,
   members,
+  files,
   announce,
   onOpenTask,
   onSplit,
@@ -837,6 +852,12 @@ function TaskForm({
 }: DialogProps & {
   task: TaskDetail | null
   members: Person[]
+  /**
+   * The project's files, for the `>` tags in whatever prose this draws or
+   * takes. Empty while they are loading, which leaves a `>` an ordinary
+   * character until they arrive.
+   */
+  files: readonly FiledItem[]
   /**
    * Leaving the form without saving. On an existing card that is a step back
    * to the detail view; on a new one there is nothing behind it, so it closes.
@@ -1125,12 +1146,17 @@ function TaskForm({
             />
           </Field>
 
-          <Field label="Description" required hint="Type @ to tag someone on the project.">
+          <Field
+            label="Description"
+            required
+            hint="Type @ to tag someone on the project, > to tag one of its files."
+          >
             <MentionBox
               multiline
               value={form.description}
               onChange={(description) => setForm({ ...form, description })}
               members={members}
+              files={files}
               placeholder="What done looks like"
             />
           </Field>
@@ -1375,6 +1401,7 @@ function TaskForm({
             <Comments
               task={null}
               members={members}
+              files={files}
               author={author}
               onAuthor={setAuthor}
               comment={comment}
@@ -1424,6 +1451,7 @@ function TaskForm({
             <Subtasks
               task={task}
               members={members}
+              files={files}
               onOpenTask={onOpenTask}
               onSplit={onSplit}
               announce={announce}
@@ -1433,6 +1461,7 @@ function TaskForm({
             <Comments
               task={task}
               members={members}
+              files={files}
               author={author}
               onAuthor={setAuthor}
               comment={comment}
@@ -1455,6 +1484,7 @@ function TaskForm({
 function Comments({
   task,
   members,
+  files,
   author,
   onAuthor,
   comment,
@@ -1463,6 +1493,8 @@ function Comments({
   /** Null while the card is being written, which is the empty timeline. */
   task: TaskDetail | null
   members: Person[]
+  /** The files a comment may tag, and whose tags the timeline draws. */
+  files: readonly FiledItem[]
   author: string
   onAuthor: (id: string) => void
   comment: string
@@ -1472,7 +1504,9 @@ function Comments({
     <Field label="Comments">
       <div className={styles.timeline}>
         {task?.comments.length ? (
-          task.comments.map((entry) => <Entry key={entry.id} entry={entry} members={members} />)
+          task.comments.map((entry) => (
+            <Entry key={entry.id} entry={entry} members={members} files={files} />
+          ))
         ) : (
           <span className={styles.empty}>No comments yet.</span>
         )}
@@ -1493,9 +1527,10 @@ function Comments({
             value={comment}
             onChange={onComment}
             members={members}
+            files={files}
             className={styles.grow}
             aria-label="Add a comment"
-            placeholder="Add a comment, @ to tag someone…"
+            placeholder="Add a comment, @ to tag someone, > a file…"
           />
         </div>
       </div>
@@ -1649,6 +1684,9 @@ function SubStatusListEditor({
           >
             {index + 1}
           </span>
+          {/* People but not files: a stage is a step, and a step named after
+              a document would be a link on every board card that reached it.
+              A file belongs in the description that explains the step. */}
           <MentionBox
             value={label}
             members={members}
@@ -1725,7 +1763,15 @@ function summarise(
 }
 
 /** One timeline entry. System entries are drawn apart from what people wrote. */
-function Entry({ entry, members }: { entry: TaskComment; members: Person[] }) {
+function Entry({
+  entry,
+  members,
+  files,
+}: {
+  entry: TaskComment
+  members: Person[]
+  files: readonly FiledItem[]
+}) {
   const when = new Date(entry.created_at).toLocaleString('en-GB', {
     day: 'numeric',
     month: 'short',
@@ -1761,7 +1807,7 @@ function Entry({ entry, members }: { entry: TaskComment; members: Person[] }) {
           {entry.author?.name ?? 'Unattributed'}
           <span>{when}</span>
         </div>
-        <Tagged text={entry.body} members={members} />
+        <Tagged text={entry.body} members={members} files={files} />
       </div>
     </div>
   )
@@ -1902,6 +1948,7 @@ function SubtaskCardRow({
 function Subtasks({
   task,
   members,
+  files,
   onOpenTask,
   onSplit,
   announce,
@@ -1910,6 +1957,8 @@ function Subtasks({
   task: TaskDetail
   /** The people a checklist item may tag, and whose tags it draws. */
   members: Person[]
+  /** The files it may tag, and whose tags it draws as links. */
+  files: readonly FiledItem[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   onSplit?: ((parentRef: string) => void) | undefined
   announce: (message: string) => void
@@ -1956,6 +2005,7 @@ function Subtasks({
             key={item.id}
             item={item}
             members={members}
+            files={files}
             busy={busy}
             onSetState={(state) => setState.mutate({ id: item.id, state })}
             onRemove={() => remove.mutate(item.id)}
@@ -1975,13 +2025,14 @@ function Subtasks({
             value={title}
             onChange={setTitle}
             members={members}
+            files={files}
             className={styles.grow}
             aria-label="Add a checklist item"
             maxLength={200}
             onEnter={() => {
               if (title.trim()) add.mutate(title.trim())
             }}
-            placeholder="Add a checklist item, @ to tag someone…"
+            placeholder="Add a checklist item, @ to tag someone, > a file…"
           />
           <Button
             small
@@ -2041,13 +2092,15 @@ function Subtasks({
 function SubtasksRead({
   task,
   members,
+  files,
   onOpenTask,
   announce,
   onDone,
 }: {
   task: TaskDetail
-  /** Only to draw the `@` tags in a checklist item as tags. */
+  /** Only to draw a checklist item's `@` and `>` tags as tags. */
   members: Person[]
+  files: readonly FiledItem[]
   onOpenTask?: ((taskRef: string) => void) | undefined
   announce: (message: string) => void
   onDone: () => Promise<void>
@@ -2077,6 +2130,7 @@ function SubtasksRead({
           key={item.id}
           item={item}
           members={members}
+          files={files}
           busy={busy}
           onSetState={(state) => setState.mutate({ id: item.id, state })}
         />
@@ -2119,13 +2173,15 @@ function SubtasksRead({
 function ChecklistRow({
   item,
   members,
+  files,
   busy,
   onSetState,
   onRemove,
 }: {
   item: ChecklistItem
-  /** Only to draw the `@` tags in the title as tags. */
+  /** Only to draw the title's `@` and `>` tags as tags. */
   members: Person[]
+  files: readonly FiledItem[]
   busy: boolean
   onSetState: (state: ChecklistState) => void
   onRemove?: (() => void) | undefined
@@ -2142,7 +2198,7 @@ function ChecklistRow({
           onChange={(event) => onSetState(event.target.checked ? 'done' : 'open')}
         />
         <span className={item.state === 'cancelled' ? styles.struck : ''}>
-          <Tagged text={item.title} members={members} />
+          <Tagged text={item.title} members={members} files={files} />
         </span>
       </label>
       {onRemove ? (

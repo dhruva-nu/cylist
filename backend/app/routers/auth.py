@@ -7,6 +7,7 @@ revokes it and it shows up in the audit trail like any other credential.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -26,6 +27,8 @@ from app.schemas.auth import Identity, LoginRequest
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.services import activity, people, tokens
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
@@ -50,6 +53,7 @@ def _set_session_cookie(response: Response, value: str, settings: Settings) -> N
 )
 async def login(
     body: LoginRequest,
+    request: Request,
     response: Response,
     session: AsyncSession = SessionDependency,
     settings: Settings = Depends(app_settings),
@@ -60,6 +64,14 @@ async def login(
     scopes are for API tokens, which are handed to other software.
     """
     if not verify_password(body.password, settings.password_hash):
+        # At WARNING, and with the caller's address: this is the one endpoint
+        # where the whole of Cylist's security is a single password, so a run
+        # of these lines is the only warning anyone gets that it is being
+        # guessed at. What was typed is of course never written down.
+        logger.warning(
+            "Failed sign-in attempt",
+            extra={"context": {"client": request.client.host if request.client else None}},
+        )
         raise UnauthorizedError("That password is not correct.")
 
     token, plaintext = await tokens.issue(
@@ -78,6 +90,10 @@ async def login(
         channel=Channel.WEB,
     )
     await activity.record(session, principal, "session.started", entity_type="session")
+    logger.info(
+        "Signed in",
+        extra={"context": {"token_id": str(token.id), "ttl_hours": settings.session_ttl_hours}},
+    )
 
     return Identity(
         token_id=token.id,
@@ -107,6 +123,7 @@ async def logout(
     if cookie:
         await tokens.revoke_by_digest(session, hash_token(cookie))
     response.delete_cookie(SESSION_COOKIE, path="/")
+    logger.info("Signed out", extra={"context": {"had_session": bool(cookie)}})
     return Acknowledged()
 
 

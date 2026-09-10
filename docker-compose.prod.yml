@@ -33,6 +33,11 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Exactly one replica, and no --workers on the uvicorn command. The registry
+  # of who is connected over a WebSocket lives in this process: a second one
+  # would split the fan-out silently, freezing most open boards, and its
+  # startup sweep would end the agent sessions its peer was holding. See
+  # DEPLOY.md, "Never add --workers".
   app:
     build:
       # The root, because this image builds the SPA as well as the API.

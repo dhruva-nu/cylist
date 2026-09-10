@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.clock import now
 from app.db import SessionDependency
 from app.models.board import BoardColumn
 from app.models.person import Person
@@ -161,10 +160,8 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
     split = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
     boards = await _boards(session, found)
-    # One query for the agents on every card, and a moment fixed once so that
-    # "stale" means the same thing on every card of the same list.
+    # One query for the agents on every card.
     agents = await agent_sessions.for_tasks(session, ids)
-    moment = now()
     return [
         _read(
             task,
@@ -172,7 +169,7 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
             split.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
             boards.get(task.project_id),
-            agent_sessions.presence(agents.get(task.id, []), moment),
+            agent_sessions.presence(agents.get(task.id, [])),
         )
         for task in found
     ]
@@ -209,7 +206,6 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     owners = await tasks.subtask_owners(session, ids)
     board = await columns.list_for_project(session, task.project)
     agents = await agent_sessions.list_for_task(session, task)
-    moment = now()
     return TaskDetail(
         **_read(
             task,
@@ -217,10 +213,10 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
             counts.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
             board,
-            agent_sessions.presence(agents, moment),
+            agent_sessions.presence(agents),
         ).model_dump(),
         comments=[_comment(entry) for entry in timeline],
-        agent_sessions=[agent_sessions.read(row, moment) for row in agents],
+        agent_sessions=[agent_sessions.read(row) for row in agents],
         # A sub-task cannot be split again, so its own counts are always zero —
         # asked for all the same, because the loop that reads them does not know
         # which of these is which and a special case here would be a lie waiting

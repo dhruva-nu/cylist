@@ -14,21 +14,58 @@ from typing import Literal
 from fastapi import Request
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 Environment = Literal["dev", "test", "preview", "staging", "prod"]
 
-AGENT_SESSION_STALE_AFTER = timedelta(minutes=10)
-"""How long a working agent session may go unheard from before the board stops
-believing it.
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+"""Named rather than free text so a typo is refused at startup.
 
-A Claude Code session reports in on every prompt and tool call, and at least
-once a minute while a long turn runs; one silent for ten minutes has almost
-certainly been killed without its ``SessionEnd`` hook firing. The row stays
-``working`` in the database — nothing reaps it — and the read model calls it
-stale instead, so a crashed agent never pulses on a card forever. A constant
-rather than a setting: it is a fact about the hook's cadence, not about the
-deployment.
+``CYLIST_LOG_LEVEL=INFOO`` would otherwise be read by :mod:`logging` as level
+zero and turn every logger all the way up, which is the opposite of what
+whoever typed it meant.
 """
+
+LogFormat = Literal["text", "json"]
+"""``text`` for a person reading a terminal, ``json`` for anything parsing.
+
+One object per line, so ``jq`` and any log shipper can read the file without a
+multi-line grammar for tracebacks.
+"""
+
+AGENT_SOCKET_IDLE_AFTER = timedelta(minutes=5)
+"""How long an agent's socket may say nothing before the server closes it.
+
+Measured on *application* messages. Protocol pongs are answered below the
+ASGI layer and never reach the handler, which is what makes this mean "the
+agent has nothing to say" rather than "the TCP connection is quiet".
+
+The client's side of the bargain: it keeps the socket warm while it is
+working — a single tool call can run for twenty minutes without a hook event
+— and lets it go quiet once it is waiting on a human. So this window closing
+means one of two things, and the board draws them the same way: the agent is
+gone, or the person is.
+
+Comfortably more than the client's sixty-second keepalive, so five missed in
+a row is the threshold rather than one unlucky one.
+"""
+
+AGENT_QUIET_AFTER = timedelta(minutes=10)
+"""How long an *unwitnessed* session may go quiet before it is ended.
+
+For the clients that report over HTTP and hold no socket. A socket closing
+says the session is over; a PUT that stops coming says nothing at all, so
+something has to go looking. A session holding a socket is exempt however
+long it has been silent — it is witnessed, which is better evidence than a
+timestamp.
+
+This is what the computed staleness used to do, moved from the read to a
+write: the board now reads a fact rather than a guess about the clock.
+"""
+
+REAP_EVERY = timedelta(seconds=60)
+"""How often to go looking. Cheap — one indexed query over the open rows."""
 
 
 class Settings(BaseSettings):
@@ -70,6 +107,39 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     session_ttl_hours: int = Field(default=720, gt=0)
 
+    # --- Logging ----------------------------------------------------------
+    # What the process says about itself, and where. See app/core/logging.py
+    # for what is written; these decide how much of it and to where.
+    log_level: LogLevel = "INFO"
+    log_format: LogFormat = "text"
+
+    log_to_file: bool = False
+    """Whether to also write the log to a file on the server.
+
+    Off by default because the log's first home is stderr, which is where a
+    container's output belongs and what ``make prod-logs`` follows. Turning
+    this on *adds* a file; it never silences stderr, so switching it on can
+    never make a deployment quieter than it was.
+    """
+
+    log_file: Path | None = None
+    """Where that file goes, when :attr:`log_to_file` is set.
+
+    Left unset it is :attr:`log_dir` ``/cylist.log``, which is inside the data
+    directory and therefore inside the one volume every deployment already
+    mounts and backs up — so enabling the file needs one variable rather than
+    a variable and a mount.
+    """
+
+    log_file_max_mb: int = Field(default=10, gt=0)
+    log_file_backups: int = Field(default=5, ge=0)
+    """How much log to keep: ``log_file_backups`` rolled files of
+    ``log_file_max_mb`` each, plus the live one. Rotation is not optional —
+    an unbounded log file on a server is a disk that fills up quietly and
+    takes Postgres down with it, which is a far worse outage than the missing
+    logs it was meant to prevent.
+    """
+
     @field_validator("database_url")
     @classmethod
     def _require_async_driver(cls, value: str) -> str:
@@ -86,6 +156,35 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def log_dir(self) -> Path:
+        """Where log files live when they are written at all."""
+        return self.data_dir / "logs"
+
+    @property
+    def log_file_path(self) -> Path:
+        """The file the log is written to, configured or derived."""
+        return self.log_file if self.log_file is not None else self.log_dir / "cylist.log"
+
+    @property
+    def log_file_max_bytes(self) -> int:
+        return self.log_file_max_mb * 1024 * 1024
+
+    @property
+    def safe_database_url(self) -> str:
+        """The database URL with its password blanked out, for logging.
+
+        The configured URL carries the password in it, so it can never be
+        written to a log or shown on a status page as it stands. What is left
+        after redaction — driver, host, port, database — is exactly the part
+        worth seeing when a deployment has come up pointed at the wrong one.
+        """
+        try:
+            return make_url(self.database_url).render_as_string(hide_password=True)
+        except ArgumentError:
+            # Unparseable, so nothing can be said about its shape safely.
+            return "<unparseable database url>"
 
     @property
     def is_production(self) -> bool:

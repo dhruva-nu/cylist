@@ -19,13 +19,12 @@ AGENT_MARK = {
     "working": "agent: working",
     "waiting": "agent: needs you",
     "done": "agent: finished",
-    "stale": "agent: silent",
 }
 """What the web board draws as the card's border, said in words.
 
 Its own line under the reference rather than a prefix on it: a column here is
 thirty-two characters at its widest, and a prefix long enough to say which of
-the four states this is would push the reference off the end of it.
+these states this is would push the reference off the end of it.
 """
 
 

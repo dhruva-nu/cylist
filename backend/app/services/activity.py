@@ -23,6 +23,7 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.db import publish_into
 from app.models.activity import Activity
 from app.schemas.activity import FieldChange, HistoryEntry
 from app.services import agent_sessions
@@ -66,6 +67,21 @@ async def record(
     await agent_sessions.touch_from_activity(
         session, principal, verb, entity_type=entity_type, entity_id=entity_id
     )
+    # And it is news to anyone watching the board. Here for the same reason:
+    # a board goes stale for *any* change, not only for the agent ones, and a
+    # push wired to presence alone would quietly stop showing a card that an
+    # MCP `move_task` had moved. The 10s poll used to carry those too.
+    if project_id is not None:
+        publish_into(
+            session,
+            {
+                "type": "board.changed",
+                "project_id": project_id,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "verb": verb,
+            },
+        )
     return entry
 
 

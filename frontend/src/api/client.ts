@@ -384,7 +384,15 @@ export interface DayReport {
 
 export type AgentSessionState = 'working' | 'waiting' | 'done'
 export type AgentSessionReason =
-  'turn_ended' | 'permission' | 'idle' | 'question' | 'moved' | 'session_ended'
+  | 'turn_ended'
+  | 'permission'
+  | 'idle'
+  | 'question'
+  | 'moved'
+  | 'session_ended'
+  /** The socket went away without a goodbye: it dropped, or it went quiet
+   * past the idle window. What a card draws as the dashed outline. */
+  | 'connection_lost'
 
 /** One harness session — a Claude Code conversation — on one card. */
 export interface AgentSessionRead {
@@ -402,21 +410,22 @@ export interface AgentSessionRead {
   started_at: string
   /** When `state` last changed. */
   state_changed_at: string
-  /** When the hook last reported in. */
+  /** When the session last reported in, over its socket or the HTTP route. */
   last_seen_at: string
   ended_at: string | null
   dismissed_at: string | null
-  /** A `working` session not heard from for long enough that the board no
-   * longer believes it. Computed by the server, never stored. */
-  is_stale: boolean
 }
 
-export type AgentPresenceState = 'working' | 'waiting' | 'done' | 'stale'
+export type AgentPresenceState = 'working' | 'waiting' | 'done'
 
 /**
  * What a card says about the agents on it, reduced to the one state its border
- * shows. `waiting` wins over `working` wins over `done`; a `stale` session is
- * ignored while another is live and shown only when it is all that is left.
+ * shows. `waiting` wins over `working` wins over `done`.
+ *
+ * There was a fourth, `stale`, for a working session gone quiet past a
+ * threshold — back when nothing ended the row of a process that had died. The
+ * server ends them now, so a dropped agent arrives here as `done` with a
+ * `reason` of `connection_lost` rather than as a guess about the clock.
  */
 export interface AgentPresence {
   state: AgentPresenceState
@@ -737,6 +746,18 @@ export interface FileItem {
   created_at: string
 }
 
+/**
+ * An item with where it is filed — a row of the project-wide flat listing.
+ *
+ * The path is what tells two files of the same name apart in a picker. It is
+ * a string of folder names because nothing navigates with it: a `>` tag
+ * carries the name, and the path is only shown beside it.
+ */
+export interface FiledItem extends FileItem {
+  /** Folder names between the root and the item, `/`-joined; empty at the top. */
+  folder_path: string
+}
+
 export interface FolderChildren {
   folder: Folder
   /** The folders above this one, outermost first, ending with it. */
@@ -864,6 +885,11 @@ export const api = {
     request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
+  /**
+   * Every file and link in the project, flat — what a `>` tag is completed
+   * from, and what one is recognised against when prose is read back.
+   */
+  listProjectItems: (ref: string) => request<FiledItem[]>(`/projects/${ref}/items`),
 
   uploadFile: (folderId: string, file: File, addedBy?: string | null) => {
     const form = new FormData()

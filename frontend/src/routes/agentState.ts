@@ -74,23 +74,29 @@ export function agentIndicator(p: AgentPresence | null, now: Date): AgentIndicat
     case 'working':
       return { className: 'agentWorking', label: `${agents} working` }
     case 'done':
-      return { className: 'agentDone', label: many ? `${agents} finished` : 'Agent finished' }
-    case 'stale':
-      return {
-        className: 'agentStale',
-        label: `${agents} silent for ${silentFor(p.last_seen_at, now)}`,
+      // A session that was cut off is finished, but not in the way finishing
+      // means. It wears the dashed border the stale state used to — "the
+      // outline of an agent rather than an agent" was always a better
+      // description of a lost connection than of a slow one.
+      if (p.reason === 'connection_lost') {
+        return {
+          className: 'agentStale',
+          label: many ? `${agents} disconnected` : 'Agent disconnected',
+          detail: `last seen ${silentFor(p.last_seen_at, now)} ago`,
+        }
       }
+      return { className: 'agentDone', label: many ? `${agents} finished` : 'Agent finished' }
   }
 }
 
 /**
  * Whether the board should keep asking the server about this list of cards.
  *
- * True while any card has a session that is still open: working can turn into
- * waiting at any moment, waiting into working the moment somebody types, and a
- * stale session may yet report in or be replaced. A card whose only sessions
- * are done changes when a person acts, and a person acting is a mutation,
- * which already refetches everything.
+ * The fallback for a board with no socket — see `useBoardSocket`. True while
+ * any card has a session still open: working can turn into waiting at any
+ * moment, and waiting into working the moment somebody types. A card whose
+ * only sessions are done changes when a person acts, and a person acting is a
+ * mutation, which already refetches everything.
  */
 export function hasLiveAgent(tasks: readonly { agent_session: AgentPresence | null }[]): boolean {
   return tasks.some((task) => task.agent_session !== null && task.agent_session.state !== 'done')

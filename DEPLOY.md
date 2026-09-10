@@ -138,6 +138,116 @@ It needs root unless you run `sudo tailscale set --operator=$USER` once, after
 which it does not. `tailscale serve status` shows where it currently points, and
 `sudo tailscale funnel --https=443 off` takes it back off the public internet.
 
+### WebSockets through the proxy
+
+Two things hold a socket now: a browser watching a board, and each agent
+session reporting on a card. `wss:` follows `https:` automatically — the
+frontend derives the scheme from the page it was served by — and `tailscale
+serve`/`funnel` forwards `Upgrade` end to end, so **there is nothing to
+configure**. There is no flag for it, and there would be nothing to turn on
+if it did not work.
+
+**This has never been exercised in this deployment.** Until CYLIST-40 no
+WebSocket traffic existed at all, so the paragraph above is a reasonable
+expectation rather than an observation. Check it after the first deploy that
+includes this, from a laptop rather than from the server — loopback bypasses
+the very thing under test:
+
+```bash
+curl -isk -N --http1.1 \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" \
+  -H "Sec-WebSocket-Key: $(head -c16 /dev/urandom | base64)" \
+  -H "Authorization: Bearer $CYLIST_TOKEN" \
+  https://<host>/api/v1/agent-sessions/probe-1/ws | head -20
+```
+
+| First line | What it means |
+| --- | --- |
+| `101 Switching Protocols` | The upgrade survived the proxy. This is the answer you want. |
+| `200` with HTML | The SPA mount swallowed it — wrong path, or a route registered after `mount_spa`. |
+| `403` | The origin check refused it. |
+| `502` | The `tailscale funnel --bg 443` foot-gun above. |
+
+A `101` does **not** prove the token is good: a bad credential is accepted
+and then closed with 4401, deliberately, because a browser cannot read a
+handshake's status code and would otherwise be unable to tell "signed out"
+from "server down".
+
+`GET /api/v1/health/realtime` reports how many sockets this process is
+holding — agent connections and board watchers, counts only, no names. That
+is the way to answer "did the upgrade actually work last Tuesday, when
+nobody was looking": a board that has silently fallen back to polling looks
+exactly like a working one from the outside, and shows up here as watchers
+that never arrive.
+
+If sockets turn out not to get through, nothing breaks. The board keeps its
+ten-second poll as a fallback and the agent hooks keep reporting over HTTP;
+what is lost is the promptness, not the correctness.
+
+### Never add `--workers`
+
+One uvicorn process per environment, and this is now a constraint rather
+than a default. The registry of who is connected is a dictionary in that
+process, which is a complete and correct answer for one worker and a wrong
+one for two:
+
+* Fan-out splits silently. An agent's change reaches the boards on its own
+  worker and no others, so most open boards freeze — intermittently, and
+  looking exactly like a frontend bug.
+* The startup sweep, which ends every open agent session because a
+  just-started process can hold no sockets, would end the sessions its peer
+  workers are actively holding. Whichever worker restarts last wipes the
+  board.
+
+If the day comes that one process is not enough, `Hub.publish` in
+`backend/app/realtime/hub.py` is the single fan-out entry point and takes a
+JSON-serialisable dict, so backing it with Postgres `LISTEN`/`NOTIFY` is a
+change to one method. Until somebody does that deliberately, do not add the
+flag.
+
+## Logs
+
+`make prod-logs` follows the running container, and for most questions that is
+the whole answer. Its limit is that it is Docker's buffer: `docker compose
+down` takes it with it, and so does enough traffic.
+
+For logs that outlive the container, add one line to `app.env` and redeploy:
+
+```bash
+CYLIST_LOG_TO_FILE=true
+```
+
+They are then written to `/data/logs/cylist.log` inside the container, which is
+the `cylist-data` volume — the same one holding uploaded files, so
+`scripts/backup.sh` already carries it. Rotation is at 10 MB with five files
+kept, so the most this can ever occupy is 60 MB; an unbounded log file on this
+machine would fill the disk and take Postgres down with it, which is a worse
+outage than the missing logs it was meant to prevent.
+
+Reading them on the server:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app tail -f /data/logs/cylist.log
+```
+
+Two other variables are worth knowing. `CYLIST_LOG_LEVEL=DEBUG` adds every
+static asset and every health check — for a problem being chased, not for
+leaving on. `CYLIST_LOG_FORMAT=json` writes one JSON object per line, including
+tracebacks, which is what to set if anything is ever pointed at these files:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app \
+  sh -c 'grep WARNING /data/logs/cylist.log' | jq -r '.context.path' | sort | uniq -c
+```
+
+Staging and dev take the same variables in their own `app.env`, and write to
+their own volumes.
+
+Every line carries the id of the request that produced it, and every response
+carries the same id in `X-Request-ID`. When somebody reports a failure, that id
+is the one thing worth asking them for.
+
 ## When a deploy fails
 
 **`permission denied ... /var/run/docker.sock`,** from a user who is in the

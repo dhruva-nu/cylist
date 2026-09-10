@@ -23,7 +23,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from alembic import command
@@ -508,3 +508,87 @@ class TestUndoingTheOptionalDueDate:
 
         with pytest.raises(RuntimeError, match="have no due date"):
             await rewind(DATED)
+
+
+# --- A reason long enough for connection_lost ------------------------------
+
+NARROW_REASON = "0021"
+WIDE_REASON = "0022"
+
+
+async def seed_an_agent_session(connection: AsyncConnection, *, reason: str) -> None:
+    """One card with one finished agent session on it, under a given reason."""
+    await seed_a_task(connection, due_date=None)
+    await connection.execute(
+        text(
+            "INSERT INTO agent_session (id, task_id, token_id, actor_label,"
+            " client_session_id, client_name, state, reason, started_at,"
+            " state_changed_at, last_seen_at, ended_at)"
+            " SELECT gen_random_uuid(), task.id, NULL, 'claude code hook',"
+            " 'sess-1', 'ATL-1', 'done', :reason, now(), now(), now(), now()"
+            " FROM task"
+        ),
+        {"reason": reason},
+    )
+
+
+async def reasons(connection: AsyncConnection) -> list[Any]:
+    return list((await connection.execute(text("SELECT reason FROM agent_session"))).scalars())
+
+
+class TestWideningTheReason:
+    async def test_refuses_connection_lost_before_the_widen(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Why the revision exists at all.
+
+        ``reason`` is a VARCHAR sized to the longest member the schema knew,
+        and ``connection_lost`` is two characters past it. Nothing in
+        ``alembic check`` compares a column's width, so this is the only place
+        the widen is proved.
+        """
+        await migrate(NARROW_REASON)
+
+        with pytest.raises(DBAPIError, match=r"too long|right truncation"):
+            await seed_an_agent_session(connection, reason="connection_lost")
+
+    async def test_accepts_connection_lost_after_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WIDE_REASON)
+
+        await seed_an_agent_session(connection, reason="connection_lost")
+
+        assert await reasons(connection) == ["connection_lost"]
+
+    async def test_leaves_the_reasons_already_written_alone(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(NARROW_REASON)
+        await seed_an_agent_session(connection, reason="session_ended")
+
+        await migrate(WIDE_REASON)
+
+        assert await reasons(connection) == ["session_ended"]
+
+
+class TestUndoingTheWidenedReason:
+    async def test_puts_a_lost_connection_back_as_an_ended_session(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The session is over either way; only the cause does not fit."""
+        await migrate(WIDE_REASON)
+        await seed_an_agent_session(connection, reason="connection_lost")
+
+        await rewind(NARROW_REASON)
+
+        assert await reasons(connection) == ["session_ended"]

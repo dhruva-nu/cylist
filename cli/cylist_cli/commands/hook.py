@@ -2,11 +2,20 @@
 
 Claude Code runs ``cylist hook`` on every prompt, tool call, stop and exit,
 with one JSON object on stdin saying which. This module turns those into
-``PUT /tasks/{ref}/agent-sessions/{session_id}`` calls, so the board can draw a
-card's border as *working*, *waiting* or *done* without the agent having to
-say anything — the harness is the witness, not the model.
+reports on the board, so a card's border can say *working*, *waiting* or
+*done* without the agent having to say anything — the harness is the
+witness, not the model.
 
-Three rules shape everything here, and they are worth more than any feature:
+Where those reports *go* changed in CYLIST-40. A hook lives for
+milliseconds, and a connection that can be seen to end is worth more than a
+sequence of requests that merely stops arriving, so the reports now go down
+a unix socket to a small daemon that holds one WebSocket for the life of the
+session — see :mod:`cylist_cli.presence`. The old
+``PUT /tasks/{ref}/agent-sessions/{session_id}`` is still here and still
+correct: it carries the first event of a session, before a daemon exists to
+carry it, and it is what a machine that cannot run one falls back to.
+
+Four rules shape everything here, and they are worth more than any feature:
 
 * **An unbound session sends nothing.** The hooks are installed user-wide and
   fire in every project. Only ``/work <REF>`` typed in a session, or a
@@ -18,14 +27,22 @@ Three rules shape everything here, and they are worth more than any feature:
   kept installed. Bad JSON, no token, a network error — all swallowed, with a
   line on stderr only when ``CYLIST_HOOK_DEBUG=1``.
 * **It is quick.** ``UserPromptSubmit`` is on the critical path of every
-  prompt, so the HTTP timeout is a second and a half in total, and heartbeats
-  from tool calls are throttled to one a minute.
+  prompt. The socket gets a quarter of a second and the HTTP fallback a
+  second and a half, so the worst case is under two — well inside the three
+  Claude Code allows. An ordinary tool call now costs nothing at all: it
+  used to send a keepalive once a minute to prove the process was alive, and
+  a held connection proves that by existing.
+* **It never leaves anything behind it cannot show you.** The daemon it
+  starts is one process per bound session, visible in ``cylist hook status``,
+  stoppable with ``cylist hook stop``, gone when the session ends, and
+  refusable entirely with ``CYLIST_PRESENCE=off``. A background process on
+  somebody's laptop has to be all of those things.
 
 State is one small file per session under ``$XDG_STATE_HOME/cylist/sessions``:
-which card the session is bound to, when it last reported, and whether it has
-been nudged. ``/clear`` ends one session and starts another in the same
-process; a ``handoff.json`` written on the way out and read on the way in is
-what carries the binding across.
+which card the session is bound to and whether it has been nudged. ``/clear``
+ends one session and starts another in the same process; a ``handoff.json``
+written on the way out and read on the way in is what carries the binding
+across.
 """
 
 from __future__ import annotations
@@ -42,15 +59,12 @@ from typing import Any
 
 import httpx
 
-from cylist_cli import output
+from cylist_cli import output, presence
 from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
 
 HTTP_TIMEOUT = httpx.Timeout(1.5)
 """Total. A down backend costs a prompt this much and no more."""
-
-HEARTBEAT_EVERY = timedelta(seconds=60)
-"""How often a bound session reports in from tool calls alone."""
 
 HANDOFF_TTL = timedelta(seconds=5)
 """How old a ``/clear`` handoff may be and still be believed."""
@@ -145,6 +159,86 @@ def register(subparsers: Any) -> None:
     )
     uninstall.set_defaults(handler=_uninstall, swallow_errors=False)
 
+    # Not for people. Started by the hook, and only ever by the hook.
+    daemon = actions.add_parser("daemon", help=argparse.SUPPRESS)
+    daemon.add_argument("--session", required=True)
+    daemon.set_defaults(handler=_daemon, swallow_errors=True)
+
+    status = actions.add_parser(
+        "status",
+        help="Show the presence daemons running on this machine.",
+        description=(
+            "One line per bound session holding a connection to the board: which "
+            "card, whether the link is up, and the process to stop if you want it "
+            "gone. This exists so that a background process on your laptop is "
+            "something you can see rather than something you find."
+        ),
+    )
+    status.set_defaults(handler=_status, swallow_errors=False)
+
+    stop = actions.add_parser(
+        "stop",
+        help="End a presence daemon, or all of them.",
+        description=(
+            "Ends the session on the board and exits the process. The next hook "
+            "event starts a fresh one, so this is a way to clear something stuck "
+            "rather than a way to opt out — CYLIST_PRESENCE=off is that."
+        ),
+    )
+    stop.add_argument("--session", help="Just this one. Default: all of them.")
+    stop.add_argument("--all", action="store_true", help="Every daemon on this machine.")
+    stop.set_defaults(handler=_stop, swallow_errors=False)
+
+
+# --- The daemon and its handles ----------------------------------------------
+
+
+def _daemon(args: argparse.Namespace, ctx: Context) -> None:
+    """Run the presence daemon for one session, in the foreground.
+
+    Imported here and not at module scope: ``commands`` loads every module
+    eagerly, and this one reaches ``websockets``. An unbound session — the
+    common case, since the hooks fire in every project — must not pay for a
+    dependency it will never use.
+    """
+    from cylist_cli.presence import daemon
+
+    daemon.run(ctx, args.session)
+
+
+def _status(_: argparse.Namespace, ctx: Context) -> None:
+    rows = []
+    for session in presence.supervisor.running_sessions():
+        ack = presence.ipc.describe(session) or {}
+        rows.append(
+            [
+                session[:12],
+                str(ack.get("task") or "-"),
+                str(ack.get("link") or "unreachable"),
+                str(ack.get("pid") or "-"),
+                str(presence.daemon_log(session)),
+            ]
+        )
+    if ctx.as_json:
+        output.emit_json(
+            [dict(zip(["session", "task", "link", "pid", "log"], row, strict=True)) for row in rows]
+        )
+        return
+    output.table(
+        ["session", "card", "link", "pid", "log"],
+        rows,
+        empty="No presence daemons are running.",
+    )
+
+
+def _stop(args: argparse.Namespace, ctx: Context) -> None:
+    wanted = [args.session] if args.session else presence.supervisor.running_sessions()
+    stopped = [session for session in wanted if presence.supervisor.stop(session)]
+    if ctx.as_json:
+        output.emit_json({"stopped": stopped})
+        return
+    output.echo(f"Stopped {len(stopped)} presence daemon(s)." if stopped else "Nothing to stop.")
+
 
 # --- The dispatcher ----------------------------------------------------------
 
@@ -211,12 +305,12 @@ class Hook:
             wanted = match.group(1)
             if wanted.lower() == "off":
                 if self.task:
-                    self._put("done", reason="session_ended")
+                    self._end("session_ended")
                 _delete(self.session_id)
                 return
             self._bind(wanted.upper())
             self._rename()
-            self._put("working")
+            self._put("working", bind=True)
             return
         if self.task:
             self._put("working")
@@ -228,7 +322,7 @@ class Hook:
             # row. No rename here — PostToolUse cannot set a title; the next
             # prompt will.
             self._bind(target)
-            self._put("working")
+            self._put("working", bind=True)
             return
         if target and not self.task:
             if not self.state.get("nudged"):
@@ -238,8 +332,10 @@ class Hook:
                 self.state["nudged"] = True
                 _save(self.session_id, self.state)
             return
-        if self.task and self._heartbeat_due():
-            self._put("working")
+        # Nothing. An ordinary tool call used to cost a PUT once a minute,
+        # to prove the process was still alive; the socket proves that by
+        # existing. This is the event that got cheapest, and it is by far
+        # the most frequent one.
 
     def _on_Stop(self) -> None:  # noqa: N802
         if self.task:
@@ -259,7 +355,7 @@ class Hook:
         if not self.task:
             _delete(self.session_id)
             return
-        self._put("done", reason="session_ended")
+        self._end("session_ended")
         if self.event.get("reason") == "clear":
             _write_handoff(self.task)
         _delete(self.session_id)
@@ -275,7 +371,6 @@ class Hook:
         if self.task != ref:
             self.state["task"] = ref
             self.state["bound_at"] = _now().isoformat()
-            self.state.pop("last_heartbeat_at", None)
         _save(self.session_id, self.state)
 
     def _rename(self) -> None:
@@ -317,21 +412,54 @@ class Hook:
         ref = str(arguments.get("task") or "").strip().upper()
         return ref if REFERENCE.match(ref) else None
 
-    def _heartbeat_due(self) -> bool:
-        last = self.state.get("last_heartbeat_at")
-        if not last:
-            return True
-        try:
-            return _now() - datetime.fromisoformat(str(last)) >= HEARTBEAT_EVERY
-        except ValueError:
-            return True
+    def _end(self, reason: str) -> None:
+        """The session is over. Tell whichever channel is listening.
 
-    def _put(self, state: str, *, reason: str | None = None) -> None:
+        The daemon is asked first and never started: a session that is
+        ending has no use for a new one, and spawning here would leave a
+        process behind to time itself out.
+        """
+        if presence.finish(cylist_argv(), self.session_id, reason):
+            return
+        # Straight to HTTP, deliberately not back through `_put`: that would
+        # start a daemon, and a daemon for a session that is ending is a
+        # process left behind to time itself out.
+        self._http_put("done", reason=reason)
+
+    def _put(self, state: str, *, reason: str | None = None, bind: bool = False) -> None:
         """Report to the board, or silently do not.
+
+        The daemon first — it is holding a connection already, so this is a
+        line on a unix socket and no HTTP at all. If there is no daemon, one
+        is started for next time and *this* event goes the old way, because
+        a new daemon has a server to reach before it is any use and a prompt
+        must not wait for that.
 
         No token means this machine has never run ``cylist login``: the hooks
         may well be installed before that, and complaining about it on every
         prompt would be the wrong way to say so.
+        """
+        if not self.task:
+            return
+        if presence.report(
+            cylist_argv(),
+            self.session_id,
+            self.task,
+            state,
+            reason,
+            self._client_name(),
+            bind=bind,
+        ):
+            return
+        self._http_put(state, reason=reason)
+
+    def _http_put(self, state: str, *, reason: str | None = None) -> None:
+        """The original path, kept as the one that always works.
+
+        Not a temporary crutch. It is what a machine with no unix sockets, a
+        sandbox that forbids a fork, or a `CYLIST_PRESENCE=off` falls back
+        to — and it is what carries the first event of every session, before
+        a daemon exists to carry it.
         """
         if not self.task:
             return
@@ -344,8 +472,6 @@ class Hook:
             body["reason"] = reason
         with self.ctx.build_client(token, timeout=HTTP_TIMEOUT) as client:
             client.put(f"/tasks/{self.task}/agent-sessions/{self.session_id}", body)
-        self.state["last_heartbeat_at"] = _now().isoformat()
-        _save(self.session_id, self.state)
 
 
 # --- State on disk -------------------------------------------------------------
@@ -429,20 +555,29 @@ def claude_config_dir() -> Path:
     return Path(root) if root else Path.home() / ".claude"
 
 
-def hook_command() -> str:
-    """The absolute command Claude Code should run.
+def cylist_argv() -> list[str]:
+    """How to invoke this CLI, as an argv, without the subcommand.
 
     Absolute, because a hook runs with whatever PATH the harness happened to
     inherit, and ``uv tool install`` and a venv put ``cylist`` in different
     places. Falls back to the module form for a checkout run with ``uv run``.
+
+    An argv rather than a string because two callers want it and they want
+    different things: the installer writes a shell command into settings.json,
+    and the supervisor execs a list.
     """
     found = shutil.which("cylist")
     if found:
-        return f"{Path(found).resolve()} hook"
+        return [str(Path(found).resolve())]
     invoked = Path(sys.argv[0])
     if invoked.name == "cylist" and invoked.is_absolute():
-        return f"{invoked.resolve()} hook"
-    return f"{Path(sys.executable).resolve()} -m cylist_cli hook"
+        return [str(invoked.resolve())]
+    return [str(Path(sys.executable).resolve()), "-m", "cylist_cli"]
+
+
+def hook_command() -> str:
+    """The absolute command Claude Code should run, as settings.json wants it."""
+    return " ".join([*cylist_argv(), "hook"])
 
 
 def _is_ours(command: Any) -> bool:
@@ -553,9 +688,27 @@ def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
     had_command = command_path.exists()
     command_path.unlink(missing_ok=True)
 
+    # Uninstalling has to leave nothing running. Nothing would start a daemon
+    # again once the hooks are gone, so any still holding a session would sit
+    # there until their own idle window — which is a background process left
+    # behind by an uninstall, and there is no good version of that.
+    stopped = [
+        session
+        for session in presence.supervisor.running_sessions()
+        if presence.supervisor.stop(session)
+    ]
+
     if ctx.as_json:
-        output.emit_json({"settings": str(settings_path), "removed": sorted(set(removed))})
+        output.emit_json(
+            {
+                "settings": str(settings_path),
+                "removed": sorted(set(removed)),
+                "daemons_stopped": stopped,
+            }
+        )
         return
+    if stopped:
+        output.echo(f"Stopped {len(stopped)} presence daemon(s).")
     if removed:
         output.echo(f"Removed the Cylist hook from {settings_path}.")
     else:

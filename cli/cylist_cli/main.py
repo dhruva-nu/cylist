@@ -2,10 +2,16 @@
 
 **Why argparse rather than typer.** Three reasons, in order of weight:
 
-1. *No runtime dependency but httpx.* The CLI's whole job is to prove the API
+1. *Almost no runtime dependencies.* The CLI's whole job is to prove the API
    is enough on its own. A tool that installs in one step, from the standard
-   library plus one HTTP client, makes that easier to believe than one that
+   library plus an HTTP client, makes that easier to believe than one that
    pulls in a framework and its click dependency to parse ``--json``.
+
+   There are two now: ``httpx``, and ``websockets`` for the connection the
+   presence daemon holds. The second is paid only by that daemon — nothing
+   on the hook's critical path imports it, which is why
+   :mod:`cylist_cli.presence.daemon` is imported inside its handler and not
+   at the top of a module ``commands`` would load eagerly.
 2. *The exit path is visible.* Every failure in this package funnels through
    :func:`main` below, which decides the status code and what reaches stderr.
    Typer installs its own exception handling and its own ``rich`` traceback

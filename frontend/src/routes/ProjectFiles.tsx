@@ -33,6 +33,7 @@ import {
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from '../components/Modal'
 import { formatSize, formatStamp } from '../components/format'
+import { projectFilesKey } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
 import { Avatar, Button, ErrorBanner, LiveRegion, cardStyles, useAnnouncer } from '../components/ui'
 import styles from './ProjectFiles.module.css'
@@ -189,6 +190,9 @@ export function ProjectFiles() {
       queryClient.invalidateQueries({ queryKey: ['folder-tree', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['folder-children'] }),
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
+      // What the `>` tag in a description or a comment is completed from: a
+      // file uploaded here is taggable in the next thing anybody writes.
+      queryClient.invalidateQueries({ queryKey: projectFilesKey(projectKey) }),
     ])
   }
 

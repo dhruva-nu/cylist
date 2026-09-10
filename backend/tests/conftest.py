@@ -125,10 +125,18 @@ async def client_for(settings: Settings, database: Database) -> AsyncIterator[As
     app = create_app(settings)
     app.state.settings = settings
     app.state.database = database
+    # The lifespan would have done this; without it the shared pool has
+    # nobody to tell about a commit. Rebound per test, so each app's sockets
+    # hear only their own test's writes.
+    database.publish_to(app.state.hub.publish)
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test/api/v1") as http:
-        yield http
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test/api/v1") as http:
+            http.app = app  # type: ignore[attr-defined]
+            yield http
+    finally:
+        database.publish_to(None)
 
 
 async def sign_in(client: AsyncClient) -> AsyncClient:
