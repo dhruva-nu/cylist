@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.staticfiles import StaticFiles
-from starlette.types import Scope
+from starlette.types import Receive, Scope, Send
 
 
 class SpaFiles(StaticFiles):
@@ -36,6 +36,19 @@ class SpaFiles(StaticFiles):
     def __init__(self, directory: Path, *, reserved: str) -> None:
         super().__init__(directory=directory, html=True)
         self._reserved = reserved
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Refuse a websocket rather than assert on one.
+
+        ``StaticFiles`` asserts its scope is http. A mistyped socket path
+        falls through the router to this mount, and the assertion is an
+        unhandled exception with no close frame — the client sees the
+        connection vanish and cannot tell a typo from an outage.
+        """
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        await super().__call__(scope, receive, send)
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:

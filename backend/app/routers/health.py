@@ -35,6 +35,12 @@ class RequestCounts(Schema):
     status_5xx: int
 
 
+class RealtimeCounts(Schema):
+    agent_sockets: int
+    board_watchers: int
+    projects_watched: int
+
+
 @router.get("/health", response_model=Health, summary="Service health")
 async def health(
     response: Response,
@@ -70,3 +76,19 @@ async def request_counts(request: Request) -> RequestCounts:
         status_4xx=metrics.status_4xx,
         status_5xx=metrics.status_5xx,
     )
+
+
+@router.get("/health/realtime", response_model=RealtimeCounts, summary="Live connections")
+async def realtime_counts(request: Request) -> RealtimeCounts:
+    """How many sockets this process is holding.
+
+    The answer to a question that is otherwise unanswerable after the fact:
+    did the WebSocket upgrade actually survive the proxy in production, on a
+    day nobody was watching? A board that has silently fallen back to polling
+    looks exactly like a working one from the outside, and shows up here as
+    watchers that never arrive.
+
+    Unauthenticated for the reason the other two are, and safe to be: counts
+    only. No project, no session, no token, nothing about content.
+    """
+    return RealtimeCounts(**request.app.state.hub.stats())

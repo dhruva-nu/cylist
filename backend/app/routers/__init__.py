@@ -7,6 +7,7 @@ without going through HTTP.
 
 from fastapi import APIRouter
 
+from app.realtime import routes as realtime
 from app.routers import (
     activity,
     agent_sessions,
@@ -48,5 +49,9 @@ api_router.include_router(files.router)
 # After `files`, whose blob store and `clean_name` a skill upload shares.
 api_router.include_router(agents.router)
 api_router.include_router(activity.router)
+# The sockets. Registered on the API router like everything else, so they land
+# under `/api/v1` and the SPA mount — which claims "/" and is added last —
+# never sees them.
+api_router.include_router(realtime.router)
 
 __all__ = ["api_router"]

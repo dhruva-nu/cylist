@@ -51,13 +51,7 @@ def publish_into(session: AsyncSession, event: dict[str, Any]) -> None:
 class Database:
     """Owns the connection pool for the lifetime of the application."""
 
-    def __init__(
-        self,
-        url: str,
-        *,
-        echo: bool = False,
-        publish: Callable[[dict[str, Any]], None] | None = None,
-    ) -> None:
+    def __init__(self, url: str, *, echo: bool = False) -> None:
         self._engine: AsyncEngine = create_async_engine(
             url,
             echo=echo,
@@ -68,14 +62,26 @@ class Database:
             expire_on_commit=False,  # attributes stay readable after commit
             autoflush=False,
         )
-        self._publish = publish
-        """Where committed events go. ``None`` drops them, which is what a
-        test that builds its own ``Database`` wants and what the application
-        does before anything is listening."""
+        self._publish: Callable[[dict[str, Any]], None] | None = None
+        """Where committed events go. ``None`` until something is listening,
+        which is the honest default: a pool can exist before there is anyone
+        to tell, and every test that does not care about pushes gets silence
+        for free."""
 
     @property
     def engine(self) -> AsyncEngine:
         return self._engine
+
+    def publish_to(self, publish: Callable[[dict[str, Any]], None] | None) -> None:
+        """Send committed events here from now on.
+
+        Set by whoever owns both the pool and the audience — the application's
+        lifespan in production, a fixture in tests. Kept off the constructor
+        because the two are built in different orders in those two places, and
+        a database that has to know its hub up front cannot be reused by an
+        app that builds one later.
+        """
+        self._publish = publish
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
