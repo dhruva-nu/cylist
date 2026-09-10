@@ -68,6 +68,25 @@ class TestSaying:
 
         assert frames(actions)[0]["task"] == "ATL-2"
 
+    def test_a_state_message_can_move_the_card_too(self) -> None:
+        """A `bind` is not the only thing that says where.
+
+        The hook that binds a session is the one that starts the daemon, so
+        its bind never lands — the daemon's first message, and every message
+        after a move the daemon missed, is an ordinary `state` carrying the
+        reference. Trusting only `bind` left the daemon reporting on the
+        empty card, which the server closed the socket for.
+        """
+        _, actions = m.step(live(), m.HookState("working", None, "ATL-2", task="ATL-2"))
+
+        assert frames(actions)[0]["task"] == "ATL-2"
+
+    def test_a_state_message_that_says_nothing_new_still_says_nothing(self) -> None:
+        """Naming the card the machine is already on is not a change."""
+        _, actions = m.step(live(), m.HookState("working", None, "ATL-1", task="ATL-1"))
+
+        assert frames(actions) == []
+
 
 class TestWhileTheLinkIsDown:
     def test_nothing_is_sent(self) -> None:
