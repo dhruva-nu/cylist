@@ -34,7 +34,14 @@ def isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """The hook's state files and Claude's config, both under tmp."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    (tmp_path / "run").mkdir(mode=0o700, exist_ok=True)
     monkeypatch.delenv("CYLIST_TASK", raising=False)
+    # These are the HTTP path's tests. It is still a supported mode — the
+    # fallback for a machine where no daemon can run — and it is what every
+    # event does before a daemon exists, so it earns this coverage on its
+    # own. The socket path has `test_presence_hook.py`.
+    monkeypatch.setenv("CYLIST_PRESENCE", "http")
     return tmp_path
 
 
@@ -274,24 +281,19 @@ def _tool(name: str, task: str, session_id: str = SESSION) -> dict[str, Any]:
     }
 
 
-def test_a_tool_call_is_a_heartbeat(fire: Fire, recorder: fake_api.Recorder) -> None:
+def test_an_ordinary_tool_call_costs_nothing(fire: Fire, recorder: fake_api.Recorder) -> None:
+    """The event that got cheapest, and by far the most frequent one.
+
+    A tool call used to cost a PUT once a minute, purely to prove the process
+    was still there. A held connection proves that by existing, so an
+    ordinary tool call now makes no request at all — over either channel.
+    """
     _bind()
+
     fire(_event("PostToolUse", tool_name="Read", tool_input={"file_path": "x"}))
-    assert _put_body(recorder)["state"] == "working"
-
-
-def test_heartbeats_are_throttled_to_one_a_minute(fire: Fire, recorder: fake_api.Recorder) -> None:
-    _bind()
     fire(_event("PostToolUse", tool_name="Read", tool_input={}))
-    fire(_event("PostToolUse", tool_name="Read", tool_input={}))
-    assert recorder.count("PUT", "/agent-sessions/" + SESSION) == 1
 
-
-def test_a_stale_heartbeat_is_sent_again(fire: Fire, recorder: fake_api.Recorder) -> None:
-    ago = (datetime.now(UTC) - timedelta(seconds=90)).isoformat()
-    _bind(last_heartbeat_at=ago)
-    fire(_event("PostToolUse", tool_name="Read", tool_input={}))
-    assert recorder.count("PUT", "/agent-sessions/" + SESSION) == 1
+    assert recorder.paths() == []
 
 
 def test_a_cylist_write_to_another_card_moves_the_binding(
