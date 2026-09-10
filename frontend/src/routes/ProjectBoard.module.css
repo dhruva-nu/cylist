@@ -668,8 +668,13 @@
   --agent-ring: var(--ok);
 }
 
-/* Stale is a working session nobody has heard from: the process probably
-   died. Dashed grey, so it reads as an outline of an agent rather than one. */
+/* A session whose connection was lost — it dropped, or went quiet past the
+   idle window. Dashed grey, so it reads as an outline of an agent rather
+   than one.
+
+   This used to be drawn for a *working* row that had been silent too long,
+   guessed at from the clock. The server ends those rows now and says why, so
+   the same border means the same thing and is finally certain of it. */
 .agentStale {
   --agent-ring: var(--line-2);
 

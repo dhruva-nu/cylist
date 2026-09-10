@@ -95,7 +95,6 @@ class TestReporting:
         assert row["client_name"] == "ATL-1"
         assert row["actor_label"] == "claude"
         assert row["ended_at"] is None
-        assert row["is_stale"] is False
 
     async def test_a_repeated_report_is_a_heartbeat_and_not_history(
         self, signed_in: AsyncClient
@@ -280,35 +279,6 @@ class TestWhatTheCardSays:
         assert (await _card_read(signed_in, ref))["agent_session"] is None
         assert (await signed_in.get(f"/tasks/{ref}/agent-sessions")).json() == []
 
-    async def test_a_silent_worker_goes_stale(
-        self, signed_in: AsyncClient, session: AsyncSession
-    ) -> None:
-        agent = await _agent(signed_in)
-        ref = await _card(signed_in, await _setup(signed_in))
-        await _put(signed_in, agent, ref, "working")
-        await _silence(session, SESSION_A, minutes=11)
-
-        card = await _card_read(signed_in, ref)
-
-        assert card["agent_session"]["state"] == "stale"
-        detail = (await signed_in.get(f"/tasks/{ref}")).json()
-        assert detail["agent_sessions"][0]["is_stale"] is True
-
-    async def test_a_stale_worker_is_ignored_while_another_is_live(
-        self, signed_in: AsyncClient, session: AsyncSession
-    ) -> None:
-        agent = await _agent(signed_in)
-        ref = await _card(signed_in, await _setup(signed_in))
-        await _put(signed_in, agent, ref, "working", SESSION_A)
-        await _put(signed_in, agent, ref, "working", SESSION_B)
-        await _silence(session, SESSION_A, minutes=11)
-
-        card = await _card_read(signed_in, ref)
-
-        assert card["agent_session"]["state"] == "working"
-        assert card["agent_session"]["client_name"] is None
-        assert card["agent_session"]["count"] == 2
-
     async def test_a_goals_page_draws_the_same_card(self, signed_in: AsyncClient) -> None:
         agent = await _agent(signed_in)
         person = await _setup(signed_in)
@@ -324,6 +294,13 @@ class TestWhatTheCardSays:
         page = (await signed_in.get(f"/goals/{goal.json()['reference']}")).json()
 
         assert page["tasks"][0]["agent_session"]["state"] == "working"
+
+
+async def _last_seen(client: AsyncClient, ref: str) -> str:
+    """When the card's one session last reported in."""
+    rows = (await client.get(f"/tasks/{ref}/agent-sessions")).json()
+    assert len(rows) == 1, rows
+    return str(rows[0]["last_seen_at"])
 
 
 async def _silence(session: AsyncSession, client_session_id: str, *, minutes: int) -> None:
@@ -363,18 +340,25 @@ class TestTouchingTheCard:
     async def test_an_agents_own_write_is_a_heartbeat(
         self, signed_in: AsyncClient, session: AsyncSession
     ) -> None:
+        """Real work is better evidence of life than a report saying so.
+
+        Read off `last_seen_at` directly. It used to be observed through the
+        border going from stale back to working, which is no longer a thing
+        the border does — but the refresh still matters, because it is what
+        keeps the reaper off a session that is demonstrably busy.
+        """
         agent = await _agent(signed_in)
         ref = await _card(signed_in, await _setup(signed_in))
         await _put(signed_in, agent, ref, "working")
         await _silence(session, SESSION_A, minutes=11)
-        assert (await _card_read(signed_in, ref))["agent_session"]["state"] == "stale"
+        before = await _last_seen(signed_in, ref)
 
         commented = await signed_in.post(
             f"/tasks/{ref}/comments", json={"body": "Found it."}, headers=agent
         )
         assert commented.status_code == 201
 
-        assert (await _card_read(signed_in, ref))["agent_session"]["state"] == "working"
+        assert await _last_seen(signed_in, ref) > before
 
     async def test_another_agents_write_is_not(
         self, signed_in: AsyncClient, session: AsyncSession
@@ -384,10 +368,11 @@ class TestTouchingTheCard:
         ref = await _card(signed_in, await _setup(signed_in))
         await _put(signed_in, agent, ref, "working")
         await _silence(session, SESSION_A, minutes=11)
+        before = await _last_seen(signed_in, ref)
 
         await signed_in.post(f"/tasks/{ref}/comments", json={"body": "Hi."}, headers=other)
 
-        assert (await _card_read(signed_in, ref))["agent_session"]["state"] == "stale"
+        assert await _last_seen(signed_in, ref) == before
 
     async def test_deleting_the_card_takes_its_sessions(
         self, signed_in: AsyncClient, session: AsyncSession
@@ -405,7 +390,6 @@ class TestTouchingTheCard:
 # --- The pure part ----------------------------------------------------------
 
 NOW = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
-STALE_AFTER = timedelta(minutes=10)
 
 
 def _row(
@@ -437,14 +421,14 @@ def _row(
 
 class TestPresence:
     def test_nothing_from_nothing(self) -> None:
-        assert presence([], NOW, STALE_AFTER) is None
+        assert presence([]) is None
 
     def test_waiting_beats_working(self) -> None:
         rows = [
             _row(AgentSessionState.WORKING, name="busy"),
             _row(AgentSessionState.WAITING, reason=AgentSessionReason.PERMISSION, name="asking"),
         ]
-        found = presence(rows, NOW, STALE_AFTER)
+        found = presence(rows)
         assert found is not None
         assert found.state == "waiting"
         assert found.reason is AgentSessionReason.PERMISSION
@@ -453,7 +437,7 @@ class TestPresence:
 
     def test_working_beats_done(self) -> None:
         rows = [_row(AgentSessionState.DONE, ended=True), _row(AgentSessionState.WORKING)]
-        found = presence(rows, NOW, STALE_AFTER)
+        found = presence(rows)
         assert found is not None
         assert found.state == "working"
         assert found.count == 1
@@ -463,60 +447,51 @@ class TestPresence:
             _row(AgentSessionState.DONE, ended=True, seen_ago=timedelta(hours=1)),
             _row(AgentSessionState.DONE, ended=True, name="latest"),
         ]
-        found = presence(rows, NOW, STALE_AFTER)
+        found = presence(rows)
         assert found is not None
         assert found.state == "done"
         assert found.count == 2
         assert found.client_name == "latest"
 
-    def test_a_silent_worker_is_stale(self) -> None:
-        rows = [_row(AgentSessionState.WORKING, seen_ago=timedelta(minutes=11))]
-        found = presence(rows, NOW, STALE_AFTER)
-        assert found is not None
-        assert found.state == "stale"
+    def test_silence_says_nothing_about_a_working_session(self) -> None:
+        """The border reads `state`, and nothing else.
 
-    def test_exactly_at_the_threshold_is_still_working(self) -> None:
-        rows = [_row(AgentSessionState.WORKING, seen_ago=STALE_AFTER)]
-        found = presence(rows, NOW, STALE_AFTER)
-        assert found is not None
-        assert found.state == "working"
-
-    def test_stale_is_ignored_while_another_is_live(self) -> None:
-        rows = [
-            _row(AgentSessionState.WORKING, seen_ago=timedelta(minutes=11), name="crashed"),
-            _row(AgentSessionState.WORKING, name="alive"),
-        ]
-        found = presence(rows, NOW, STALE_AFTER)
+        A quiet session used to become *stale* here, which made the answer
+        depend on the clock and so on when you asked. Something ends a row
+        that has really gone — a socket closing, the sweep, the reaper — and
+        until one of them does, a working session is working. One tool call
+        can legitimately run for an hour without a word.
+        """
+        rows = [_row(AgentSessionState.WORKING, seen_ago=timedelta(hours=3))]
+        found = presence(rows)
         assert found is not None
         assert found.state == "working"
-        assert found.client_name == "alive"
-        assert found.count == 2
 
-    def test_stale_beside_done_is_stale_not_done(self) -> None:
+    def test_an_open_session_beside_a_finished_one_is_not_done(self) -> None:
         """A row that is open, however quiet, is not over."""
         rows = [
             _row(AgentSessionState.WORKING, seen_ago=timedelta(minutes=11)),
             _row(AgentSessionState.DONE, ended=True),
         ]
-        found = presence(rows, NOW, STALE_AFTER)
+        found = presence(rows)
         assert found is not None
-        assert found.state == "stale"
+        assert found.state == "working"
 
-    def test_a_waiting_session_never_goes_stale(self) -> None:
+    def test_a_waiting_session_stays_waiting_however_long(self) -> None:
         """Nothing fires while a human is away; silence is what waiting looks like."""
         rows = [_row(AgentSessionState.WAITING, seen_ago=timedelta(hours=3))]
-        found = presence(rows, NOW, STALE_AFTER)
+        found = presence(rows)
         assert found is not None
         assert found.state == "waiting"
 
     def test_dismissed_rows_are_not_counted(self) -> None:
         rows = [_row(AgentSessionState.DONE, ended=True, dismissed=True)]
-        assert presence(rows, NOW, STALE_AFTER) is None
+        assert presence(rows) is None
 
     def test_since_is_the_state_change_not_the_heartbeat(self) -> None:
         row = _row(AgentSessionState.WORKING)
         row.state_changed_at = NOW - timedelta(minutes=5)
-        found = presence([row], NOW, STALE_AFTER)
+        found = presence([row])
         assert found is not None
         assert found.since == NOW - timedelta(minutes=5)
         assert found.last_seen_at == NOW

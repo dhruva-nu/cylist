@@ -82,7 +82,7 @@ import {
   type TaskType,
   type Template,
 } from '../api/client'
-import { agentIndicator, silentFor, waitingDetail } from '../routes/agentState'
+import { silentFor, waitingDetail } from '../routes/agentState'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
@@ -538,23 +538,13 @@ function AgentSessions({
 /** One session's state, in the words the card's border uses. */
 function sessionState(session: AgentSessionRead, now: Date): string {
   if (session.ended_at !== null) {
-    return session.reason === 'moved' ? 'moved to another card' : 'finished'
+    if (session.reason === 'moved') return 'moved to another card'
+    if (session.reason === 'connection_lost') {
+      return `disconnected — last seen ${silentFor(session.last_seen_at, now)} ago`
+    }
+    return 'finished'
   }
   if (session.state === 'waiting') return `needs you — ${waitingDetail(session.reason)}`
-  if (session.is_stale) {
-    const indicator = agentIndicator(
-      {
-        state: 'stale',
-        count: 1,
-        reason: session.reason,
-        client_name: session.client_name,
-        since: session.state_changed_at,
-        last_seen_at: session.last_seen_at,
-      },
-      now,
-    )
-    return indicator?.label.toLowerCase() ?? 'silent'
-  }
   return 'working'
 }
 

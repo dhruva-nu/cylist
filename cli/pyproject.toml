@@ -5,6 +5,12 @@ description = "cylist — the Cylist command line, talking to the same HTTP API 
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "httpx>=0.28",
+    # The presence daemon's connection to the board. Pure Python, no
+    # transitive dependencies, and `websockets.sync` is a real client with
+    # ping/pong — which is what lets a dropped connection be noticed rather
+    # than waited out. The synchronous flavour on purpose: it keeps asyncio,
+    # and pytest-asyncio, out of this package entirely.
+    "websockets>=13",
 ]
 
 [project.scripts]

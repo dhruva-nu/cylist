@@ -384,7 +384,15 @@ export interface DayReport {
 
 export type AgentSessionState = 'working' | 'waiting' | 'done'
 export type AgentSessionReason =
-  'turn_ended' | 'permission' | 'idle' | 'question' | 'moved' | 'session_ended'
+  | 'turn_ended'
+  | 'permission'
+  | 'idle'
+  | 'question'
+  | 'moved'
+  | 'session_ended'
+  /** The socket went away without a goodbye: it dropped, or it went quiet
+   * past the idle window. What a card draws as the dashed outline. */
+  | 'connection_lost'
 
 /** One harness session — a Claude Code conversation — on one card. */
 export interface AgentSessionRead {
@@ -402,21 +410,22 @@ export interface AgentSessionRead {
   started_at: string
   /** When `state` last changed. */
   state_changed_at: string
-  /** When the hook last reported in. */
+  /** When the session last reported in, over its socket or the HTTP route. */
   last_seen_at: string
   ended_at: string | null
   dismissed_at: string | null
-  /** A `working` session not heard from for long enough that the board no
-   * longer believes it. Computed by the server, never stored. */
-  is_stale: boolean
 }
 
-export type AgentPresenceState = 'working' | 'waiting' | 'done' | 'stale'
+export type AgentPresenceState = 'working' | 'waiting' | 'done'
 
 /**
  * What a card says about the agents on it, reduced to the one state its border
- * shows. `waiting` wins over `working` wins over `done`; a `stale` session is
- * ignored while another is live and shown only when it is all that is left.
+ * shows. `waiting` wins over `working` wins over `done`.
+ *
+ * There was a fourth, `stale`, for a working session gone quiet past a
+ * threshold — back when nothing ended the row of a process that had died. The
+ * server ends them now, so a dropped agent arrives here as `done` with a
+ * `reason` of `connection_lost` rather than as a guess about the clock.
  */
 export interface AgentPresence {
   state: AgentPresenceState

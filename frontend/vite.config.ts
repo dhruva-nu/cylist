@@ -21,6 +21,12 @@ export default defineConfig({
       '/api': {
         target: apiTarget,
         changeOrigin: false,
+        // The board holds a WebSocket under /api/v1. Vite only registers an
+        // `upgrade` handler for a proxy entry that asks for one, and without
+        // it the handshake 404s and the board falls back to polling —
+        // silently, and only in development, which is the worst place for a
+        // difference from production to hide.
+        ws: true,
       },
     },
   },

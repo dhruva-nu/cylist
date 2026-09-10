@@ -54,18 +54,21 @@ class AgentSessionRead(Schema):
     note: str | None
     started_at: datetime
     state_changed_at: datetime = Field(description="When `state` last changed.")
-    last_seen_at: datetime = Field(description="When the hook last reported in.")
+    last_seen_at: datetime = Field(
+        description="When the session last reported in, over its socket or the HTTP route."
+    )
     ended_at: datetime | None
     dismissed_at: datetime | None
-    is_stale: bool = Field(
-        description=(
-            "A `working` session not heard from for long enough that the board "
-            "no longer believes it. Computed, never stored."
-        )
-    )
 
 
-PresenceState = Literal["working", "waiting", "done", "stale"]
+PresenceState = Literal["working", "waiting", "done"]
+"""What a card's border says.
+
+Three, not four. There was a `stale` — a working session gone quiet past a
+threshold — for as long as nothing ended the rows of processes that died
+without saying so. Something does now, so the board reads a fact instead of
+a guess about the clock.
+"""
 
 
 class AgentPresence(Schema):

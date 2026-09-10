@@ -137,6 +137,42 @@ stdin, always exits 0, and prints nothing but the JSON Claude Code expects —
 a board that is down, a token that is missing, a malformed event: none of them
 may cost you a prompt. Set `CYLIST_HOOK_DEBUG=1` to see why it did nothing.
 
+### The connection it holds
+
+A bound session gets one small background process, which holds a single
+WebSocket to the board for as long as the session is on a card. The hooks
+talk to it over a unix socket in `$XDG_RUNTIME_DIR/cylist` rather than making
+a request each.
+
+That is not about saving handshakes. It is so the board can tell a session
+that *finished* from one that was killed: a connection closing says so at
+once, where a series of requests that stops arriving says nothing at all, and
+the board used to have to guess from how long it had been quiet.
+
+```
+cylist hook status       what is running, on which card, and whether it is connected
+cylist hook stop         end them (the next prompt starts a fresh one)
+cylist hook stop --session <id>
+```
+
+One process per bound session, and never for an unbound one. It exits when
+the session ends, when you have left it waiting for five minutes, or when the
+board has been unreachable for half an hour. Its log is one file per run
+under `$XDG_STATE_HOME/cylist/logs`, truncated each time so it cannot grow.
+`cylist hook uninstall` stops whatever is still running.
+
+If you would rather not have a background process at all:
+
+```
+CYLIST_PRESENCE=off      report over HTTP, exactly as before
+CYLIST_PRESENCE=http     the same, said explicitly
+CYLIST_PRESENCE=ws       the default
+```
+
+`off` and `http` are not degraded modes — that HTTP path is also what carries
+the first event of every session, before a daemon exists to carry it, and
+what a machine with no unix sockets falls back to on its own.
+
 ## Names, not ids
 
 Anywhere the API wants a UUID, the CLI takes the name a human would say:
@@ -224,8 +260,9 @@ script can branch on `error.code`:
 
 ## Why argparse
 
-`argparse` rather than `typer`, for three reasons: the CLI's only runtime
-dependency is `httpx`, which makes "the API is enough" easier to believe;
+`argparse` rather than `typer`, for three reasons: the CLI's runtime
+dependencies are two — `httpx`, and `websockets` for the connection the
+presence daemon holds — which makes "the API is enough" easier to believe;
 every failure funnels through one `try` in `main.py` that owns the exit code
 and guarantees no traceback reaches the terminal, rather than that being a
 property of a framework's error handling being configured correctly; and

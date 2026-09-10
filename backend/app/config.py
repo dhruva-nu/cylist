@@ -34,18 +34,38 @@ One object per line, so ``jq`` and any log shipper can read the file without a
 multi-line grammar for tracebacks.
 """
 
-AGENT_SESSION_STALE_AFTER = timedelta(minutes=10)
-"""How long a working agent session may go unheard from before the board stops
-believing it.
+AGENT_SOCKET_IDLE_AFTER = timedelta(minutes=5)
+"""How long an agent's socket may say nothing before the server closes it.
 
-A Claude Code session reports in on every prompt and tool call, and at least
-once a minute while a long turn runs; one silent for ten minutes has almost
-certainly been killed without its ``SessionEnd`` hook firing. The row stays
-``working`` in the database — nothing reaps it — and the read model calls it
-stale instead, so a crashed agent never pulses on a card forever. A constant
-rather than a setting: it is a fact about the hook's cadence, not about the
-deployment.
+Measured on *application* messages. Protocol pongs are answered below the
+ASGI layer and never reach the handler, which is what makes this mean "the
+agent has nothing to say" rather than "the TCP connection is quiet".
+
+The client's side of the bargain: it keeps the socket warm while it is
+working — a single tool call can run for twenty minutes without a hook event
+— and lets it go quiet once it is waiting on a human. So this window closing
+means one of two things, and the board draws them the same way: the agent is
+gone, or the person is.
+
+Comfortably more than the client's sixty-second keepalive, so five missed in
+a row is the threshold rather than one unlucky one.
 """
+
+AGENT_QUIET_AFTER = timedelta(minutes=10)
+"""How long an *unwitnessed* session may go quiet before it is ended.
+
+For the clients that report over HTTP and hold no socket. A socket closing
+says the session is over; a PUT that stops coming says nothing at all, so
+something has to go looking. A session holding a socket is exempt however
+long it has been silent — it is witnessed, which is better evidence than a
+timestamp.
+
+This is what the computed staleness used to do, moved from the read to a
+write: the board now reads a fact rather than a guess about the clock.
+"""
+
+REAP_EVERY = timedelta(seconds=60)
+"""How often to go looking. Cheap — one indexed query over the open rows."""
 
 
 class Settings(BaseSettings):

@@ -86,4 +86,22 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health').status==200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# The WebSocket parameters are spelled out rather than inherited, because two
+# of them are load-bearing and neither is obvious from the app's own code.
+#
+# The ping pair is the drop-detection budget: an agent's connection that dies
+# without saying so surfaces as a disconnect within about forty seconds, and
+# that number is the reason a card can be trusted. It also has to stay well
+# under any idle timeout a proxy in front of us might have.
+#
+# --ws-max-size is a security cap, not a tuning knob. It defaults to 16 MiB,
+# which is how much an unauthenticated peer on a public funnel could make this
+# process buffer before anyone had checked who they were. Nothing in the
+# protocol is within three orders of magnitude of 64 KiB.
+#
+# No --workers. See DEPLOY.md: the connection registry is in-process, and a
+# second worker would split it silently.
+CMD ["uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--ws-ping-interval", "20", "--ws-ping-timeout", "20", \
+     "--ws-max-size", "65536"]

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -27,7 +27,6 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
-from app.config import AGENT_SESSION_STALE_AFTER
 from app.core.clock import now as clock_now
 from app.core.errors import ForbiddenError
 from app.models.activity import Channel
@@ -177,6 +176,35 @@ def _finish(row: AgentSession, reason: AgentSessionReason, now: datetime) -> Non
     row.last_seen_at = now
 
 
+def close(
+    row: AgentSession,
+    reason: AgentSessionReason,
+    project_id: UUID,
+    now: datetime,
+    *,
+    cause: str | None = None,
+) -> Transition:
+    """End one row from outside a hook report, and say so in the trail.
+
+    For the endings nobody reported: a socket that dropped, a session too
+    quiet to still believe in, a process that restarted while agents were
+    running. :func:`upsert` is the wrong door for those — it exists to apply
+    what a *client* said, and walks the session off any other card on the way
+    — where this only closes the row in front of it.
+
+    ``cause`` is the detail the reason deliberately does not carry: one
+    ``connection_lost`` covers both a drop and an idle timeout, and this is
+    where the difference is written down for whoever comes looking.
+    """
+    _finish(row, reason, now)
+    return Transition(
+        "agent_session.finished",
+        row.task_id,
+        project_id,
+        _payload(row, cause=cause),
+    )
+
+
 def _verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     """Which line the trail gets for a change of state, if any.
 
@@ -191,7 +219,9 @@ def _verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     return "agent_session.finished"
 
 
-def _payload(row: AgentSession, *, moved_to: str | None = None) -> dict[str, Any]:
+def _payload(
+    row: AgentSession, *, moved_to: str | None = None, cause: str | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "client_session_id": row.client_session_id,
         "client_name": row.client_name,
@@ -199,6 +229,8 @@ def _payload(row: AgentSession, *, moved_to: str | None = None) -> dict[str, Any
     }
     if moved_to is not None:
         payload["moved_to"] = moved_to
+    if cause is not None:
+        payload["cause"] = cause
     return payload
 
 
@@ -302,18 +334,7 @@ async def for_tasks(
     return grouped
 
 
-def is_stale(row: AgentSession, now: datetime, stale_after: timedelta) -> bool:
-    """A working session nobody has heard from for too long."""
-    return (
-        row.state is AgentSessionState.WORKING
-        and row.ended_at is None
-        and now - row.last_seen_at > stale_after
-    )
-
-
-def read(
-    row: AgentSession, now: datetime, stale_after: timedelta = AGENT_SESSION_STALE_AFTER
-) -> AgentSessionRead:
+def read(row: AgentSession) -> AgentSessionRead:
     return AgentSessionRead(
         id=row.id,
         task_id=row.task_id,
@@ -328,28 +349,32 @@ def read(
         last_seen_at=row.last_seen_at,
         ended_at=row.ended_at,
         dismissed_at=row.dismissed_at,
-        is_stale=is_stale(row, now, stale_after),
     )
 
 
-def presence(
-    rows: Iterable[AgentSession],
-    now: datetime,
-    stale_after: timedelta = AGENT_SESSION_STALE_AFTER,
-) -> AgentPresence | None:
+def presence(rows: Iterable[AgentSession]) -> AgentPresence | None:
     """The one state a card's border shows, from every session on it.
 
     Whatever needs a human wins, then whatever is alive, then what is over:
 
     1. ``waiting`` if any open session is waiting.
-    2. else ``working`` if any open session is working and not stale.
+    2. else ``working`` if any open session is working.
     3. else ``done`` if every session has ended (and at least one is still
        undismissed — dismissed rows are not passed in).
-    4. else ``stale`` — the only open sessions are working but silent.
-    5. else nothing: no border.
+    4. else nothing: no border.
 
-    A stale row is ignored while another row is live, so one crashed
-    terminal does not dim a card somebody else is still working on.
+    There used to be a fifth answer. A ``working`` row that had gone quiet
+    for longer than a threshold was called *stale*, because nothing ended the
+    row when the process behind it died and the alternative was a card that
+    pulsed forever. That made the border a function of ``now``: a card
+    changed what it said with no event behind it, which is precisely why the
+    board had to keep asking. Something ends those rows now — a socket
+    closing, the boot sweep, the reaper — so this is a pure function of
+    stored state, every change to it is an event, and an event can be pushed.
+
+    The stale branch is not merely unused, it is unreachable: the
+    ``done_has_ended_at`` constraint means every *open* row is working or
+    waiting, so ``waiting`` and ``working`` between them cover ``open_rows``.
 
     Pure, and tested on its own. ``rows`` is expected to be the undismissed
     sessions of one card, as :func:`for_tasks` returns them.
@@ -360,19 +385,13 @@ def presence(
 
     open_rows = [row for row in considered if row.ended_at is None]
     waiting = [row for row in open_rows if row.state is AgentSessionState.WAITING]
-    working = [
-        row
-        for row in open_rows
-        if row.state is AgentSessionState.WORKING and not is_stale(row, now, stale_after)
-    ]
+    working = [row for row in open_rows if row.state is AgentSessionState.WORKING]
 
     if waiting:
         return _summary("waiting", _latest(waiting), len(open_rows))
     if working:
         return _summary("working", _latest(working), len(open_rows))
-    if not open_rows:
-        return _summary("done", _latest(considered), len(considered))
-    return _summary("stale", _latest(open_rows), len(open_rows))
+    return _summary("done", _latest(considered), len(considered))
 
 
 def _latest(rows: list[AgentSession]) -> AgentSession:

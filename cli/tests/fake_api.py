@@ -547,7 +547,6 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
                 "last_seen_at": "2026-02-06T09:00:00Z",
                 "ended_at": "2026-02-06T09:00:00Z" if body["state"] == "done" else None,
                 "dismissed_at": None,
-                "is_stale": False,
                 "task_ref": task_ref,
             },
         )
