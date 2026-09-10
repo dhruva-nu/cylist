@@ -25,6 +25,13 @@ RECEIVE_TIMEOUT = 2.0
 """Long enough for a slow machine, short enough that a socket which never
 answers fails the test instead of hanging the suite."""
 
+TEARDOWN_TIMEOUT = 1.0
+"""How long a handler gets to finish after the client hangs up.
+
+It matters that this is a real wait and not a cancel. A handler's `finally`
+is where a row gets ended, and cancelling into the middle of that would make
+the test pass or fail on how fast the database answered."""
+
 
 class SocketClosedError(Exception):
     """The app closed the socket. Carries the code the test wants to assert."""
@@ -65,14 +72,21 @@ class WebSocketSession:
         if self._task is None:
             return
         await self._to_app.put({"type": "websocket.disconnect", "code": 1000})
-        self._task.cancel()
-        # The handler's own teardown is what matters, and cancelling is how a
-        # board socket normally ends — it is parked on a queue that will never
-        # fill. Whatever it raised on the way out is the test's business only
-        # if the test went looking for it.
+        # Let it wind down on its own first — a real server never cancels a
+        # handler mid-teardown, and neither should a test.
+        _, pending = await asyncio.wait({self._task}, timeout=TEARDOWN_TIMEOUT)
+        if pending:
+            self._task.cancel()
         with suppress(BaseException):
             await self._task
         self._task = None
+
+    async def send_text(self, text: str) -> None:
+        """Send a raw frame, including one the app should refuse."""
+        await self._to_app.put({"type": "websocket.receive", "text": text})
+
+    async def send_json(self, payload: Any) -> None:
+        await self.send_text(json.dumps(payload))
 
     async def receive(self) -> dict[str, Any]:
         """The next message the app sent, or raise :class:`SocketClosedError`."""

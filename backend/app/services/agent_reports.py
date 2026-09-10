@@ -84,6 +84,26 @@ async def end_open_sessions(
     return await _end_each(session, await _open_rows(session), cause=cause)
 
 
+async def end_session(
+    session: AsyncSession,
+    client_session_id: str,
+    *,
+    reason: AgentSessionReason = AgentSessionReason.CONNECTION_LOST,
+    cause: str = "dropped",
+) -> int:
+    """End whatever one client session still holds open, wherever it is.
+
+    Called when a socket closes. By client session and not by card, because
+    the socket knows which conversation it was and the conversation knows
+    which card — a session that walked the board mid-connection has exactly
+    one open row, and this finds it without being told which.
+    """
+    rows = [
+        pair for pair in await _open_rows(session) if pair[0].client_session_id == client_session_id
+    ]
+    return await _end_each(session, rows, cause=cause, reason=reason)
+
+
 async def reap_unwitnessed(
     session: AsyncSession,
     live_session_ids: frozenset[str],
@@ -126,8 +146,9 @@ async def _end_each(
     rows: list[tuple[AgentSession, UUID]],
     *,
     cause: str,
+    reason: AgentSessionReason = AgentSessionReason.CONNECTION_LOST,
 ) -> int:
-    """Close a set of rows as connection_lost, one trail entry each.
+    """Close a set of rows, one trail entry each.
 
     Row by row rather than one bulk UPDATE, because the trail is the point:
     a card that went grey while nobody was watching should be able to say
@@ -138,13 +159,7 @@ async def _end_each(
 
     moment = clock_now()
     for row, project_id in rows:
-        transition = agent_sessions.close(
-            row,
-            AgentSessionReason.CONNECTION_LOST,
-            project_id,
-            moment,
-            cause=cause,
-        )
+        transition = agent_sessions.close(row, reason, project_id, moment, cause=cause)
         await activity.record(
             session,
             _principal_of(row),
