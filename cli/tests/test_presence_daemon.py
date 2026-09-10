@@ -93,6 +93,49 @@ class TestTheLoop:
             tell(protocol.end_message(SESSION, "session_ended"))
             thread.join(timeout=3)
 
+    def test_the_first_message_is_a_state_and_it_still_knows_the_card(self) -> None:
+        """The sequence a real session actually produces.
+
+        Every other test here opens with a `bind`, which is the one message
+        a fresh daemon never receives: the hook that binds a session is the
+        hook that starts the daemon, so its bind finds nobody home and goes
+        over HTTP instead. What the daemon really sees first is the next
+        event's `state`. It carried the reference all along and the daemon
+        was throwing it away, so it connected and reported on the empty
+        card — which the server closed the socket for, and the board drew
+        as an agent that had disconnected seconds after arriving.
+        """
+        connection = FakeConnection()
+        thread = run_in_background(a_context(), lambda *_: connection)
+        try:
+            assert tell(protocol.state_message(SESSION, CARD, "working", None, CARD)) is not None
+            threading.Event().wait(0.2)
+
+            assert [f["task"] for f in connection.sent if f["type"] == "state"] == [CARD]
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+
+    def test_it_holds_off_connecting_until_it_knows_where(self) -> None:
+        """A socket with nothing to say is worse than no socket: it occupies
+        the session's slot on the server and then gets closed for reporting
+        on nothing."""
+        attempts: list[int] = []
+
+        def connect(*_: Any) -> FakeConnection:
+            attempts.append(1)
+            return FakeConnection()
+
+        thread = run_in_background(a_context(), connect)
+        try:
+            tell(protocol.state_message(SESSION, "", "working", None, ""))
+            threading.Event().wait(0.3)
+
+            assert attempts == []
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+
     def test_it_says_goodbye_and_lets_go(self) -> None:
         connection = FakeConnection()
         thread = run_in_background(a_context(), lambda *_: connection)

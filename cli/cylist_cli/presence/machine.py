@@ -80,6 +80,18 @@ class HookState:
     state: str
     reason: str | None
     client_name: str
+    task: str = ""
+    """Which card, when the hook says so — and it always does on the wire.
+
+    It matters most for the *first* message a daemon ever gets. The hook
+    that binds a session is the one that starts the daemon, so its `bind`
+    never arrives: `ipc.send` finds nobody, spawns, and reports over HTTP.
+    The daemon's first message is therefore an ordinary `state` from the
+    event after that, and if it did not carry the card, the daemon would
+    connect and report on the empty reference.
+
+    Empty means "not said", which leaves whatever the machine already had.
+    """
 
 
 @dataclass(frozen=True)
@@ -178,9 +190,11 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
 
     if isinstance(event, HookState):
         agent = Agent.WAITING if event.state == "waiting" else Agent.WORKING
-        unchanged = agent is machine.agent and event.reason == machine.reason
+        moved = bool(event.task) and event.task != machine.task
+        unchanged = agent is machine.agent and event.reason == machine.reason and not moved
         machine = replace(
             machine,
+            task=event.task or machine.task,
             agent=agent,
             reason=event.reason,
             client_name=event.client_name or machine.client_name,

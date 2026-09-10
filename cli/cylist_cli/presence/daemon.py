@@ -137,6 +137,7 @@ def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Even
                 state=str(message.get("state") or "working"),
                 reason=message.get("reason"),
                 client_name=str(message.get("client_name") or ""),
+                task=str(message.get("task") or ""),
             )
         )
     elif kind == "bind":
@@ -180,7 +181,10 @@ def _loop(
     retry_at = 0.0
 
     while True:
-        if socket is None and _clock() >= retry_at:
+        # Nothing to say until we know which card, and a socket opened
+        # without one would report on the empty reference and be closed for
+        # it. Wait instead; the next hook event says where.
+        if socket is None and machine.task and _clock() >= retry_at:
             try:
                 # Re-read the token every attempt, so a fresh `cylist login`
                 # heals a daemon that is already running.
@@ -242,9 +246,10 @@ def _initial(session_id: str, first: m.Event) -> m.Machine:
     if isinstance(first, m.HookBind):
         return m.Machine(session=session_id, task=first.task, client_name=first.client_name)
     if isinstance(first, m.HookState):
+        # Almost always the real first message: see `HookState.task`.
         return m.Machine(
             session=session_id,
-            task="",
+            task=first.task,
             client_name=first.client_name,
             agent=m.Agent.WAITING if first.state == "waiting" else m.Agent.WORKING,
             reason=first.reason,
