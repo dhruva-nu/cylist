@@ -62,7 +62,7 @@ async def report(
             project_id=transition.project_id,
             payload=transition.payload,
         )
-    return agent_sessions.read(result.row, clock_now())
+    return agent_sessions.read(result.row)
 
 
 async def end_open_sessions(

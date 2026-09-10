@@ -485,8 +485,9 @@ class TaskRead(Schema):
         default=None,
         description="Who is working on this card right now, if an agent is: the one state "
         "the card's border shows, reduced from every harness session on it. `waiting` means "
-        "it needs a human; `working` is live; `done` is finished and not yet dismissed; "
-        "`stale` is a working session nobody has heard from. Null when no agent is on it.",
+        "it needs a human; `working` is live; `done` is finished and not yet dismissed — "
+        "including a session whose connection was lost, whose `reason` says so. Null when "
+        "no agent is on it.",
     )
     created_at: datetime
 

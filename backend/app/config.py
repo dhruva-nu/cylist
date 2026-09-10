@@ -34,19 +34,6 @@ One object per line, so ``jq`` and any log shipper can read the file without a
 multi-line grammar for tracebacks.
 """
 
-AGENT_SESSION_STALE_AFTER = timedelta(minutes=10)
-"""How long a working agent session may go unheard from before the board stops
-believing it.
-
-A Claude Code session reports in on every prompt and tool call, and at least
-once a minute while a long turn runs; one silent for ten minutes has almost
-certainly been killed without its ``SessionEnd`` hook firing. The row stays
-``working`` in the database — nothing reaps it — and the read model calls it
-stale instead, so a crashed agent never pulses on a card forever. A constant
-rather than a setting: it is a fact about the hook's cadence, not about the
-deployment.
-"""
-
 AGENT_SOCKET_IDLE_AFTER = timedelta(minutes=5)
 """How long an agent's socket may say nothing before the server closes it.
 

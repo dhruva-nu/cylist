@@ -14,9 +14,17 @@ first (see :func:`app.services.agent_sessions.presence`).
 
 The rows are written by lifecycle hooks, not by the model: the harness
 reports working / waiting / done deterministically, and the agent itself has
-no tool to lie with. A row that stops hearing from its hook is ``working``
-forever in the database and *stale* in the read model, which is computed
-rather than stored so a crashed process needs no reaper to be told about.
+no tool to lie with.
+
+A row is only ever ``working`` while something says so. That used to be
+untrue, and the read model papered over it: nothing ended the row of a
+process that had died, so a *stale* state was computed from how long it had
+been silent. It worked, and it cost the board the ability to ever be pushed
+to — a card changed what it said with no event behind it, so a client had to
+keep asking. Three things end a row now, and all of them are events: the
+agent's socket closing, the sweep on startup (a process holding no sockets
+has no live sessions, whatever the rows say), and the reaper, for the
+clients that hold no socket to close.
 """
 
 from __future__ import annotations
@@ -171,8 +179,13 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     this, "last heard from at 14:31" is that."""
 
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    """Every PUT refreshes it, and so does any write the same token makes to
-    the card. Silence past a threshold is what the read model calls stale."""
+    """Every report refreshes it, and so does any write the same token makes
+    to the card.
+
+    No longer load-bearing for what a card *shows* — the border is a function
+    of ``state`` alone. It is what the reaper reads when deciding whether a
+    session that holds no socket has been quiet long enough to stop believing
+    in, and it is what a person reads to know how long ago that was."""
 
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     """Set exactly when ``state`` is done — see ``done_has_ended_at``."""

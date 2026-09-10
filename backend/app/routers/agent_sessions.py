@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.clock import now
 from app.db import SessionDependency
 from app.models.task import Task
 from app.routers.tasks import resolved_task
@@ -71,11 +70,7 @@ async def list_agent_sessions(
 ) -> list[AgentSessionRead]:
     """Every session still worth showing: the open ones first, then the
     finished ones nobody has dismissed. Dismissed sessions are left out."""
-    moment = now()
-    return [
-        agent_sessions.read(row, moment)
-        for row in await agent_sessions.list_for_task(session, task)
-    ]
+    return [agent_sessions.read(row) for row in await agent_sessions.list_for_task(session, task)]
 
 
 @router.post(
