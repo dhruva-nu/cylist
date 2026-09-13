@@ -275,9 +275,11 @@ class TestStopping:
         """The pid file is two lines — the pid and the session it serves —
         and parsing the whole of it as an integer made ``hook stop`` report
         that there was nothing to stop, every time, whatever was running.
+
+        Not faked to either platform: Windows asks over the socket first,
+        finds no endpoint, and falls through to this same path.
         """
         signalled: list[int] = []
-        monkeypatch.setattr(sys, "platform", "linux")
         monkeypatch.setattr("os.kill", lambda pid, _: signalled.append(pid))
         supervisor.pid_path(SESSION).parent.mkdir(parents=True, exist_ok=True)
         supervisor.pid_path(SESSION).write_text(f"424242\n{SESSION}\n")
@@ -285,9 +287,7 @@ class TestStopping:
         assert supervisor.stop(SESSION) is True
         assert signalled == [424242]
 
-    def test_nothing_to_stop_is_not_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sys, "platform", "linux")
-
+    def test_nothing_to_stop_is_not_an_error(self) -> None:
         assert supervisor.stop(SESSION) is False
 
     def test_windows_asks_over_the_socket_before_reaching_for_terminate(

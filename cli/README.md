@@ -264,6 +264,16 @@ In the other direction, `cylist vault add` reads the credential from a hidden
 prompt or `--value-stdin`. A secret is never an argument in either direction,
 so it never reaches your shell history.
 
+Every `0600` on this page is a POSIX mode, and Windows has no such thing —
+`os.chmod` there moves the read-only bit and nothing else, so these files
+read back `0666` however they were created. What keeps them private is the
+ACL Windows puts on your profile directory, which is where all of them live:
+`config.toml`, the session state, and the daemon's endpoint token. It is the
+same assumption pip and uv make about their own credentials. `cylist login`
+says which of the two it actually got rather than quoting a mode it did not
+set — a token file described as "owner read/write only" when it is `0666`
+would be worse than saying nothing at all.
+
 ## Exit codes and errors
 
 `0` on success, `1` on any failure, `2` for a usage error from the argument

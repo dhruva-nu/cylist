@@ -69,10 +69,16 @@ class TestReadingAMessage:
 class TestWhereTheSocketGoes:
     def test_it_is_named_by_a_hash_not_by_the_session(self) -> None:
         """AF_UNIX paths cap near a hundred bytes, and the directory this
-        sits in can already be long."""
+        sits in can already be long.
+
+        Asserted on the name rather than on the whole path: the length of
+        the directory is the test runner's business — a Windows temporary
+        directory is long all by itself — and what this code controls is
+        that the name does not grow with the session id.
+        """
         path = ipc.socket_path("a" * 300)
 
-        assert len(str(path)) < 100
+        assert len(path.name) < 32
         assert "aaaa" not in path.name
 
     def test_the_same_session_always_lands_in_the_same_place(self) -> None:

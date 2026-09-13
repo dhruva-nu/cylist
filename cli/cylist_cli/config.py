@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -122,5 +123,27 @@ def _render(url: str, token: str) -> str:
 
 
 def describe_mode(path: Path) -> str:
-    """``0600``-style rendering of a file's permission bits, for reassurance."""
+    """``0600``-style rendering of a file's permission bits.
+
+    Reports what the filesystem says, which on Windows is ``0666`` whatever
+    was asked for. Use :func:`describe_protection` to tell somebody their
+    token is safe; this is the raw reading and not the reassurance.
+    """
     return oct(stat.S_IMODE(path.stat().st_mode))[2:].rjust(4, "0")
+
+
+def describe_protection(path: Path) -> str:
+    """How this file is kept private, phrased truthfully for the platform.
+
+    A mode on POSIX, because one was set and it holds. Not on Windows:
+    ``os.chmod`` there moves the read-only bit and nothing else, so the file
+    reads back ``0666`` however it was created, and "mode 0666 — owner
+    read/write only" would be a reassurance that is not true. What actually
+    protects it is the ACL Windows puts on the user's profile directory,
+    which is where this file lives — the same thing pip and uv rely on for
+    their own credentials.
+    """
+    if sys.platform == "win32":
+        return "in your user profile, which only you and an administrator can read"
+    else:
+        return f"mode {describe_mode(path)} — owner read/write only"

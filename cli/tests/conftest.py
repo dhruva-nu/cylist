@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,16 @@ class Result:
 
 
 Runner = Callable[..., Result]
+
+posix_modes_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "a 0600 guarantee, which Windows cannot give: os.chmod moves the read-only "
+        "bit and nothing else, and stat reads 0666 back whatever was asked. What "
+        "keeps these files private there is the ACL on the user's profile — see "
+        "config.describe_protection, which is tested on both platforms."
+    ),
+)
 
 
 @pytest.fixture(autouse=True)

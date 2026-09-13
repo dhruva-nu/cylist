@@ -58,15 +58,24 @@ def _login(args: argparse.Namespace, ctx: Context) -> None:
 
     path = configuration.save(url, token)
     mode = configuration.describe_mode(path)
+    protection = configuration.describe_protection(path)
 
     if ctx.as_json:
-        output.emit_json({"url": url, "config_path": str(path), "mode": mode, **identity})
+        output.emit_json(
+            {
+                "url": url,
+                "config_path": str(path),
+                "mode": mode,
+                "protection": protection,
+                **identity,
+            }
+        )
         return
 
     scopes = ", ".join(identity.get("scopes", [])) or "none"
     output.echo(f"Signed in to {url} as {identity.get('label', 'unknown')}.")
     output.echo(f"Scopes: {scopes}")
-    output.echo(f"Token written to {path} (mode {mode} — owner read/write only).")
+    output.echo(f"Token written to {path} ({protection}).")
 
 
 def _whoami(_: argparse.Namespace, ctx: Context) -> None:
