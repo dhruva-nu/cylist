@@ -72,15 +72,26 @@ jobs:
   # The CLI and the MCP server talk to the API over HTTP and are tested against
   # an httpx.MockTransport, so neither needs a database or a running backend.
   agents:
-    name: ${{ matrix.package.name }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.package.name }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         package:
           - { name: CLI, dir: cli }
           - { name: MCP server, dir: mcp }
+        include:
+          # The CLI installs the Claude Code hook and runs its presence
+          # daemon on the developer's own machine, so "the developer's own
+          # machine" is part of its contract. Windows is the one that differs
+          # in kind rather than in detail — no AF_UNIX, no fcntl, no
+          # catchable SIGTERM — and each of those is a way for the daemon to
+          # be silently unusable there. mypy is worth as much as the tests
+          # here: it is the only run that reads the msvcrt branches at all.
+          - os: windows-latest
+            package: { name: CLI, dir: cli }
 
     defaults:
       run:
@@ -105,6 +116,15 @@ jobs:
 
       - name: Type-check
         run: uv run mypy .
+
+      # The CLI's Windows branches are invisible to a type check run as
+      # Linux — mypy does not analyse a block it knows this platform never
+      # reaches. This reads them without needing a Windows runner, and it is
+      # how the AF_UNIX, CLOCK_BOOTTIME and getuid errors were found in the
+      # first place. Cheap, and it fails on the leg people actually watch.
+      - name: Type-check as Windows
+        if: matrix.package.dir == 'cli' && runner.os == 'Linux'
+        run: uv run mypy --platform win32 .
 
       - name: Test
         run: uv run pytest -q

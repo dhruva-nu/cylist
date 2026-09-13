@@ -26,7 +26,7 @@ CARD = "ATL-1"
 
 
 @pytest.fixture(autouse=True)
-def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ipc_transport: str) -> Path:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
     (tmp_path / "run").mkdir(mode=0o700, exist_ok=True)
