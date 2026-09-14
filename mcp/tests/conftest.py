@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -27,6 +28,18 @@ class ToolResult:
 
 
 Caller = Callable[..., Awaitable[ToolResult]]
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the tests away from the developer's own configuration.
+
+    :func:`cylist_mcp.config.resolve` reads ``~/.config/cylist/config.toml``
+    now, so without this a run on a machine that has done ``cylist setup``
+    would find a real token there — and the test that asserts a *missing*
+    token is refused would pass or fail depending on whose laptop it ran on.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
 @pytest.fixture

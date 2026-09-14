@@ -28,6 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from cylist_cli import endpoints
 from cylist_cli.context import Context
 from cylist_cli.presence import ipc, protocol, supervisor
 from cylist_cli.presence import machine as m
@@ -215,17 +216,26 @@ def _loop(
     last = _clock()
     retry_at = 0.0
 
+    # Every address the server answers on, tried in turn. A daemon outlives
+    # the network it was started on: a laptop that suspends on the tailnet and
+    # wakes on a hotel network has to reconnect somewhere else or spend the
+    # rest of the session reporting nothing.
+    addresses = endpoints.order(ctx.config.urls)
+    attempt = 0
+
     while True:
         # Nothing to say until we know which card, and a socket opened
         # without one would report on the empty reference and be closed for
         # it. Wait instead; the next hook event says where.
         if socket is None and machine.task and _clock() >= retry_at:
+            base_url = addresses[attempt % len(addresses)]
             try:
-                # Re-read the token every attempt, so a fresh `cylist login`
+                # Re-read the token every attempt, so a fresh `cylist setup`
                 # heals a daemon that is already running.
-                socket = connect(ctx.config.url, ctx.config.token or token, session_id)
+                socket = connect(base_url, ctx.config.token or token, session_id)
             except Exception as exc:
-                logger.info("Connect failed: %s", exc)
+                attempt += 1
+                logger.info("Connect to %s failed: %s", base_url, exc)
                 machine, actions = _advance(machine, m.LinkDown(), last)
                 last = _clock()
                 retry_at = last + _delay(actions)
@@ -233,6 +243,7 @@ def _loop(
                 if _finished(actions):
                     return
                 continue
+            endpoints.remember(base_url)
             machine, actions = _advance(machine, m.LinkUp(), last)
             last = _clock()
             state.link = machine.link.value

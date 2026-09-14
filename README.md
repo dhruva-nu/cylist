@@ -190,6 +190,24 @@ secrets deserve production's care. DEPLOY.md says what that means.
 
 Everything the web app does is an HTTP call, so two other clients ship with it.
 
+**To let this machine's agents use a board, one command does all of it:**
+
+```bash
+make agent          # or: uv tool install ./cli && cylist setup
+```
+
+`cylist setup` finds the server, asks for the owner's password once, mints a
+`read,write` token for this machine, stores it `0600`, installs Claude Code's
+lifecycle hooks and `/work`, and registers the MCP server. It is safe to run
+again, and it stores **every** address the server says it answers on — so the
+same setup works on the tailnet, off it, and on the server itself, without
+being told which. `cylist whoami` names the one that answered.
+
+Linux, macOS and Windows. On Windows the hooks report over HTTP rather than
+holding a socket, because Python there has no `AF_UNIX` — the board shows the
+same working / waiting / done, and only a session that is *killed* takes the
+server's quiet window to notice rather than being seen at once.
+
 ```bash
 cd cli && uv sync && uv run cylist --help
 ```
@@ -211,10 +229,11 @@ capped at 280 characters so the next one reads the pad rather than skimming it.
 
 The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
 It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an
-agent is never offered a tool that will always fail. See `mcp/README.md` for the
-`claude mcp add` line.
+agent is never offered a tool that will always fail. It reads the same 0600 file
+the CLI does, so the registration Claude Code holds contains no credential at
+all — see `mcp/README.md`.
 
-Mint a token scoped to what the agent actually needs:
+To mint a token by hand, scoped to what the agent actually needs:
 
 ```bash
 curl -X POST localhost:8000/api/v1/tokens -b cookies \

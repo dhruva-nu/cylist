@@ -16,12 +16,14 @@ from cylist_cli.commands import (
     hook,
     people,
     projects,
+    setup,
     tasks,
     vault,
     work,
 )
 
 REGISTRARS = (
+    setup.register,
     auth.register,
     projects.register,
     board.register,
