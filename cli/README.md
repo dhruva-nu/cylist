@@ -142,7 +142,7 @@ may cost you a prompt. Set `CYLIST_HOOK_DEBUG=1` to see why it did nothing.
 A bound session gets one small background process, which holds a single
 WebSocket to the board for as long as the session is on a card. The hooks
 talk to it over a unix socket in `$XDG_RUNTIME_DIR/cylist` rather than making
-a request each.
+a request each — or, on Windows, over a loopback port; see below.
 
 That is not about saving handshakes. It is so the board can tell a session
 that *finished* from one that was killed: a connection closing says so at
@@ -158,8 +158,9 @@ cylist hook stop --session <id>
 One process per bound session, and never for an unbound one. It exits when
 the session ends, when you have left it waiting for five minutes, or when the
 board has been unreachable for half an hour. Its log is one file per run
-under `$XDG_STATE_HOME/cylist/logs`, truncated each time so it cannot grow.
-`cylist hook uninstall` stops whatever is still running.
+under `$XDG_STATE_HOME/cylist/logs` (`%LOCALAPPDATA%\cylist\logs` on
+Windows), truncated each time so it cannot grow. `cylist hook uninstall`
+stops whatever is still running.
 
 If you would rather not have a background process at all:
 
@@ -171,7 +172,39 @@ CYLIST_PRESENCE=ws       the default
 
 `off` and `http` are not degraded modes — that HTTP path is also what carries
 the first event of every session, before a daemon exists to carry it, and
-what a machine with no unix sockets falls back to on its own.
+what a machine that cannot start a daemon falls back to on its own.
+
+### On Windows
+
+Everything above works the same, and nothing here is a flag you have to set.
+Three things underneath it are different, and they are worth knowing if you
+are ever looking at why a session is not on the board.
+
+CPython has no `socket.AF_UNIX` on Windows, so the hook reaches the daemon
+over a port on `127.0.0.1` instead. A port cannot be given a mode, and any
+process on the machine may connect to the loopback, so the daemon writes a
+fresh 256-bit token beside the port in `%LOCALAPPDATA%\cylist\run` and
+refuses a caller that cannot quote it back before it reads a word of the
+message. What keeps that token private is the ACL Windows puts on your
+profile directory — the same thing already keeping your API token private in
+`config.toml`.
+
+`cylist hook stop` asks the daemon to end over that channel rather than
+signalling it. `os.kill` on Windows is `TerminateProcess`: it runs no handler
+and no `finally`, so a daemon killed that way would never say goodbye and the
+card would sit there looking live until the server's own idle window closed
+it. Termination is still the fallback when the channel is the thing that has
+gone wrong, and what the daemon could not clean up is cleaned up for it.
+
+The idle window is counted from a clock that stops while the machine is
+asleep, because Windows has no `CLOCK_BOOTTIME`. A laptop shut for the night
+comes back and starts the five minutes again rather than ending the session
+on the spot — which is the right answer anyway: you were waiting on it
+before the lid closed and you still are.
+
+You can run that loopback transport anywhere with `CYLIST_IPC=tcp`, which is
+how the test suite exercises it on Linux. `CYLIST_IPC=unix` forces the other
+way. Neither is something a normal install needs to set.
 
 ## Names, not ids
 
@@ -230,6 +263,16 @@ the audit log for a command that was never going to hand the value over.
 In the other direction, `cylist vault add` reads the credential from a hidden
 prompt or `--value-stdin`. A secret is never an argument in either direction,
 so it never reaches your shell history.
+
+Every `0600` on this page is a POSIX mode, and Windows has no such thing —
+`os.chmod` there moves the read-only bit and nothing else, so these files
+read back `0666` however they were created. What keeps them private is the
+ACL Windows puts on your profile directory, which is where all of them live:
+`config.toml`, the session state, and the daemon's endpoint token. It is the
+same assumption pip and uv make about their own credentials. `cylist login`
+says which of the two it actually got rather than quoting a mode it did not
+set — a token file described as "owner read/write only" when it is `0666`
+would be worse than saying nothing at all.
 
 ## Exit codes and errors
 

@@ -38,7 +38,8 @@ Four rules shape everything here, and they are worth more than any feature:
   refusable entirely with ``CYLIST_PRESENCE=off``. A background process on
   somebody's laptop has to be all of those things.
 
-State is one small file per session under ``$XDG_STATE_HOME/cylist/sessions``:
+State is one small file per session under ``$XDG_STATE_HOME/cylist/sessions``
+(``%LOCALAPPDATA%\\cylist\\sessions`` on Windows):
 which card the session is bound to and whether it has been nudged. ``/clear``
 ends one session and starts another in the same process; a ``handoff.json``
 written on the way out and read on the way in is what carries the binding
@@ -482,9 +483,21 @@ def _now() -> datetime:
 
 
 def sessions_dir() -> Path:
-    """``$XDG_STATE_HOME/cylist/sessions``, or its ``~/.local/state`` default."""
+    """``$XDG_STATE_HOME/cylist/sessions``, or the platform's equivalent.
+
+    ``XDG_STATE_HOME`` is honoured everywhere, not only where a system sets
+    it: it is how the suite redirects this, and a Windows user who has one
+    set has said something deliberate. Otherwise ``%LOCALAPPDATA%`` on
+    Windows and ``~/.local/state`` elsewhere.
+    """
     root = os.environ.get("XDG_STATE_HOME")
-    base = Path(root) if root else Path.home() / ".local" / "state"
+    if root:
+        base = Path(root)
+    elif sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+    else:
+        base = Path.home() / ".local" / "state"
     return base / "cylist" / "sessions"
 
 
@@ -567,7 +580,7 @@ def cylist_argv() -> list[str]:
     and the supervisor execs a list.
     """
     found = shutil.which("cylist")
-    if found:
+    if found and _is_executable_image(found):
         return [str(Path(found).resolve())]
     invoked = Path(sys.argv[0])
     if invoked.name == "cylist" and invoked.is_absolute():
@@ -575,15 +588,54 @@ def cylist_argv() -> list[str]:
     return [str(Path(sys.executable).resolve()), "-m", "cylist_cli"]
 
 
+def _is_executable_image(found: str) -> bool:
+    """Whether ``CreateProcess`` can run this directly, which on Windows is a question.
+
+    ``PATHEXT`` puts ``.EXE`` ahead of ``.CMD``, so the shims pip and uv write
+    are found first and this is almost always true. When it is not — a batch
+    shim and no exe beside it — the module form is taken instead, because a
+    ``.cmd`` needs ``cmd.exe`` wrapped round it and a daemon does not need a
+    ``cmd.exe`` sitting in front of it for its whole life.
+    """
+    if sys.platform == "win32":
+        return Path(found).suffix.lower() not in {".cmd", ".bat"}
+    else:
+        return True
+
+
 def hook_command() -> str:
-    """The absolute command Claude Code should run, as settings.json wants it."""
-    return " ".join([*cylist_argv(), "hook"])
+    r"""The absolute command Claude Code should run, as settings.json wants it.
+
+    Quoted where it has to be. A POSIX install lands in a path without
+    spaces often enough to have got away with plain joining; ``C:\Users\Given
+    Name\...\cylist.exe`` does not, and an unquoted one would have the shell
+    run ``C:\Users\Given`` on every prompt.
+    """
+    return " ".join(_quote(part) for part in [*cylist_argv(), "hook"])
+
+
+def _quote(part: str) -> str:
+    """Double quotes, which are what both ``cmd.exe`` and a POSIX shell take.
+
+    Not ``shlex.quote``: it picks single quotes, which ``cmd.exe`` does not
+    treat as quoting at all. A Windows path cannot contain ``"`` — the
+    filesystem forbids it — so there is nothing here left to escape.
+    """
+    return f'"{part}"' if " " in part else part
+
+
+OURS = re.compile(r'^"?(?:.*[\\/])?(?:cylist(?:\.exe)?"?\s|.*-m\s+cylist_cli\s)hook$')
+r"""Any install of this hook, quoted or not, with or without the ``.exe``.
+
+Matched rather than suffix-tested because quoting moved the end of the
+string: ``"C:\...\cylist.exe" hook`` no longer ends in ``cylist hook``, and
+an installer that could not recognise its own earlier work would add a
+second copy of the hook on every run.
+"""
 
 
 def _is_ours(command: Any) -> bool:
-    """Any install of this hook, wherever the binary was at the time."""
-    text = str(command or "")
-    return text.endswith("cylist hook") or text.endswith("-m cylist_cli hook")
+    return bool(OURS.match(str(command or "").strip()))
 
 
 def _entry(command: str) -> dict[str, Any]:

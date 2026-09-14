@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests import fake_api
-from tests.conftest import Runner
+from tests.conftest import Runner, posix_modes_only
 
 # --- Projects --------------------------------------------------------------
 
@@ -444,6 +444,7 @@ def test_vault_reveal_with_show_prints_the_value_and_warns(run: Runner) -> None:
     assert "scrollback" in result.err
 
 
+@posix_modes_only
 def test_vault_reveal_to_a_file_keeps_it_off_the_screen(run: Runner, tmp_path: Path) -> None:
     target = tmp_path / "stripe.txt"
     result = run("vault", "reveal", "ATL", "Logins/Billing/Stripe", "-o", str(target))
