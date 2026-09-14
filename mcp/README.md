@@ -19,9 +19,21 @@ Code's lifecycle hooks, and registering this server:
 cylist setup
 ```
 
+You do not have to install this package first. `cylist setup` uses a
+`cylist-mcp` already on your PATH, then an `mcp` directory beside the CLI, and
+failing both installs this package from the repository — so a machine that has
+only the CLI still ends up with a registered server. `scripts/install.sh` and
+`scripts/install.ps1` install both up front, from one ref.
+
 See [`cli/README.md`](../cli/README.md). Nothing below is needed if you have
 run that; it is here for an MCP client that is not Claude Code, or a
 configuration you would rather write yourself.
+
+To install it by hand, into your PATH, without a clone:
+
+```
+uv tool install "git+https://github.com/dhruva-nu/cylist.git#subdirectory=mcp"
+```
 
 ## Where the token comes from
 

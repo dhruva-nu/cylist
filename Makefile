@@ -38,8 +38,14 @@ setup: ## Install backend and frontend dependencies
 #
 #   make agent CYLIST=https://dnu-home-1.tail222f46.ts.net
 #
+# This target is for a *clone*, and installs from the working tree so that it
+# sets up whatever you are looking at. A machine that only wants to use a
+# board needs no clone and no make — see scripts/install.sh and
+# scripts/install.ps1, which are one line and do the same thing.
+#
 agent: ## Set this machine's agents up against a board (token, hooks, MCP)
 	uv tool install --force ./cli
+	uv tool install --force ./mcp
 	cylist $(if $(CYLIST),--url $(CYLIST),) setup
 
 db: ## Start Postgres (development and test databases)

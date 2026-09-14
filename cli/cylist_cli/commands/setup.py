@@ -11,7 +11,7 @@ They are all the same act — *let the agents on this machine use this board* �
 so they are one command. It is safe to run again: every step either does
 nothing or re-points itself at where things are now.
 
-Three decisions are worth explaining, because each removes a step rather than
+Four decisions are worth explaining, because each removes a step rather than
 automating one.
 
 **The password mints the token.** ``POST /tokens`` needs ``admin``, and the
@@ -32,6 +32,15 @@ moves.
 address it answers on, and all of them are stored. That is what makes a laptop
 that set itself up on a tailnet keep working in a café — see
 :mod:`cylist_cli.endpoints` for the order they are tried in.
+
+**The MCP server is installed if it is missing.** The machine this is most
+often run on is not the one the board runs on: the CLI came from
+``uv tool install git+…``, so there is no ``mcp`` directory anywhere and
+nothing called ``cylist-mcp`` on PATH. That case used to end the command with
+"could not find the MCP server", which is a piece of homework rather than an
+outcome — so it is now ``uv tool install`` from the same repository. See
+:func:`_mcp_spec` for the order, and ``scripts/install.sh`` /
+``scripts/install.ps1``, which are the one line that gets a machine this far.
 """
 
 from __future__ import annotations
@@ -68,6 +77,21 @@ old to be asked.
 MCP_SERVER_NAME = "cylist"
 """The name the MCP server is registered under, and so what ``/mcp`` lists."""
 
+MCP_SOURCE_ENV = "CYLIST_MCP_SOURCE"
+"""Where to install the MCP server from, when it has to be installed.
+
+Set by ``scripts/install.sh`` and ``scripts/install.ps1`` so that a machine
+bootstrapped from one branch does not then fetch its MCP server from another.
+"""
+
+MCP_SOURCE = "git+https://github.com/dhruva-nu/cylist.git#subdirectory=mcp"
+"""The default, which is the repository this CLI came from.
+
+A git URL and not a package name because the MCP server is not on an index:
+it is a subdirectory of a public repository, which ``uv`` can install from
+directly. Anyone running a fork points at it with ``--mcp-source``.
+"""
+
 SCOPES = ("user", "project", "local")
 """Claude Code's three configuration scopes. ``user`` is the useful default:
 the board is a property of the machine, not of one checkout of one repository.
@@ -81,7 +105,12 @@ CLAUDE_TIMEOUT = 30
 """Seconds allowed to ``claude mcp``. It edits a JSON file; if it has not
 finished in half a minute something is wrong that waiting will not fix."""
 
-Runner = Callable[[Sequence[str]], tuple[int, str]]
+INSTALL_TIMEOUT = 300
+"""And rather more for ``uv tool install``, which resolves and builds a
+dependency tree over the network. Five minutes is generous for a good
+connection and still short enough to fail rather than hang a laptop."""
+
+Runner = Callable[..., tuple[int, str]]
 
 
 def register(subparsers: Any) -> None:
@@ -109,6 +138,18 @@ def register(subparsers: Any) -> None:
     parser.add_argument(
         "--mcp-dir",
         help="The 'mcp' directory to run the server from, if it cannot be found.",
+    )
+    parser.add_argument(
+        "--mcp-source",
+        default=os.environ.get(MCP_SOURCE_ENV) or MCP_SOURCE,
+        help=(
+            f"Where to install the MCP server from when there is no checkout. Default {MCP_SOURCE}."
+        ),
+    )
+    parser.add_argument(
+        "--no-install",
+        action="store_true",
+        help="Never install anything; print what to run instead.",
     )
     parser.add_argument(
         "--no-hooks",
@@ -345,17 +386,19 @@ class Registration:
     """One line saying what happened — including what to do by hand when
     nothing could be done automatically."""
 
+    installed: bool = False
+    """Whether the MCP server had to be fetched and installed to get here."""
 
-def _register(args: argparse.Namespace, spec: tuple[str, ...] | None) -> Registration:
+
+def _register(
+    args: argparse.Namespace, spec: tuple[str, ...] | None, *, installed: bool = False
+) -> Registration:
     if spec is None:
         return Registration(
             argv=(),
             scope=args.scope,
             registered=False,
-            detail=(
-                "Could not find the MCP server. Point at its directory with "
-                "--mcp-dir, or install it with 'uv tool install ./mcp'."
-            ),
+            detail=_cannot_install(args),
         )
 
     claude = shutil.which("claude")
@@ -364,6 +407,7 @@ def _register(args: argparse.Namespace, spec: tuple[str, ...] | None) -> Registr
             argv=spec,
             scope=args.scope,
             registered=False,
+            installed=installed,
             detail=(
                 "Claude Code is not on PATH. Register it yourself with: "
                 + _add_command("claude", spec, args.scope)
@@ -380,13 +424,37 @@ def _register(args: argparse.Namespace, spec: tuple[str, ...] | None) -> Registr
             argv=spec,
             scope=args.scope,
             registered=False,
+            installed=installed,
             detail=f"'claude mcp add' failed: {said or f'exit {code}'}",
         )
     return Registration(
         argv=spec,
         scope=args.scope,
         registered=True,
+        installed=installed,
         detail=f"Registered the '{MCP_SERVER_NAME}' MCP server ({args.scope} scope).",
+    )
+
+
+def _cannot_install(args: argparse.Namespace) -> str:
+    """Why there is no MCP server, and the one line that would fix it.
+
+    Three different sentences rather than one, because the thing to do next
+    is different in each case and "could not find the MCP server" was the
+    same unhelpful answer to all three.
+    """
+    if shutil.which("uv") is None:
+        return (
+            "Could not install the MCP server: uv is not on PATH. Install it from "
+            "https://docs.astral.sh/uv/ and run 'cylist setup' again."
+        )
+    if args.no_install:
+        return "Skipped the MCP server (--no-install). Install it with: " + system.shell_command(
+            ["uv", "tool", "install", args.mcp_source]
+        )
+    return (
+        f"Could not install the MCP server from {args.mcp_source}. Point at a checkout "
+        "with --mcp-dir, or at another source with --mcp-source."
     )
 
 
@@ -406,28 +474,88 @@ def _add_command(claude: str, spec: Sequence[str], scope: str) -> str:
     return system.shell_command(_add_argv(claude, spec, scope))
 
 
-def _mcp_spec(args: argparse.Namespace) -> tuple[str, ...] | None:
-    """How to start the MCP server, or ``None`` if it cannot be found.
+def _mcp_spec(args: argparse.Namespace) -> tuple[tuple[str, ...] | None, bool]:
+    """How to start the MCP server, and whether this had to install it.
 
-    Installed on PATH it is one word. In a checkout it is ``uv run`` against
-    the ``mcp`` directory, which also installs its dependencies the first time
-    — so a clone needs no separate ``uv sync``.
+    Three answers, in the order they are worth having:
 
-    No ``env`` block either way: the server reads the same 0600 config file
-    this command has just written, which is what keeps a live token out of
-    Claude Code's configuration.
+    1. **Already on PATH.** One word, and nothing to do.
+    2. **A checkout beside us.** ``uv run`` against the ``mcp`` directory,
+       which installs its dependencies the first time — so a clone needs no
+       separate ``uv sync``.
+    3. **Neither**, which is the ordinary case on a machine that is not the
+       server: the CLI was installed from git and there is no ``mcp``
+       directory anywhere. So it is installed, from the same place the CLI
+       came from.
+
+    Three used to be "could not find the MCP server", and it is the case that
+    matters most: a laptop joining a board has a checkout of nothing. Leaving
+    it to the reader meant the one command that is supposed to finish the job
+    ended by printing homework.
+
+    No ``env`` block in any of them: the server reads the same 0600 config
+    file this command has just written, which is what keeps a live token out
+    of Claude Code's configuration.
     """
     installed = shutil.which("cylist-mcp")
     if installed:
-        return (str(Path(installed).resolve()),)
+        return (str(Path(installed).resolve()),), False
 
-    directory = _mcp_dir(args)
-    if directory is None:
-        return None
     uv = shutil.which("uv")
-    if uv is None:
+    directory = _mcp_dir(args)
+    if directory is not None and uv is not None:
+        return (str(Path(uv).resolve()), "--directory", str(directory), "run", "cylist-mcp"), False
+
+    if uv is None or args.no_install:
+        return None, False
+    return _install_mcp(uv, args.mcp_source), True
+
+
+def _install_mcp(uv: str, source: str) -> tuple[str, ...] | None:
+    """``uv tool install`` the MCP server, and say where it landed.
+
+    ``--force`` because this command is safe to run again and a half-finished
+    earlier attempt must not be the thing that stops it; the install is
+    otherwise a no-op when the version has not moved.
+
+    Finding the result cannot go through ``shutil.which``: ``uv`` puts it in
+    a directory that is on the *user's* PATH and very often not on this
+    process's — a shell that was opened before uv was, or a fresh install
+    whose PATH change has not been read yet. So uv is asked where its
+    executables go, and only that answer is trusted.
+    """
+    # On stderr, and before the wait rather than after it. Resolving and
+    # building a dependency tree over the network is the one step here that
+    # takes long enough to look like a hang, and `--json` must still get one
+    # document on stdout and nothing else.
+    output.warn(f"Installing the Cylist MCP server from {source} (this takes a moment)…")
+    code, said = _runner([uv, "tool", "install", "--force", source], timeout=INSTALL_TIMEOUT)
+    if code != 0:
+        output.warn(f"uv tool install failed: {said or f'exit {code}'}")
         return None
-    return (str(Path(uv).resolve()), "--directory", str(directory), "run", "cylist-mcp")
+    found = _installed_binary(uv)
+    if found is None:
+        return None
+    return (str(found),)
+
+
+def _installed_binary(uv: str) -> Path | None:
+    """Where ``uv tool install`` puts executables, asked rather than assumed."""
+    name = "cylist-mcp.exe" if system.windows() else "cylist-mcp"
+    code, said = _runner([uv, "tool", "dir", "--bin"])
+    candidates = [Path(said.strip())] if code == 0 and said.strip() else []
+    # Older uv has no `--bin`. Its documented default is the same on every
+    # platform, which is the one guess worth making.
+    candidates.append(Path.home() / ".local" / "bin")
+    for directory in candidates:
+        binary = directory / name
+        # `is_file` follows the link, which is what is being asked: uv puts a
+        # symlink here pointing into a tool store it manages. Registered as it
+        # stands rather than resolved, because this path is the one uv keeps
+        # stable across an upgrade and the store path behind it is not.
+        if binary.is_file():
+            return binary
+    return None
 
 
 def _mcp_dir(args: argparse.Namespace) -> Path | None:
@@ -448,7 +576,7 @@ def _mcp_dir(args: argparse.Namespace) -> Path | None:
     return None
 
 
-def _run(argv: Sequence[str]) -> tuple[int, str]:
+def _run(argv: Sequence[str], timeout: int = CLAUDE_TIMEOUT) -> tuple[int, str]:
     """Run a command, and return its status and whatever it said."""
     try:
         completed = subprocess.run(  # noqa: S603 - argv is built here, never from input
@@ -456,7 +584,7 @@ def _run(argv: Sequence[str]) -> tuple[int, str]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=CLAUDE_TIMEOUT,
+            timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, str(exc)
@@ -491,8 +619,11 @@ def _setup(args: argparse.Namespace, ctx: Context) -> None:
     credential = _credential(args, ctx, server)
     path = configuration.save(server.url, credential.token, urls=server.urls)
 
-    installed = None if args.no_hooks else hook.install_hooks()
-    registration = None if args.no_mcp else _register(args, _mcp_spec(args))
+    hooks = None if args.no_hooks else hook.install_hooks()
+    registration = None
+    if not args.no_mcp:
+        spec, fetched = _mcp_spec(args)
+        registration = _register(args, spec, installed=fetched)
 
     if ctx.as_json:
         output.emit_json(
@@ -507,12 +638,12 @@ def _setup(args: argparse.Namespace, ctx: Context) -> None:
                 },
                 "config_path": str(path),
                 "hooks": None
-                if installed is None
+                if hooks is None
                 else {
-                    "settings": str(installed.settings_path),
-                    "command": installed.command,
-                    "added": installed.added,
-                    "work_command": str(installed.work_command),
+                    "settings": str(hooks.settings_path),
+                    "command": hooks.command,
+                    "added": hooks.added,
+                    "work_command": str(hooks.work_command),
                 },
                 "mcp": None
                 if registration is None
@@ -521,20 +652,21 @@ def _setup(args: argparse.Namespace, ctx: Context) -> None:
                     "command": list(registration.argv),
                     "scope": registration.scope,
                     "registered": registration.registered,
+                    "installed": registration.installed,
                     "detail": registration.detail,
                 },
             }
         )
         return
 
-    _report(server, credential, path, installed, registration)
+    _report(server, credential, path, hooks, registration)
 
 
 def _report(
     server: Server,
     credential: Credential,
     path: Path,
-    installed: hook.HookInstall | None,
+    hooks: hook.HookInstall | None,
     registration: Registration | None,
 ) -> None:
     also = f", also on {', '.join(server.others)}" if server.others else ""
@@ -547,15 +679,17 @@ def _report(
         output.echo(f"Kept the token already configured ({credential.name}, {scopes}).")
     output.echo(f"Wrote {path} ({configuration.describe_protection(path)}).")
 
-    if installed is not None:
-        what = ", ".join(installed.added) if installed.added else "nothing new"
-        output.echo(f"Claude Code hooks in {installed.settings_path}: {what}.")
-        output.echo(f"Wrote {installed.work_command} — type /work <REF> in a session.")
+    if hooks is not None:
+        what = ", ".join(hooks.added) if hooks.added else "nothing new"
+        output.echo(f"Claude Code hooks in {hooks.settings_path}: {what}.")
+        output.echo(f"Wrote {hooks.work_command} — type /work <REF> in a session.")
     if registration is not None:
+        if registration.installed:
+            output.echo(f"Installed the MCP server at {registration.argv[0]}.")
         output.echo(registration.detail)
 
     output.echo()
-    if installed is None and registration is None:
+    if hooks is None and registration is None:
         output.echo("Ready. 'cylist board <KEY>' to see a board.")
         return
     output.echo("Open a new Claude Code session, then 'cylist work <REF>' or /work <REF>.")

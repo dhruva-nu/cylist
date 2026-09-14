@@ -17,11 +17,39 @@ uv tool install .
 
 ## Setting up, in one command
 
+From a machine that has never seen a board and has none of this installed,
+one line is the whole of it — no clone, no `make`, nothing outside your home
+directory and nothing needing `sudo`:
+
+```
+# Linux and macOS
+curl -fsSL https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.sh \
+  | sh -s -- --url https://cylist.example.ts.net
+```
+
+```powershell
+# Windows PowerShell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.ps1))) `
+  -Url https://cylist.example.ts.net
+```
+
+The PowerShell invocation looks like that, rather than `irm … | iex`, because
+`iex` on a piped string has nowhere to put `-Url`. Saved to a file it is the
+ordinary `.\install.ps1 -Url …`.
+
+Both scripts install [uv](https://docs.astral.sh/uv/) if it is missing,
+install this CLI and the `cylist-mcp` server from the repository, and then run
+the command below. `--ref` installs from a branch or tag rather than `main`,
+and `--repo` from a fork; the MCP server is always taken from the same ref as
+the CLI, so a machine cannot end up with halves from two branches.
+
+With the CLI already installed, that last step on its own is:
+
 ```
 cylist setup
 ```
 
-That is the whole of it, from a machine that has never seen a board. It finds
+It finds
 the server, asks for the owner's password **once**, mints a `read,write` token
 named after this machine, stores it `0600`, installs Claude Code's lifecycle
 hooks and the `/work` command, and registers the Cylist MCP server. Run it
@@ -51,6 +79,18 @@ From a clone, `make agent` does the `uv tool install` first and then this.
 | `--scope user\|project\|local` | which Claude Code scope the MCP server goes in (default `user`) |
 | `--no-hooks`, `--no-mcp` | configure the token and nothing else |
 | `--mcp-dir PATH` | where the MCP server lives, if it cannot be found |
+| `--mcp-source URL` | where to install it from when it cannot be found at all |
+| `--no-install` | never fetch anything; print what to run instead |
+
+**Where the MCP server comes from.** Three answers, in this order: whatever
+`cylist-mcp` is on your PATH; an `mcp` directory beside the CLI, which a clone
+has; and otherwise `uv tool install` from this repository, because a machine
+that installed the CLI from git has a checkout of nothing. That last case is
+the ordinary one for a laptop joining a board, and it used to end the command
+with "could not find the MCP server" and a piece of homework. `--mcp-source`
+points it at a fork, and `CYLIST_MCP_SOURCE` does the same from the
+environment — which is how the bootstrap scripts keep the CLI and the server
+on one ref.
 
 **Why it asks for the password rather than a token.** Minting a token needs the
 `admin` scope, and the owner's password already grants everything. So setup

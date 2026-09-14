@@ -190,23 +190,38 @@ secrets deserve production's care. DEPLOY.md says what that means.
 
 Everything the web app does is an HTTP call, so two other clients ship with it.
 
-**To let this machine's agents use a board, one command does all of it:**
+**To let a machine's agents use a board, one line does all of it.** No clone,
+no `make`, and nothing installed outside your home directory:
 
 ```bash
-make agent          # or: uv tool install ./cli && cylist setup
+# Linux and macOS
+curl -fsSL https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.sh \
+  | sh -s -- --url https://dnu-home-1.tail222f46.ts.net
 ```
+
+```powershell
+# Windows PowerShell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.ps1))) `
+  -Url https://dnu-home-1.tail222f46.ts.net
+```
+
+Both install [uv](https://docs.astral.sh/uv/) if it is missing, install the
+`cylist` CLI and the `cylist-mcp` server, and then run `cylist setup`. Neither
+needs `sudo` or an administrator. From a clone, `make agent` is the same thing
+against your working tree.
 
 `cylist setup` finds the server, asks for the owner's password once, mints a
 `read,write` token for this machine, stores it `0600`, installs Claude Code's
-lifecycle hooks and `/work`, and registers the MCP server. It is safe to run
-again, and it stores **every** address the server says it answers on — so the
-same setup works on the tailnet, off it, and on the server itself, without
-being told which. `cylist whoami` names the one that answered.
+lifecycle hooks and `/work`, and registers the MCP server — installing it
+first if this machine has no copy. It is safe to run again, and it stores
+**every** address the server says it answers on, so the same setup works on
+the tailnet, off it, and on the server itself without being told which.
+`cylist whoami` names the one that answered.
 
-Linux, macOS and Windows. On Windows the hooks report over HTTP rather than
-holding a socket, because Python there has no `AF_UNIX` — the board shows the
-same working / waiting / done, and only a session that is *killed* takes the
-server's quiet window to notice rather than being seen at once.
+Linux, macOS and Windows, with the same board behaviour on each. What differs
+is only how a hook reaches the daemon holding its session open: a unix socket
+where there is one, and on Windows a loopback port guarded by a per-daemon
+secret, because a port — unlike a socket — cannot be given a mode.
 
 ```bash
 cd cli && uv sync && uv run cylist --help

@@ -129,6 +129,37 @@ jobs:
       - name: Test
         run: uv run pytest -q
 
+  # The two bootstrap scripts are the first thing a new machine runs, and the
+  # only thing nothing else covers: they are quoted in three READMEs and are
+  # fetched straight from the default branch, so a typo in one is a typo
+  # everybody pastes. Neither is executed here — that would install uv on the
+  # runner — but both are parsed, which is what a typo fails.
+  installers:
+    name: Bootstrap scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check install.sh
+        run: |
+          sh -n scripts/install.sh
+          # POSIX sh, not bash: /bin/sh is dash on Debian and Ubuntu, which is
+          # exactly where this has to work.
+          shellcheck --shell=sh scripts/install.sh
+
+      - name: Check install.ps1
+        shell: pwsh
+        run: |
+          $problems = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/install.ps1", [ref] $null, [ref] $problems) | Out-Null
+          if ($problems) {
+            $problems | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+          Write-Host 'install.ps1 parses.'
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -169,7 +200,7 @@ jobs:
   # deploy key, and no secrets stored in this repository.
   deploy:
     name: Deploy to dnu-home-1
-    needs: [backend, agents, frontend]
+    needs: [backend, agents, installers, frontend]
     # Only main, and only a real push: a pull request that happens to target
     # main must not put anything on the server. A push to `staging` gets the
     # three test jobs above and nothing else — staging is deployed by hand,

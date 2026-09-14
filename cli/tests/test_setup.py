@@ -403,3 +403,170 @@ def test_state_lives_in_one_place_whatever_the_platform(as_windows: None) -> Non
     answered under ``~/.local/state``."""
     assert hook.sessions_dir().parent == system.state_dir()
     assert system.state_dir().name == "cylist"
+
+
+# --- Installing the MCP server ---------------------------------------------
+#
+# The case a laptop joining a board is actually in: the CLI came from git, so
+# there is no `mcp` directory anywhere and nothing called `cylist-mcp` on
+# PATH. This used to end with "could not find the MCP server".
+
+
+@pytest.fixture
+def no_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No ``mcp`` directory to be found — an installed CLI, not a clone."""
+    monkeypatch.setattr(setup, "_mcp_dir", lambda _: None)
+
+
+@pytest.fixture
+def uv_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """A ``uv`` that installs into a bin directory of our own, and a PATH that
+    does not have ``cylist-mcp`` on it even after that — which is the real
+    shape of the problem: uv's bin directory is on the *user's* PATH, not on
+    this process's."""
+    calls: list[list[str]] = []
+    binaries = tmp_path / "uv-bin"
+    binaries.mkdir()
+
+    def fake_runner(argv: Sequence[str], timeout: int = 0) -> tuple[int, str]:
+        calls.append(list(argv))
+        if argv[1:3] == ["tool", "install"]:
+            (binaries / "cylist-mcp").write_text("#!/bin/sh\n")
+            return 0, ""
+        if argv[1:4] == ["tool", "dir", "--bin"]:
+            return 0, f"{binaries}\n"
+        return 0, ""
+
+    monkeypatch.setattr(setup, "_runner", fake_runner)
+    monkeypatch.setattr(shutil, "which", _which)
+    return calls
+
+
+def test_a_machine_with_no_checkout_gets_the_server_installed(
+    run: Runner, fresh: None, password: None, no_checkout: None, uv_calls: list[list[str]]
+) -> None:
+    result = run("--json", "setup")
+
+    reported = json.loads(result.out)["mcp"]
+    assert reported["installed"] is True
+    assert reported["registered"] is True
+    assert reported["command"][0].endswith("cylist-mcp")
+
+    installs = [call for call in uv_calls if call[1:3] == ["tool", "install"]]
+    assert installs == [["/usr/bin/uv", "tool", "install", "--force", setup.MCP_SOURCE]]
+
+
+def test_the_installed_binary_is_found_by_asking_uv_not_by_searching_path(
+    run: Runner, fresh: None, password: None, no_checkout: None, uv_calls: list[list[str]]
+) -> None:
+    """``shutil.which`` cannot see it: uv installs into a directory that is on
+    the user's PATH and very often not on this process's — a shell opened
+    before uv was. Registering a bare name that this process cannot resolve
+    would produce an MCP server that never starts."""
+    run("setup")
+
+    assert ["/usr/bin/uv", "tool", "dir", "--bin"] in uv_calls
+    assert shutil.which("cylist-mcp") is None
+
+
+def test_the_source_can_be_pointed_at_a_fork(
+    run: Runner, fresh: None, password: None, no_checkout: None, uv_calls: list[list[str]]
+) -> None:
+    run("setup", "--mcp-source", "git+https://example.test/fork#subdirectory=mcp")
+
+    installs = [call for call in uv_calls if call[1:3] == ["tool", "install"]]
+    assert installs[0][-1] == "git+https://example.test/fork#subdirectory=mcp"
+
+
+def test_the_bootstrap_scripts_can_set_the_source_in_the_environment(
+    run: Runner,
+    fresh: None,
+    password: None,
+    no_checkout: None,
+    uv_calls: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """So that a machine bootstrapped from one branch does not then fetch its
+    MCP server from another."""
+    monkeypatch.setenv(setup.MCP_SOURCE_ENV, "git+https://example.test/c@staging#subdirectory=mcp")
+
+    run("setup")
+
+    installs = [call for call in uv_calls if call[1:3] == ["tool", "install"]]
+    assert installs[0][-1] == "git+https://example.test/c@staging#subdirectory=mcp"
+
+
+def test_a_checkout_is_still_preferred_to_a_download(
+    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+) -> None:
+    """Nothing is fetched when the source is right there — which is what keeps
+    this command usable on the machine the server runs on."""
+    result = run("--json", "setup")
+
+    reported = json.loads(result.out)["mcp"]
+    assert reported["installed"] is False
+    assert not any(call[1:3] == ["tool", "install"] for call in claude_calls)
+
+
+def test_no_install_prints_the_command_instead_of_running_it(
+    run: Runner,
+    fresh: None,
+    password: None,
+    no_checkout: None,
+    uv_calls: list[list[str]],
+) -> None:
+    result = run("setup", "--no-install")
+
+    assert not any(call[1:3] == ["tool", "install"] for call in uv_calls)
+    assert "uv tool install" in result.out
+    assert setup.MCP_SOURCE in result.out
+
+
+def test_no_uv_says_to_install_uv_rather_than_naming_a_uv_command(
+    run: Runner, fresh: None, password: None, no_checkout: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Install it with uv tool install" is not useful advice to a machine
+    that has no uv."""
+    monkeypatch.setattr(shutil, "which", lambda name: {"claude": "/usr/bin/claude"}.get(name))
+
+    result = run("setup")
+
+    assert "uv is not on PATH" in result.out
+    assert "docs.astral.sh/uv" in result.out
+
+
+def test_a_failed_install_names_the_source_it_could_not_reach(
+    run: Runner,
+    fresh: None,
+    password: None,
+    no_checkout: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing(argv: Sequence[str], timeout: int = 0) -> tuple[int, str]:
+        return (1, "Could not resolve host") if argv[1:3] == ["tool", "install"] else (0, "")
+
+    monkeypatch.setattr(setup, "_runner", failing)
+    monkeypatch.setattr(shutil, "which", _which)
+
+    result = run("setup")
+
+    assert setup.MCP_SOURCE in result.out
+    assert "--mcp-dir" in result.out
+
+
+def test_the_token_is_still_written_when_the_mcp_server_cannot_be_had(
+    run: Runner,
+    fresh: None,
+    password: None,
+    no_checkout: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP server is the last step and the least of them. A machine that
+    cannot fetch one is still set up to run `cylist` and report presence."""
+    monkeypatch.setattr(setup, "_runner", lambda argv, timeout=0: (1, "no network"))
+    monkeypatch.setattr(shutil, "which", _which)
+
+    result = run("setup")
+
+    assert result.code == 0
+    assert _stored()["token"].startswith("cyl_")
