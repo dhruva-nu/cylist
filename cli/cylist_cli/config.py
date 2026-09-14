@@ -5,8 +5,21 @@ Resolution order, first hit wins:
 1. ``--url`` on the command line (URL only; there is deliberately no
    ``--token`` flag — see below).
 2. ``CYLIST_URL`` / ``CYLIST_TOKEN`` in the environment.
-3. ``~/.config/cylist/config.toml``, written by ``cylist login``.
+3. ``~/.config/cylist/config.toml``, written by ``cylist setup`` or
+   ``cylist login``.
 4. ``http://localhost:8000`` for the URL; no token.
+
+A stored configuration holds a *list* of addresses, not one, because one
+server is often reachable several ways and which of them works depends on
+where the laptop is rather than on anything either end decided at setup time.
+``cylist setup`` asks the server for that list (``GET /setup``) and writes it
+here; :mod:`cylist_cli.endpoints` decides the order they are tried in, and
+:class:`cylist_cli.client.Client` moves down it when a connection cannot be
+made. See :attr:`Config.urls`.
+
+An address given explicitly — ``--url``, or ``CYLIST_URL`` — is the whole
+list. Naming a server means that server: quietly reaching a different one
+because the named one was down would be the opposite of what was asked.
 
 There is no ``--token`` flag on purpose. A token passed as an argument is
 copied into shell history, into ``ps`` output for as long as the process runs,
@@ -21,8 +34,10 @@ import os
 import stat
 import sys
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from cylist_cli.errors import CylistError
 
@@ -46,17 +61,28 @@ class Config:
     url: str
     token: str | None
     token_source: str
+    urls: tuple[str, ...] = ()
+    """Every address to try for this server, in order, :attr:`url` first.
+
+    A single-entry list for a server named explicitly or reached one way.
+    Longer when ``cylist setup`` has asked the server what else it answers on
+    — which is what lets the same configuration work on and off a tailnet.
+    """
+
+    def __post_init__(self) -> None:
+        if not self.urls:
+            object.__setattr__(self, "urls", (self.url,))
 
     def require_token(self) -> str:
         """The token, or an error explaining the three ways to supply one."""
         if not self.token:
             raise CylistError(
-                "No API token. Run 'cylist login', or set CYLIST_TOKEN in the environment."
+                "No API token. Run 'cylist setup', or set CYLIST_TOKEN in the environment."
             )
         return self.token
 
 
-def _read_file(path: Path) -> dict[str, str]:
+def _read_file(path: Path) -> dict[str, Any]:
     """Read the config file, ignoring it if it is absent."""
     try:
         raw = path.read_bytes()
@@ -70,7 +96,24 @@ def _read_file(path: Path) -> dict[str, str]:
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
         raise CylistError(f"{path} is not valid TOML: {exc}") from exc
 
-    return {key: value for key, value in parsed.items() if isinstance(value, str)}
+    return parsed
+
+
+def _string(stored: dict[str, Any], key: str) -> str | None:
+    value = stored.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _strings(stored: dict[str, Any], key: str) -> tuple[str, ...]:
+    """A list-of-strings setting, ignoring anything that is not one.
+
+    Hand-edited files happen, and a stray integer in ``urls`` should cost that
+    entry rather than every command until somebody notices.
+    """
+    value = stored.get(key)
+    if not isinstance(value, list):
+        return ()
+    return tuple(item.rstrip("/") for item in value if isinstance(item, str) and item.strip())
 
 
 def load(url_override: str | None = None, *, path: Path | None = None) -> Config:
@@ -78,20 +121,41 @@ def load(url_override: str | None = None, *, path: Path | None = None) -> Config
     where = path or config_path()
     stored = _read_file(where)
 
-    url = url_override or os.environ.get("CYLIST_URL") or stored.get("url") or DEFAULT_URL
+    named = url_override or os.environ.get("CYLIST_URL")
+    stored_url = _string(stored, "url")
+    url = (named or stored_url or DEFAULT_URL).rstrip("/")
+
+    # A named server is the only candidate; a stored one carries whatever else
+    # the server said it answers on, itself first.
+    urls = (url,) if named else dedupe((url, *_strings(stored, "urls")))
 
     token = os.environ.get("CYLIST_TOKEN")
     source = "CYLIST_TOKEN"
     if not token:
-        token = stored.get("token")
+        token = _string(stored, "token")
         source = str(where)
     if not token:
         source = "unset"
 
-    return Config(url=url.rstrip("/"), token=token, token_source=source)
+    return Config(url=url, token=token, token_source=source, urls=urls)
 
 
-def save(url: str, token: str, *, path: Path | None = None) -> Path:
+def dedupe(urls: Iterable[str]) -> tuple[str, ...]:
+    """First appearance wins, order kept — the order is the whole point.
+
+    Public because every producer of a candidate list needs it and they must
+    all agree: an address that appears twice is an address tried twice, which
+    for a timeout is twice the wait.
+    """
+    seen: dict[str, None] = {}
+    for url in urls:
+        cleaned = url.strip().rstrip("/")
+        if cleaned:
+            seen.setdefault(cleaned, None)
+    return tuple(seen)
+
+
+def save(url: str, token: str, *, urls: Iterable[str] = (), path: Path | None = None) -> Path:
     """Write the config file with mode 0600, and return where it went.
 
     The file is created 0600 rather than created and then chmod-ed: between
@@ -99,12 +163,13 @@ def save(url: str, token: str, *, path: Path | None = None) -> Path:
     machine "briefly" is long enough.
     """
     where = path or config_path()
+    candidates = dedupe((url, *urls))
     try:
         where.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(where, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, CONFIG_MODE)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(_render(url, token))
+                handle.write(_render(url, token, candidates))
         finally:
             # An existing file keeps its old mode through O_CREAT, so tighten
             # it as well — the token is new even when the file is not.
@@ -114,10 +179,12 @@ def save(url: str, token: str, *, path: Path | None = None) -> Path:
     return where
 
 
-def _render(url: str, token: str) -> str:
+def _render(url: str, token: str, urls: tuple[str, ...]) -> str:
+    rendered = ", ".join(f'"{candidate}"' for candidate in urls)
     return (
-        "# Written by 'cylist login'. Mode 0600: this file holds a bearer token.\n"
+        "# Written by 'cylist setup'. Mode 0600: this file holds a bearer token.\n"
         f'url = "{url}"\n'
+        f"urls = [{rendered}]\n"
         f'token = "{token}"\n'
     )
 

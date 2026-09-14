@@ -138,6 +138,44 @@ It needs root unless you run `sudo tailscale set --operator=$USER` once, after
 which it does not. `tailscale serve status` shows where it currently points, and
 `sudo tailscale funnel --https=443 off` takes it back off the public internet.
 
+### Telling clients where to find it
+
+A stack is reachable at more than one address, and which one works depends on
+where the laptop asking is — not on anything either end can settle once. So
+each compose file lists them, and the app hands the list to any client that
+asks (`GET /api/v1/setup`, unauthenticated: it is read before a client has a
+token):
+
+```yaml
+CYLIST_CLIENT_URLS: '["http://localhost:8000","https://dnu-home-1.tail222f46.ts.net"]'
+```
+
+| | production | staging | dev |
+|---|---|---|---|
+| local | `http://localhost:8000` | `http://localhost:8001` | `http://localhost:8002` |
+| remote | `…ts.net` | `…ts.net:8443` | `…ts.net:9443` |
+| off the tailnet | yes, via Funnel | no | no |
+
+`cylist setup` stores every address it is given, and the CLI and the MCP server
+try them in order, moving on when one will not *connect*. That is what makes
+one setup work on the tailnet, off it, and on this machine itself — see
+[`cli/README.md`](cli/README.md).
+
+Two things to keep straight:
+
+* **The app never dials these.** They are advisory data returned to callers, so
+  `localhost` in the list means *the caller's* localhost — right for something
+  running on this machine, an instant refusal (and then the next address) for
+  anything else. Cheap either way, which is why it stays first.
+* **Only production's remote address works off the tailnet**, because only
+  production is funnelled. Staging and dev are `tailscale serve`, so a laptop
+  that leaves the tailnet cannot reach them at all — the failover mechanism is
+  address-agnostic, but it cannot invent reachability.
+
+Change one of these and the client keeps the old list until its next `cylist
+setup` or `cylist login`. Neither is urgent: an address that has gone away
+costs one connection failure and is stepped over.
+
 ### WebSockets through the proxy
 
 Two things hold a socket now: a browser watching a board, and each agent

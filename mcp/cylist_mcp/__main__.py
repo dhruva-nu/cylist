@@ -5,6 +5,11 @@ which scopes the configured token holds. That answers two questions at once —
 is this token usable at all, and should ``reveal_secret`` exist — and it is
 much better to fail here, where the MCP client shows the error, than to fail
 later inside a tool call where only the model sees it.
+
+That call is also what settles *which* address is used, when the
+configuration holds several: the client walks down them until one connects.
+So the line printed to stderr names the one that answered, which is the
+answer to "why is it slow" on a laptop that thinks it is still at home.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ import asyncio
 import sys
 
 from cylist_mcp.client import ApiClient
-from cylist_mcp.config import from_environment
+from cylist_mcp.config import resolve
 from cylist_mcp.errors import CylistError
 from cylist_mcp.server import build_server
 
@@ -26,14 +31,14 @@ async def scopes_of(client: ApiClient) -> frozenset[str]:
 
 
 async def serve() -> None:
-    settings = from_environment()
-    client = ApiClient(settings.url, settings.token)
+    settings = resolve()
+    client = ApiClient(settings.urls, settings.token)
     try:
         scopes = await scopes_of(client)
         # stderr, never stdout: stdout is the JSON-RPC channel and anything
         # else written there corrupts the protocol.
         print(
-            f"cylist-mcp: connected to {settings.url} with scopes "
+            f"cylist-mcp: connected to {client.url} with scopes "
             f"{', '.join(sorted(scopes)) or 'none'}.",
             file=sys.stderr,
         )

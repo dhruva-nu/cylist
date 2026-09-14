@@ -63,6 +63,13 @@ services:
       # request is same-origin and no CORS middleware is installed at all —
       # which is the strongest setting, not a missing one.
       CYLIST_CORS_ORIGINS: "[]"
+      # Every address a client can reach this stack at, handed to the CLI and
+      # the MCP server by `GET /setup` so they store all of them and try them
+      # in order — which is what lets one `cylist setup` keep working on the
+      # tailnet, off it, and on this machine itself. Advisory data returned to
+      # callers: the app never dials these, so `localhost` here means the
+      # caller's localhost, not the container's.
+      CYLIST_CLIENT_URLS: '["http://localhost:8000","https://dnu-home-1.tail222f46.ts.net"]'
     ports:
       # Loopback only. See the note at the top of this file.
       - "127.0.0.1:8000:8000"

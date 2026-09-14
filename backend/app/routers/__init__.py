@@ -20,6 +20,7 @@ from app.routers import (
     people,
     projects,
     reports,
+    setup,
     tasks,
     templates,
     tokens,
@@ -28,6 +29,7 @@ from app.routers import (
 
 api_router = APIRouter()
 api_router.include_router(health.router)
+api_router.include_router(setup.router)
 api_router.include_router(auth.router)
 api_router.include_router(tokens.router)
 api_router.include_router(projects.router)

@@ -75,6 +75,8 @@ services:
       # this same process, so every request is same-origin and no CORS
       # middleware is installed at all.
       CYLIST_CORS_ORIGINS: "[]"
+      # As production and staging, for :8002. Tailnet only.
+      CYLIST_CLIENT_URLS: '["http://localhost:8002","https://dnu-home-1.tail222f46.ts.net:9443"]'
     ports:
       # Loopback only, and 8002 rather than production's 8000 or staging's
       # 8001. `tailscale serve --https 9443` terminates HTTPS in front of it;

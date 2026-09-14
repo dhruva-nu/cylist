@@ -87,13 +87,14 @@ def test_a_body_that_is_not_our_envelope_still_produces_a_sentence(run: Runner) 
     assert "<html>" not in result.err
 
 
-def test_an_unauthenticated_call_suggests_logging_in(run: Runner) -> None:
+def test_an_unauthenticated_call_suggests_setting_this_machine_up(run: Runner) -> None:
+    """'cylist setup' rather than 'login': it is the one command that fixes this."""
     result = run(
         "projects",
         overrides={("GET", "/projects"): httpx.Response(401, text="")},
     )
     assert result.code == 1
-    assert "cylist login" in result.err
+    assert "cylist setup" in result.err
 
 
 def test_an_unreachable_server_names_the_url(run: Runner) -> None:
@@ -120,7 +121,7 @@ def test_a_missing_token_explains_the_three_ways_to_supply_one(
     code = main(["projects"], transport=fake_api.build(fake_api.Recorder()))
     captured = capsys.readouterr()
     assert code == 1
-    assert "cylist login" in captured.err
+    assert "cylist setup" in captured.err
     assert "CYLIST_TOKEN" in captured.err
 
 

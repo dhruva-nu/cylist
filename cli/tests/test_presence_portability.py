@@ -361,6 +361,11 @@ class TestTheInstalledCommand:
             "/home/somebody/.local/bin/cylist hook",
             '"C:\\Users\\Given Name\\.local\\bin\\cylist.exe" hook',
             "C:\\Users\\d\\AppData\\Local\\bin\\cylist.exe hook",
+            # Not a hypothetical spelling: `shutil.which` on Windows appends
+            # the extension verbatim from %PATHEXT%, which is conventionally
+            # upper case, so this is what `cylist_argv` actually returns there.
+            "C:\\Users\\d\\AppData\\Local\\bin\\cylist.EXE hook",
+            '"C:\\Users\\Given Name\\.local\\bin\\cylist.EXE" hook',
             "/usr/bin/python3 -m cylist_cli hook",
             '"C:\\Program Files\\Python\\python.exe" -m cylist_cli hook',
         ],
