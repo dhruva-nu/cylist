@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import stat
+import sys
 from pathlib import Path
 
 import httpx
@@ -13,7 +14,7 @@ from cylist_cli import config as configuration
 from cylist_cli.errors import CylistError
 from cylist_cli.main import main
 from tests import fake_api
-from tests.conftest import Runner
+from tests.conftest import Runner, posix_modes_only
 
 
 def _error(status: int, code: str, message: str) -> httpx.Response:
@@ -86,13 +87,14 @@ def test_a_body_that_is_not_our_envelope_still_produces_a_sentence(run: Runner) 
     assert "<html>" not in result.err
 
 
-def test_an_unauthenticated_call_suggests_logging_in(run: Runner) -> None:
+def test_an_unauthenticated_call_suggests_setting_this_machine_up(run: Runner) -> None:
+    """'cylist setup' rather than 'login': it is the one command that fixes this."""
     result = run(
         "projects",
         overrides={("GET", "/projects"): httpx.Response(401, text="")},
     )
     assert result.code == 1
-    assert "cylist login" in result.err
+    assert "cylist setup" in result.err
 
 
 def test_an_unreachable_server_names_the_url(run: Runner) -> None:
@@ -119,7 +121,7 @@ def test_a_missing_token_explains_the_three_ways_to_supply_one(
     code = main(["projects"], transport=fake_api.build(fake_api.Recorder()))
     captured = capsys.readouterr()
     assert code == 1
-    assert "cylist login" in captured.err
+    assert "cylist setup" in captured.err
     assert "CYLIST_TOKEN" in captured.err
 
 
@@ -147,6 +149,7 @@ def test_the_url_flag_beats_everything(tmp_path: Path) -> None:
     assert configuration.load("http://from-flag/", path=path).url == "http://from-flag"
 
 
+@posix_modes_only
 def test_a_saved_token_is_owner_only(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     configuration.save("http://cylist.test", "cyl_secret", path=path)
@@ -154,6 +157,7 @@ def test_a_saved_token_is_owner_only(tmp_path: Path) -> None:
     assert configuration.describe_mode(path) == "0600"
 
 
+@posix_modes_only
 def test_saving_over_a_loose_file_tightens_it(tmp_path: Path) -> None:
     """An existing 0644 file keeps its mode through O_CREAT; it must not."""
     path = tmp_path / "config.toml"
@@ -199,8 +203,13 @@ def test_login_verifies_the_token_before_writing_it(
 
     written = tmp_path / "cylist" / "config.toml"
     assert "cyl_pasted_token" in written.read_text()
-    assert stat.S_IMODE(written.stat().st_mode) == 0o600
-    assert "mode 0600" in captured.out
+    if sys.platform == "win32":
+        # No mode to claim here, and claiming one would be the wrong kind of
+        # reassurance about a file holding a bearer token.
+        assert "user profile" in captured.out
+    else:
+        assert stat.S_IMODE(written.stat().st_mode) == 0o600
+        assert "mode 0600" in captured.out
 
 
 def test_login_writes_nothing_when_the_token_is_rejected(
@@ -234,3 +243,20 @@ def test_no_token_flag_exists(run: Runner) -> None:
     with pytest.raises(SystemExit) as exit_info:
         run("--token", "cyl_oops", "projects")
     assert exit_info.value.code == 2
+
+
+def test_login_says_what_actually_protects_the_token(tmp_path: Path) -> None:
+    """Two platforms, two true sentences, and no reassurance on either that
+    is not earned. A token file described as "owner read/write only" when it
+    is 0666 is worse than saying nothing.
+    """
+    path = tmp_path / "config.toml"
+    configuration.save("http://cylist.test", "cyl_secret", path=path)
+
+    said = configuration.describe_protection(path)
+
+    if sys.platform == "win32":
+        assert said == "in your user profile, which only you and an administrator can read"
+        assert "mode" not in said
+    else:
+        assert said == "mode 0600 — owner read/write only"

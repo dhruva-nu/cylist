@@ -10,16 +10,25 @@ hook reads to bind before the first prompt.
 the session itself — but through a field Claude Code has not documented yet,
 so the documented flag rides along as the fallback that makes the name right
 even if that field stops being honoured.
+
+Handing the terminal over is ``execvpe`` on POSIX and a child process on
+Windows. Two reasons, both Windows': ``exec`` there does not consult
+``PATHEXT``, so it cannot find the ``claude.cmd`` that an npm install leaves
+on the path; and it replaces the process in a way that returns control to the
+shell while the new program is still using the console. Waiting on a child
+and exiting with its status is what a Windows user expects anyway.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from cylist_cli import output
+from cylist_cli import output, system
 from cylist_cli.commands.hook import REFERENCE
 from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
@@ -28,7 +37,21 @@ Exec = Callable[[str, Sequence[str], Mapping[str, str]], Any]
 
 
 def _replace_process(file: str, argv: Sequence[str], env: Mapping[str, str]) -> None:
-    os.execvpe(file, list(argv), dict(env))  # noqa: S606 - handing the terminal to claude is the command
+    """Hand the terminal to ``claude``, and do not come back.
+
+    ``shutil.which`` first: on Windows the executable is ``claude.cmd`` and
+    neither ``exec`` nor ``CreateProcess`` will find it from the bare name.
+    """
+    found = shutil.which(file)
+    if found is None:
+        raise CylistError(
+            f"{file} is not on your PATH. Install Claude Code, or run it yourself "
+            "and type /work <REF> in the session."
+        )
+    if system.windows():
+        completed = subprocess.run([found, *argv[1:]], env=dict(env), check=False)  # noqa: S603
+        raise SystemExit(completed.returncode)
+    os.execve(found, list(argv), dict(env))  # noqa: S606 - handing the terminal over is the command
 
 
 _exec: Exec = _replace_process

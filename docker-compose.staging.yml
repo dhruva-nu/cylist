@@ -69,6 +69,9 @@ services:
       # process, so every request is same-origin and no CORS middleware is
       # installed at all.
       CYLIST_CORS_ORIGINS: "[]"
+      # As production, for :8001. Tailnet only — `serve`, not `funnel` — so
+      # the second address works from your devices and nowhere else.
+      CYLIST_CLIENT_URLS: '["http://localhost:8001","https://dnu-home-1.tail222f46.ts.net:8443"]'
     ports:
       # Loopback only, and 8001 rather than production's 8000. `tailscale serve
       # --https 8443` terminates HTTPS in front of it; nothing else should reach

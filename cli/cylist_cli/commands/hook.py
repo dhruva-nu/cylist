@@ -28,7 +28,8 @@ Four rules shape everything here, and they are worth more than any feature:
   line on stderr only when ``CYLIST_HOOK_DEBUG=1``.
 * **It is quick.** ``UserPromptSubmit`` is on the critical path of every
   prompt. The socket gets a quarter of a second and the HTTP fallback a
-  second and a half, so the worst case is under two — well inside the three
+  second and a half — all of the addresses the server answers on, between
+  them, not each — so the worst case is under two, well inside the three
   Claude Code allows. An ordinary tool call now costs nothing at all: it
   used to send a keepalive once a minute to prove the process was alive, and
   a held connection proves that by existing.
@@ -38,7 +39,8 @@ Four rules shape everything here, and they are worth more than any feature:
   refusable entirely with ``CYLIST_PRESENCE=off``. A background process on
   somebody's laptop has to be all of those things.
 
-State is one small file per session under ``$XDG_STATE_HOME/cylist/sessions``:
+State is one small file per session under ``$XDG_STATE_HOME/cylist/sessions``
+(``%LOCALAPPDATA%\\cylist\\sessions`` on Windows):
 which card the session is bound to and whether it has been nudged. ``/clear``
 ends one session and starts another in the same process; a ``handoff.json``
 written on the way out and read on the way in is what carries the binding
@@ -53,18 +55,29 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from cylist_cli import output, presence
+from cylist_cli import output, presence, system
 from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
 
 HTTP_TIMEOUT = httpx.Timeout(1.5)
 """Total. A down backend costs a prompt this much and no more."""
+
+HTTP_BUDGET = 1.5
+"""And the same, in total, however many addresses the server answers on.
+
+A configuration may hold three (see :mod:`cylist_cli.config`) and a prompt
+cannot pay three timeouts to discover that none of them is there. Addresses
+that refuse instantly — the usual shape of a wrong one, a ``localhost`` with
+nothing behind it — cost nothing and leave the budget to the next; one that
+hangs spends it, and is the last thing tried.
+"""
 
 HANDOFF_TTL = timedelta(seconds=5)
 """How old a ``/clear`` handoff may be and still be believed."""
@@ -470,7 +483,7 @@ class Hook:
         body: dict[str, Any] = {"state": state, "client_name": self._client_name()}
         if reason:
             body["reason"] = reason
-        with self.ctx.build_client(token, timeout=HTTP_TIMEOUT) as client:
+        with self.ctx.build_client(token, timeout=HTTP_TIMEOUT, budget=HTTP_BUDGET) as client:
             client.put(f"/tasks/{self.task}/agent-sessions/{self.session_id}", body)
 
 
@@ -482,10 +495,14 @@ def _now() -> datetime:
 
 
 def sessions_dir() -> Path:
-    """``$XDG_STATE_HOME/cylist/sessions``, or its ``~/.local/state`` default."""
-    root = os.environ.get("XDG_STATE_HOME")
-    base = Path(root) if root else Path.home() / ".local" / "state"
-    return base / "cylist" / "sessions"
+    """Where a session's binding is remembered between hook invocations.
+
+    One rule for every machine-local file this CLI writes, so that a Windows
+    install does not keep its sessions under ``%LOCALAPPDATA%`` and the
+    address it last reached under ``~/.local/state``. See
+    :func:`cylist_cli.system.state_dir`.
+    """
+    return system.state_dir() / "sessions"
 
 
 def _state_path(session_id: str) -> Path:
@@ -567,7 +584,7 @@ def cylist_argv() -> list[str]:
     and the supervisor execs a list.
     """
     found = shutil.which("cylist")
-    if found:
+    if found and _is_executable_image(found):
         return [str(Path(found).resolve())]
     invoked = Path(sys.argv[0])
     if invoked.name == "cylist" and invoked.is_absolute():
@@ -575,22 +592,92 @@ def cylist_argv() -> list[str]:
     return [str(Path(sys.executable).resolve()), "-m", "cylist_cli"]
 
 
+def _is_executable_image(found: str) -> bool:
+    """Whether ``CreateProcess`` can run this directly, which on Windows is a question.
+
+    ``PATHEXT`` puts ``.EXE`` ahead of ``.CMD``, so the shims pip and uv write
+    are found first and this is almost always true. When it is not — a batch
+    shim and no exe beside it — the module form is taken instead, because a
+    ``.cmd`` needs ``cmd.exe`` wrapped round it and a daemon does not need a
+    ``cmd.exe`` sitting in front of it for its whole life.
+    """
+    if sys.platform == "win32":
+        return Path(found).suffix.lower() not in {".cmd", ".bat"}
+    else:
+        return True
+
+
 def hook_command() -> str:
-    """The absolute command Claude Code should run, as settings.json wants it."""
-    return " ".join([*cylist_argv(), "hook"])
+    r"""The absolute command Claude Code should run, as settings.json wants it.
+
+    Quoted where it has to be. A POSIX install lands in a path without
+    spaces often enough to have got away with plain joining; ``C:\Users\Given
+    Name\...\cylist.exe`` does not, and an unquoted one would have the shell
+    run ``C:\Users\Given`` on every prompt.
+    """
+    return " ".join(_quote(part) for part in [*cylist_argv(), "hook"])
+
+
+def _quote(part: str) -> str:
+    """Double quotes, which are what both ``cmd.exe`` and a POSIX shell take.
+
+    Not ``shlex.quote``: it picks single quotes, which ``cmd.exe`` does not
+    treat as quoting at all. A Windows path cannot contain ``"`` — the
+    filesystem forbids it — so there is nothing here left to escape.
+    """
+    return f'"{part}"' if " " in part else part
+
+
+OURS = re.compile(
+    r'^"?(?:.*[\\/])?(?:cylist(?:\.exe)?"?\s|.*-m\s+cylist_cli\s)hook$', re.IGNORECASE
+)
+r"""Any install of this hook, quoted or not, with or without the ``.exe``.
+
+Matched rather than suffix-tested because quoting moved the end of the
+string: ``"C:\...\cylist.exe" hook`` no longer ends in ``cylist hook``, and
+an installer that could not recognise its own earlier work would add a
+second copy of the hook on every run.
+
+Case-insensitive for the same reason, and it is not hypothetical:
+``shutil.which`` on Windows appends the extension *verbatim* from
+``%PATHEXT%``, which is conventionally upper case, so :func:`cylist_argv`
+routinely returns ``…\cylist.EXE``. Matching only ``.exe`` would mean
+``cylist setup`` — which promises to be safe to run again — adding a second
+hook every time it was run on Windows.
+"""
 
 
 def _is_ours(command: Any) -> bool:
-    """Any install of this hook, wherever the binary was at the time."""
-    text = str(command or "")
-    return text.endswith("cylist hook") or text.endswith("-m cylist_cli hook")
+    return bool(OURS.match(str(command or "").strip()))
 
 
 def _entry(command: str) -> dict[str, Any]:
     return {"type": "command", "command": command, "timeout": HOOK_TIMEOUT_SECONDS}
 
 
-def _install(_: argparse.Namespace, ctx: Context) -> None:
+@dataclass(frozen=True)
+class HookInstall:
+    """What installing the hooks changed, for whoever wants to report it.
+
+    ``cylist setup`` prints one line of this among several; ``cylist hook
+    install`` prints all of it. Separating the doing from the saying is what
+    lets both exist without one of them shelling out to the other.
+    """
+
+    settings_path: Path
+    command: str
+    added: list[str]
+    work_command: Path
+    wrote_work_command: bool
+
+
+def install_hooks() -> HookInstall:
+    """Wire ``cylist hook`` into Claude Code's user settings, idempotently.
+
+    Never duplicates the hook and never touches anybody else's: an install
+    that finds ours already there only re-points it at wherever the binary is
+    now, which is what makes this safe to run again after a reinstall.
+    """
     command = hook_command()
     settings_path = claude_config_dir() / "settings.json"
     settings = _read_settings(settings_path)
@@ -633,23 +720,38 @@ def _install(_: argparse.Namespace, ctx: Context) -> None:
     )
     command_path.write_text(WORK_COMMAND_FILE, "utf-8")
 
+    return HookInstall(
+        settings_path=settings_path,
+        command=command,
+        added=added,
+        work_command=command_path,
+        wrote_work_command=wrote_command,
+    )
+
+
+def _install(_: argparse.Namespace, ctx: Context) -> None:
+    report = install_hooks()
+
     if ctx.as_json:
         output.emit_json(
             {
-                "settings": str(settings_path),
-                "command": command,
-                "added": added,
-                "work_command": str(command_path),
+                "settings": str(report.settings_path),
+                "command": report.command,
+                "added": report.added,
+                "work_command": str(report.work_command),
             }
         )
         return
-    if added:
-        output.echo(f"Added the Cylist hook to {settings_path} for: {', '.join(added)}.")
+    if report.added:
+        output.echo(
+            f"Added the Cylist hook to {report.settings_path} for: {', '.join(report.added)}."
+        )
     else:
-        output.echo(f"The Cylist hook was already in {settings_path}; nothing to add.")
-    output.echo(f"Hook command: {command}")
+        output.echo(f"The Cylist hook was already in {report.settings_path}; nothing to add.")
+    output.echo(f"Hook command: {report.command}")
     output.echo(
-        f"{'Wrote' if wrote_command else 'Kept'} {command_path} — type /work <REF> in a session."
+        f"{'Wrote' if report.wrote_work_command else 'Kept'} {report.work_command}"
+        " — type /work <REF> in a session."
     )
     output.echo("Open a new Claude Code session for the hooks to load.")
 

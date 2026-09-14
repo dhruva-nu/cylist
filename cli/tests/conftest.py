@@ -1,7 +1,9 @@
-"""Fixtures: an isolated config directory and a way to run a command."""
+"""Fixtures: an isolated config directory, a way to run a command, and a transport."""
 
 from __future__ import annotations
 
+import socket
+import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +13,7 @@ import pytest
 
 from cylist_cli import output
 from cylist_cli.main import main
+from cylist_cli.presence import ipc
 from tests import fake_api
 
 
@@ -28,6 +31,16 @@ class Result:
 
 
 Runner = Callable[..., Result]
+
+posix_modes_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "a 0600 guarantee, which Windows cannot give: os.chmod moves the read-only "
+        "bit and nothing else, and stat reads 0666 back whatever was asked. What "
+        "keeps these files private there is the ACL on the user's profile — see "
+        "config.describe_protection, which is tested on both platforms."
+    ),
+)
 
 
 @pytest.fixture(autouse=True)
@@ -66,3 +79,19 @@ def run(recorder: fake_api.Recorder, capsys: pytest.CaptureFixture[str]) -> Iter
         return Result(code=code, out=captured.out, err=captured.err)
 
     yield invoke
+
+
+@pytest.fixture(params=["unix", "tcp"])
+def ipc_transport(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run the test once per hook-to-daemon carrier.
+
+    Not autouse: only the presence modules want it. What it buys is that the
+    loopback transport — the one Windows uses, because CPython has no
+    ``AF_UNIX`` there — is exercised on every Linux run as well. A path that
+    only ever runs on the platform nobody develops on is a path that is
+    never really tested.
+    """
+    if request.param == "unix" and not hasattr(socket, "AF_UNIX"):
+        pytest.skip("this platform has no AF_UNIX")
+    monkeypatch.setenv(ipc.TRANSPORT_ENV, request.param)
+    return str(request.param)

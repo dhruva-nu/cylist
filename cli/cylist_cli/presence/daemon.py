@@ -1,7 +1,7 @@
 """The process that holds the socket.
 
 Two threads and a queue. The main thread owns the WebSocket exclusively and
-runs the reducer; a second thread accepts on the AF_UNIX socket and pushes
+runs the reducer; a second thread accepts on the hook socket and pushes
 what the hooks say onto the queue. Nothing else is shared, so there is no
 lock anywhere in here.
 
@@ -24,9 +24,11 @@ import queue
 import signal
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from cylist_cli import endpoints
 from cylist_cli.context import Context
 from cylist_cli.presence import ipc, protocol, supervisor
 from cylist_cli.presence import machine as m
@@ -51,17 +53,41 @@ def log_path(session_id: str) -> Path:
     return logs / f"daemon-{session_id[:16]}.log"
 
 
-def _clock() -> float:
-    """Seconds that include time the machine spent asleep.
+def _find_boottime_clock() -> Callable[[], float] | None:
+    """A clock that counts the time the machine spent asleep, if there is one.
 
     ``monotonic`` stops while a laptop is suspended, so a lid closed for
     eight hours on a waiting session would come back believing no time had
     passed. ``BOOTTIME`` does not, which is what the idle window needs.
+
+    It is a Linux clock, and it is looked up by name because neither the
+    function nor the constant exists on Windows. Resolved once at import: it
+    cannot appear later, and :func:`_clock` is called on every tick.
     """
+    reader: Any = getattr(time, "clock_gettime", None)
+    clock_id = getattr(time, "CLOCK_BOOTTIME", None)
+    if reader is None or clock_id is None:
+        return None
     try:
-        return time.clock_gettime(time.CLOCK_BOOTTIME)
-    except (AttributeError, OSError):  # pragma: no cover - not Linux
-        return time.monotonic()
+        reader(clock_id)
+    except OSError:  # pragma: no cover - a kernel that names it and refuses it
+        return None
+    return lambda: float(reader(clock_id))
+
+
+_BOOTTIME = _find_boottime_clock()
+
+
+def _clock() -> float:
+    """Seconds, from the best clock this platform has.
+
+    macOS and Windows fall back to ``monotonic`` and count the idle window
+    from the wake rather than from the last hook. That is a defensible answer
+    rather than a broken one: a session that was waiting on a person before
+    the lid closed is still waiting on them afterwards, and five more minutes
+    of a card saying so costs nothing.
+    """
+    return _BOOTTIME() if _BOOTTIME is not None else time.monotonic()
 
 
 def run(ctx: Context, session_id: str, *, connect: Any = None) -> int:
@@ -79,8 +105,20 @@ def run(ctx: Context, session_id: str, *, connect: Any = None) -> int:
     _configure_logging(session_id)
     supervisor.write_pid(session_id)
     events: queue.Queue[m.Event] = queue.Queue()
-    listener = ipc.Listener(session_id)
     state = _Shared(session_id)
+
+    try:
+        listener = ipc.Listener(session_id)
+    except OSError:
+        # There is nowhere for the hooks to reach us, so there is no daemon
+        # to be. Logged rather than raised because nobody is reading this
+        # process's stderr — it went to DEVNULL when the hook detached it,
+        # and an empty log beside a vanished process is the hardest possible
+        # way to find out that a path was too long or a port refused.
+        logger.exception("Could not listen for hooks; this daemon is no use")
+        supervisor.clear_pid(session_id)
+        lock.release()
+        return 0
 
     accepting = threading.Thread(
         target=listener.serve,
@@ -93,9 +131,7 @@ def run(ctx: Context, session_id: str, *, connect: Any = None) -> int:
     def hang_up(*_: object) -> None:
         events.put(m.HookEnd("session_ended"))
 
-    with contextlib.suppress(ValueError):  # not the main thread, in a test
-        signal.signal(signal.SIGTERM, hang_up)
-        signal.signal(signal.SIGINT, hang_up)
+    _on_being_asked_to_stop(hang_up)
 
     try:
         _loop(ctx, session_id, events, state, connect=connect)
@@ -180,17 +216,26 @@ def _loop(
     last = _clock()
     retry_at = 0.0
 
+    # Every address the server answers on, tried in turn. A daemon outlives
+    # the network it was started on: a laptop that suspends on the tailnet and
+    # wakes on a hotel network has to reconnect somewhere else or spend the
+    # rest of the session reporting nothing.
+    addresses = endpoints.order(ctx.config.urls)
+    attempt = 0
+
     while True:
         # Nothing to say until we know which card, and a socket opened
         # without one would report on the empty reference and be closed for
         # it. Wait instead; the next hook event says where.
         if socket is None and machine.task and _clock() >= retry_at:
+            base_url = addresses[attempt % len(addresses)]
             try:
-                # Re-read the token every attempt, so a fresh `cylist login`
+                # Re-read the token every attempt, so a fresh `cylist setup`
                 # heals a daemon that is already running.
-                socket = connect(ctx.config.url, ctx.config.token or token, session_id)
+                socket = connect(base_url, ctx.config.token or token, session_id)
             except Exception as exc:
-                logger.info("Connect failed: %s", exc)
+                attempt += 1
+                logger.info("Connect to %s failed: %s", base_url, exc)
                 machine, actions = _advance(machine, m.LinkDown(), last)
                 last = _clock()
                 retry_at = last + _delay(actions)
@@ -198,6 +243,7 @@ def _loop(
                 if _finished(actions):
                     return
                 continue
+            endpoints.remember(base_url)
             machine, actions = _advance(machine, m.LinkUp(), last)
             last = _clock()
             state.link = machine.link.value
@@ -326,6 +372,25 @@ def _connect(base_url: str, token: str, session_id: str) -> Any:
         ping_timeout=PING_TIMEOUT,
         close_timeout=2,
     )
+
+
+def _on_being_asked_to_stop(hang_up: Callable[..., None]) -> None:
+    """End the session tidily on whichever signals this platform delivers.
+
+    SIGTERM is what ``supervisor.stop`` sends on POSIX. On Windows it is
+    registrable and never delivered — ``os.kill`` there is
+    ``TerminateProcess``, which runs no handler — so SIGBREAK is added, that
+    being the one a console Ctrl-Break or ``CREATE_NEW_PROCESS_GROUP`` can
+    actually raise. Windows' graceful stop is the ``end`` message on the IPC
+    channel; these are what is left for the console cases.
+    """
+    for name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        # ValueError: not the main thread, which is how the suite drives this.
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(number, hang_up)
 
 
 def _configure_logging(session_id: str) -> None:

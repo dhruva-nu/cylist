@@ -396,6 +396,26 @@ IDENTITY = {
     "scopes": ["read", "write"],
 }
 
+TAILNET_URL = "https://cylist.tailnet.test"
+
+SETUP = {
+    "urls": ["http://cylist.test", TAILNET_URL],
+    "environment": "test",
+    "agent_scopes": ["read", "write"],
+}
+
+MINTED_TOKEN = "cyl_minted_for_this_machine"
+
+MINTED = {
+    "id": "0192f3c4-000a-7000-8000-000000000002",
+    "name": "a laptop agent",
+    "scopes": ["read", "write"],
+    "created_at": "2026-02-06T09:00:00Z",
+    "expires_at": None,
+    "last_used_at": None,
+    "token": MINTED_TOKEN,
+}
+
 
 @dataclass
 class Recorder:
@@ -461,6 +481,19 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
 
     if path == "/me":
         return httpx.Response(200, json=IDENTITY)
+
+    if path == "/setup" and method == "GET":
+        return httpx.Response(200, json=SETUP)
+    if path == "/auth/login" and method == "POST":
+        # The real server issues an HttpOnly cookie here, and reads
+        # `Authorization` in preference to it — which is why the client that
+        # logs in must send no such header. `test_setup` asserts that.
+        return httpx.Response(200, json=IDENTITY, headers={"set-cookie": "cylist_session=s3"})
+    if path == "/auth/logout" and method == "POST":
+        return httpx.Response(200, json={"ok": True})
+    if path == "/tokens" and method == "POST":
+        body = json.loads(request.content)
+        return httpx.Response(201, json={**MINTED, "name": body["name"], "scopes": body["scopes"]})
 
     if path == "/projects" and method == "GET":
         return httpx.Response(200, json=[PROJECT])

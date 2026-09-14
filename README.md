@@ -190,6 +190,39 @@ secrets deserve production's care. DEPLOY.md says what that means.
 
 Everything the web app does is an HTTP call, so two other clients ship with it.
 
+**To let a machine's agents use a board, one line does all of it.** No clone,
+no `make`, and nothing installed outside your home directory:
+
+```bash
+# Linux and macOS
+curl -fsSL https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.sh \
+  | sh -s -- --url https://dnu-home-1.tail222f46.ts.net
+```
+
+```powershell
+# Windows PowerShell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.ps1))) `
+  -Url https://dnu-home-1.tail222f46.ts.net
+```
+
+Both install [uv](https://docs.astral.sh/uv/) if it is missing, install the
+`cylist` CLI and the `cylist-mcp` server, and then run `cylist setup`. Neither
+needs `sudo` or an administrator. From a clone, `make agent` is the same thing
+against your working tree.
+
+`cylist setup` finds the server, asks for the owner's password once, mints a
+`read,write` token for this machine, stores it `0600`, installs Claude Code's
+lifecycle hooks and `/work`, and registers the MCP server — installing it
+first if this machine has no copy. It is safe to run again, and it stores
+**every** address the server says it answers on, so the same setup works on
+the tailnet, off it, and on the server itself without being told which.
+`cylist whoami` names the one that answered.
+
+Linux, macOS and Windows, with the same board behaviour on each. What differs
+is only how a hook reaches the daemon holding its session open: a unix socket
+where there is one, and on Windows a loopback port guarded by a per-daemon
+secret, because a port — unlike a socket — cannot be given a mode.
+
 ```bash
 cd cli && uv sync && uv run cylist --help
 ```
@@ -211,10 +244,11 @@ capped at 280 characters so the next one reads the pad rather than skimming it.
 
 The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
 It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an
-agent is never offered a tool that will always fail. See `mcp/README.md` for the
-`claude mcp add` line.
+agent is never offered a tool that will always fail. It reads the same 0600 file
+the CLI does, so the registration Claude Code holds contains no credential at
+all — see `mcp/README.md`.
 
-Mint a token scoped to what the agent actually needs:
+To mint a token by hand, scoped to what the agent actually needs:
 
 ```bash
 curl -X POST localhost:8000/api/v1/tokens -b cookies \

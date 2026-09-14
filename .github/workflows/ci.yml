@@ -72,15 +72,26 @@ jobs:
   # The CLI and the MCP server talk to the API over HTTP and are tested against
   # an httpx.MockTransport, so neither needs a database or a running backend.
   agents:
-    name: ${{ matrix.package.name }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.package.name }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         package:
           - { name: CLI, dir: cli }
           - { name: MCP server, dir: mcp }
+        include:
+          # The CLI installs the Claude Code hook and runs its presence
+          # daemon on the developer's own machine, so "the developer's own
+          # machine" is part of its contract. Windows is the one that differs
+          # in kind rather than in detail — no AF_UNIX, no fcntl, no
+          # catchable SIGTERM — and each of those is a way for the daemon to
+          # be silently unusable there. mypy is worth as much as the tests
+          # here: it is the only run that reads the msvcrt branches at all.
+          - os: windows-latest
+            package: { name: CLI, dir: cli }
 
     defaults:
       run:
@@ -106,8 +117,48 @@ jobs:
       - name: Type-check
         run: uv run mypy .
 
+      # The CLI's Windows branches are invisible to a type check run as
+      # Linux — mypy does not analyse a block it knows this platform never
+      # reaches. This reads them without needing a Windows runner, and it is
+      # how the AF_UNIX, CLOCK_BOOTTIME and getuid errors were found in the
+      # first place. Cheap, and it fails on the leg people actually watch.
+      - name: Type-check as Windows
+        if: matrix.package.dir == 'cli' && runner.os == 'Linux'
+        run: uv run mypy --platform win32 .
+
       - name: Test
         run: uv run pytest -q
+
+  # The two bootstrap scripts are the first thing a new machine runs, and the
+  # only thing nothing else covers: they are quoted in three READMEs and are
+  # fetched straight from the default branch, so a typo in one is a typo
+  # everybody pastes. Neither is executed here — that would install uv on the
+  # runner — but both are parsed, which is what a typo fails.
+  installers:
+    name: Bootstrap scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check install.sh
+        run: |
+          sh -n scripts/install.sh
+          # POSIX sh, not bash: /bin/sh is dash on Debian and Ubuntu, which is
+          # exactly where this has to work.
+          shellcheck --shell=sh scripts/install.sh
+
+      - name: Check install.ps1
+        shell: pwsh
+        run: |
+          $problems = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/install.ps1", [ref] $null, [ref] $problems) | Out-Null
+          if ($problems) {
+            $problems | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+          Write-Host 'install.ps1 parses.'
 
   frontend:
     name: Frontend
@@ -149,7 +200,7 @@ jobs:
   # deploy key, and no secrets stored in this repository.
   deploy:
     name: Deploy to dnu-home-1
-    needs: [backend, agents, frontend]
+    needs: [backend, agents, installers, frontend]
     # Only main, and only a real push: a pull request that happens to target
     # main must not put anything on the server. A push to `staging` gets the
     # three test jobs above and nothing else — staging is deployed by hand,

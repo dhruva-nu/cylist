@@ -107,6 +107,19 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     session_ttl_hours: int = Field(default=720, gt=0)
 
+    client_urls: list[str] = Field(default_factory=list)
+    """Every address this deployment can be reached at, most local first.
+
+    Handed to clients by ``GET /setup`` so that a CLI or an MCP server keeps
+    the whole list and tries them in order. One address is enough for a server
+    reached one way; a machine on a tailnet with a public funnel in front of
+    it has three, and which of them works depends on where the laptop is
+    sitting at the time rather than on anything either end can decide once.
+
+    Order is the order a client will try them in, so put the cheapest first:
+    ``["http://localhost:8000", "https://box.tailnet.ts.net"]``.
+    """
+
     # --- Logging ----------------------------------------------------------
     # What the process says about itself, and where. See app/core/logging.py
     # for what is written; these decide how much of it and to where.

@@ -3,6 +3,7 @@
 #   make setup     install every dependency
 #   make dev       run the API and the web app
 #   make up        run the whole stack in Docker instead
+#   make agent     let this machine's agents use a board
 #   make check     everything CI runs
 
 BACKEND  := backend
@@ -16,7 +17,7 @@ UV       := uv --project $(BACKEND)
         staging-refresh staging-logs staging-ps staging-down \
         dev-deploy dev-logs dev-ps dev-down dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key \
-        clean
+        agent clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -25,6 +26,27 @@ help: ## Show this help
 setup: ## Install backend and frontend dependencies
 	$(UV) sync
 	npm --prefix $(FRONTEND) install
+
+# --- Agents ----------------------------------------------------------------
+# The whole of "let Claude Code use a board" in one target: install the CLI on
+# your PATH, then let it configure itself — a token minted from your password,
+# the lifecycle hooks that put a session on a card, and the MCP server. It
+# finds the server itself, and stores every address the server answers on, so
+# the same setup works on the tailnet and off it. Safe to run again.
+#
+# Pass a server if it is not on this machine:
+#
+#   make agent CYLIST=https://dnu-home-1.tail222f46.ts.net
+#
+# This target is for a *clone*, and installs from the working tree so that it
+# sets up whatever you are looking at. A machine that only wants to use a
+# board needs no clone and no make — see scripts/install.sh and
+# scripts/install.ps1, which are one line and do the same thing.
+#
+agent: ## Set this machine's agents up against a board (token, hooks, MCP)
+	uv tool install --force ./cli
+	uv tool install --force ./mcp
+	cylist $(if $(CYLIST),--url $(CYLIST),) setup
 
 db: ## Start Postgres (development and test databases)
 	docker compose up -d postgres postgres-test

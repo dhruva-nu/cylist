@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ CARD = "ATL-1"
 
 
 @pytest.fixture(autouse=True)
-def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ipc_transport: str) -> Path:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
@@ -176,7 +177,10 @@ class TestWhenThereIsNot:
         assert spawned["stdout"] is subprocess.DEVNULL
         assert spawned["stderr"] is subprocess.DEVNULL
         assert spawned["stdin"] is subprocess.DEVNULL
-        assert spawned["start_new_session"] is True
+        if sys.platform == "win32":
+            assert spawned["creationflags"] & subprocess.DETACHED_PROCESS
+        else:
+            assert spawned["start_new_session"] is True
 
     def test_an_unbound_session_starts_nothing_and_says_nothing(
         self, fire: Fire, recorder: fake_api.Recorder, no_real_processes: list[dict[str, Any]]

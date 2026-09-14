@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,10 @@ import pytest
 from cylist_cli.presence import ipc, protocol
 
 SESSION = "01a08bbf-994b-743b-989c-e07e09e66add"
+
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="mode bits and uids, neither of which Windows has"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -64,10 +69,16 @@ class TestReadingAMessage:
 class TestWhereTheSocketGoes:
     def test_it_is_named_by_a_hash_not_by_the_session(self) -> None:
         """AF_UNIX paths cap near a hundred bytes, and the directory this
-        sits in can already be long."""
+        sits in can already be long.
+
+        Asserted on the name rather than on the whole path: the length of
+        the directory is the test runner's business — a Windows temporary
+        directory is long all by itself — and what this code controls is
+        that the name does not grow with the session id.
+        """
         path = ipc.socket_path("a" * 300)
 
-        assert len(str(path)) < 100
+        assert len(path.name) < 32
         assert "aaaa" not in path.name
 
     def test_the_same_session_always_lands_in_the_same_place(self) -> None:
@@ -76,12 +87,14 @@ class TestWhereTheSocketGoes:
     def test_two_sessions_do_not_collide(self) -> None:
         assert ipc.socket_path("one") != ipc.socket_path("two")
 
+    @posix_only
     def test_the_directory_is_private(self) -> None:
         """It is a channel into a process holding a bearer token."""
         mode = ipc.runtime_dir().stat().st_mode
 
         assert not mode & (stat.S_IRWXG | stat.S_IRWXO)
 
+    @posix_only
     def test_a_loose_directory_is_tightened_rather_than_trusted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -93,17 +106,24 @@ class TestWhereTheSocketGoes:
 
         assert not resolved.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)
 
+    @posix_only
     def test_it_falls_back_when_there_is_no_runtime_dir(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """macOS has no XDG_RUNTIME_DIR, and the fallback is shared, so it
-        is checked rather than assumed."""
-        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+        is checked rather than assumed.
 
-        resolved = ipc.runtime_dir()
+        The body is inside a platform check as well as behind ``posix_only``
+        — the marker is what skips it, and the check is what stops a type
+        check run as Windows reading ``os.getuid``, which is not there.
+        """
+        if sys.platform != "win32":
+            monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
 
-        assert resolved.name == f"cylist-{os.getuid()}"
-        assert resolved.stat().st_uid == os.getuid()
+            resolved = ipc.runtime_dir()
+
+            assert resolved.name == f"cylist-{os.getuid()}"
+            assert resolved.stat().st_uid == os.getuid()
 
 
 class TestWhatTheHookPathCosts:

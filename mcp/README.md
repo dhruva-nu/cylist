@@ -10,10 +10,50 @@ the token it is configured with.
 uv sync
 ```
 
-## Mint a token first
+## Setting it up
 
-The server needs `CYLIST_TOKEN`. Issue one from a credential that already holds
-the `admin` scope, granting only what the agent actually needs:
+One command, from the CLI, which does this and the rest of it — token, Claude
+Code's lifecycle hooks, and registering this server:
+
+```
+cylist setup
+```
+
+You do not have to install this package first. `cylist setup` uses a
+`cylist-mcp` already on your PATH, then an `mcp` directory beside the CLI, and
+failing both installs this package from the repository — so a machine that has
+only the CLI still ends up with a registered server. `scripts/install.sh` and
+`scripts/install.ps1` install both up front, from one ref.
+
+See [`cli/README.md`](../cli/README.md). Nothing below is needed if you have
+run that; it is here for an MCP client that is not Claude Code, or a
+configuration you would rather write yourself.
+
+To install it by hand, into your PATH, without a clone:
+
+```
+uv tool install "git+https://github.com/dhruva-nu/cylist.git#subdirectory=mcp"
+```
+
+## Where the token comes from
+
+The server needs a token, and looks in two places:
+
+1. `CYLIST_TOKEN` and `CYLIST_URL` in the environment — the `env` block of an
+   MCP client's configuration.
+2. `~/.config/cylist/config.toml`, mode 0600, written by `cylist setup`.
+
+**The file is the better one, and not only for convenience.** A token in an
+`env` block means a live credential written into a `.mcp.json` that lives in a
+repository, which is how they get committed by accident. Reading the CLI's
+file means the registration holds no secret at all, and that moving the server
+is one edit rather than one per client pointing at it.
+
+The environment wins where it is set, so a client that wants to be explicit —
+a different server, a narrower token — says so and is obeyed.
+
+To mint a token by hand, from a credential that already holds the `admin`
+scope, granting only what the agent actually needs:
 
 ```
 curl -sX POST http://localhost:8000/api/v1/tokens \
@@ -46,19 +86,39 @@ reading a 403 cannot tell a missing scope from a mistake it made, so it
 reasonably tries again with different arguments and burns turns discovering
 that nothing will work.
 
+## One server, several addresses
+
+`GET /setup` on the backend returns every address a deployment answers on, and
+`cylist setup` stores all of them in that config file. This server reads the
+list and tries them in order, moving on only when it cannot *connect* — so a
+laptop that suspends on a tailnet and wakes somewhere else reconnects instead
+of answering every tool call with "cannot reach the Cylist API".
+
+Only a failure to connect is retried elsewhere. A timeout after the connection
+was made might mean a write that was applied and whose response was lost.
+
+The line it prints to stderr at startup names the address that answered, which
+is the answer to "why is it slow" on a machine that thinks it is still at home.
+
 ## Point Claude Code at it
+
+`cylist setup` does this. By hand:
 
 ```
 claude mcp add cylist \
-  --scope project \
-  --env CYLIST_URL=http://localhost:8000 \
-  --env CYLIST_TOKEN=cyl_the_token_you_just_minted \
+  --scope user \
   -- uv --directory /absolute/path/to/cylist/mcp run cylist-mcp
 ```
 
 Flags come before the server name; `--` separates them from the command to
 run. `--scope` is one of `local` (default — this project, just you), `project`
-(shared through `.mcp.json`) or `user` (all your projects).
+(shared through `.mcp.json`) or `user` (all your projects) — `user` is the
+right one for a board, which is a property of the machine rather than of one
+checkout.
+
+No `--env` block: the token comes from `~/.config/cylist/config.toml`. Add
+`--env CYLIST_URL=…` and `--env CYLIST_TOKEN=…` only for a server or a token
+that is *not* the one this machine is set up with.
 
 Or write `.mcp.json` at the repository root by hand:
 
@@ -68,11 +128,7 @@ Or write `.mcp.json` at the repository root by hand:
     "cylist": {
       "type": "stdio",
       "command": "uv",
-      "args": ["--directory", "/absolute/path/to/cylist/mcp", "run", "cylist-mcp"],
-      "env": {
-        "CYLIST_URL": "http://localhost:8000",
-        "CYLIST_TOKEN": "cyl_the_token_you_just_minted"
-      }
+      "args": ["--directory", "/absolute/path/to/cylist/mcp", "run", "cylist-mcp"]
     }
   }
 }
@@ -84,9 +140,10 @@ and until they do, `claude mcp list` shows it as pending. They can also manage
 it from `/mcp` in a session, and reset a refusal with
 `claude mcp reset-project-choices`.
 
-Since that file holds a live token, treat it as a secret — keep it out of the
-repository, or point `CYLIST_TOKEN` at something your secret manager
-substitutes.
+That file holds no credential now, which is the point of reading the CLI's.
+If you do put a token in an `env` block, treat the file as a secret — keep it
+out of the repository, or point `CYLIST_TOKEN` at something your secret
+manager substitutes.
 
 Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 
@@ -147,7 +204,7 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
 - **Progress is reported by the harness, not by the agent.** A Claude Code
   session bound to a card with `cylist work ATL-41` or `/work ATL-41` shows on
   the board as working, waiting on a human, or done, driven by the harness's
-  lifecycle hooks. There is no tool for it and nothing to announce;
+  lifecycle hooks — installed by `cylist setup` alongside this server. There is no tool for it and nothing to announce;
   `agent_session` on a card is what it looks like from the outside, and
   `get_task`'s `agent_sessions` says which sessions have been on it.
 - **Goals gate their own closing.** `set_goal_status(..., "achieved")` is

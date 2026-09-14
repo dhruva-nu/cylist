@@ -23,7 +23,7 @@ import pytest
 from cylist_cli.commands import hook
 from cylist_cli.main import main
 from tests import fake_api
-from tests.conftest import Runner
+from tests.conftest import Runner, posix_modes_only
 
 SESSION = "0192f3c4-0aaa-7000-8000-000000000001"
 OTHER_SESSION = "0192f3c4-0aaa-7000-8000-000000000002"
@@ -454,6 +454,7 @@ def test_debugging_goes_to_stderr_only(fire: Fire, monkeypatch: pytest.MonkeyPat
     assert "cylist hook:" in err
 
 
+@posix_modes_only
 def test_state_files_are_owner_only(fire: Fire) -> None:
     fire(_event("UserPromptSubmit", prompt="/work ATL-1"))
     path = hook._state_path(SESSION)
