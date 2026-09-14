@@ -76,6 +76,9 @@ if ! command -v uv >/dev/null 2>&1; then
     fi
     # uv writes this to put itself on PATH; sourcing it saves reopening a shell.
     if [ -f "$HOME/.local/bin/env" ]; then
+        # Written by uv's installer a moment ago, so there is nothing on disk
+        # for shellcheck to follow when it reads this.
+        # shellcheck disable=SC1091
         . "$HOME/.local/bin/env"
     else
         PATH="$HOME/.local/bin:$PATH"
