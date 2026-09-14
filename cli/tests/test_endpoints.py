@@ -75,9 +75,18 @@ def test_a_corrupt_memory_is_no_memory(tmp_path: Path) -> None:
     assert endpoints.remembered() is None
 
 
-def test_remembering_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A read-only home directory is not a reason for a command to fail."""
-    monkeypatch.setenv("XDG_STATE_HOME", "/proc/nowhere-writable")
+def test_remembering_never_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A state directory that cannot be written is not a reason for a command
+    to fail — it costs the ordering and nothing else.
+
+    The unwritable place is a directory whose parent is a *file*, which every
+    platform refuses with an OSError. A hard-coded ``/proc/…`` said Linux, and
+    on Windows it was an ordinary relative path that the test cheerfully
+    created — so this passed there by not testing anything.
+    """
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+    monkeypatch.setenv("XDG_STATE_HOME", str(blocker / "state"))
 
     endpoints.remember(TAILNET)  # no exception
 

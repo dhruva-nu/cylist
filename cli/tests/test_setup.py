@@ -19,7 +19,7 @@ from cylist_cli import system
 from cylist_cli.commands import hook, setup
 from cylist_cli.main import main
 from tests import fake_api
-from tests.conftest import Runner
+from tests.conftest import Runner, posix_modes_only
 
 
 @pytest.fixture(autouse=True)
@@ -118,10 +118,22 @@ def test_every_address_the_server_answers_on_is_stored(
     assert _stored()["urls"] == ["http://cylist.test", fake_api.TAILNET_URL]
 
 
+@posix_modes_only
 def test_the_config_file_is_owner_only(run: Runner, fresh: None, password: None) -> None:
     run("setup", "--no-mcp")
 
     assert configuration.describe_mode(configuration.config_path()) == "0600"
+
+
+def test_the_config_file_is_described_as_private_on_every_platform(
+    run: Runner, fresh: None, password: None
+) -> None:
+    """What Windows gives instead of a mode is the ACL on the user's profile,
+    and `describe_protection` is what says so rather than claiming a 0600 that
+    `os.chmod` there never set."""
+    result = run("setup", "--no-mcp")
+
+    assert configuration.describe_protection(configuration.config_path()) in result.out
 
 
 def test_a_working_token_is_kept_and_no_password_is_asked_for(
@@ -184,7 +196,9 @@ def test_the_mcp_server_is_registered_without_a_token_in_it(
     assert add[4:6] == ["--scope", "user"]
     assert add[6] == "--"
     # The command it will run, and nothing else: no -e, no --env, no token.
-    assert add[7] == "/usr/bin/uv"
+    # Resolved rather than spelled out: `Path("/usr/bin/uv").resolve()` is
+    # `D:\\usr\\bin\\uv` on Windows, and which uv it is is not the point here.
+    assert add[7] == str(Path("/usr/bin/uv").resolve())
     assert not any(part.startswith("-e") or part.startswith("--env") for part in add)
     assert fake_api.MINTED_TOKEN not in " ".join(add)
 
@@ -412,6 +426,11 @@ def test_state_lives_in_one_place_whatever_the_platform(as_windows: None) -> Non
 # PATH. This used to end with "could not find the MCP server".
 
 
+_MCP_BINARY = "cylist-mcp.exe" if system.windows() else "cylist-mcp"
+"""What `uv tool install` leaves behind here — and what `_installed_binary`
+goes looking for, which is the thing these tests are about."""
+
+
 @pytest.fixture
 def no_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     """No ``mcp`` directory to be found — an installed CLI, not a clone."""
@@ -431,7 +450,7 @@ def uv_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]
     def fake_runner(argv: Sequence[str], timeout: int = 0) -> tuple[int, str]:
         calls.append(list(argv))
         if argv[1:3] == ["tool", "install"]:
-            (binaries / "cylist-mcp").write_text("#!/bin/sh\n")
+            (binaries / _MCP_BINARY).write_text("#!/bin/sh\n")
             return 0, ""
         if argv[1:4] == ["tool", "dir", "--bin"]:
             return 0, f"{binaries}\n"
@@ -450,7 +469,7 @@ def test_a_machine_with_no_checkout_gets_the_server_installed(
     reported = json.loads(result.out)["mcp"]
     assert reported["installed"] is True
     assert reported["registered"] is True
-    assert reported["command"][0].endswith("cylist-mcp")
+    assert reported["command"][0].endswith(_MCP_BINARY)
 
     installs = [call for call in uv_calls if call[1:3] == ["tool", "install"]]
     assert installs == [["/usr/bin/uv", "tool", "install", "--force", setup.MCP_SOURCE]]
