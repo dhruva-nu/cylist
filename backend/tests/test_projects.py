@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from app.config import Settings
+from app.db import Database
+from app.models.person import Person
+from tests.conftest import INVITEE_PASSWORD, client_for, open_account
+
+ADITI = {
+    "name": "Aditi K",
+    "kind": "team",
+    "role": "Backend engineer",
+    "responsibilities": "Payments and webhooks.",
+}
+
 ATLAS = {
     "key": "ATL",
     "name": "Atlas Billing Migration",
@@ -19,7 +31,7 @@ class TestCreating:
         assert response.status_code == 201
         body = response.json()
         assert body["key"] == "ATL"
-        assert body["member_count"] == 0
+        assert body["member_count"] == 1  # whoever created it — see below
         assert body["archived_at"] is None
 
     async def test_uppercases_the_key(self, signed_in: AsyncClient) -> None:
@@ -154,39 +166,56 @@ class TestAuditTrail:
         assert entries[0]["payload"] == {"key": "ATL", "name": ATLAS["name"]}
 
 
-OWNER = {
-    "name": "Dhruva N",
-    "kind": "team",
-    "role": "Owner",
-    "responsibilities": "Everything, until somebody else is here to do it.",
-    "is_me": True,
-}
+class TestTheCreatorJoinsTheirProject:
+    """Whoever starts a project is on it from the moment it exists.
 
+    It used to be whoever held ``person.is_me`` — one person, the same one on
+    every project on the deployment. Now it is the caller, which is what makes
+    two people able to start projects on one board and each end up on their
+    own.
+    """
 
-class TestTheOwnerJoinsEveryProject:
-    """Whoever is marked as you is on a project from the moment it exists."""
-
-    async def test_a_new_project_has_the_owner_on_it(self, signed_in: AsyncClient) -> None:
-        owner = (await signed_in.post("/people", json=OWNER)).json()
-
+    async def test_a_new_project_has_its_creator_on_it(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
         project = (await signed_in.post("/projects", json=ATLAS)).json()
 
         assert project["member_count"] == 1
         members = (await signed_in.get(f"/projects/{project['key']}/members")).json()["members"]
-        assert [person["id"] for person in members] == [owner["id"]]
+        assert [person["id"] for person in members] == [str(owner.id)]
 
-    async def test_a_project_started_before_there_was_an_owner_is_left_alone(
-        self, signed_in: AsyncClient
+    async def test_two_people_each_join_their_own(
+        self, signed_in: AsyncClient, owner: Person, settings: Settings, database: Database
     ) -> None:
-        project = (await signed_in.post("/projects", json=ATLAS)).json()
-        await signed_in.post("/people", json=OWNER)
+        aditi, token = await open_account(signed_in, ADITI, "aditi@cylist.dev")
+        mine = (await signed_in.post("/projects", json=ATLAS)).json()
 
-        assert (await signed_in.get(f"/projects/{project['key']}")).json()["member_count"] == 0
+        async with client_for(settings, database) as other:
+            await other.post(
+                "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
+            )
+            theirs = (await other.post("/projects", json=HERMES)).json()
 
-    async def test_the_owner_can_be_taken_off_a_project_afterwards(
-        self, signed_in: AsyncClient
+        on_mine = (await signed_in.get(f"/projects/{mine['key']}/members")).json()["members"]
+        on_theirs = (await signed_in.get(f"/projects/{theirs['key']}/members")).json()["members"]
+
+        assert [person["id"] for person in on_mine] == [str(owner.id)]
+        assert [person["id"] for person in on_theirs] == [aditi["id"]]
+
+    async def test_a_bootstrap_session_starts_a_project_with_nobody_on_it(
+        self, bootstrapped: AsyncClient
     ) -> None:
-        await signed_in.post("/people", json=OWNER)
+        """The one caller who is not a person, and so cannot join anything.
+
+        Creating the project still works — refusing would leave a fresh
+        deployment unable to do the first thing anyone does on it — and
+        whoever opens the first account adds themselves.
+        """
+        project = (await bootstrapped.post("/projects", json=ATLAS)).json()
+
+        assert project["member_count"] == 0
+
+    async def test_the_creator_can_be_taken_off_afterwards(self, signed_in: AsyncClient) -> None:
         project = (await signed_in.post("/projects", json=ATLAS)).json()
 
         await signed_in.put(f"/projects/{project['key']}/members", json={"person_ids": []})

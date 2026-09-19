@@ -10,7 +10,7 @@ agents can use it as readily as you can.
 | **Goals** | The epics a board's cards are written under. Each has a colour of its own, which every card on it wears down its left-hand edge, and a page listing what is left on it. Cards are grouped into lanes by goal on the board when you want to read it that way. |
 | **Files** | Folders of uploaded files, with SharePoint and Google Drive links sitting alongside them. |
 | **Vault** | Logins, keys and links in trees you shape yourself. Secrets are encrypted at rest and revealed only on request. |
-| **People** | Team members and clients, what each is responsible for, and who to tag when work stalls. One of them is **you**, and joins every project you start. |
+| **People** | Team members and clients, what each is responsible for, and who to tag when work stalls. A team member can be given an account by invitation, and then signs in as themselves: whoever starts a project joins it, cards are assigned to a person, and the audit trail names which of you did what. Clients are named on the work, never signed in to it. |
 
 React · FastAPI · PostgreSQL. See [PLAN.md](PLAN.md) for the full design and
 build order, and the [approved mock](https://claude.ai/code/artifact/27e0344e-ef48-4e2a-a592-5e5c53c1f935)
@@ -36,6 +36,12 @@ make dev            # API on :8000, web app on :5173
 ```
 
 Open <http://localhost:5173> and sign in with the password you just hashed.
+Nobody has an account yet, so that password — the deployment's, belonging to
+nobody — is what gets you in. Open your own account from the card at the top
+of the home screen, and the deployment password stops working. From then on
+everybody signs in with their own email and password, and invites the rest of
+the team from the People tab.
+
 The API's interactive docs are at <http://localhost:8000/api/v1/docs>.
 
 ## Everyday commands
@@ -210,8 +216,9 @@ Both install [uv](https://docs.astral.sh/uv/) if it is missing, install the
 needs `sudo` or an administrator. From a clone, `make agent` is the same thing
 against your working tree.
 
-`cylist setup` finds the server, asks for the owner's password once, mints a
-`read,write` token for this machine, stores it `0600`, installs Claude Code's
+`cylist setup` finds the server, asks for your email and password once, mints a
+`read,write` token for this machine — one that acts as *you*, so the board says
+whose agent moved a card — stores it `0600`, installs Claude Code's
 lifecycle hooks and `/work`, and registers the MCP server — installing it
 first if this machine has no copy. It is safe to run again, and it stores
 **every** address the server says it answers on, so the same setup works on

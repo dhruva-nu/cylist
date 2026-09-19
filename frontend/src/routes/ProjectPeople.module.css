@@ -147,3 +147,29 @@
   color: var(--ink-3);
   font-size: 12.5px;
 }
+
+/* Whether somebody can sign in. Same shape as the "you" tag beside it, in the
+   ok and hold tones rather than the brand one: an account is a settled state
+   and an invitation is a waiting one, which is exactly what those two already
+   mean everywhere else on the board. Quiet on purpose — it is read when you
+   are wondering why somebody has not turned up yet, not before. */
+.account,
+.invited {
+  padding: 2px 8px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.account {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.invited {
+  background: var(--hold-soft);
+  color: var(--hold);
+}

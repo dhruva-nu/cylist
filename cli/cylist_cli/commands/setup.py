@@ -14,12 +14,18 @@ nothing or re-points itself at where things are now.
 Four decisions are worth explaining, because each removes a step rather than
 automating one.
 
-**The password mints the token.** ``POST /tokens`` needs ``admin``, and the
-owner's password already grants everything (``POST /auth/login``). So setup
-asks for the password it can prompt for, uses the session to mint a
+**Your password mints the token.** ``POST /tokens`` needs ``admin``, and a
+person's own session grants everything (``POST /auth/login``). So setup asks
+for the email and password it can prompt for, uses the session to mint a
 ``read,write`` token — which is all an agent should ever hold — and revokes
 the session on the way out. Nobody has to hold an ``admin`` token to give an
 agent a narrow one.
+
+The token it mints acts as *you*, so the agent on this machine moves cards
+under your name rather than the server's. On a deployment that has no accounts
+in it yet the email is skipped and ``CYLIST_PASSWORD_HASH`` is what signs in;
+``GET /setup`` says which of the two this is, so nobody is asked for an
+address that does not exist.
 
 **The MCP server reads the CLI's configuration.** It used to be told
 ``CYLIST_URL`` and ``CYLIST_TOKEN`` through the ``env`` block of a Claude Code
@@ -120,14 +126,21 @@ def register(subparsers: Any) -> None:
         description=(
             "Finds the server, mints a read,write token for this machine, stores it "
             "0600, installs Claude Code's lifecycle hooks and the /work command, and "
-            "registers the Cylist MCP server. Asks for the owner's password once, "
+            "registers the Cylist MCP server. Asks for your email and password once, "
             "unless a working token is already configured. Safe to run again."
         ),
     )
     parser.add_argument(
+        "--email",
+        help="The address to sign in as. Prompted for if omitted.",
+    )
+    parser.add_argument(
         "--password-stdin",
         action="store_true",
-        help="Read the owner's password from stdin instead of prompting, for scripts.",
+        help=(
+            "Read the password from stdin instead of prompting, for scripts. "
+            "Pass --email too, or there is nothing to sign in as."
+        ),
     )
     parser.add_argument(
         "--scope",
@@ -179,6 +192,15 @@ class Server:
 
     environment: str
     agent_scopes: tuple[str, ...]
+
+    has_accounts: bool = True
+    """Whether anybody on this deployment can sign in yet.
+
+    Defaults to true, which is both the usual answer and the safe one: a
+    server too old to have said either way is a single-owner deployment whose
+    login takes a password alone, and that path is tried first anyway when
+    there is no email to send.
+    """
 
     @property
     def others(self) -> tuple[str, ...]:
@@ -240,6 +262,7 @@ def _discover(ctx: Context) -> Server:
             urls=configuration.dedupe((url, *_advertised(described))),
             environment=str(described.get("environment") or "unknown"),
             agent_scopes=_scopes(described),
+            has_accounts=bool(described.get("has_accounts", True)),
         )
 
     raise CylistError(
@@ -311,18 +334,19 @@ def _identify(ctx: Context, server: Server, token: str) -> dict[str, Any] | None
 
 
 def _mint(args: argparse.Namespace, ctx: Context, server: Server) -> Credential:
-    """Exchange the owner's password for a token scoped to what an agent needs.
+    """Exchange your password for a token scoped to what an agent needs.
 
     The session the password buys is dropped again before this returns. It
-    holds every scope — it is the owner at the keyboard — and there is no
-    reason for one to outlive the thirty milliseconds it takes to mint
-    something narrower.
+    holds every scope — it is you at the keyboard — and there is no reason for
+    one to outlive the thirty milliseconds it takes to mint something
+    narrower. The token that outlives it is yours: it names you, so the board
+    says which person's agent did what.
     """
-    password = _password(args, server)
+    credentials = _credentials(args, server)
     name = _token_name()
 
     with ctx.build_client(None, server.url) as client:
-        client.post("/auth/login", {"password": password})
+        client.post("/auth/login", credentials)
         try:
             issued = client.post("/tokens", {"name": name, "scopes": list(server.agent_scopes)})
         finally:
@@ -352,11 +376,44 @@ def _drop_session(client: Any) -> None:
         return
 
 
-def _password(args: argparse.Namespace, server: Server) -> str:
+def _credentials(args: argparse.Namespace, server: Server) -> dict[str, str]:
+    """What to post to ``/auth/login``: an email and a password, or just one.
+
+    The email is left out only where there is nobody to be — a deployment with
+    no accounts in it, signing in with ``CYLIST_PASSWORD_HASH``. Asking for an
+    address there would be asking for one that does not exist yet.
+    """
+    if not server.has_accounts:
+        return {
+            "password": _password(args, prompt=f"Deployment password for {server.url}"),
+        }
+
+    email = _email(args, server)
+    return {"email": email, "password": _password(args, prompt=f"Password for {email}")}
+
+
+def _email(args: argparse.Namespace, server: Server) -> str:
+    if args.email:
+        return str(args.email).strip()
+    if args.password_stdin:
+        # Nothing to prompt with: stdin is the password, and reading a second
+        # line for the address would be a format nobody was told about.
+        raise CylistError(
+            "--password-stdin needs --email as well: this server signs people in by address."
+        )
+
+    output.warn(f"Sign in to {server.url}.")
+    email = input("Email: ").strip()
+    if not email:
+        raise CylistError("No email given; nothing was changed.")
+    return email
+
+
+def _password(args: argparse.Namespace, *, prompt: str) -> str:
     if args.password_stdin:
         password = sys.stdin.readline().rstrip("\n")
     else:
-        output.warn(f"Cylist owner password for {server.url} (input is hidden).")
+        output.warn(f"{prompt} (input is hidden).")
         password = getpass.getpass("Password: ")
 
     if not password:

@@ -85,7 +85,7 @@ async def create_project(
     The key becomes part of every task number on its board (`ATL-41`) and can
     be used in place of the id in any path here, so pick something short.
     """
-    project = await projects.create(session, body)
+    project = await projects.create(session, body, creator_id=principal.person_id)
     await activity.record(
         session,
         principal,

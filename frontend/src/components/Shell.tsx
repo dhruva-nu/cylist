@@ -113,8 +113,9 @@ export function Shell() {
  * Your own mark in the bar.
  *
  * `/me` is fetched once by the authentication gate and read from the cache
- * here, so this costs nothing. Until somebody is marked as you in the
- * directory it is the plain accent — there is nobody to name yet.
+ * here, so this costs nothing. A session with no person behind it — the
+ * bootstrap login, on a deployment whose first account has not been opened —
+ * gets the plain accent, because there is nobody to name yet.
  */
 function You() {
   const identity = useQuery({ queryKey: ['me'], queryFn: api.me })

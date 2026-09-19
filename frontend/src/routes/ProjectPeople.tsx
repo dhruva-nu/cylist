@@ -9,7 +9,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, type Person } from '../api/client'
+import { api, isMe, type Identity, type Person } from '../api/client'
+import { InviteDialog } from '../components/InviteDialog'
 import { Modal, ModalBody } from '../components/Modal'
 import { PersonDialog } from '../components/PersonDialog'
 import { PageHead } from '../components/Shell'
@@ -32,7 +33,13 @@ export function ProjectPeople() {
   const [adding, setAdding] = useState(false)
   const [choosing, setChoosing] = useState(false)
   const [editing, setEditing] = useState<Person | null>(null)
+  const [inviting, setInviting] = useState<Person | null>(null)
   const { message, announce } = useAnnouncer()
+
+  // Who is looking. Already in the cache — the auth gate asked for it before
+  // this screen existed — so reading it here costs nothing and is what makes
+  // "you" mean the reader rather than one flagged row in the directory.
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
 
   const members = useQuery({
     queryKey: ['members', projectKey],
@@ -90,8 +97,22 @@ export function ProjectPeople() {
       {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
-      <Group title="Team" people={team} onEdit={setEditing} onRemove={remove.mutate} />
-      <Group title="Clients" people={clients} onEdit={setEditing} onRemove={remove.mutate} />
+      <Group
+        title="Team"
+        people={team}
+        identity={identity.data}
+        onEdit={setEditing}
+        onInvite={setInviting}
+        onRemove={remove.mutate}
+      />
+      <Group
+        title="Clients"
+        people={clients}
+        identity={identity.data}
+        onEdit={setEditing}
+        onInvite={setInviting}
+        onRemove={remove.mutate}
+      />
 
       {adding ? (
         <PersonDialog
@@ -111,6 +132,15 @@ export function ProjectPeople() {
           onSaved={(name) => announce(`${name} saved.`)}
           onDone={refresh}
           onClose={() => setEditing(null)}
+        />
+      ) : null}
+
+      {inviting ? (
+        <InviteDialog
+          person={inviting}
+          onSaved={(name) => announce(`Invitation ready for ${name}.`)}
+          onDone={refresh}
+          onClose={() => setInviting(null)}
         />
       ) : null}
 
@@ -134,12 +164,16 @@ export function ProjectPeople() {
 function Group({
   title,
   people,
+  identity,
   onEdit,
+  onInvite,
   onRemove,
 }: {
   title: string
   people: Person[]
+  identity: Identity | undefined
   onEdit: (person: Person) => void
+  onInvite: (person: Person) => void
   onRemove: (personId: string) => void
 }) {
   return (
@@ -159,7 +193,8 @@ function Group({
                 <div className={styles.nameRow}>
                   <b>{person.name}</b>
                   <KindTag kind={person.kind} />
-                  {person.is_me ? <span className={styles.you}>you</span> : null}
+                  {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
+                  <AccountTag person={person} />
                 </div>
                 <span className={styles.role}>{person.role}</span>
                 <div className={styles.responsibilities}>{person.responsibilities}</div>
@@ -173,6 +208,15 @@ function Group({
                   <Button variant="ghost" small onClick={() => onEdit(person)}>
                     Edit
                   </Button>
+                  {/* Clients are named on the work, not signed in to it, and
+                      somebody who already has an account has nothing to
+                      accept — so the button is only offered where it would
+                      do something. */}
+                  {person.kind === 'team' && !person.has_account && !person.archived_at ? (
+                    <Button variant="ghost" small onClick={() => onInvite(person)}>
+                      {person.invite_is_pending ? 'Re-invite' : 'Invite'}
+                    </Button>
+                  ) : null}
                   <Button variant="ghost" small danger onClick={() => onRemove(person.id)}>
                     Remove
                   </Button>
@@ -262,4 +306,23 @@ function DirectoryDialog({
       </ModalBody>
     </Modal>
   )
+}
+
+/** Whether this person can sign in, said in a word next to their name. */
+function AccountTag({ person }: { person: Person }) {
+  if (person.has_account) {
+    return (
+      <span className={styles.account} title="Can sign in as themselves.">
+        account
+      </span>
+    )
+  }
+  if (person.invite_is_pending) {
+    return (
+      <span className={styles.invited} title="Invited; has not set a password yet.">
+        invited
+      </span>
+    )
+  }
+  return null
 }

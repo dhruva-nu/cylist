@@ -111,8 +111,19 @@ class PersonSpec:
     responsibilities: str
     email: str
     colour: str
-    is_me: bool = False
-    """Whether this is the directory's "you". Exactly one spec sets it."""
+    is_owner: bool = False
+    """Whether this is the person the sample projects are created by.
+
+    Exactly one spec sets it. It no longer marks them as "you" — with
+    accounts, who you are is whoever signed in — but somebody has to be the
+    creator the seeded projects name, and the tech lead is the obvious one.
+
+    No password is seeded. A freshly seeded deployment has no accounts, which
+    is the state the bootstrap login exists for: sign in with
+    ``CYLIST_PASSWORD_HASH``, then invite this person like any other. That way
+    the sample data exercises the real path in rather than shipping a
+    credential nobody chose.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +271,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
     PersonSpec(
         handle="dn",
         name="Dhruva N",
-        is_me=True,
+        is_owner=True,
         kind=PersonKind.TEAM,
         role="Tech lead",
         responsibilities=(
@@ -989,6 +1000,7 @@ async def populate(
     """
     summary = Summary()
     directory = await _write_directory(session, summary)
+    owner_id = _owner_of(directory)
 
     for spec in SAMPLE:
         project = await projects.create(
@@ -996,6 +1008,7 @@ async def populate(
             ProjectCreate(
                 key=spec.key, name=spec.name, description=spec.description, colour=spec.colour
             ),
+            creator_id=owner_id,
         )
         await projects.set_members(session, project, [directory[h] for h in spec.members])
 
@@ -1031,12 +1044,19 @@ async def _write_directory(session: AsyncSession, summary: Summary) -> dict[str,
                 responsibilities=spec.responsibilities,
                 email=spec.email,
                 colour=spec.colour,
-                is_me=spec.is_me,
             ),
         )
         directory[spec.handle] = person.id
         summary.people += 1
     return directory
+
+
+def _owner_of(directory: dict[str, UUID]) -> UUID | None:
+    """Whoever the sample data is created by, by handle."""
+    return next(
+        (directory[spec.handle] for spec in DIRECTORY if spec.is_owner),
+        None,
+    )
 
 
 async def _shape_board(

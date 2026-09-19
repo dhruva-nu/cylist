@@ -39,6 +39,15 @@ class TokenRead(Schema):
     expires_at: datetime | None
     last_used_at: datetime | None
 
+    person_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Whose authority this token carries — whoever minted it. Null "
+            "only for tokens minted before accounts existed, and for one "
+            "minted from the bootstrap session."
+        ),
+    )
+
 
 class TokenIssued(TokenRead):
     """A freshly minted token, including the only copy of its plaintext."""

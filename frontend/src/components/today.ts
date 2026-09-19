@@ -47,9 +47,10 @@ export interface TodayWork {
  * Today's work off one board.
  *
  * `me` narrows it to your own cards, which is what makes this a to-do list
- * rather than a report on the project. Null — nobody in the directory is
- * marked as you yet — falls back to the whole board: an empty panel that
- * cannot say why it is empty is worse than a wider answer.
+ * rather than a report on the project. Null — a session with no person behind
+ * it, which is the bootstrap login and nothing else — falls back to the whole
+ * board: an empty panel that cannot say why it is empty is worse than a wider
+ * answer.
  *
  * A card is left out when it is in the board's last column, because that is
  * what finished means here, and when it is cancelled, because that is work
