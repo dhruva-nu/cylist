@@ -15,6 +15,8 @@ import {
   NO_GOAL,
   applySuggestion,
   filterTasks,
+  hidesSetAside,
+  isSetAside,
   parseQuery,
   suggestionsFor,
   tokenize,
@@ -165,5 +167,44 @@ describe('its suggestions', () => {
   it('leaves an earlier token alone when one is accepted', () => {
     const chosen = suggestionsFor('goal:sea', [], [ADITI], goals)[0]!
     expect(applySuggestion('blk: goal:sea', chosen)).toBe('blk: goal:"Search revamp" ')
+  })
+})
+
+/**
+ * The hide, which is the other half of the same danger the goal tag has: a
+ * card put away looks exactly like a card that is not there. What is tested
+ * here is mostly when it declines to hide — a filter that empties the board in
+ * answer to a question about the very cards it hides is the failure worth
+ * having a test for.
+ */
+describe('hiding the cards set aside', () => {
+  const parsed = (query: string) => parseQuery(tokenize(query))
+
+  it('counts a card on hold and a cancelled one, and nothing else', () => {
+    expect(isSetAside({ ...SEARCH, status: 'hold' })).toBe(true)
+    expect(isSetAside({ ...SEARCH, status: 'cancelled' })).toBe(true)
+    expect(isSetAside({ ...SEARCH, status: 'active' })).toBe(false)
+    expect(isSetAside({ ...SEARCH, status: 'blocked' })).toBe(false)
+  })
+
+  it('is in force when it is on and nothing else asks for those cards', () => {
+    expect(hidesSetAside(true, 'all', parsed(''))).toBe(true)
+    expect(hidesSetAside(true, 'all', parsed('blk: totals'))).toBe(true)
+    expect(hidesSetAside(true, 'active', parsed(''))).toBe(true)
+  })
+
+  it('does nothing while it is off', () => {
+    expect(hidesSetAside(false, 'all', parsed(''))).toBe(false)
+    expect(hidesSetAside(false, 'hold', parsed(''))).toBe(false)
+  })
+
+  it('stands down when the status filter asks for exactly what it hides', () => {
+    expect(hidesSetAside(true, 'hold', parsed(''))).toBe(false)
+    expect(hidesSetAside(true, 'cancelled', parsed(''))).toBe(false)
+  })
+
+  it('stands down for hld: in the search box', () => {
+    expect(hidesSetAside(true, 'all', parsed('hld:'))).toBe(false)
+    expect(hidesSetAside(true, 'all', parsed('hld: totals'))).toBe(false)
   })
 })

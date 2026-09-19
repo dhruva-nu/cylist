@@ -1261,12 +1261,19 @@
 }
 
 .filterDrawerOpen {
-  /* Comfortably past two selects at their widest — a goal's name can run
-     long, and a drawer that clips one mid-word is worse than one with a
-     little empty margin past it. */
-  max-width: 480px;
+  /* Comfortably past two selects and the hide at their widest — a goal's name
+     can run long, and a drawer that clips one mid-word is worse than one with
+     a little empty margin past it. */
+  max-width: 760px;
   opacity: 1;
   transform: translateX(0);
+}
+
+/* Nothing in the drawer folds onto a second line: the drawer is one row high
+   and animates by width, so a control that wrapped would be drawn outside the
+   height the row has. */
+.filterDrawer button {
+  white-space: nowrap;
 }
 
 .filterDrawer select {

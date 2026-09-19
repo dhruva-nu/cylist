@@ -75,6 +75,8 @@ import {
   activeToken,
   applySuggestion,
   filterTasks,
+  hidesSetAside,
+  isSetAside,
   parseQuery,
   suggestionsFor,
   tokenize,
@@ -228,36 +230,37 @@ function useFolded(storageKey: string) {
 }
 
 /**
- * Whether the board is split into one lane per goal, remembered per project.
+ * One way of looking at a board, on or off, remembered per project — whether
+ * it is split into lanes, whether the cards set aside are hidden.
  *
  * Kept the way the folded columns are, and for the same reason: how you look
  * at one board says nothing about how you want to look at another, and a
  * preference nobody can save is a smaller problem than a board that will not
- * render — see `readFolded`.
+ * render — see `readFolded`. The key carries the project, so walking to
+ * another board reads that board's answer rather than carrying this one's.
  */
-function useLaneMode(projectKey: string) {
-  const key = `cylist.board.lanes.${projectKey}`
+function useBoardToggle(storageKey: string): [boolean, (on: boolean) => void] {
   const read = useCallback(() => {
     try {
-      return window.localStorage.getItem(`cylist.board.lanes.${projectKey}`) === 'true'
+      return window.localStorage.getItem(storageKey) === 'true'
     } catch {
       return false
     }
-  }, [projectKey])
+  }, [storageKey])
 
-  const [grouped, setGrouped] = useState<boolean>(read)
+  const [on, setOn] = useState<boolean>(read)
 
-  useEffect(() => setGrouped(read()), [projectKey, read])
+  useEffect(() => setOn(read()), [read])
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(key, String(grouped))
+      window.localStorage.setItem(storageKey, String(on))
     } catch {
-      // The grouping still holds for this visit; it just is not remembered.
+      // It still holds for this visit; it just is not remembered.
     }
-  }, [key, grouped])
+  }, [storageKey, on])
 
-  return { grouped, setGrouped }
+  return [on, setOn]
 }
 
 /**
@@ -368,7 +371,17 @@ export function ProjectBoard() {
     setFolded: setFoldedLanes,
     toggle: toggleLane,
   } = useFolded(`cylist.board.lanes.folded.${projectKey}`)
-  const { grouped, setGrouped } = useLaneMode(projectKey)
+  const [grouped, setGrouped] = useBoardToggle(`cylist.board.lanes.${projectKey}`)
+  /**
+   * Whether the cards on hold and the cancelled ones are hidden.
+   *
+   * Remembered per project rather than reset each visit, because it is a
+   * standing answer to a standing question: a board carrying a year of work
+   * that stopped is one you hide those on once and want to stay hidden. It is
+   * only ever a way of reading the board — nothing about the cards changes,
+   * and the button says how many it is holding back.
+   */
+  const [hideSetAside, setHideSetAside] = useBoardToggle(`cylist.board.setAside.${projectKey}`)
   const { message, announce } = useAnnouncer()
 
   const board = useQuery({
@@ -560,7 +573,8 @@ export function ProjectBoard() {
   // Client-side, over what's already fetched: the board holds every task in
   // memory regardless, and a search endpoint would be a second way to ask a
   // question this data already answers.
-  const visibleTasks = filterTasks(tasks.data, parseQuery(tokenize(search)), columns, memberList)
+  const parsed = parseQuery(tokenize(search))
+  const narrowed = filterTasks(tasks.data, parsed, columns, memberList)
     // The quick filters, ANDed on top of the search box the same way its own
     // tags are ANDed together — see `filterTasks`. Kept out of that function
     // rather than folded into `ParsedSearch`: these two already have their own
@@ -572,6 +586,18 @@ export function ProjectBoard() {
       return quickGoal === 'none' ? task.goal_id === null : task.goal_id === quickGoal
     })
     .filter((task) => quickStatus === 'all' || task.status === quickStatus)
+  /**
+   * The hide, applied last — and only once everything else has had its say.
+   *
+   * Last because it is the one filter that answers to the others: asking the
+   * board for the cards on hold stands it down rather than emptying the board,
+   * which is `hidesSetAside`'s whole job. Counted off the narrowed set rather
+   * than off every card there is, so the number on the button is how many this
+   * board, as it is currently being read, is holding back.
+   */
+  const hiding = hidesSetAside(hideSetAside, quickStatus, parsed)
+  const setAsideCount = narrowed.filter(isSetAside).length
+  const visibleTasks = hiding ? narrowed.filter((task) => !isSetAside(task)) : narrowed
   const byColumn = new Map(columns.map((column) => [column.id, [] as Task[]]))
   // The server sends top-level cards only, so nothing here is column-less; the
   // check is what makes that a statement rather than an assumption.
@@ -840,6 +866,10 @@ export function ProjectBoard() {
             onGoal={setQuickGoal}
             status={quickStatus}
             onStatus={setQuickStatus}
+            hideSetAside={hideSetAside}
+            onHideSetAside={setHideSetAside}
+            setAsideCount={setAsideCount}
+            hiding={hiding}
           />
         </div>
       </div>
@@ -1230,14 +1260,20 @@ const SUGGESTION_KINDS: Record<Suggestion['kind'], string> = {
 }
 
 /**
- * Two dropdowns, narrowing the board by goal and by status — tucked behind a
- * toggle rather than sitting on the toolbar all the time.
+ * Two dropdowns and a hide, narrowing the board by goal and by status — tucked
+ * behind a toggle rather than sitting on the toolbar all the time.
  *
  * A pair of selects rather than a row of chips: a project's goal list is
  * open-ended, and a chip for each would be the one control on the board that
- * grows with the data instead of the columns. Both ANDed onto whatever the
- * search box is already narrowing to — see the `.filter` calls around
+ * grows with the data instead of the columns. All of it ANDed onto whatever
+ * the search box is already narrowing to — see the `.filter` calls around
  * `visibleTasks`.
+ *
+ * The hide is a button rather than a third select because it has one question
+ * and two answers, and because it is the one of the three anybody sets and
+ * leaves: the status select asks "show me only these", the hide asks "stop
+ * showing me those" — which is why it says how many it is holding back, and
+ * why it says so even while it is standing down.
  *
  * Collapsed by default and opened from the button at its right, which is also
  * where it closes back to: a board with two more selects parked on the
@@ -1251,15 +1287,27 @@ function QuickFilters({
   onGoal,
   status,
   onStatus,
+  hideSetAside,
+  onHideSetAside,
+  setAsideCount,
+  hiding,
 }: {
   goals: Goal[]
   goal: 'all' | 'none' | (string & {})
   onGoal: (goal: 'all' | 'none' | (string & {})) => void
   status: 'all' | Task['status']
   onStatus: (status: 'all' | Task['status']) => void
+  /** Whether the reader has asked for the cards on hold and the cancelled ones
+   * to be put away. */
+  hideSetAside: boolean
+  onHideSetAside: (hide: boolean) => void
+  /** How many such cards the board is holding, before the hide is applied. */
+  setAsideCount: number
+  /** Whether the hide is actually in force — see `hidesSetAside`. */
+  hiding: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const active = goal !== 'all' || status !== 'all'
+  const active = goal !== 'all' || status !== 'all' || hiding
 
   return (
     <div className={styles.quickFilters}>
@@ -1298,6 +1346,33 @@ function QuickFilters({
             </option>
           ))}
         </select>
+        {/* Pressed, but not necessarily doing anything: `hiding` is what the
+            board actually did, and the two part company when the status
+            select is asking for the very cards this puts away. The button
+            stays pressed and says so in its own words rather than silently
+            un-pressing itself — the setting is still on, it is just being
+            overruled by the more specific question next to it. */}
+        <Button
+          small
+          aria-pressed={hideSetAside}
+          className={hiding ? styles.groupedOn : undefined}
+          tabIndex={open ? undefined : -1}
+          onClick={() => onHideSetAside(!hideSetAside)}
+          title={
+            hideSetAside
+              ? 'Show the cards on hold and the cancelled ones again'
+              : 'Hide the cards on hold and the cancelled ones'
+          }
+        >
+          ⊘ On hold &amp; cancelled
+          <span className={styles.hint}>
+            {hiding
+              ? `${setAsideCount} hidden`
+              : hideSetAside
+                ? 'overruled'
+                : setAsideCount || 'none'}
+          </span>
+        </Button>
       </div>
       <Button
         small
