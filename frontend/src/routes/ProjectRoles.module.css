@@ -1,0 +1,219 @@
+.heading {
+  margin: 26px 0 10px;
+  font-size: 18px;
+}
+
+.lead,
+.note {
+  max-width: 62ch;
+  margin-bottom: 14px;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+/* Said in the brand tone rather than as an error: a reader who is not an
+   admin has not done anything wrong, they are just looking. */
+.note {
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-card);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+/* --- Who is what here ---------------------------------------------------- */
+
+.people_list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.nameRow b {
+  font-family: var(--font-ui);
+  font-size: 15px;
+}
+
+.title {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.you {
+  padding: 2px 8px;
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--radius-control);
+  color: var(--brand-ink);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.picker select {
+  padding: 5px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+/* "No role" is a state, not a role, so it is not drawn as a badge — a grey
+   pill beside the real ones would read as one more thing to be. */
+.unsaid {
+  color: var(--ink-3);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- What each role can do ----------------------------------------------- */
+
+/* A card per role with its permissions wrapped inside it, rather than one
+   wide table of roles by permissions. The table was the obvious drawing and
+   it scrolls sideways on anything but a desktop, which puts the tick boxes
+   and the name of the role they belong to on different screens. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.role {
+  padding: 16px 18px 12px;
+}
+
+.roleHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.roleHead b {
+  font-family: var(--font-ui);
+  font-size: 16px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.count {
+  padding: 2px 9px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.people {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.why {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.permissions {
+  display: flex;
+  flex-direction: column;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tick + .tick {
+  border-top: 1px solid var(--line);
+}
+
+.tick label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 2px;
+  cursor: pointer;
+}
+
+.tick input[disabled] + span,
+.tick label:has(input[disabled]) {
+  cursor: default;
+}
+
+.tick input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--go);
+  flex: none;
+}
+
+.tick span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tick b {
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.summary {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.clash {
+  margin-top: -6px;
+  color: var(--blocked);
+  font-size: 13px;
+}

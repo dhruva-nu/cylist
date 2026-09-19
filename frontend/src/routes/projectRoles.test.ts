@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { Identity, Member, RoleSummary } from '../api/client'
-import { isProjectAdmin, myMembership, nameIsTaken, whyUndeletable } from './projectRoles'
+import type { RoleSummary } from '../api/client'
+import { nameIsTaken, whyUndeletable } from './projectRoles'
 
 const ADMIN: RoleSummary = {
   id: 'role-admin',
@@ -19,76 +19,6 @@ const REVIEWER: RoleSummary = {
   is_admin: false,
   member_count: 0,
 }
-
-function member(id: string, role: RoleSummary | null): Member {
-  return {
-    id,
-    name: id,
-    kind: 'team',
-    title: 'Backend engineer',
-    responsibilities: '',
-    email: null,
-    colour: '#1D7D46',
-    archived_at: null,
-    created_at: '2026-01-01T00:00:00Z',
-    has_account: true,
-    invite_is_pending: false,
-    role,
-  }
-}
-
-function signedInAs(id: string | null): Identity {
-  return {
-    token_id: 'token',
-    label: 'Web session',
-    channel: 'web',
-    scopes: ['read', 'write', 'admin'],
-    person: id === null ? null : member(id, null),
-  }
-}
-
-describe('myMembership', () => {
-  it('finds the reader among the members', () => {
-    const members = [member('aditi', null), member('dhruva', ADMIN)]
-
-    expect(myMembership(members, signedInAs('dhruva'))?.id).toBe('dhruva')
-  })
-
-  it('is undefined when the reader is not on this project', () => {
-    expect(myMembership([member('aditi', null)], signedInAs('dhruva'))).toBeUndefined()
-  })
-
-  it('is undefined for a credential that belongs to nobody', () => {
-    expect(myMembership([member('aditi', ADMIN)], signedInAs(null))).toBeUndefined()
-  })
-})
-
-describe('isProjectAdmin', () => {
-  it('is true for somebody wearing the admin role', () => {
-    expect(isProjectAdmin([member('dhruva', ADMIN)], signedInAs('dhruva'))).toBe(true)
-  })
-
-  it('is false for a member wearing another role', () => {
-    expect(isProjectAdmin([member('dhruva', REVIEWER)], signedInAs('dhruva'))).toBe(false)
-  })
-
-  it('is false for a member with no role at all', () => {
-    expect(isProjectAdmin([member('dhruva', null)], signedInAs('dhruva'))).toBe(false)
-  })
-
-  it('does not read the admin scope', () => {
-    /**
-     * The scope says what the credential may do anywhere; this asks who the
-     * person is on one board. The identity above carries `admin` throughout,
-     * so a version that consulted it would pass every test in this block.
-     */
-    expect(isProjectAdmin([member('aditi', ADMIN)], signedInAs('dhruva'))).toBe(false)
-  })
-
-  it('is false while the member list is still loading', () => {
-    expect(isProjectAdmin([], signedInAs('dhruva'))).toBe(false)
-  })
-})
 
 describe('nameIsTaken', () => {
   it('catches an exact repeat', () => {

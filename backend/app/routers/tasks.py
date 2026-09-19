@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
@@ -20,6 +21,7 @@ from app.models.board import BoardColumn
 from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.agent_sessions import AgentPresence
 from app.schemas.common import Acknowledged
@@ -58,6 +60,25 @@ async def resolved_task(
 ) -> Task:
     """Turn the path segment into a task, 404-ing if nothing matches."""
     return await tasks.resolve(session, task_ref)
+
+
+async def resolved_checklist_item(
+    item_id: UUID,
+    session: AsyncSession = SessionDependency,
+) -> TaskChecklistItem:
+    """Turn the path segment into a tick box, 404-ing if nothing matches."""
+    return await tasks.get_checklist_item(session, item_id)
+
+
+async def _project_of_checklist_item(session: AsyncSession, item: TaskChecklistItem) -> UUID:
+    """Which project a tick box is on, by way of the card it is on.
+
+    A checklist item is the one thing in this router addressed by an id that
+    names neither a project nor a card, so the hop the guard needs is written
+    out rather than read off the row.
+    """
+    task = await tasks.resolve(session, str(item.task_id))
+    return task.project_id
 
 
 def _comment(entry: TaskComment) -> CommentRead:
@@ -228,6 +249,26 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     )
 
 
+WRITE_CARDS = guards.on_project(Permission.TASKS)
+"""Adding a card, on the one path that names the project rather than a card."""
+
+WRITE_THIS_CARD = guards.for_entity(Permission.TASKS, resolved_task)
+"""Everything done to a card that already exists: editing it, moving it,
+finishing it, changing its status, splitting it, ticking its boxes."""
+
+COMMENT_ON_THIS_CARD = guards.for_entity(Permission.COMMENTS, resolved_task)
+"""Saying something on a card, which is deliberately not the same permission.
+A client who should never move a card is often exactly the person whose
+comment you want. The reason a status change carries is not this — that is
+part of making the change, and goes with it."""
+
+WRITE_THIS_CHECKLIST = guards.for_entity(
+    Permission.TASKS, resolved_checklist_item, locate=_project_of_checklist_item
+)
+"""A tick box is addressed by its own id and knows only its card, so the hop
+to the project is spelled out."""
+
+
 @router.get(
     "/projects/{project_ref}/tasks", response_model=list[TaskRead], summary="List a board's tasks"
 )
@@ -259,7 +300,7 @@ async def list_tasks(
 async def create_task(
     body: TaskCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_CARDS),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Create a task at the bottom of the board's **first** column.
@@ -357,7 +398,7 @@ async def task_history(
 async def update_task(
     body: TaskUpdate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Change any subset of a task's details. Omitted fields are left alone.
@@ -381,7 +422,7 @@ async def update_task(
 @router.delete("/tasks/{task_ref}", response_model=Acknowledged, summary="Delete a task")
 async def delete_task(
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a task and its comments.
@@ -419,7 +460,7 @@ async def delete_task(
 async def move_task(
     body: TaskMove,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Put a card in a column, at a position counted from the top.
@@ -462,7 +503,7 @@ async def move_task(
 async def set_sub_status(
     body: SubStatusMove,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Move a task to one of its sub-status stages, forwards or back.
@@ -499,7 +540,7 @@ async def set_sub_status(
 async def finish_task(
     body: TaskFinish,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Tick a sub-task off, or put it back.
@@ -548,7 +589,7 @@ async def finish_task(
 async def change_status(
     body: TaskStatusChange,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Move a task between `active`, `hold` and `blocked`.
@@ -617,7 +658,7 @@ async def list_subtasks(
 async def create_subtask(
     body: SubtaskCreate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Add a sub-task with a reference, an owner and a timeline of its own.
@@ -660,7 +701,7 @@ async def create_subtask(
 async def add_checklist_item(
     body: ChecklistItemCreate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> ChecklistItemRead:
     """Add a tick-box sub-task to the bottom of a task's checklist.
@@ -689,8 +730,8 @@ async def add_checklist_item(
 )
 async def update_checklist_item(
     body: ChecklistItemUpdate,
-    item_id: UUID,
-    principal: Principal = Depends(require(Scope.WRITE)),
+    item: TaskChecklistItem = Depends(resolved_checklist_item),
+    principal: Principal = Depends(WRITE_THIS_CHECKLIST),
     session: AsyncSession = SessionDependency,
 ) -> ChecklistItemRead:
     """Change one tick box.
@@ -698,7 +739,6 @@ async def update_checklist_item(
     `state` is `open`, `done` or `cancelled`; the last two both count as
     settled, so either one stops the item holding its card back.
     """
-    item = await tasks.get_checklist_item(session, item_id)
     updated = await tasks.update_checklist_item(session, item, body)
     task = await tasks.resolve(session, str(updated.task_id))
     await activity.record(
@@ -721,12 +761,11 @@ async def update_checklist_item(
     "/checklist/{item_id}", response_model=Acknowledged, summary="Delete a checklist item"
 )
 async def delete_checklist_item(
-    item_id: UUID,
-    principal: Principal = Depends(require(Scope.WRITE)),
+    item: TaskChecklistItem = Depends(resolved_checklist_item),
+    principal: Principal = Depends(WRITE_THIS_CHECKLIST),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Remove a tick box entirely. Cancel it instead to keep the record."""
-    item = await tasks.get_checklist_item(session, item_id)
     task = await tasks.resolve(session, str(item.task_id))
     title = item.title
     await tasks.delete_checklist_item(session, item)
@@ -764,7 +803,7 @@ async def list_comments(
 async def add_comment(
     body: CommentCreate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(COMMENT_ON_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> CommentRead:
     """Add a comment to a task.

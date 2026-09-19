@@ -10,12 +10,14 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
 from app.models.project import Project
 from app.models.task import TaskStatus
+from app.routers import guards
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
@@ -67,6 +69,14 @@ def _read(project: Project) -> ProjectRead:
         created_at=project.created_at,
         member_count=len(project.members),
     )
+
+
+CHANGE_PROJECT = guards.on_project(Permission.PROJECT)
+"""Renaming, rewording and archiving the project itself."""
+
+CHANGE_MEMBERSHIP = guards.on_project(Permission.PEOPLE)
+"""Saying who is on it. A different question from what the project is called,
+and often a different person's job, so it is a permission of its own."""
 
 
 @router.get("", response_model=list[ProjectRead], summary="List projects")
@@ -166,7 +176,7 @@ async def get_summary(
 async def update_project(
     body: ProjectUpdate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(CHANGE_PROJECT),
     session: AsyncSession = SessionDependency,
 ) -> ProjectRead:
     """Change any subset of a project's details. Omitted fields are left alone."""
@@ -186,7 +196,7 @@ async def update_project(
 @router.delete("/{project_ref}", response_model=Acknowledged, summary="Archive a project")
 async def archive_project(
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(CHANGE_PROJECT),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Archive a project, hiding it from the grid.
@@ -251,7 +261,7 @@ async def list_members(
 async def set_members(
     body: MembershipUpdate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(CHANGE_MEMBERSHIP),
     session: AsyncSession = SessionDependency,
 ) -> Membership:
     """Set the project's membership to exactly these people.

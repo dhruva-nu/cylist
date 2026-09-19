@@ -37,6 +37,7 @@ import { projectFilesKey } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
 import { Avatar, Button, ErrorBanner, LiveRegion, cardStyles, useAnnouncer } from '../components/ui'
 import styles from './ProjectFiles.module.css'
+import { usePermissions } from './usePermissions'
 
 const FOLDER_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -144,6 +145,7 @@ function visibleRows(root: FolderNode, expanded: Set<string>): TreeRow[] {
 
 export function ProjectFiles() {
   const { projectKey } = useParams({ from: '/p/$projectKey/files' })
+  const may = usePermissions(projectKey)
   const queryClient = useQueryClient()
 
   const [selected, setSelected] = useState<string | null>(null)
@@ -338,19 +340,26 @@ export function ProjectFiles() {
       <PageHead
         title="Files"
         actions={
-          <>
-            {/* Disabled only while the tree is still on its way: every folder
-                it can arrive at, the root included, takes files. */}
-            <Button variant="go" disabled={selectedId === null} onClick={() => setDialog('upload')}>
-              ↑ Upload files
-            </Button>
-            <Button disabled={selectedId === null} onClick={() => setDialog('link')}>
-              + Add a link
-            </Button>
-            <Button disabled={selectedId === null} onClick={() => setDialog('folder')}>
-              + New folder
-            </Button>
-          </>
+          may('files') ? (
+            <>
+              {/* Disabled only while the tree is still on its way: every folder
+                  it can arrive at, the root included, takes files. Absent
+                  entirely for a role that is not allowed files at all. */}
+              <Button
+                variant="go"
+                disabled={selectedId === null}
+                onClick={() => setDialog('upload')}
+              >
+                ↑ Upload files
+              </Button>
+              <Button disabled={selectedId === null} onClick={() => setDialog('link')}>
+                + Add a link
+              </Button>
+              <Button disabled={selectedId === null} onClick={() => setDialog('folder')}>
+                + New folder
+              </Button>
+            </>
+          ) : null
         }
       >
         Files upload to the server. Links to SharePoint or Google Drive sit in the same folders.
@@ -438,10 +447,13 @@ export function ProjectFiles() {
                       id={folder.id}
                       name={folder.name}
                       onOpen={open}
-                      onDelete={() =>
-                        confirmDelete(`"${folder.name}" and everything in it`, () =>
-                          removeFolder.mutate({ id: folder.id, name: folder.name }),
-                        )
+                      onDelete={
+                        may('files')
+                          ? () =>
+                              confirmDelete(`"${folder.name}" and everything in it`, () =>
+                                removeFolder.mutate({ id: folder.id, name: folder.name }),
+                              )
+                          : null
                       }
                     />
                   ))}
@@ -449,10 +461,13 @@ export function ProjectFiles() {
                     <ItemRow
                       key={item.id}
                       item={item}
-                      onDelete={() =>
-                        confirmDelete(`"${item.name}"`, () =>
-                          removeItem.mutate({ id: item.id, name: item.name }),
-                        )
+                      onDelete={
+                        may('files')
+                          ? () =>
+                              confirmDelete(`"${item.name}"`, () =>
+                                removeItem.mutate({ id: item.id, name: item.name }),
+                              )
+                          : null
                       }
                     />
                   ))}
@@ -544,7 +559,9 @@ function FolderRow({
   id: string
   name: string
   onOpen: (id: string) => void
-  onDelete: () => void
+  /** Null where the reader's role does not allow files — no button, not a
+      button that refuses. */
+  onDelete: (() => void) | null
 }) {
   return (
     // The whole row is clickable for the mouse, but a `tr` is not something
@@ -572,21 +589,23 @@ function FolderRow({
       <td className={styles.mono}>—</td>
       <td>
         <div className={styles.actions}>
-          <GhostAction
-            onClick={(event) => {
-              event.stopPropagation()
-              onDelete()
-            }}
-          >
-            Delete
-          </GhostAction>
+          {onDelete ? (
+            <GhostAction
+              onClick={(event) => {
+                event.stopPropagation()
+                onDelete()
+              }}
+            >
+              Delete
+            </GhostAction>
+          ) : null}
         </div>
       </td>
     </tr>
   )
 }
 
-function ItemRow({ item, onDelete }: { item: FileItem; onDelete: () => void }) {
+function ItemRow({ item, onDelete }: { item: FileItem; onDelete: (() => void) | null }) {
   const isLink = item.kind === 'link'
   const badge = isLink ? { kind: 'link', label: '↗' } : badgeOf(item.name)
 
@@ -634,7 +653,7 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: () => void }) {
               Download
             </a>
           )}
-          <GhostAction onClick={() => onDelete()}>Delete</GhostAction>
+          {onDelete ? <GhostAction onClick={() => onDelete()}>Delete</GhostAction> : null}
         </div>
       </td>
     </tr>

@@ -1,35 +1,13 @@
 /**
- * What the People page needs to know about roles, kept out of the TSX.
+ * What the roles screen needs to know about a role, kept out of the TSX.
  *
- * This is the first place the web app asks "am I allowed to?", and it answers
- * from the member list rather than from `identity.scopes`. Scopes say what a
- * credential may do anywhere; whether you administer *this* project is a fact
- * about this board, and the member list is where the server already said it.
+ * It used to answer "am I allowed to?" from the member list too. It does not
+ * any more: CYLIST-46 made the server say so outright, in `may_manage` on the
+ * permission grid, because three different callers may administer a project
+ * and only one of them is visible in a member list.
  */
 
-import type { Identity, Member, RoleSummary } from '../api/client'
-
-/** The signed-in person's own membership row, if they are on this project. */
-export function myMembership(
-  members: Member[],
-  identity: Identity | undefined,
-): Member | undefined {
-  const me = identity?.person?.id
-  return me === undefined ? undefined : members.find((member) => member.id === me)
-}
-
-/**
- * Whether the reader may create, rename and hand out this project's roles.
- *
- * Holding the admin role is the answer. The server has one more case — a
- * project whose last admin was archived lets an `admin`-scoped credential step
- * in — which is deliberately not mirrored here: it is a way back rather than a
- * way of working, and a button that appears on a technicality is worse than
- * one refusal nobody will see.
- */
-export function isProjectAdmin(members: Member[], identity: Identity | undefined): boolean {
-  return myMembership(members, identity)?.role?.is_admin === true
-}
+import type { RoleSummary } from '../api/client'
 
 /**
  * Whether a project already has a role by this name, ignoring case.

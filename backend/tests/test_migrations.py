@@ -748,3 +748,165 @@ class TestUndoingRoles:
         assert list(titles.scalars()) == ["Engineer"]
         tables = await connection.execute(text("SELECT to_regclass('project_role') IS NULL"))
         assert tables.scalar() is True
+
+
+# --- Every board comes through permitting what it already permitted --------
+
+WITH_PERMISSIONS = "0025"
+
+PERMISSION_COUNT = 10
+"""How many permissions revision 0025 knows about. Written out rather than
+imported for the reason the revision writes them out: this asserts what that
+back-fill did, not what today's vocabulary happens to be."""
+
+
+async def seed_a_board_with_roles(connection: AsyncConnection) -> None:
+    """A project with its admin role and two the admin invented."""
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 0)"
+        )
+    )
+    for name, is_admin in (("Admin", True), ("Reviewer", False), ("QA", False)):
+        await connection.execute(
+            text(
+                "INSERT INTO project_role (id, project_id, name, description, colour, is_admin)"
+                " SELECT gen_random_uuid(), project.id, :name, '', '#1D7D46', :is_admin"
+                " FROM project WHERE project.key = 'ATL'"
+            ),
+            {"name": name, "is_admin": is_admin},
+        )
+
+
+async def granted_to(connection: AsyncConnection, role: str | None) -> int:
+    """How many permissions a role — or the role-less baseline — was given."""
+    if role is None:
+        rows = await connection.execute(
+            text("SELECT count(*) FROM project_permission WHERE role_id IS NULL")
+        )
+    else:
+        rows = await connection.execute(
+            text(
+                "SELECT count(*) FROM project_permission"
+                " JOIN project_role ON project_role.id = project_permission.role_id"
+                " WHERE project_role.name = :name"
+            ),
+            {"name": role},
+        )
+    return int(rows.scalar() or 0)
+
+
+class TestBackFillingPermissions:
+    async def test_every_role_keeps_being_able_to_do_everything(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Turning the fence on must not fence a board nobody has narrowed."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PERMISSIONS)
+
+        assert await granted_to(connection, "Reviewer") == PERMISSION_COUNT
+        assert await granted_to(connection, "QA") == PERMISSION_COUNT
+
+    async def test_and_so_does_everybody_with_no_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PERMISSIONS)
+
+        assert await granted_to(connection, None) == PERMISSION_COUNT
+
+    async def test_the_admin_role_is_granted_nothing(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """It holds everything by being the admin role. Rows saying so would be
+        rows somebody could delete."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PERMISSIONS)
+
+        assert await granted_to(connection, "Admin") == 0
+
+    async def test_a_grant_cannot_be_written_twice(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO project_permission (id, project_id, role_id, permission)"
+                    " SELECT gen_random_uuid(), project_id, role_id, permission"
+                    " FROM project_permission WHERE role_id IS NOT NULL LIMIT 1"
+                )
+            )
+
+    async def test_nor_can_a_baseline_one_be(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The half a plain unique constraint would have missed: Postgres counts
+        NULL role_ids as distinct from each other."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO project_permission (id, project_id, role_id, permission)"
+                    " SELECT gen_random_uuid(), project_id, NULL, permission"
+                    " FROM project_permission WHERE role_id IS NULL LIMIT 1"
+                )
+            )
+
+    async def test_deleting_the_project_takes_its_grants_with_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The deferred composite key must not make which cascade fires first
+        decide whether a project can be deleted."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await connection.execute(text("DELETE FROM project WHERE key = 'ATL'"))
+
+        left = await connection.execute(text("SELECT count(*) FROM project_permission"))
+        assert left.scalar() == 0
+
+
+class TestUndoingPermissions:
+    async def test_it_drops_every_grant_and_leaves_the_roles(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await rewind(WITH_ROLES)
+
+        gone = await connection.execute(text("SELECT to_regclass('project_permission') IS NULL"))
+        assert gone.scalar() is True
+        roles = await connection.execute(text("SELECT count(*) FROM project_role"))
+        assert roles.scalar() == 3

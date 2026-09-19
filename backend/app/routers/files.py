@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
@@ -23,6 +24,7 @@ from app.core.errors import NotFoundError, UnprocessableRequestError
 from app.db import SessionDependency
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.files import (
@@ -117,6 +119,21 @@ def _nest(folders: list[Folder]) -> list[FolderNode]:
 # --- Folders ---------------------------------------------------------------
 
 
+async def _project_of_item(session: AsyncSession, item: FileItem) -> UUID:
+    """Which project a file or link is on, by way of the folder holding it.
+
+    A file knows its folder and nothing above it — the tree is what has a
+    project — so this is the one hop the default guard cannot make on its own.
+    """
+    folder = await files.get_folder(session, item.folder_id)
+    return folder.project_id
+
+
+WRITE_FILES = guards.on_project(Permission.FILES)
+WRITE_IN_THIS_FOLDER = guards.for_entity(Permission.FILES, resolved_folder)
+WRITE_THIS_ITEM = guards.for_entity(Permission.FILES, resolved_item, locate=_project_of_item)
+
+
 @router.get(
     "/projects/{project_ref}/folders",
     response_model=list[FolderRead],
@@ -144,7 +161,7 @@ async def list_folders(
 async def create_folder(
     body: FolderCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_FILES),
     session: AsyncSession = SessionDependency,
 ) -> FolderRead:
     """Add a folder. Omit `parent_id` to put it in the project's root folder.
@@ -234,7 +251,7 @@ async def get_children(
 async def update_folder(
     body: FolderUpdate,
     folder: Folder = Depends(resolved_folder),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_IN_THIS_FOLDER),
     session: AsyncSession = SessionDependency,
 ) -> FolderRead:
     """Change a folder's name, its parent, or both.
@@ -264,7 +281,7 @@ async def update_folder(
 )
 async def delete_folder(
     folder: Folder = Depends(resolved_folder),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_IN_THIS_FOLDER),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
@@ -302,7 +319,7 @@ async def delete_folder(
 )
 async def upload_file(
     folder: Folder = Depends(resolved_folder),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_IN_THIS_FOLDER),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
@@ -345,7 +362,7 @@ async def upload_file(
 async def add_link(
     body: LinkCreate,
     folder: Folder = Depends(resolved_folder),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_IN_THIS_FOLDER),
     session: AsyncSession = SessionDependency,
 ) -> ItemRead:
     """Put a link to a SharePoint or Drive document in this folder.
@@ -404,7 +421,7 @@ async def get_item(
 async def update_item(
     body: ItemUpdate,
     item: FileItem = Depends(resolved_item),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_ITEM),
     session: AsyncSession = SessionDependency,
 ) -> ItemRead:
     """Rename an item, correct a link's target, or change who added it."""
@@ -425,7 +442,7 @@ async def update_item(
 @router.delete("/items/{item_id}", response_model=Acknowledged, summary="Delete a file or link")
 async def delete_item(
     item: FileItem = Depends(resolved_item),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_ITEM),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:

@@ -30,6 +30,7 @@ import {
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectVault.module.css'
+import { usePermissions } from './usePermissions'
 
 const MASK = '••••••••••••'
 
@@ -59,6 +60,7 @@ interface Destination {
 
 export function ProjectVault() {
   const { projectKey } = useParams({ from: '/p/$projectKey/vault' })
+  const may = usePermissions(projectKey)
   const queryClient = useQueryClient()
   const { message, announce } = useAnnouncer()
 
@@ -136,9 +138,11 @@ export function ProjectVault() {
       <PageHead
         title="Vault"
         actions={
-          <Button variant="go" onClick={() => setNamingTree(true)}>
-            + New tree
-          </Button>
+          may('vault') ? (
+            <Button variant="go" onClick={() => setNamingTree(true)}>
+              + New tree
+            </Button>
+          ) : null
         }
       >
         Multiple trees, each as deep as you like. Secrets stay masked until you reveal them, and
@@ -182,13 +186,15 @@ export function ProjectVault() {
                     />
                     {/* Outside the tree on purpose: role="tree" may only hold
                         treeitems, and this is an action, not a node. */}
-                    <button
-                      type="button"
-                      className={`${styles.node} ${styles.add}`}
-                      onClick={() => setAdding({ treeId: tree.id, parentId: null })}
-                    >
-                      <span className={styles.caret} aria-hidden="true" />+ Add a node
-                    </button>
+                    {may('vault') ? (
+                      <button
+                        type="button"
+                        className={`${styles.node} ${styles.add}`}
+                        onClick={() => setAdding({ treeId: tree.id, parentId: null })}
+                      >
+                        <span className={styles.caret} aria-hidden="true" />+ Add a node
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -205,6 +211,8 @@ export function ProjectVault() {
                   setAdding({ treeId: selected.node.tree_id, parentId: selected.node.id, kind })
                 }
                 onSelect={select}
+                mayChange={may('vault')}
+                mayReveal={may('vault_reveal')}
                 onEdit={() => setEditing(selected.node)}
                 onMove={() => setMoving(selected.node)}
                 onDelete={() => remove.mutate(selected.node)}
@@ -482,6 +490,8 @@ function NodeDetail({
   node,
   path,
   announce,
+  mayChange,
+  mayReveal,
   onAdd,
   onSelect,
   onEdit,
@@ -491,6 +501,11 @@ function NodeDetail({
   node: VaultNode
   path: string[]
   announce: (message: string) => void
+  /** Whether the reader's role allows changing the vault. Revealing a secret
+      is a separate permission, and the reveal control answers to that one. */
+  mayChange: boolean
+  /** Whether the reader's role allows reading a stored secret. */
+  mayReveal: boolean
   onAdd: (kind: VaultNodeKind) => void
   onSelect: (node: VaultNode) => void
   onEdit: () => void
@@ -509,33 +524,35 @@ function NodeDetail({
             </p>
           ) : null}
         </div>
-        <div className={styles.detailActions}>
-          {node.kind === 'branch' ? (
-            <>
-              <Button small onClick={() => onAdd('branch')}>
-                + Branch
+        {mayChange ? (
+          <div className={styles.detailActions}>
+            {node.kind === 'branch' ? (
+              <>
+                <Button small onClick={() => onAdd('branch')}>
+                  + Branch
+                </Button>
+                <Button small variant="go" onClick={() => onAdd('secret')}>
+                  + Secret
+                </Button>
+              </>
+            ) : (
+              <Button small onClick={onEdit}>
+                Edit
               </Button>
-              <Button small variant="go" onClick={() => onAdd('secret')}>
-                + Secret
-              </Button>
-            </>
-          ) : (
-            <Button small onClick={onEdit}>
-              Edit
+            )}
+            <Button small variant="ghost" onClick={onMove}>
+              Move
             </Button>
-          )}
-          <Button small variant="ghost" onClick={onMove}>
-            Move
-          </Button>
-          <Button small variant="ghost" danger onClick={onDelete}>
-            Delete
-          </Button>
-        </div>
+            <Button small variant="ghost" danger onClick={onDelete}>
+              Delete
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {node.kind === 'secret' ? (
         <div className={styles.reading}>
-          <SecretDetail node={node} announce={announce} />
+          <SecretDetail node={node} announce={announce} mayReveal={mayReveal} />
         </div>
       ) : (
         <div className={styles.cards}>
@@ -568,9 +585,12 @@ function NodeDetail({
 function SecretDetail({
   node,
   announce,
+  mayReveal,
 }: {
   node: VaultNode
   announce: (message: string) => void
+  /** Whether the reader's role allows reading the stored value. */
+  mayReveal: boolean
 }) {
   const [revealed, setRevealed] = useState<string | null>(null)
   const [copied, setCopied] = useState<'username' | 'secret' | null>(null)
@@ -669,18 +689,25 @@ function SecretDetail({
               </>
             )}
           </span>
-          <Button variant="ghost" small disabled={reveal.isPending} onClick={toggleReveal}>
-            {revealed ? 'Hide' : reveal.isPending ? 'Revealing…' : 'Reveal'}
-          </Button>
-          <Button
-            variant="ghost"
-            small
-            disabled={copy.isPending}
-            aria-label={copied === 'secret' ? 'Secret copied' : 'Copy secret'}
-            onClick={() => copy.mutate('secret')}
-          >
-            {copied === 'secret' ? 'Copied' : 'Copy'}
-          </Button>
+          {/* Copying a credential is reading it — the copy goes through the
+              same logged endpoint — so both controls answer to the same
+              permission, and a role without it gets neither. */}
+          {mayReveal ? (
+            <>
+              <Button variant="ghost" small disabled={reveal.isPending} onClick={toggleReveal}>
+                {revealed ? 'Hide' : reveal.isPending ? 'Revealing…' : 'Reveal'}
+              </Button>
+              <Button
+                variant="ghost"
+                small
+                disabled={copy.isPending}
+                aria-label={copied === 'secret' ? 'Secret copied' : 'Copy secret'}
+                onClick={() => copy.mutate('secret')}
+              >
+                {copied === 'secret' ? 'Copied' : 'Copy'}
+              </Button>
+            </>
+          ) : null}
         </span>
 
         {secret.url ? (

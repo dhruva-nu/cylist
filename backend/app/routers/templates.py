@@ -9,11 +9,13 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.template import TaskTemplate
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.templates import (
@@ -62,6 +64,14 @@ async def _one_template(session: AsyncSession, template: TaskTemplate) -> Templa
     return _template(template, counts.get(template.id, 0))
 
 
+SHAPE_BOARD = guards.on_project(Permission.BOARD)
+"""A template is part of the board's shape: it says what kinds of card the
+board has and where each kind may go, which is the same decision as what the
+columns are."""
+
+SHAPE_THIS_BOARD = guards.for_entity(Permission.BOARD, resolved_template)
+
+
 @router.get(
     "/projects/{project_ref}/templates",
     response_model=list[TemplateRead],
@@ -96,7 +106,7 @@ async def list_templates(
 async def create_template(
     body: TemplateCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(SHAPE_BOARD),
     session: AsyncSession = SessionDependency,
 ) -> TemplateRead:
     """Add a kind of card to the project, with however many stages it starts
@@ -126,7 +136,7 @@ async def create_template(
 async def update_template(
     body: TemplateUpdate,
     template: TaskTemplate = Depends(resolved_template),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(SHAPE_THIS_BOARD),
     session: AsyncSession = SessionDependency,
 ) -> TemplateRead:
     """Rename a template, reword it, or replace its stages outright.
@@ -156,7 +166,7 @@ async def update_template(
 )
 async def delete_template(
     template: TaskTemplate = Depends(resolved_template),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(SHAPE_THIS_BOARD),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a template nothing was created from, and every stage about it.

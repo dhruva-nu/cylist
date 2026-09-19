@@ -99,8 +99,10 @@ export interface PersonInput {
  * A role on a project — "Reviewer", "QA" — invented by that project's admin.
  *
  * Per project, not per person: the same person can be the Admin of one board
- * and a Reviewer on another. What a role *permits* is nothing at all, with
- * one exception: holders of the admin role manage the project's roles.
+ * and a Reviewer on another. Since CYLIST-46 a role also carries a set of
+ * `Permission`s saying what its holders may do here; the admin role holds
+ * every one of them by being the admin role, and is the only one that can
+ * hand the others out.
  */
 export interface Role {
   id: string
@@ -121,6 +123,67 @@ export interface RoleInput {
   name: string
   description?: string
   colour?: string | null
+}
+
+/**
+ * One thing a role may allow, from a vocabulary the server fixes.
+ *
+ * A role's *name* is the admin's invention; what it may do cannot be, because
+ * every entry is a fence a particular endpoint recognises. Kept as a union
+ * rather than a bare string so that a typo in a permission name is a build
+ * error rather than a tick box that silently never matches.
+ */
+export type Permission =
+  | 'tasks'
+  | 'comments'
+  | 'goals'
+  | 'board'
+  | 'files'
+  | 'vault'
+  | 'vault_reveal'
+  | 'people'
+  | 'agents'
+  | 'project'
+
+/** One permission, described well enough to draw a labelled tick box. */
+export interface PermissionInfo {
+  key: Permission
+  label: string
+  summary: string
+}
+
+/**
+ * One line of the grid: a role, and what it allows.
+ *
+ * `role_id` is null for the line called "Everyone else" — the project's
+ * baseline, which covers everybody on it who has no role and everybody who is
+ * not on it at all.
+ */
+export interface RolePermissions {
+  role_id: string | null
+  name: string
+  colour: string
+  is_admin: boolean
+  member_count: number
+  permissions: Permission[]
+}
+
+/** The whole grid, and the words to draw it with. */
+export interface ProjectPermissions {
+  catalogue: PermissionInfo[]
+  roles: RolePermissions[]
+  /** What the reader may do here — what a client hides buttons by. */
+  mine: Permission[]
+  /**
+   * Whether the reader may change any of it.
+   *
+   * The server's answer rather than one worked out from the member list:
+   * three different callers may — the admin role's holders, the bootstrap
+   * session, and an `admin`-scoped credential on a project whose last admin
+   * was archived — and a client that reimplemented the rule would be wrong
+   * about at least one of them.
+   */
+  may_manage: boolean
 }
 
 /**
@@ -1004,6 +1067,18 @@ export const api = {
     request<Role | null>(`/projects/${ref}/members/${personId}/role`, {
       method: 'PUT',
       body: body({ role }),
+    }),
+  getPermissions: (ref: string) => request<ProjectPermissions>(`/projects/${ref}/permissions`),
+  setRolePermissions: (ref: string, roleRef: string, permissions: Permission[]) =>
+    request<RolePermissions>(`/projects/${ref}/roles/${roleRef}/permissions`, {
+      method: 'PUT',
+      body: body({ permissions }),
+    }),
+  /** What somebody here with no role — and anybody not on the project — may do. */
+  setBaselinePermissions: (ref: string, permissions: Permission[]) =>
+    request<RolePermissions>(`/projects/${ref}/permissions/everyone-else`, {
+      method: 'PUT',
+      body: body({ permissions }),
     }),
 
   /** The project's root folder, with the whole tree nested inside it. */

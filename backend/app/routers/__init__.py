@@ -18,6 +18,7 @@ from app.routers import (
     goals,
     health,
     people,
+    permissions,
     projects,
     reports,
     roles,
@@ -40,6 +41,8 @@ api_router.include_router(vault.project_router)
 api_router.include_router(reports.router)
 # After `projects` too: every role path hangs off the same `{project_ref}`.
 api_router.include_router(roles.router)
+# After `roles`, whose `resolved_role` and admin gate the permission grid uses.
+api_router.include_router(permissions.router)
 api_router.include_router(vault.router)
 api_router.include_router(people.router)
 api_router.include_router(columns.router)

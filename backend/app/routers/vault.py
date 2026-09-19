@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
@@ -32,6 +33,7 @@ from app.core.crypto import VaultCipher
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.vault import (
@@ -46,7 +48,7 @@ from app.schemas.vault import (
     VaultTreeRead,
     VaultTreeUpdate,
 )
-from app.services import activity, vault
+from app.services import activity, permissions, vault
 
 READ = require(Scope.VAULT_READ)
 WRITE = require(Scope.WRITE, Scope.VAULT_READ)
@@ -79,6 +81,42 @@ async def resolved_node(node_id: UUID, session: AsyncSession = SessionDependency
 # --- Trees -----------------------------------------------------------------
 
 
+async def _project_of_node(session: AsyncSession, node: VaultNode) -> UUID:
+    """Which project a node is in, by way of its tree. A node knows only the
+    tree; the tree is what belongs to a project."""
+    tree = await vault.get_tree(session, node.tree_id)
+    return tree.project_id
+
+
+CHANGE_VAULT = guards.on_project(Permission.VAULT, Scope.WRITE, Scope.VAULT_READ)
+CHANGE_THIS_TREE = guards.for_entity(Permission.VAULT, resolved_tree, Scope.WRITE, Scope.VAULT_READ)
+CHANGE_THIS_NODE = guards.for_entity(
+    Permission.VAULT, resolved_node, Scope.WRITE, Scope.VAULT_READ, locate=_project_of_node
+)
+REVEAL_THIS_SECRET = guards.for_entity(
+    Permission.VAULT_REVEAL, resolved_node, Scope.VAULT_REVEAL, locate=_project_of_node
+)
+"""Both gates, and they are a pair worth reading together. ``vault:reveal`` is
+what the credential carries; the permission is what this person is on this
+board. A token minted to reveal secrets still reveals none on a project whose
+role for its owner does not allow it."""
+
+
+async def may_add_node(
+    body: VaultNodeCreate,
+    principal: Principal = Depends(WRITE),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """The guard for ``POST /vault/nodes``, whose tree is in the body.
+
+    The one write on this router that names nothing in its path. FastAPI gives
+    a dependency the same parsed body the handler gets, so this costs a lookup
+    and no second read of the request.
+    """
+    tree = await vault.get_tree(session, body.tree_id)
+    return await permissions.enforce_on(session, tree.project_id, principal, Permission.VAULT)
+
+
 @project_router.get(
     "/{project_ref}/vault/trees",
     response_model=list[VaultTreeRead],
@@ -106,7 +144,7 @@ async def list_trees(
 )
 async def create_tree(
     body: VaultTreeCreate,
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(CHANGE_VAULT),
     project: Project = Depends(resolved_project),
     session: AsyncSession = SessionDependency,
 ) -> VaultTreeRead:
@@ -155,7 +193,7 @@ async def get_tree(
 )
 async def update_tree(
     body: VaultTreeUpdate,
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(CHANGE_THIS_TREE),
     tree: VaultTree = Depends(resolved_tree),
     session: AsyncSession = SessionDependency,
 ) -> VaultTreeRead:
@@ -174,7 +212,7 @@ async def update_tree(
 
 @router.delete("/trees/{tree_id}", response_model=Acknowledged, summary="Delete a vault tree")
 async def delete_tree(
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(CHANGE_THIS_TREE),
     tree: VaultTree = Depends(resolved_tree),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
@@ -208,7 +246,7 @@ async def delete_tree(
 )
 async def create_node(
     body: VaultNodeCreate,
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(may_add_node),
     session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),
 ) -> VaultNodeRead:
@@ -253,7 +291,7 @@ async def get_node(
 )
 async def update_node(
     body: VaultNodeUpdate,
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(CHANGE_THIS_NODE),
     node: VaultNode = Depends(resolved_node),
     session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),
@@ -281,7 +319,7 @@ async def update_node(
 
 @router.delete("/nodes/{node_id}", response_model=Acknowledged, summary="Delete a node")
 async def delete_node(
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(CHANGE_THIS_NODE),
     node: VaultNode = Depends(resolved_node),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
@@ -312,7 +350,7 @@ async def delete_node(
 )
 async def move_node(
     body: VaultNodeMove,
-    principal: Principal = Depends(WRITE),
+    principal: Principal = Depends(CHANGE_THIS_NODE),
     node: VaultNode = Depends(resolved_node),
     session: AsyncSession = SessionDependency,
 ) -> VaultNodeRead:
@@ -350,7 +388,7 @@ async def move_node(
     },
 )
 async def reveal_secret(
-    principal: Principal = Depends(REVEAL),
+    principal: Principal = Depends(REVEAL_THIS_SECRET),
     node: VaultNode = Depends(resolved_node),
     session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),

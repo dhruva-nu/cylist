@@ -81,6 +81,7 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | `person` | `name`, `kind` (`team`/`client`), `title`, `responsibilities`, `email`, `color`, `password_hash` | **Global directory** — a client can appear in several projects. `title` is the job description; it was called `role` until roles became a thing of their own |
 | `project_role` | `project_id`, `name`, `description`, `colour`, `is_admin` | what somebody is on *this* board. Unique name per project; at most one `is_admin` role, seeded on every project and held by whoever created it |
 | `project_member` | `project_id`, `person_id`, PK(both), `role_id` (nullable) | membership; assignee/tag pickers read from this. `role_id` is a composite FK on `(project_id, role_id)`, so a member cannot wear another project's role |
+| `project_permission` | `project_id`, `role_id` (nullable), `permission` | what a role may do here, one row per grant. `role_id IS NULL` is the project's baseline — everybody on it with no role, and everybody not on it. Two partial unique indexes, because Postgres counts NULLs as distinct. The admin role holds everything and stores nothing |
 | `board_column` | `project_id`, `name`, `description`, `position` | `CHECK` + service rule: 2 ≤ count ≤ 8; first column (`position=0`) is where new tasks land |
 | `goal` | `project_id`, `number` (per-project sequence → ATL-G1), `name`, `description`, `colour`, `status` (`open`/`achieved`/`dropped`), `achieved_at`, `target_date`, `owner_id`→person | an epic. Unique name per project; progress is counted from its cards, never stored |
 | `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards |
@@ -194,6 +195,8 @@ Each phase ends with something usable end-to-end.
    *Revised by CYLIST-45:* there are roles now, but they are still not a
    fence — a role says who somebody is on a board, and the only thing any of
    them permits is the admin role's holder managing the others.
+   *Revised again by CYLIST-46:* a role is a fence, where an admin has built
+   one. Membership still is not — see decision 20.
 5. **Vault**: only the secret value is encrypted; reveal is a distinct, logged, scoped action.
 6. **Uploads are content-addressed** (sha256) with a configurable size cap (default 200 MB).
 7. **No Tailwind / component library** — the mock's design system is ported as CSS variables + modules.
@@ -225,3 +228,22 @@ These came up while implementing and are worth knowing:
     admin is archived, an `admin`-scoped credential can step in, which is the
     only way back from a board nobody can manage.
 19. **A goal cannot be marked achieved while a card on it is open** — the same shape as the rule that keeps a card out of the last column with a sub-task outstanding, and the refusal names what is holding it open. Dropping a goal carries no such rule.
+20. **Permissions are a fixed vocabulary, granted per role, and every project
+    starts open.** A role's *name* is the admin's invention; what it may do
+    cannot be, because every entry is a fence a particular endpoint
+    recognises. Reading is not fenced at all — a project is a shared
+    workspace, and the one read-shaped permission, `vault_reveal`, was already
+    a distinct logged act. Every project is created with the whole vocabulary
+    granted to its baseline, and the back-fill gave every existing board the
+    same, so turning this on changed nothing for anybody: an admin narrows it
+    from the Roles screen. A new role starts with whatever the baseline
+    allows, so naming somebody a Reviewer is never a demotion nobody asked
+    for.
+21. **The baseline is a line on the grid, not a seeded role.** CYLIST-45
+    turned down a seeded "Member" default because "nobody has said yet" is an
+    honest state a word would hide, and that stands. But the state still has
+    to permit something, so the project carries one set of permissions for it
+    — a `project_permission` row with no `role_id`, drawn as **Everyone else**
+    — which also answers for somebody who is not on the project, since
+    membership is a picker rather than a fence and nobody has said what they
+    are either.

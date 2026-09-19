@@ -12,6 +12,12 @@ rows to answer and both have to name what they found:
 * **A project does not lose its last admin.** Neither by having the role taken
   off its last holder nor by having that holder dropped from the project.
 
+Two more came with CYLIST-46, which gave a role a set of permissions to carry.
+A new role starts with whatever somebody here with no role could already do,
+so that naming somebody a Reviewer is never a demotion nobody asked for; and
+deleting a role takes its grants with it, because the key they hang off is the
+deferred one that would otherwise refuse at COMMIT without saying why.
+
 Archived people are not counted as holders for the second rule. They cannot
 sign in, so counting them would let a project look administered while nobody
 could administer it — and :func:`app.services.roles.may_administer` has a
@@ -22,6 +28,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +37,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
+from app.models.permission import ProjectPermission
 from app.models.person import KIND_ORDER, Person
 from app.models.project import Project, ProjectMember
 from app.models.role import ADMIN_ROLE_NAME, ProjectRole
@@ -197,7 +205,35 @@ async def create(session: AsyncSession, project: Project, data: RoleCreate) -> P
             f"{key} already has a role called {data.name}.",
             details={"name": data.name},
         ) from exc
+
+    await _copy_baseline(session, project, role)
     return role
+
+
+async def _copy_baseline(session: AsyncSession, project: Project, role: ProjectRole) -> None:
+    """Start a new role off with whatever somebody here with no role may do.
+
+    A new role grants what its holders could already do, and no more. The
+    alternative — a role that starts empty — would mean that the act of saying
+    what somebody is on a board silently took things away from them, which is
+    backwards: naming somebody a Reviewer is not a demotion, and an admin who
+    wants one can untick from here.
+
+    Written as rows rather than left implicit so that the grid says the same
+    thing the server does: a role whose line reads as full is full, and stays
+    full when the baseline is later narrowed.
+    """
+    baseline = await session.scalars(
+        select(ProjectPermission.permission).where(
+            ProjectPermission.project_id == project.id,
+            ProjectPermission.role_id.is_(None),
+        )
+    )
+    session.add_all(
+        ProjectPermission(project_id=project.id, role_id=role.id, permission=permission)
+        for permission in baseline
+    )
+    await session.flush()
 
 
 async def update(session: AsyncSession, role: ProjectRole, data: RoleUpdate) -> ProjectRole:
@@ -251,6 +287,12 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
             "Move them off it first.",
             details={"holder_person_ids": [str(person.id) for person in wearing]},
         )
+
+    # Before the role itself: a grant points at its role through the same
+    # deferred, NO ACTION key `project_member` uses, which would refuse this at
+    # COMMIT — a long way from here, and unable to say what it was refusing
+    # about.
+    await session.execute(sql_delete(ProjectPermission).where(ProjectPermission.role_id == role.id))
 
     await session.delete(role)
     await session.flush()

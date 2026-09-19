@@ -18,7 +18,7 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns, files, roles
+from app.services import columns, files, permissions, roles
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -40,6 +40,12 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
     makes — see :func:`app.services.roles.seed_admin` — and the creator wears
     it, because "these roles are created by whoever creates the project" is
     not a rule anybody can follow if the project starts with nobody able to.
+
+    And it starts open: everybody on it may do everything until its admin says
+    otherwise, which is what :func:`app.services.permissions.seed` writes. A
+    board that permitted nothing until somebody ticked boxes would make
+    creating one a two-step job, and would answer decision 4 differently from
+    the way Cylist has answered it since the start.
 
     Args:
         creator_id: Who is starting it, and so the project's first member and
@@ -69,6 +75,7 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
     await columns.seed(session, project)
     await files.seed_root(session, project)
     admin = await roles.seed_admin(session, project)
+    await permissions.seed(session, project)
 
     if creator_id is not None:
         session.add(ProjectMember(project_id=project.id, person_id=creator_id, role_id=admin.id))

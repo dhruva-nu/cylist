@@ -104,6 +104,7 @@ import {
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
+import { usePermissions } from './usePermissions'
 
 /**
  * Which keys drive a keyboard drag.
@@ -301,6 +302,7 @@ function laneKeyOf(over: string): string | null {
 
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
+  const may = usePermissions(projectKey)
   const { q: initialQuery = '' } = useSearch({ from: '/p/$projectKey/board' })
   const queryClient = useQueryClient()
 
@@ -829,11 +831,17 @@ export function ProjectBoard() {
               {everyLaneFolded ? '⌄ Open all' : '⌃ Fold all'}
             </Button>
           ) : null}
-          <Button small onClick={() => setTemplatesOpen(true)}>
-            + Templates
-            <span className={styles.hint}>{templateList.length}</span>
-          </Button>
-          <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+          {/* Both change the shape of the board rather than what is on it,
+              which is one permission, and neither is drawn without it. */}
+          {may('board') ? (
+            <>
+              <Button small onClick={() => setTemplatesOpen(true)}>
+                + Templates
+                <span className={styles.hint}>{templateList.length}</span>
+              </Button>
+              <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
+            </>
+          ) : null}
           <QuickFilters
             goals={goalList}
             goal={quickGoal}
@@ -882,7 +890,7 @@ export function ProjectBoard() {
                   onToggleOutcome={toggleOutcome}
                   onOpenTask={setOpenTaskId}
                   onMoveSubStatus={() => {}}
-                  onAddTask={() => setCreatingTask(true)}
+                  onAddTask={may('tasks') ? () => setCreatingTask(true) : null}
                   onEdit={() => setColumnDialog(column)}
                   members={memberList}
                 />
@@ -904,10 +912,14 @@ export function ProjectBoard() {
                     folded={laneFolded}
                     rowId={`lane-${key}`}
                     onToggleFold={() => onToggleLane(key, name)}
-                    onAdd={() => {
-                      setComposingOn(goal?.id ?? null)
-                      setCreatingTask(true)
-                    }}
+                    onAdd={
+                      may('tasks')
+                        ? () => {
+                            setComposingOn(goal?.id ?? null)
+                            setCreatingTask(true)
+                          }
+                        : null
+                    }
                   />
                   {laneFolded ? null : (
                     <div
@@ -932,7 +944,7 @@ export function ProjectBoard() {
                           onMoveSubStatus={(taskId, index) =>
                             moveSubStatus.mutate({ taskId, index })
                           }
-                          onAddTask={() => setCreatingTask(true)}
+                          onAddTask={may('tasks') ? () => setCreatingTask(true) : null}
                           onEdit={() => setColumnDialog(column)}
                           members={memberList}
                         />
@@ -958,7 +970,7 @@ export function ProjectBoard() {
                 onToggleOutcome={toggleOutcome}
                 onOpenTask={setOpenTaskId}
                 onMoveSubStatus={(taskId, index) => moveSubStatus.mutate({ taskId, index })}
-                onAddTask={() => setCreatingTask(true)}
+                onAddTask={may('tasks') ? () => setCreatingTask(true) : null}
                 onEdit={() => setColumnDialog(column)}
                 members={memberList}
               />
@@ -1412,7 +1424,8 @@ function LaneHead({
   /** The row this heading opens and closes, for `aria-controls`. */
   rowId: string
   onToggleFold: () => void
-  onAdd: () => void
+  /** Null where the reader's role does not allow cards — see `Column`. */
+  onAdd: (() => void) | null
 }) {
   const name = goal?.name ?? 'No goal'
 
@@ -1452,14 +1465,16 @@ function LaneHead({
         </span>
       )}
       <span className={styles.count}>{count}</span>
-      <Button
-        variant="ghost"
-        small
-        onClick={onAdd}
-        aria-label={goal ? `Add a task on ${goal.name}` : 'Add a task on no goal'}
-      >
-        + Task
-      </Button>
+      {onAdd ? (
+        <Button
+          variant="ghost"
+          small
+          onClick={onAdd}
+          aria-label={goal ? `Add a task on ${goal.name}` : 'Add a task on no goal'}
+        >
+          + Task
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -1502,8 +1517,12 @@ function Column({
   onToggleOutcome: (id: string) => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
-  /** Open the whole form, which is where a card is written. */
-  onAddTask: () => void
+  /**
+   * Open the whole form, which is where a card is written. Null for a reader
+   * whose role does not allow cards, which is what takes the "+" off the
+   * column rather than leaving one that refuses.
+   */
+  onAddTask: (() => void) | null
   onEdit: () => void
   /** The project's people, for the `@` tags in a stage label. */
   members: Person[]
@@ -1601,7 +1620,7 @@ function Column({
           {/* The first column is where new work lands, so its "+" survives the
               fold: otherwise tidying the board away takes the add button with
               it. */}
-          {isFirst ? (
+          {isFirst && onAddTask ? (
             <button className={styles.railAdd} onClick={onAddTask} aria-label="Add a task">
               +
             </button>
@@ -1684,7 +1703,7 @@ function Column({
             </div>
           )}
 
-          {isFirst && part === 'all' ? (
+          {isFirst && part === 'all' && onAddTask ? (
             <button className={styles.addTask} onClick={onAddTask}>
               + Add a task
             </button>

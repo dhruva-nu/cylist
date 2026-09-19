@@ -108,18 +108,61 @@ invents them. Every project is created with one role, `Admin`, worn by whoever
 created it; everybody added afterwards has no role until an admin says what
 they are.
 
-A role permits nothing. It is worn beside a name the way `team` and `client`
-are, and the board has no opinion about it. The one exception is the role that
-makes the rest possible: only a holder of `Admin` can create a role, rename
-one, or hand one out. Because a credential acts as whoever minted it, an agent
-token owned by an admin can do that too — narrowing *that* is what a smaller
-scope on the token is for.
+Only a holder of `Admin` can create a role, rename one, hand one out, or say
+what any of them may do. Because a credential acts as whoever minted it, an
+agent token owned by an admin can do that too — narrowing *that* is what a
+smaller scope on the token is for.
 
 Roles are per project, so the same person can be the Admin of one board and a
 Reviewer on another. `GET /projects/{ref}/roles` lists them, and each entry in
 `GET /projects/{ref}/members` carries the one its member wears — alongside
 `title`, which is the job description the directory holds and is not a role at
 all.
+
+### Permissions
+
+A role carries a set of permissions saying what its holders may do *here*, from
+a vocabulary the server fixes:
+
+| Permission | Allows |
+|---|---|
+| `tasks` | Create, edit, move and finish cards, sub-tasks and checklists. |
+| `comments` | Say something on a card. |
+| `goals` | Create, rename, retarget and drop goals. |
+| `board` | Columns, and card templates — the shape of the board. |
+| `files` | Folders, uploads and links. |
+| `vault` | Add, change and delete credentials. Not read them. |
+| `vault_reveal` | Decrypt and read a stored secret. |
+| `people` | Say who is on this project. |
+| `agents` | The skills and notes this project's agents work from. |
+| `project` | Rename, describe and archive the project. |
+
+A role's *name* is the admin's invention; what it may do cannot be, because
+every entry is a fence a particular endpoint recognises. Reading is not on the
+list: a project is a shared workspace, and everyone who can reach a board can
+read it. `vault_reveal` is the one read-shaped entry, and it was already a
+distinct, logged, separately scoped act before roles existed.
+
+Three things hold everything, always. The `Admin` role, by being it. The
+bootstrap session, which belongs to nobody. And whoever the project's grid
+grants it to.
+
+The line called **Everyone else** is what somebody on the project with no role
+may do — and what somebody who is not on it may do, since membership has never
+been a fence here. A project is created with every box on that line ticked, so
+a new board behaves exactly as boards did before permissions existed, and its
+admin narrows it from there. A new role starts with whatever that line allows,
+so naming somebody a Reviewer is never a demotion nobody asked for.
+
+Scopes and permissions are both checked and neither stands in for the other: a
+read-only token held by an admin still cannot write, and a `write` token held
+by somebody whose role does not allow cards still cannot move one.
+
+`GET /projects/{ref}/permissions` returns the whole grid — the vocabulary, each
+role's line, and `mine`, what the caller may do here, which is what the web app
+hides buttons by. `PUT /projects/{ref}/roles/{role}/permissions` and
+`PUT /projects/{ref}/permissions/everyone-else` replace one line of it. The
+**Roles** tab on a project is the screen all of that is drawn from.
 
 ### Auditing
 

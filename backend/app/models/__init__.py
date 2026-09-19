@@ -13,6 +13,7 @@ from app.models.base import Base
 from app.models.board import BoardColumn
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
+from app.models.permission import EVERYONE_ELSE, ProjectPermission
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.models.role import ProjectRole
@@ -32,6 +33,7 @@ from app.models.template import TaskTemplate, TemplateStage
 from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 
 __all__ = [
+    "EVERYONE_ELSE",
     "Activity",
     "AgentNote",
     "AgentSession",
@@ -54,6 +56,7 @@ __all__ = [
     "PersonKind",
     "Project",
     "ProjectMember",
+    "ProjectPermission",
     "ProjectRole",
     "Skill",
     "Task",

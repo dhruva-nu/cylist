@@ -10,11 +10,13 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.goal import Goal
 from app.models.project import Project
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.routers.tasks import read_tasks
 from app.schemas.common import Acknowledged
@@ -69,6 +71,10 @@ async def _detail(session: AsyncSession, goal: Goal) -> GoalDetail:
     )
 
 
+WRITE_GOALS = guards.on_project(Permission.GOALS)
+WRITE_THIS_GOAL = guards.for_entity(Permission.GOALS, resolved_goal)
+
+
 @router.get(
     "/projects/{project_ref}/goals",
     response_model=list[GoalRead],
@@ -112,7 +118,7 @@ async def list_goals(
 async def create_goal(
     body: GoalCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_GOALS),
     session: AsyncSession = SessionDependency,
 ) -> GoalDetail:
     """Start a goal, numbered `ATL-G1` and given a colour.
@@ -165,7 +171,7 @@ async def get_goal(
 async def update_goal(
     body: GoalUpdate,
     goal: Goal = Depends(resolved_goal),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_GOAL),
     session: AsyncSession = SessionDependency,
 ) -> GoalDetail:
     """Change any subset of a goal's details. Omitted fields are left alone.
@@ -196,7 +202,7 @@ async def update_goal(
 @router.delete("/goals/{goal_ref}", response_model=Acknowledged, summary="Delete a goal")
 async def delete_goal(
     goal: Goal = Depends(resolved_goal),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_GOAL),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a goal. Its cards stay on the board, unlinked.

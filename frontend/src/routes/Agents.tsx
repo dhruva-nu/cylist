@@ -38,6 +38,7 @@ import {
   useAnnouncer,
 } from '../components/ui'
 import styles from './Agents.module.css'
+import { usePermissions } from './usePermissions'
 
 export function Agents() {
   const { projectKey } = useParams({ from: '/p/$projectKey/agents' })
@@ -96,6 +97,7 @@ function Skills({
   announce: (message: string) => void
 }) {
   const queryClient = useQueryClient()
+  const may = usePermissions(projectKey)
   const [problem, setProblem] = useState<string | null>(null)
   const picker = useRef<HTMLInputElement>(null)
 
@@ -153,26 +155,32 @@ function Skills({
       blurb="Packaged jobs an agent can be handed. Uploading a name that already exists replaces it — the name is the skill, so a second upload is a new version of it."
       count={skills.data?.length}
       actions={
-        <>
-          {/* The real input, driven by the button beside it: a bare file input
-              cannot be styled to match anything else on the page. */}
-          <input
-            ref={picker}
-            type="file"
-            multiple
-            className="visually-hidden"
-            onChange={(event) => {
-              const chosen = Array.from(event.target.files ?? [])
-              if (chosen.length) upload.mutate(chosen)
-              // Cleared so that picking the same file twice fires twice —
-              // which is exactly what re-uploading a corrected skill is.
-              event.target.value = ''
-            }}
-          />
-          <Button variant="go" disabled={upload.isPending} onClick={() => picker.current?.click()}>
-            {upload.isPending ? 'Uploading…' : '+ Upload a skill'}
-          </Button>
-        </>
+        may('agents') ? (
+          <>
+            {/* The real input, driven by the button beside it: a bare file
+                input cannot be styled to match anything else on the page. */}
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              className="visually-hidden"
+              onChange={(event) => {
+                const chosen = Array.from(event.target.files ?? [])
+                if (chosen.length) upload.mutate(chosen)
+                // Cleared so that picking the same file twice fires twice —
+                // which is exactly what re-uploading a corrected skill is.
+                event.target.value = ''
+              }}
+            />
+            <Button
+              variant="go"
+              disabled={upload.isPending}
+              onClick={() => picker.current?.click()}
+            >
+              {upload.isPending ? 'Uploading…' : '+ Upload a skill'}
+            </Button>
+          </>
+        ) : null
       }
     >
       {problem ? <ErrorBanner>{problem}</ErrorBanner> : null}
