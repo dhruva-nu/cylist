@@ -9,9 +9,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, isMe, type Identity, type Person } from '../api/client'
+import { api, isMe, type Identity, type Member, type Person, type RoleSummary } from '../api/client'
 import { InviteDialog } from '../components/InviteDialog'
-import { Modal, ModalBody } from '../components/Modal'
+import { Field, Modal, ModalBody } from '../components/Modal'
 import { PersonDialog } from '../components/PersonDialog'
 import { PageHead } from '../components/Shell'
 import {
@@ -22,10 +22,12 @@ import {
   KindTag,
   LiveRegion,
   MailIcon,
+  RoleTag,
   cardStyles,
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectPeople.module.css'
+import { isProjectAdmin, nameIsTaken, whyUndeletable } from './projectRoles'
 
 export function ProjectPeople() {
   const { projectKey } = useParams({ from: '/p/$projectKey/people' })
@@ -34,6 +36,7 @@ export function ProjectPeople() {
   const [choosing, setChoosing] = useState(false)
   const [editing, setEditing] = useState<Person | null>(null)
   const [inviting, setInviting] = useState<Person | null>(null)
+  const [managingRoles, setManagingRoles] = useState(false)
   const { message, announce } = useAnnouncer()
 
   // Who is looking. Already in the cache — the auth gate asked for it before
@@ -46,14 +49,28 @@ export function ProjectPeople() {
     queryFn: () => api.listMembers(projectKey),
   })
 
+  // Read by everyone, not only admins: the picker on each card needs the list
+  // to draw, and a badge nobody can look up is a badge nobody can read.
+  const roles = useQuery({
+    queryKey: ['roles', projectKey],
+    queryFn: () => api.listRoles(projectKey),
+  })
+
   async function refresh() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['members', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['projects'] }),
       queryClient.invalidateQueries({ queryKey: ['people'] }),
+      queryClient.invalidateQueries({ queryKey: ['roles', projectKey] }),
     ])
   }
+
+  const setRole = useMutation({
+    mutationFn: ({ personId, role }: { personId: string; role: string | null }) =>
+      api.setMemberRole(projectKey, personId, role),
+    onSuccess: refresh,
+  })
 
   const remove = useMutation({
     mutationFn: (personId: string) => {
@@ -76,6 +93,7 @@ export function ProjectPeople() {
 
   const team = members.data.members.filter((person) => person.kind === 'team')
   const clients = members.data.members.filter((person) => person.kind === 'client')
+  const amAdmin = isProjectAdmin(members.data.members, identity.data)
 
   return (
     <>
@@ -87,6 +105,9 @@ export function ProjectPeople() {
               + Add a person
             </Button>
             <Button onClick={() => setChoosing(true)}>From the directory</Button>
+            {/* Only an admin can act on this, and a button that always
+                refuses is worse than one that is not there. */}
+            {amAdmin ? <Button onClick={() => setManagingRoles(true)}>Roles</Button> : null}
           </>
         }
       >
@@ -95,23 +116,34 @@ export function ProjectPeople() {
       </PageHead>
 
       {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
+      {setRole.error ? <ErrorBanner>{setRole.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
       <Group
         title="Team"
         people={team}
         identity={identity.data}
+        roles={roles.data ?? []}
+        amAdmin={amAdmin}
         onEdit={setEditing}
         onInvite={setInviting}
         onRemove={remove.mutate}
+        onSetRole={(personId, role) => {
+          setRole.mutate({ personId, role })
+        }}
       />
       <Group
         title="Clients"
         people={clients}
         identity={identity.data}
+        roles={roles.data ?? []}
+        amAdmin={amAdmin}
         onEdit={setEditing}
         onInvite={setInviting}
         onRemove={remove.mutate}
+        onSetRole={(personId, role) => {
+          setRole.mutate({ personId, role })
+        }}
       />
 
       {adding ? (
@@ -144,6 +176,16 @@ export function ProjectPeople() {
         />
       ) : null}
 
+      {managingRoles ? (
+        <RolesDialog
+          projectKey={projectKey}
+          roles={roles.data ?? []}
+          onSaved={announce}
+          onDone={refresh}
+          onClose={() => setManagingRoles(false)}
+        />
+      ) : null}
+
       {choosing ? (
         <DirectoryDialog
           projectKey={projectKey}
@@ -165,16 +207,22 @@ function Group({
   title,
   people,
   identity,
+  roles,
+  amAdmin,
   onEdit,
   onInvite,
   onRemove,
+  onSetRole,
 }: {
   title: string
-  people: Person[]
+  people: Member[]
   identity: Identity | undefined
+  roles: RoleSummary[]
+  amAdmin: boolean
   onEdit: (person: Person) => void
   onInvite: (person: Person) => void
   onRemove: (personId: string) => void
+  onSetRole: (personId: string, role: string | null) => void
 }) {
   return (
     <>
@@ -194,9 +242,10 @@ function Group({
                   <b>{person.name}</b>
                   <KindTag kind={person.kind} />
                   {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
+                  {person.role ? <RoleTag role={person.role} /> : null}
                   <AccountTag person={person} />
                 </div>
-                <span className={styles.role}>{person.role}</span>
+                <span className={styles.title}>{person.title}</span>
                 <div className={styles.responsibilities}>{person.responsibilities}</div>
                 <div className={styles.contact}>
                   {person.email ? (
@@ -220,6 +269,22 @@ function Group({
                   <Button variant="ghost" small danger onClick={() => onRemove(person.id)}>
                     Remove
                   </Button>
+                  {amAdmin ? (
+                    <label className={styles.rolePicker}>
+                      <span className={styles.srOnly}>{person.name}'s role</span>
+                      <select
+                        value={person.role?.id ?? ''}
+                        onChange={(event) => onSetRole(person.id, event.target.value || null)}
+                      >
+                        <option value="">No role</option>
+                        {roles.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -227,6 +292,105 @@ function Group({
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * Where a project's admin invents its roles.
+ *
+ * A list and one form, rather than a dialog per role: the whole point of the
+ * screen is seeing what a board already calls people before adding another
+ * word for the same thing.
+ */
+function RolesDialog({
+  projectKey,
+  roles,
+  onSaved,
+  onDone,
+  onClose,
+}: {
+  projectKey: string
+  roles: RoleSummary[]
+  onSaved: (message: string) => void
+  onDone: () => Promise<void>
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+
+  const add = useMutation({
+    mutationFn: () =>
+      api.createRole(projectKey, { name: name.trim(), description: description.trim() }),
+    onSuccess: async (role) => {
+      await onDone()
+      onSaved(`${role.name} is now a role on this project.`)
+      setName('')
+      setDescription('')
+    },
+  })
+
+  const drop = useMutation({
+    mutationFn: (role: RoleSummary) => api.deleteRole(projectKey, role.id),
+    onSuccess: async () => {
+      await onDone()
+      onSaved('Role deleted.')
+    },
+  })
+
+  const taken = nameIsTaken(roles, name)
+  const complete = name.trim() !== '' && !taken
+
+  return (
+    <Modal title="Roles" onClose={onClose} footer={<Button onClick={onClose}>Done</Button>}>
+      <ModalBody>
+        {add.error ? <ErrorBanner>{add.error.message}</ErrorBanner> : null}
+        {drop.error ? <ErrorBanner>{drop.error.message}</ErrorBanner> : null}
+        <p className={styles.lead}>
+          What people are on this board. A role says who somebody is; it does not change what they
+          can do.
+        </p>
+
+        <div className={styles.roleList}>
+          {roles.map((role) => {
+            const why = whyUndeletable(role)
+            return (
+              <div key={role.id} className={styles.roleRow}>
+                <RoleTag role={role} />
+                <span className={styles.roleCount}>
+                  {role.member_count === 1 ? '1 person' : `${role.member_count} people`}
+                </span>
+                <Button
+                  variant="ghost"
+                  small
+                  danger
+                  disabled={why !== null || drop.isPending}
+                  title={why ?? undefined}
+                  onClick={() => drop.mutate(role)}
+                >
+                  Delete
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+
+        <Field label="Add a role" required>
+          <input
+            value={name}
+            maxLength={40}
+            placeholder="QA"
+            onChange={(event) => setName(event.target.value)}
+          />
+        </Field>
+        {taken ? <p className={styles.clash}>This project already has a {name.trim()}.</p> : null}
+        <Field label="What it means here" hint="Optional.">
+          <input value={description} onChange={(event) => setDescription(event.target.value)} />
+        </Field>
+        <Button variant="go" disabled={!complete || add.isPending} onClick={() => add.mutate()}>
+          {add.isPending ? 'Adding…' : 'Add role'}
+        </Button>
+      </ModalBody>
+    </Modal>
   )
 }
 
@@ -296,7 +460,7 @@ function DirectoryDialog({
                 <span className={styles.optionText}>
                   <b>{person.name}</b>
                   <span>
-                    {person.kind} · {person.role}
+                    {person.kind} · {person.title}
                   </span>
                 </span>
               </label>

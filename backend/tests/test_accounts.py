@@ -36,13 +36,13 @@ from tests.conftest import (
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 SANJAY = {
     "name": "Sanjay F",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
     "responsibilities": "Approves tax and vendor accounts.",
 }
 ADITI_EMAIL = "aditi@cylist.dev"

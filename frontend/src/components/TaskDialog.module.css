@@ -114,7 +114,11 @@
   color: var(--paper) !important;
 }
 
-.role {
+/* The quiet half of a line — "Aditi K · Backend engineer", "Done · shipped".
+   Named for what it does rather than for what it first held: it carries a job
+   title, an outcome and a column name, and calling it .role stopped being
+   true the moment a role became a thing of its own. */
+.aside {
   font-weight: 400;
   opacity: 0.75;
 }

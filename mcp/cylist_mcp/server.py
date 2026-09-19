@@ -708,7 +708,10 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "work and 'client' approves or unblocks it. Pass project to list "
             "only that project's members — which is the set an assignee or a "
             "waiting_on tag must come from. Returns each person's name, kind, "
-            "role, responsibilities and email."
+            "title, responsibilities and email. Title is their job description "
+            "('Finance controller, Atlas'); a project's members also carry "
+            "role, which is what they are on that board and is null until an "
+            "admin has said."
         ),
     )
     async def list_people(

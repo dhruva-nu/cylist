@@ -38,7 +38,7 @@ async def make_project(client: AsyncClient, key: str = "ATL") -> str:
             json={
                 "name": f"Owner of {key}",
                 "kind": "team",
-                "role": "Backend engineer",
+                "title": "Backend engineer",
                 "responsibilities": "Payments.",
             },
         )

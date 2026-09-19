@@ -27,7 +27,7 @@ MAX_PASSWORD_LENGTH = 256
 class PersonCreate(Schema):
     name: str = Field(min_length=1, max_length=120)
     kind: PersonKind = Field(description="`team` does the work; `client` approves or unblocks it.")
-    role: str = Field(
+    title: str = Field(
         min_length=1,
         max_length=160,
         description="Who this is, in one line — e.g. 'Finance controller, Atlas'.",
@@ -43,7 +43,7 @@ class PersonCreate(Schema):
         description="Six-digit hex. Omit to take a stable colour from the palette.",
     )
 
-    @field_validator("name", "role", "responsibilities")
+    @field_validator("name", "title", "responsibilities")
     @classmethod
     def _strip(cls, value: str) -> str:
         stripped = value.strip()
@@ -57,7 +57,7 @@ class PersonUpdate(Schema):
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
     kind: PersonKind | None = None
-    role: str | None = Field(default=None, min_length=1, max_length=160)
+    title: str | None = Field(default=None, min_length=1, max_length=160)
     responsibilities: str | None = Field(default=None, min_length=1)
     email: EmailStr | None = None
     colour: str | None = Field(default=None, pattern=_COLOUR_PATTERN)
@@ -85,7 +85,7 @@ class PersonRead(Schema):
     id: UUID
     name: str
     kind: PersonKind
-    role: str
+    title: str
     responsibilities: str
     email: str | None
     colour: str

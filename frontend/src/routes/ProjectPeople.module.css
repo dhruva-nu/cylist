@@ -15,10 +15,13 @@
 }
 
 /* 340px rather than 300px, now that the page is allowed the width of the
-   window. A card holds a face, a name, a role, a line of responsibilities and
-   three controls, and at 300px a wide display fitted five of them across and
-   wrapped every one of those lines; 340px is the width the card was drawn at,
-   so four sit across the same room and each reads. */
+   window. A card holds a face, a name, a job title, a line of responsibilities
+   and three controls, and at 300px a wide display fitted five of them across
+   and wrapped every one of those lines; 340px is the width the card was drawn
+   at, so four sit across the same room and each reads. The role badge added in
+   CYLIST-45 sits on the name row, which already wraps, so it costs the card no
+   height until a name is long — which is why it went there and not on a line
+   of its own. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -65,7 +68,7 @@
   text-transform: uppercase;
 }
 
-.role {
+.title {
   color: var(--ink-2);
   font-size: 13.5px;
 }
@@ -172,4 +175,71 @@
 .invited {
   background: var(--hold-soft);
   color: var(--hold);
+}
+
+/* The role picker sits in the contact row with the buttons, because changing
+   what somebody is on a board is the same kind of act as editing or removing
+   them, and giving it a row of its own would put a control on every card for
+   a thing most people set once. Shown to admins only. */
+.rolePicker select {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* Visible to a screen reader and to nobody else: the select is labelled by the
+   person whose card it is on, which the eye reads from the card and the ear
+   cannot. */
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  white-space: nowrap;
+}
+
+.lead {
+  margin-bottom: 14px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.roleList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 18px;
+}
+
+.roleRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.roleRow:hover {
+  background: var(--paper-2);
+}
+
+/* How many people wear it, which is the number that decides whether the
+   delete button is going to work. */
+.roleCount {
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+/* Said before the round trip rather than after it, so "Reviewer" and
+   "reviewer" do not look like two different answers to somebody typing. */
+.clash {
+  margin: -6px 0 12px;
+  color: var(--blocked);
+  font-size: 12.5px;
 }

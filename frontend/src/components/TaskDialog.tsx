@@ -353,7 +353,7 @@ function TaskDetailView({
             <span className={styles.person}>
               <Avatar name={task.assignee.name} colour={task.assignee.colour} />
               {task.assignee.name}
-              <span className={styles.role}>· {task.assignee.role.split(',')[0]}</span>
+              <span className={styles.aside}>· {task.assignee.title.split(',')[0]}</span>
             </span>
           </ReadField>
           <ReadField label="Due date">
@@ -389,9 +389,9 @@ function TaskDetailView({
             // card still on its way says where it is and nothing more.
             <ReadField label="Column">
               {column?.name ?? '—'}
-              {task.outcome ? <span className={styles.role}>· {task.outcome}</span> : null}
+              {task.outcome ? <span className={styles.aside}>· {task.outcome}</span> : null}
               {task.finished_at ? (
-                <span className={styles.role}>
+                <span className={styles.aside}>
                   · finished {formatDue(task.finished_at.slice(0, 10))}
                 </span>
               ) : null}
@@ -511,7 +511,7 @@ function AgentSessions({
                 wording the history below uses. */}
             <span className={styles.agent}>agent</span>
             {session.actor_label}
-            <span className={styles.role}>
+            <span className={styles.aside}>
               · started {formatWhen(session.started_at)} · last seen{' '}
               {silentFor(session.last_seen_at, now)} ago
             </span>
@@ -1274,7 +1274,7 @@ function TaskForm({
               >
                 {members.map((person) => (
                   <option key={person.id} value={person.id}>
-                    {person.name} — {person.role}
+                    {person.name} — {person.title}
                   </option>
                 ))}
               </select>
@@ -1381,7 +1381,7 @@ function TaskForm({
                     >
                       <Avatar name={person.name} colour={person.colour} />
                       {person.name.split(' ')[0]}
-                      <span className={styles.role}>· {person.role.split(',')[0]}</span>
+                      <span className={styles.aside}>· {person.title.split(',')[0]}</span>
                     </button>
                   ))}
                 </div>

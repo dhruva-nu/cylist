@@ -361,7 +361,7 @@ def test_people_new_posts_the_required_fields(run: Runner, recorder: fake_api.Re
         "Ravi S",
         "--kind",
         "team",
-        "--role",
+        "--title",
         "Data engineer",
         "--responsibilities",
         "Owns the export pipeline.",

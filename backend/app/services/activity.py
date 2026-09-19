@@ -376,6 +376,19 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
         f"Set the project's membership to {p.get('member_count', 0)} "
         f"{'person' if p.get('member_count') == 1 else 'people'}."
     ),
+    # --- Roles, and who wears them ------------------------------------------
+    "role.created": lambda p: f"Added the role {_quoted(p.get('name'))}.",
+    "role.updated": lambda p: (
+        f"Renamed the role {_quoted(p.get('was'))} to {_quoted(p.get('name'))}."
+        if p.get("was")
+        else f"Changed the role {_quoted(p.get('name'))}'s {_fields(p)}."
+    ),
+    "role.deleted": lambda p: f"Deleted the role {_quoted(p.get('name'))}.",
+    "member.role_set": lambda p: (
+        f"Made {p.get('person')} {_quoted(p.get('role'))} on this project."
+        if p.get("role")
+        else f"Took {p.get('person')}'s role off."
+    ),
     # --- The board's columns ------------------------------------------------
     "column.created": lambda p: f"Added the column {_quoted(p.get('name'))}.",
     "column.updated": lambda p: f"Changed a column's {_fields(p)}.",

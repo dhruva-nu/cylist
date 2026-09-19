@@ -78,8 +78,9 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | Table | Key columns | Notes |
 |---|---|---|
 | `project` | `key` (unique, e.g. ATL), `name`, `description`, `color`, `archived_at` | |
-| `person` | `name`, `kind` (`team`/`client`), `role`, `responsibilities`, `email`, `color` | **Global directory** — a client can appear in several projects |
-| `project_member` | `project_id`, `person_id`, PK(both) | membership; assignee/tag pickers read from this |
+| `person` | `name`, `kind` (`team`/`client`), `title`, `responsibilities`, `email`, `color`, `password_hash` | **Global directory** — a client can appear in several projects. `title` is the job description; it was called `role` until roles became a thing of their own |
+| `project_role` | `project_id`, `name`, `description`, `colour`, `is_admin` | what somebody is on *this* board. Unique name per project; at most one `is_admin` role, seeded on every project and held by whoever created it |
+| `project_member` | `project_id`, `person_id`, PK(both), `role_id` (nullable) | membership; assignee/tag pickers read from this. `role_id` is a composite FK on `(project_id, role_id)`, so a member cannot wear another project's role |
 | `board_column` | `project_id`, `name`, `description`, `position` | `CHECK` + service rule: 2 ≤ count ≤ 8; first column (`position=0`) is where new tasks land |
 | `goal` | `project_id`, `number` (per-project sequence → ATL-G1), `name`, `description`, `colour`, `status` (`open`/`achieved`/`dropped`), `achieved_at`, `target_date`, `owner_id`→person | an epic. Unique name per project; progress is counted from its cards, never stored |
 | `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards |
@@ -189,8 +190,10 @@ Each phase ends with something usable end-to-end.
 2. **Status-change reason is required** for On hold / Blocked, enforced by the API, stored as a comment.
 3. **Tagging people** is available on status changes only in v1; @-mentions in free comments are a later add.
 4. **Accounts on the people directory + API tokens with scopes**; a token
-   acts as whoever minted it. No roles, and membership is a picker rather
-   than a fence.
+   acts as whoever minted it. Membership is a picker rather than a fence.
+   *Revised by CYLIST-45:* there are roles now, but they are still not a
+   fence — a role says who somebody is on a board, and the only thing any of
+   them permits is the admin role's holder managing the others.
 5. **Vault**: only the secret value is encrypted; reveal is a distinct, logged, scoped action.
 6. **Uploads are content-addressed** (sha256) with a configurable size cap (default 200 MB).
 7. **No Tailwind / component library** — the mock's design system is ported as CSS variables + modules.
@@ -208,4 +211,17 @@ These came up while implementing and are worth knowing:
 14. **A goal takes the card's left-hand rail.** The rail used to be the status — green, amber, red, grey. A card on a goal now wears the goal's colour there instead, and only a card on no goal falls back to the status colours. Status was already on the card three times over (the tint, the icon tile, the word on the pill); a goal had nowhere else on a board to be.
 15. **A card belongs to at most one goal**, and a sub-task to none of its own — its card is what belongs to the goal. Both are check constraints rather than conventions: one colour on one rail, and one honest answer to "what is left on this goal".
 16. **A goal's progress is never stored.** It is counted from its cards on every read. A percentage kept beside them is a number that can disagree with them.
-17. **A goal cannot be marked achieved while a card on it is open** — the same shape as the rule that keeps a card out of the last column with a sub-task outstanding, and the refusal names what is holding it open. Dropping a goal carries no such rule.
+17. **A role is per project, and only Admin is seeded.** The same person
+    reviews on one board and does the work on another, so a directory-wide
+    role could only say one of those. Every project gets an `Admin` role and
+    its creator wears it; everybody else starts with none, because a role is
+    something an admin says about you and "not said yet" is an honest state
+    a seeded default would have hidden.
+18. **A project never has to lose its admin, and never refuses a membership
+    edit over one.** Taking the role off its last holder is refused and names
+    them — the intent is unambiguous and so is the fix. Dropping that person
+    from the project is not the same act: that caller is saying who is on the
+    board, so the role passes to whoever has been on it longest. If the last
+    admin is archived, an `admin`-scoped credential can step in, which is the
+    only way back from a board nobody can manage.
+19. **A goal cannot be marked achieved while a card on it is open** — the same shape as the rule that keeps a card out of the last column with a sub-task outstanding, and the refusal names what is holding it open. Dropping a goal carries no such rule.

@@ -13,12 +13,13 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.models.person import PersonKind
+from app.models.person import Person, PersonKind
 from app.models.project import Project
 from app.models.task import TaskStatus
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
+    MemberRead,
     Membership,
     MembershipUpdate,
     ProjectCreate,
@@ -26,7 +27,18 @@ from app.schemas.projects import (
     ProjectSummary,
     ProjectUpdate,
 )
-from app.services import activity, agents, columns, files, goals, projects, tasks, vault
+from app.schemas.roles import RoleRead
+from app.services import (
+    activity,
+    agents,
+    columns,
+    files,
+    goals,
+    projects,
+    roles,
+    tasks,
+    vault,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -196,13 +208,38 @@ async def archive_project(
     return Acknowledged()
 
 
+async def _membership(session: AsyncSession, project: Project, members: list[Person]) -> Membership:
+    """Build the member list with each person's role on this project attached.
+
+    The roles come from a query of their own because ``Project.members`` runs
+    through ``secondary=`` and so never sees the join row the role sits on —
+    see :func:`app.services.roles.member_roles`.
+    """
+    worn = await roles.member_roles(session, project)
+    return Membership(
+        members=[
+            MemberRead(
+                **PersonRead.model_validate(person).model_dump(),
+                role=(RoleRead.model_validate(worn[person.id]) if person.id in worn else None),
+            )
+            for person in members
+        ]
+    )
+
+
 @router.get("/{project_ref}/members", response_model=Membership, summary="List members")
 async def list_members(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
 ) -> Membership:
-    """Who is on this project — the pool the assignee picker draws from."""
-    return Membership(members=[PersonRead.model_validate(p) for p in project.members])
+    """Who is on this project, and what each of them is on it.
+
+    The pool the assignee picker draws from, and the one place a person's role
+    is read from — `role` is null for anybody an admin has not said what they
+    are yet.
+    """
+    return await _membership(session, project, list(project.members))
 
 
 @router.put(
@@ -233,4 +270,4 @@ async def set_members(
         project_id=project.id,
         payload={"member_count": len(people)},
     )
-    return Membership(members=[PersonRead.model_validate(person) for person in people])
+    return await _membership(session, project, people)

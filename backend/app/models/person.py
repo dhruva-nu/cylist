@@ -76,8 +76,14 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
 
-    role: Mapped[str] = mapped_column(String(160), nullable=False)
-    """Who this is, in one line — "Finance controller, Atlas"."""
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    """Who this is, in one line — "Finance controller, Atlas".
+
+    Called ``title`` rather than ``role`` since CYLIST-45, which gave the word
+    role to a thing a project's admin creates and hands out. This is the other
+    thing: a job description, written by whoever added the person, that no
+    board has any opinion about.
+    """
 
     responsibilities: Mapped[str] = mapped_column(Text, nullable=False)
     """What they do, and so what you would tag them about when work stalls."""

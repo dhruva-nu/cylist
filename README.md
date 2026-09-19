@@ -100,6 +100,27 @@ that works:
 An agent that tidies your board wants `read` and `write` — and nothing else.
 It cannot mint itself a broader token, because that needs `admin`.
 
+### Roles
+
+Scopes say what a *credential* may do anywhere. A **role** says who somebody is
+on one board — "Reviewer", "QA", "Designer" — and it is the project's admin who
+invents them. Every project is created with one role, `Admin`, worn by whoever
+created it; everybody added afterwards has no role until an admin says what
+they are.
+
+A role permits nothing. It is worn beside a name the way `team` and `client`
+are, and the board has no opinion about it. The one exception is the role that
+makes the rest possible: only a holder of `Admin` can create a role, rename
+one, or hand one out. Because a credential acts as whoever minted it, an agent
+token owned by an admin can do that too — narrowing *that* is what a smaller
+scope on the token is for.
+
+Roles are per project, so the same person can be the Admin of one board and a
+Reviewer on another. `GET /projects/{ref}/roles` lists them, and each entry in
+`GET /projects/{ref}/members` carries the one its member wears — alongside
+`title`, which is the job description the directory holds and is not a role at
+all.
+
 ### Auditing
 
 Every mutation writes a row to `activity` recording who did it, what changed,

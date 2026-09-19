@@ -9,7 +9,11 @@ from cylist_cli import output
 from cylist_cli.context import Context
 
 KINDS = ("team", "client")
-ROLE_WIDTH = 38
+TITLE_WIDTH = 38
+"""How much of a job title a row shows before it is cut.
+
+The titles that run long — "Finance controller, Atlas" — say the useful half
+first, so a cut here loses the qualifier rather than the job."""
 
 
 def register(subparsers: Any) -> None:
@@ -27,7 +31,7 @@ def register(subparsers: Any) -> None:
     new = actions.add_parser("new", help="Add someone to the directory.")
     new.add_argument("--name", required=True)
     new.add_argument("--kind", required=True, choices=KINDS)
-    new.add_argument("--role", required=True, help="Who they are, in one line.")
+    new.add_argument("--title", required=True, help="Who they are, in one line.")
     new.add_argument(
         "--responsibilities", required=True, help="What they do, and so what to tag them about."
     )
@@ -52,23 +56,35 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         output.emit_json(people)
         return
 
+    # ROLE is only asked for when the listing is a project's, because that is
+    # the only place a person has one: a role belongs to a board, not to the
+    # directory. TITLE is the job description and is always there.
+    on_a_project = bool(args.project)
     rows = [
         [
             str(person["name"]),
             str(person["kind"]),
-            output.truncate(str(person.get("role", "")), ROLE_WIDTH),
+            output.truncate(str(person.get("title", "")), TITLE_WIDTH),
+            *([_role_of(person)] if on_a_project else []),
             str(person.get("email") or ""),
         ]
         for person in people
     ]
-    output.table(["NAME", "KIND", "ROLE", "EMAIL"], rows, empty="Nobody in the directory yet.")
+    headings = ["NAME", "KIND", "TITLE", *(["ROLE"] if on_a_project else []), "EMAIL"]
+    output.table(headings, rows, empty="Nobody in the directory yet.")
+
+
+def _role_of(person: dict[str, Any]) -> str:
+    """What this person is on the project, or nothing if nobody has said."""
+    role = person.get("role")
+    return str(role["name"]) if isinstance(role, dict) else ""
 
 
 def _new(args: argparse.Namespace, ctx: Context) -> None:
     body: dict[str, Any] = {
         "name": args.name,
         "kind": args.kind,
-        "role": args.role,
+        "title": args.title,
         "responsibilities": args.responsibilities,
     }
     if args.email:

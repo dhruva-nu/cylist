@@ -24,7 +24,7 @@ HERMES = {"key": "HRM", "name": "Hermes Notifications"}
 UPLOADER = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 UNKNOWN_ID = "00000000-0000-7000-8000-000000000000"

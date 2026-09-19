@@ -58,7 +58,13 @@ export interface Person {
   id: string
   name: string
   kind: PersonKind
-  role: string
+  /**
+   * Their job description — "Finance controller, Atlas".
+   *
+   * Called `title` rather than `role` since CYLIST-45, which gave the word
+   * role to a thing a project's admin creates and hands out. See `Role`.
+   */
+  title: string
   responsibilities: string
   email: string | null
   colour: string
@@ -84,9 +90,47 @@ export const isMe = (person: Pick<Person, 'id'>, identity: Identity | undefined)
 export interface PersonInput {
   name: string
   kind: PersonKind
-  role: string
+  title: string
   responsibilities: string
   email?: string | null
+}
+
+/**
+ * A role on a project — "Reviewer", "QA" — invented by that project's admin.
+ *
+ * Per project, not per person: the same person can be the Admin of one board
+ * and a Reviewer on another. What a role *permits* is nothing at all, with
+ * one exception: holders of the admin role manage the project's roles.
+ */
+export interface Role {
+  id: string
+  name: string
+  description: string
+  colour: string
+  /** Whether holders of this role may manage the project's roles. */
+  is_admin: boolean
+}
+
+/** A role as the page an admin manages them from needs it. */
+export interface RoleSummary extends Role {
+  member_count: number
+  created_at: string
+}
+
+export interface RoleInput {
+  name: string
+  description?: string
+  colour?: string | null
+}
+
+/**
+ * A person as they appear on a project, rather than in the directory.
+ *
+ * `role` is null until an admin has said what they are, which is what every
+ * member starts as.
+ */
+export interface Member extends Person {
+  role: Role | null
 }
 
 export interface Project {
@@ -938,11 +982,28 @@ export const api = {
   archiveProject: (ref: string) =>
     request<{ ok: boolean }>(`/projects/${ref}`, { method: 'DELETE' }),
 
-  listMembers: (ref: string) => request<{ members: Person[] }>(`/projects/${ref}/members`),
+  listMembers: (ref: string) => request<{ members: Member[] }>(`/projects/${ref}/members`),
   setMembers: (ref: string, personIds: string[]) =>
-    request<{ members: Person[] }>(`/projects/${ref}/members`, {
+    request<{ members: Member[] }>(`/projects/${ref}/members`, {
       method: 'PUT',
       body: body({ person_ids: personIds }),
+    }),
+
+  listRoles: (ref: string) => request<RoleSummary[]>(`/projects/${ref}/roles`),
+  createRole: (ref: string, input: RoleInput) =>
+    request<RoleSummary>(`/projects/${ref}/roles`, { method: 'POST', body: body(input) }),
+  updateRole: (ref: string, roleRef: string, input: Partial<RoleInput>) =>
+    request<RoleSummary>(`/projects/${ref}/roles/${roleRef}`, {
+      method: 'PATCH',
+      body: body(input),
+    }),
+  deleteRole: (ref: string, roleRef: string) =>
+    request<void>(`/projects/${ref}/roles/${roleRef}`, { method: 'DELETE' }),
+  /** `role` is a role id or name; null takes their role off. */
+  setMemberRole: (ref: string, personId: string, role: string | null) =>
+    request<Role | null>(`/projects/${ref}/members/${personId}/role`, {
+      method: 'PUT',
+      body: body({ role }),
     }),
 
   /** The project's root folder, with the whole tree nested inside it. */

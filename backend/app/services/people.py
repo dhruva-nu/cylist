@@ -31,7 +31,7 @@ async def create(session: AsyncSession, data: PersonCreate) -> Person:
     person = Person(
         name=data.name,
         kind=data.kind,
-        role=data.role,
+        title=data.title,
         responsibilities=data.responsibilities,
         email=data.email,
         colour=data.colour or colour_for(data.name),

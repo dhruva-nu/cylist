@@ -28,6 +28,8 @@ ADITI_ID = "0192f3c4-0002-7000-8000-00000000ad17"
 LENA_ID = "0192f3c4-0002-7000-8000-00000000012a"
 LEO_ID = "0192f3c4-0002-7000-8000-0000000001e0"
 
+REVIEWER_ID = "0192f3c4-0004-7000-8000-000000000101"
+
 TASK_ONE_ID = "0192f3c4-0003-7000-8000-000000000001"
 TASK_TWO_ID = "0192f3c4-0003-7000-8000-000000000002"
 SUBTASK_ID = "0192f3c4-0003-7000-8000-000000000021"
@@ -49,7 +51,8 @@ ADITI = {
     "id": ADITI_ID,
     "name": "Aditi K",
     "kind": "team",
-    "role": "Engineer, Atlas",
+    "title": "Engineer, Atlas",
+    "role": {"id": REVIEWER_ID, "name": "Reviewer", "colour": "#3B6FC2", "is_admin": False},
     "responsibilities": "Ships the migration.",
     "email": "aditi@example.com",
     "colour": "#c8553d",
@@ -60,7 +63,8 @@ LENA = {
     "id": LENA_ID,
     "name": "Lena W",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
+    "role": None,
     "responsibilities": "Approves the invoice schedule.",
     "email": "lena@example.com",
     "colour": "#3d5a80",
@@ -71,7 +75,8 @@ LEO = {
     "id": LEO_ID,
     "name": "Leo Wren",
     "kind": "client",
-    "role": "Legal, Atlas",
+    "title": "Legal, Atlas",
+    "role": None,
     "responsibilities": "Signs the contracts.",
     "email": None,
     "colour": "#7d8471",
@@ -393,7 +398,7 @@ PERSON = {
     "id": "0192f3c4-000a-7000-8000-00000000000a",
     "name": "Dhruva N",
     "kind": "team",
-    "role": "Tech lead",
+    "title": "Tech lead",
     "responsibilities": "Runs this Cylist.",
     "email": "dhruva@cylist.dev",
     "colour": "#1D7D46",

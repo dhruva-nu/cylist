@@ -108,7 +108,7 @@ export function MentionBox({
           id: person.id,
           name: person.name,
           mark: <Avatar name={person.name} colour={person.colour} />,
-          note: person.role,
+          note: person.title,
         }))
 
   function pick(suggestion: Suggestion) {

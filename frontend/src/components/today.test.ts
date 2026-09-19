@@ -20,7 +20,7 @@ function person(id: string, name: string): Person {
     id,
     name,
     kind: 'team',
-    role: '',
+    title: '',
     responsibilities: '',
     email: null,
     colour: '#1D7D46',

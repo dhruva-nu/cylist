@@ -15,19 +15,19 @@ ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 SANJAY = {
     "name": "Sanjay F",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
     "responsibilities": "Approves anything touching tax or vendor accounts.",
 }
 LENA = {
     "name": "Lena W",
     "kind": "client",
-    "role": "Legal counsel, Atlas",
+    "title": "Legal counsel, Atlas",
     "responsibilities": "Signs off licences and contracts.",
 }
 UNKNOWN_ID = "00000000-0000-7000-8000-000000000000"

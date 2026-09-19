@@ -15,6 +15,7 @@ from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
+from app.models.role import ProjectRole
 from app.models.task import (
     ChecklistState,
     CommentKind,
@@ -53,6 +54,7 @@ __all__ = [
     "PersonKind",
     "Project",
     "ProjectMember",
+    "ProjectRole",
     "Skill",
     "Task",
     "TaskChecklistItem",

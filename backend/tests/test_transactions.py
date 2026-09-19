@@ -25,7 +25,7 @@ from app.main import create_app
 PERSON = {
     "name": "Priya R",
     "kind": "team",
-    "role": "Platform engineer",
+    "title": "Platform engineer",
     "responsibilities": "Keeps the deploys boring.",
 }
 

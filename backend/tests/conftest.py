@@ -176,7 +176,7 @@ async def ensure_owner(client: AsyncClient) -> Person:
         person = Person(
             name=OWNER_NAME,
             kind=PersonKind.TEAM,
-            role="Tech lead",
+            title="Tech lead",
             responsibilities="Owns the architecture and the cutover plan.",
             email=OWNER_EMAIL,
             colour=colour_for(OWNER_NAME),

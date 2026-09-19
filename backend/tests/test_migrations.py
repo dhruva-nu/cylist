@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -592,3 +592,159 @@ class TestUndoingTheWidenedReason:
         await rewind(NARROW_REASON)
 
         assert await reasons(connection) == ["session_ended"]
+
+
+# --- An admin for every project that predates roles ------------------------
+
+BEFORE_ROLES = "0023"
+WITH_ROLES = "0024"
+
+
+async def seed_a_board_with_members(connection: AsyncConnection) -> None:
+    """One project with three people on it, joined in a known order.
+
+    The order is the whole point: the back-fill has to pick *one* of them to
+    be the admin, and which one is the only interesting thing it decides.
+    ``created_at`` is written by hand rather than left to ``now()``, because
+    three rows inserted in one statement share a transaction timestamp and the
+    question would then have no answer to test.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 0)"
+        )
+    )
+    for name, joined, archived in (
+        ("Rohan T", datetime(2026, 1, 3, tzinfo=UTC), None),
+        ("Aditi K", datetime(2026, 1, 1, tzinfo=UTC), None),
+        ("Sanjay F", datetime(2026, 1, 2, tzinfo=UTC), None),
+    ):
+        await connection.execute(
+            text(
+                "INSERT INTO person (id, name, kind, role, responsibilities, colour,"
+                " archived_at)"
+                " VALUES (gen_random_uuid(), :name, 'team', 'Engineer', '', '#1D7D46',"
+                " :archived)"
+            ),
+            {"name": name, "archived": archived},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO project_member (project_id, person_id, created_at, updated_at)"
+                " SELECT project.id, person.id, :joined, :joined"
+                " FROM project, person WHERE person.name = :name"
+            ),
+            {"name": name, "joined": joined},
+        )
+
+
+async def admins(connection: AsyncConnection) -> list[Any]:
+    """Whoever ended up wearing the admin role, by name."""
+    rows = await connection.execute(
+        text(
+            "SELECT person.name FROM project_member"
+            " JOIN project_role ON project_role.id = project_member.role_id"
+            " JOIN person ON person.id = project_member.person_id"
+            " WHERE project_role.is_admin"
+        )
+    )
+    return list(rows.scalars())
+
+
+class TestBackFillingAnAdmin:
+    async def test_every_project_gets_the_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        names = await connection.execute(text("SELECT name FROM project_role"))
+        assert list(names.scalars()) == ["Admin"]
+
+    async def test_the_longest_standing_member_wears_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Not the first row inserted — the earliest to have joined."""
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        assert await admins(connection) == ["Aditi K"]
+
+    async def test_nobody_else_is_given_a_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """A role is something said about somebody. The migration says it once."""
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        unworn = await connection.execute(
+            text("SELECT count(*) FROM project_member WHERE role_id IS NULL")
+        )
+        assert unworn.scalar() == 2
+
+    async def test_a_project_with_nobody_on_it_still_gets_the_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Unworn until somebody joins, which the service then notices."""
+        await migrate(BEFORE_ROLES)
+        await connection.execute(
+            text(
+                "INSERT INTO project (id, key, name, description, colour, task_counter)"
+                " VALUES (gen_random_uuid(), 'ORB', 'Orbit Internal Portal', '',"
+                " '#3B6FC2', 0)"
+            )
+        )
+
+        await migrate(WITH_ROLES)
+
+        assert await admins(connection) == []
+        roles = await connection.execute(text("SELECT count(*) FROM project_role"))
+        assert roles.scalar() == 1
+
+    async def test_the_job_title_moves_to_its_own_word(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """``person.role`` was always the job title; roles are now a real thing."""
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        titles = await connection.execute(text("SELECT DISTINCT title FROM person"))
+        assert list(titles.scalars()) == ["Engineer"]
+
+
+class TestUndoingRoles:
+    async def test_puts_the_job_title_back_and_drops_the_roles(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+        await migrate(WITH_ROLES)
+
+        await rewind(BEFORE_ROLES)
+
+        titles = await connection.execute(text("SELECT DISTINCT role FROM person"))
+        assert list(titles.scalars()) == ["Engineer"]
+        tables = await connection.execute(text("SELECT to_regclass('project_role') IS NULL"))
+        assert tables.scalar() is True

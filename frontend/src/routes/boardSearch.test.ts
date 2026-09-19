@@ -24,7 +24,7 @@ const ADITI: Person = {
   id: 'person-1',
   name: 'Aditi K',
   kind: 'team',
-  role: 'Backend engineer',
+  title: 'Backend engineer',
   responsibilities: '',
   email: null,
   colour: '#1D7D46',

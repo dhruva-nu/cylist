@@ -12,7 +12,7 @@ from tests.conftest import INVITEE_PASSWORD, client_for, open_account
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 

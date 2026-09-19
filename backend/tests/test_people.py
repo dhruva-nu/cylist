@@ -13,14 +13,14 @@ from tests.conftest import INVITEE_PASSWORD, client_for, open_account
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments, Stripe integration and webhook reliability.",
     "email": "aditi@think41.com",
 }
 SANJAY = {
     "name": "Sanjay F",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
     "responsibilities": "Approves anything touching tax or vendor accounts.",
 }
 
@@ -119,16 +119,16 @@ class TestUpdating:
         person = (await signed_in.post("/people", json=ADITI)).json()
 
         updated = (
-            await signed_in.patch(f"/people/{person['id']}", json={"role": "Tech lead"})
+            await signed_in.patch(f"/people/{person['id']}", json={"title": "Tech lead"})
         ).json()
 
-        assert updated["role"] == "Tech lead"
+        assert updated["title"] == "Tech lead"
         assert updated["name"] == "Aditi K"
         assert updated["responsibilities"] == ADITI["responsibilities"]
 
     async def test_unknown_person_is_a_clean_404(self, signed_in: AsyncClient) -> None:
         response = await signed_in.patch(
-            "/people/00000000-0000-7000-8000-000000000000", json={"role": "x"}
+            "/people/00000000-0000-7000-8000-000000000000", json={"title": "x"}
         )
 
         assert response.status_code == 404

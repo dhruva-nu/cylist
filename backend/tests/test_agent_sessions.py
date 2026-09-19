@@ -17,7 +17,7 @@ ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 

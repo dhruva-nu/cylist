@@ -7,6 +7,7 @@ import {
   type FiledItem,
   type Person,
   type PersonKind,
+  type Role,
   type TaskPriority,
   type TaskStatus,
   type TaskType,
@@ -181,7 +182,7 @@ export function Tagged({
             <span
               key={index}
               className={styles.mention}
-              title={`${run.person.name} — ${run.person.role}`}
+              title={`${run.person.name} — ${run.person.title}`}
             >
               {run.text}
             </span>
@@ -668,6 +669,26 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
 
 export function KindTag({ kind }: { kind: PersonKind }) {
   return <span className={`${styles.tag} ${styles[kind]}`}>{kind}</span>
+}
+
+/**
+ * What somebody is on a project, worn beside their name.
+ *
+ * Coloured inline rather than by class, because a role is invented by whoever
+ * runs the board and so has no name this stylesheet could have known. The fill
+ * is the role's own colour and the ink is whatever reads on it — the same
+ * calculation an avatar makes, for the same reason.
+ */
+export function RoleTag({ role }: { role: Pick<Role, 'name' | 'colour' | 'description'> }) {
+  return (
+    <span
+      className={styles.tag}
+      style={{ background: role.colour, color: readableInkOn(role.colour) }}
+      title={role.description || undefined}
+    >
+      {role.name}
+    </span>
+  )
 }
 
 export function Eyebrow({ children }: { children: ReactNode }) {

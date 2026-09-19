@@ -23,7 +23,7 @@ function person(name: string): Person {
     id: name,
     name,
     kind: 'team',
-    role: 'Backend engineer',
+    title: 'Backend engineer',
     responsibilities: '',
     email: null,
     colour: '#1D7D46',

@@ -22,7 +22,7 @@ import { Button, ErrorBanner } from './ui'
 const EMPTY: PersonInput = {
   name: '',
   kind: 'team',
-  role: '',
+  title: '',
   responsibilities: '',
   email: '',
 }
@@ -50,7 +50,7 @@ export function PersonDialog({
       ? {
           name: person.name,
           kind: person.kind,
-          role: person.role,
+          title: person.title,
           responsibilities: person.responsibilities,
           email: person.email ?? '',
         }
@@ -77,7 +77,7 @@ export function PersonDialog({
     },
   })
 
-  const complete = form.name.trim() && form.role.trim() && form.responsibilities.trim()
+  const complete = form.name.trim() && form.title.trim() && form.responsibilities.trim()
 
   return (
     <Modal
@@ -117,8 +117,8 @@ export function PersonDialog({
         </FieldPair>
         <Field label="Who is this?" required>
           <input
-            value={form.role}
-            onChange={(event) => setForm({ ...form, role: event.target.value })}
+            value={form.title}
+            onChange={(event) => setForm({ ...form, title: event.target.value })}
             placeholder="Finance controller, Atlas"
           />
         </Field>
