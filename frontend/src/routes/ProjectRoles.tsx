@@ -8,6 +8,17 @@
  * put the first half in a dialog off the People page; this is where it lives
  * now, and People links across to it.
  *
+ * **Roles down the left, one role's detail on the right** — the vault's shape,
+ * for the vault's reason. A role now carries three different kinds of answer
+ * (what it may do, where on the board, how far it may read) and laying every
+ * role's three out at once made a page you scrolled to compare two things that
+ * were never on screen together. One role at a time is also how the decision
+ * is actually made.
+ *
+ * Who holds a role lives in that role's pane rather than in a directory of its
+ * own, which is the other half of the same idea: the list of people with no
+ * role is the "Everyone else" line, so nothing is hidden by grouping them.
+ *
  * Everybody can read this page. Only an admin can change anything on it —
  * which is the server's rule, mirrored here so that a reader who cannot act
  * is shown why rather than offered buttons that refuse.
@@ -38,7 +49,6 @@ import {
   ErrorBanner,
   KindTag,
   LiveRegion,
-  RoleTag,
   cardStyles,
   useAnnouncer,
 } from '../components/ui'
@@ -77,6 +87,16 @@ export function ProjectRoles() {
    */
   const [pending, setPending] = useState<Record<string, Permission[]>>({})
   const [pendingColumns, setPendingColumns] = useState<Record<string, ColumnRule[]>>({})
+
+  /**
+   * Which line the right-hand pane is about.
+   *
+   * Null means "whichever is first", resolved below rather than written into
+   * state by an effect: the first line is the admin role, a deleted role
+   * falls back to it without anything having to notice, and the pane is never
+   * about nothing.
+   */
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
   const members = useQuery({
@@ -166,6 +186,9 @@ export function ProjectRoles() {
 
   const amAdmin = grid.data.may_manage
   const catalogue = grid.data.catalogue
+  const lines = inOrder(grid.data)
+  const selected = lines.find((line) => keyOf(line) === selectedKey) ?? lines[0]
+  if (selected === undefined) return <EmptyState>This project has no roles.</EmptyState>
 
   return (
     <>
@@ -196,103 +219,67 @@ export function ProjectRoles() {
         </p>
       ) : null}
 
-      <h2 className={styles.heading}>Who is what here</h2>
-      <People
-        members={members.data.members}
-        identity={identity.data}
-        roles={roles.data ?? []}
-        amAdmin={amAdmin}
-        onSetRole={(personId, role) => setRole.mutate({ personId, role })}
-      />
+      <div className={styles.split}>
+        <nav className={styles.list} aria-label="Roles on this project">
+          {lines.map((line) => (
+            <button
+              key={keyOf(line)}
+              type="button"
+              className={`${styles.listRow} ${keyOf(line) === keyOf(selected) ? styles.selected : ''}`}
+              aria-current={keyOf(line) === keyOf(selected)}
+              onClick={() => setSelectedKey(keyOf(line))}
+            >
+              <span className={styles.dot} style={{ background: line.colour }} aria-hidden />
+              <span className={styles.listName}>{line.name}</span>
+              <span className={styles.listCount}>{line.member_count || ''}</span>
+            </button>
+          ))}
+        </nav>
 
-      <h2 className={styles.heading}>What each role can do</h2>
-      <p className={styles.lead}>
-        A new role starts with whatever somebody here with no role can already do, so naming
-        somebody is never a demotion by accident.
-        {/* Said only to the reader it is about: to everybody else it describes
-            tick boxes they cannot reach. */}
-        {amAdmin ? ' Changes save as you make them.' : null}
-      </p>
-
-      <div className={styles.grid}>
-        {inOrder(grid.data).map((line) => {
-          const held = pending[keyOf(line)] ?? line.permissions
-          const board = pendingColumns[keyOf(line)] ?? line.columns
-          const role = (roles.data ?? []).find((candidate) => candidate.id === line.role_id)
-          const undeletable = role ? whyUndeletable(role) : 'This is not a role anybody holds.'
-
-          return (
-            <section key={keyOf(line)} className={`${cardStyles.card} ${styles.role}`}>
-              <header className={styles.roleHead}>
-                <span className={styles.dot} style={{ background: line.colour }} aria-hidden />
-                <b>{line.name}</b>
-                <span className={styles.count}>
-                  {summarise({ ...line, permissions: held }, catalogue)}
-                </span>
-                <span className={styles.people}>{countPeople(line.member_count)}</span>
-                {/* Not drawn on the admin role at all: it cannot be deleted, and a
-                    greyed button explaining that is still a button. */}
-                {amAdmin && role && !isEveryoneElse(line) && !isFixed(line) ? (
-                  <Button
-                    variant="ghost"
-                    small
-                    danger
-                    disabled={undeletable !== null || drop.isPending}
-                    title={undeletable ?? undefined}
-                    onClick={() => drop.mutate(role)}
-                  >
-                    Delete
-                  </Button>
-                ) : null}
-              </header>
-
-              {/* One line, not two: the admin role carries a seeded
-                  description that says what `explain` says, and printing both
-                  reads as a stutter. */}
-              {(explain(line) ?? role?.description) ? (
-                <p className={styles.why}>{explain(line) ?? role?.description}</p>
-              ) : null}
-
-              <ul className={styles.permissions}>
-                {catalogue.map((entry) => (
-                  <Tick
-                    key={entry.key}
-                    entry={entry}
-                    on={isFixed(line) || held.includes(entry.key)}
-                    disabled={!amAdmin || isFixed(line) || save.isPending}
-                    onChange={(on) => {
-                      const next = toggled(held, entry.key, on)
-                      setPending((current) => ({ ...current, [keyOf(line)]: next }))
-                      save.mutate({ line, permissions: next })
-                    }}
-                  />
-                ))}
-              </ul>
-
-              {/* Both of these narrow what the tick boxes above allowed —
-                  they never widen it — so they read after them rather than
-                  beside them. */}
-              <Workflow
-                board={board}
-                summary={summariseColumns({ ...line, columns: board })}
-                disabled={!amAdmin || isFixed(line) || saveColumns.isPending}
-                gated={!isFixed(line) && !held.includes('tasks')}
-                onChange={(columnId, field, on) => {
-                  const next = withColumnRule(board, columnId, field, on)
-                  setPendingColumns((current) => ({ ...current, [keyOf(line)]: next }))
-                  saveColumns.mutate({ line, columns: next })
-                }}
-              />
-
-              <Clearance
-                levels={grid.data.levels}
-                value={clearanceOf(line)}
-                disabled={!amAdmin || isFixed(line) || saveClearance.isPending}
-                onChange={(clearance) => saveClearance.mutate({ line, clearance })}
-              />
-            </section>
-          )
-        })}
+        <div className={`${cardStyles.card} ${styles.pane}`}>
+          <RoleDetail
+            line={selected}
+            role={(roles.data ?? []).find((candidate) => candidate.id === selected.role_id)}
+            catalogue={catalogue}
+            levels={grid.data.levels}
+            members={members.data.members}
+            identity={identity.data}
+            amAdmin={amAdmin}
+            held={pending[keyOf(selected)] ?? selected.permissions}
+            board={pendingColumns[keyOf(selected)] ?? selected.columns}
+            busy={{
+              permissions: save.isPending,
+              columns: saveColumns.isPending,
+              clearance: saveClearance.isPending,
+              deleting: drop.isPending,
+            }}
+            onPermission={(entry, on) => {
+              const next = toggled(pending[keyOf(selected)] ?? selected.permissions, entry, on)
+              setPending((current) => ({ ...current, [keyOf(selected)]: next }))
+              save.mutate({ line: selected, permissions: next })
+            }}
+            onColumn={(columnId, field, on) => {
+              const next = withColumnRule(
+                pendingColumns[keyOf(selected)] ?? selected.columns,
+                columnId,
+                field,
+                on,
+              )
+              setPendingColumns((current) => ({ ...current, [keyOf(selected)]: next }))
+              saveColumns.mutate({ line: selected, columns: next })
+            }}
+            onClearance={(clearance) => saveClearance.mutate({ line: selected, clearance })}
+            onSetRole={(personId, role) => setRole.mutate({ personId, role })}
+            onDelete={(role) => {
+              // Back to the admin line first: the pane is about to be about a
+              // role that no longer exists, and falling back silently reads as
+              // the delete having done something else.
+              setSelectedKey(null)
+              drop.mutate(role)
+            }}
+            roles={roles.data ?? []}
+          />
+        </div>
       </div>
 
       {adding ? (
@@ -335,6 +322,215 @@ function Tick({
         </span>
       </label>
     </li>
+  )
+}
+
+/**
+ * One role, and everything there is to say about it.
+ *
+ * The three axes read top to bottom in the order they narrow each other: what
+ * this role may do at all, then where on the board it may do the card half of
+ * it, then how far it may read. Who holds it comes first, because that is what
+ * the reader clicked the name to find out.
+ */
+function RoleDetail({
+  line,
+  role,
+  roles,
+  catalogue,
+  levels,
+  members,
+  identity,
+  amAdmin,
+  held,
+  board,
+  busy,
+  onPermission,
+  onColumn,
+  onClearance,
+  onSetRole,
+  onDelete,
+}: {
+  line: RolePermissions
+  /** The role row behind this line, absent for the baseline. */
+  role: RoleSummary | undefined
+  roles: RoleSummary[]
+  catalogue: PermissionInfo[]
+  levels: SensitivityInfo[]
+  members: Member[]
+  identity: Identity | undefined
+  amAdmin: boolean
+  held: Permission[]
+  board: ColumnRule[]
+  busy: { permissions: boolean; columns: boolean; clearance: boolean; deleting: boolean }
+  onPermission: (entry: Permission, on: boolean) => void
+  onColumn: (columnId: string, field: 'may_enter' | 'may_stage', on: boolean) => void
+  onClearance: (level: Sensitivity) => void
+  onSetRole: (personId: string, role: string | null) => void
+  onDelete: (role: RoleSummary) => void
+}) {
+  const undeletable = role ? whyUndeletable(role) : null
+  const holders = members.filter((person) =>
+    isEveryoneElse(line) ? person.role === null : person.role?.id === line.role_id,
+  )
+
+  return (
+    <div className={styles.detail}>
+      <header className={styles.detailHead}>
+        <div className={styles.detailTitle}>
+          <span className={styles.dot} style={{ background: line.colour }} aria-hidden />
+          <h2>{line.name}</h2>
+          <span className={styles.count}>
+            {summarise({ ...line, permissions: held }, catalogue)}
+          </span>
+        </div>
+        {/* Not drawn on the admin role or the baseline: neither can be deleted,
+            and a greyed button explaining that is still a button. */}
+        {amAdmin && role && !isEveryoneElse(line) && !isFixed(line) ? (
+          <Button
+            variant="ghost"
+            small
+            danger
+            disabled={undeletable !== null || busy.deleting}
+            title={undeletable ?? undefined}
+            onClick={() => onDelete(role)}
+          >
+            Delete role
+          </Button>
+        ) : null}
+      </header>
+
+      {/* One line, not two: the admin role carries a seeded description that
+          says what `explain` says, and printing both reads as a stutter. */}
+      {(explain(line) ?? role?.description) ? (
+        <p className={styles.why}>{explain(line) ?? role?.description}</p>
+      ) : null}
+
+      <section className={styles.axis}>
+        <header>
+          <b>Who holds it</b>
+          <span className={styles.count}>{countPeople(line.member_count)}</span>
+        </header>
+        <Holders
+          holders={holders}
+          identity={identity}
+          roles={roles}
+          amAdmin={amAdmin}
+          baseline={isEveryoneElse(line)}
+          onSetRole={onSetRole}
+        />
+      </section>
+
+      {/* Two columns rather than one long scroll. The twelve tick boxes are
+          the tall thing and the two narrowing axes are the short ones, so
+          stacking all three put the clearance a screen and a half below the
+          permission it qualifies. Side by side they are visible together,
+          which is how the decision is actually made. */}
+      <div className={styles.axes}>
+        <section className={styles.axis}>
+          <header>
+            <b>What it can do</b>
+          </header>
+          <ul className={styles.permissions}>
+            {catalogue.map((entry) => (
+              <Tick
+                key={entry.key}
+                entry={entry}
+                on={isFixed(line) || held.includes(entry.key)}
+                disabled={!amAdmin || isFixed(line) || busy.permissions}
+                onChange={(on) => onPermission(entry.key, on)}
+              />
+            ))}
+          </ul>
+        </section>
+
+        {/* Both of these narrow what the tick boxes beside them allowed —
+            they never widen it — so they sit in the second column, under a
+            heading that says which permission each is about. */}
+        <div className={styles.narrowing}>
+          <Workflow
+            board={board}
+            summary={summariseColumns({ ...line, columns: board })}
+            disabled={!amAdmin || isFixed(line) || busy.columns}
+            gated={!isFixed(line) && !held.includes('tasks')}
+            onChange={onColumn}
+          />
+
+          <Clearance
+            levels={levels}
+            value={clearanceOf(line)}
+            disabled={!amAdmin || isFixed(line) || busy.clearance}
+            onChange={onClearance}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The people on this line, and the control that moves one off it.
+ *
+ * The same `select` the People page used to carry, grouped by what somebody
+ * is rather than listed flat. Changing it here moves that person to another
+ * line of the sidebar, which is the whole of what "say what they are" means.
+ */
+function Holders({
+  holders,
+  identity,
+  roles,
+  amAdmin,
+  baseline,
+  onSetRole,
+}: {
+  holders: Member[]
+  identity: Identity | undefined
+  roles: RoleSummary[]
+  amAdmin: boolean
+  /** Whether this is the "Everyone else" line, which nobody is *given*. */
+  baseline: boolean
+  onSetRole: (personId: string, role: string | null) => void
+}) {
+  if (holders.length === 0) {
+    return (
+      <p className={styles.why}>
+        {baseline
+          ? 'Everybody on this project has been given a role.'
+          : 'Nobody holds this role yet. Give it to somebody from their own line.'}
+      </p>
+    )
+  }
+
+  return (
+    <ul className={styles.holders}>
+      {holders.map((person) => (
+        <li key={person.id}>
+          <Avatar name={person.name} colour={person.colour} />
+          <span className={styles.who}>
+            <b>{person.name}</b>
+            <span className={styles.title}>{person.title}</span>
+          </span>
+          <KindTag kind={person.kind} />
+          {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
+          {amAdmin ? (
+            <label className={styles.picker}>
+              <span className={styles.srOnly}>{person.name}&rsquo;s role</span>
+              <select
+                value={person.role?.id ?? ''}
+                onChange={(event) => onSetRole(person.id, event.target.value || null)}
+              >
+                <option value="">No role</option>
+                {roles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -461,61 +657,6 @@ function Clearance({
         ))}
       </ul>
     </section>
-  )
-}
-
-/** Everybody on the project, and the role each of them wears. */
-function People({
-  members,
-  identity,
-  roles,
-  amAdmin,
-  onSetRole,
-}: {
-  members: Member[]
-  identity: Identity | undefined
-  roles: RoleSummary[]
-  amAdmin: boolean
-  onSetRole: (personId: string, role: string | null) => void
-}) {
-  if (members.length === 0) return <EmptyState>Nobody is on this project yet.</EmptyState>
-
-  return (
-    <ul className={styles.people_list}>
-      {members.map((person) => (
-        <li key={person.id} className={`${cardStyles.card} ${styles.person}`}>
-          <Avatar name={person.name} colour={person.colour} />
-          <div className={styles.who}>
-            <div className={styles.nameRow}>
-              <b>{person.name}</b>
-              <KindTag kind={person.kind} />
-              {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
-            </div>
-            <span className={styles.title}>{person.title}</span>
-          </div>
-          {amAdmin ? (
-            <label className={styles.picker}>
-              <span className={styles.srOnly}>{person.name}&rsquo;s role</span>
-              <select
-                value={person.role?.id ?? ''}
-                onChange={(event) => onSetRole(person.id, event.target.value || null)}
-              >
-                <option value="">No role</option>
-                {roles.map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : person.role ? (
-            <RoleTag role={person.role} />
-          ) : (
-            <span className={styles.unsaid}>No role</span>
-          )}
-        </li>
-      ))}
-    </ul>
   )
 }
 
