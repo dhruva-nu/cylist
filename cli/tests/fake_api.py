@@ -28,6 +28,8 @@ ADITI_ID = "0192f3c4-0002-7000-8000-00000000ad17"
 LENA_ID = "0192f3c4-0002-7000-8000-00000000012a"
 LEO_ID = "0192f3c4-0002-7000-8000-0000000001e0"
 
+REVIEWER_ID = "0192f3c4-0004-7000-8000-000000000101"
+
 TASK_ONE_ID = "0192f3c4-0003-7000-8000-000000000001"
 TASK_TWO_ID = "0192f3c4-0003-7000-8000-000000000002"
 SUBTASK_ID = "0192f3c4-0003-7000-8000-000000000021"
@@ -49,18 +51,36 @@ ADITI = {
     "id": ADITI_ID,
     "name": "Aditi K",
     "kind": "team",
-    "role": "Engineer, Atlas",
+    "title": "Engineer, Atlas",
+    "role": {"id": REVIEWER_ID, "name": "Reviewer", "colour": "#3B6FC2", "is_admin": False},
     "responsibilities": "Ships the migration.",
     "email": "aditi@example.com",
     "colour": "#c8553d",
     "archived_at": None,
     "created_at": "2026-01-04T09:00:00Z",
 }
+# Annotated because its `is_agent` is the only bool among these payloads, and
+# an inferred value type of `object` makes every person in the directory
+# unindexable to mypy.
+MACHINE: dict[str, Any] = {
+    "id": "0192f3c4-0004-7000-8000-00000000000f",
+    "name": "Agent",
+    "kind": "team",
+    "title": "Machine, worked through the API",
+    "role": None,
+    "responsibilities": "Works the cards it is given.",
+    "email": None,
+    "colour": "#4A7B8C",
+    "archived_at": None,
+    "created_at": "2026-01-04T09:00:00Z",
+    "is_agent": True,
+}
 LENA = {
     "id": LENA_ID,
     "name": "Lena W",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
+    "role": None,
     "responsibilities": "Approves the invoice schedule.",
     "email": "lena@example.com",
     "colour": "#3d5a80",
@@ -71,7 +91,8 @@ LEO = {
     "id": LEO_ID,
     "name": "Leo Wren",
     "kind": "client",
-    "role": "Legal, Atlas",
+    "title": "Legal, Atlas",
+    "role": None,
     "responsibilities": "Signs the contracts.",
     "email": None,
     "colour": "#7d8471",
@@ -389,11 +410,50 @@ ACTIVITY = [
     }
 ]
 
+PERSON = {
+    "id": "0192f3c4-000a-7000-8000-00000000000a",
+    "name": "Dhruva N",
+    "kind": "team",
+    "title": "Tech lead",
+    "responsibilities": "Runs this Cylist.",
+    "email": "dhruva@cylist.dev",
+    "colour": "#1D7D46",
+    "archived_at": None,
+    "created_at": "2026-02-06T09:00:00Z",
+    "has_account": True,
+    "invite_is_pending": False,
+}
+
 IDENTITY = {
     "token_id": "0192f3c4-000a-7000-8000-000000000001",
     "label": "board-tidy agent",
     "channel": "api",
     "scopes": ["read", "write"],
+    # A token acts as whoever minted it, so every identity here has a person
+    # behind it. The one shape that does not is the bootstrap session, which
+    # `test_setup` builds explicitly where it needs one.
+    "person": PERSON,
+}
+
+TAILNET_URL = "https://cylist.tailnet.test"
+
+SETUP = {
+    "urls": ["http://cylist.test", TAILNET_URL],
+    "environment": "test",
+    "agent_scopes": ["read", "write"],
+    "has_accounts": True,
+}
+
+MINTED_TOKEN = "cyl_minted_for_this_machine"
+
+MINTED = {
+    "id": "0192f3c4-000a-7000-8000-000000000002",
+    "name": "a laptop agent",
+    "scopes": ["read", "write"],
+    "created_at": "2026-02-06T09:00:00Z",
+    "expires_at": None,
+    "last_used_at": None,
+    "token": MINTED_TOKEN,
 }
 
 TAILNET_URL = "https://cylist.tailnet.test"
@@ -586,7 +646,7 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
 
     if path == "/people" and method == "GET":
         kind = request.url.params.get("kind")
-        people = [ADITI, LENA, LEO]
+        people = [ADITI, MACHINE, LENA, LEO]
         if kind:
             people = [person for person in people if person["kind"] == kind]
         return httpx.Response(200, json=people)

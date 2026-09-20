@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from app.config import Settings
+from app.db import Database
+from app.models.person import Person
+from tests.conftest import INVITEE_PASSWORD, client_for, open_account
+
+ADITI = {
+    "name": "Aditi K",
+    "kind": "team",
+    "title": "Backend engineer",
+    "responsibilities": "Payments and webhooks.",
+}
+
 ATLAS = {
     "key": "ATL",
     "name": "Atlas Billing Migration",
@@ -19,7 +31,7 @@ class TestCreating:
         assert response.status_code == 201
         body = response.json()
         assert body["key"] == "ATL"
-        assert body["member_count"] == 0
+        assert body["member_count"] == 2  # whoever created it, and the agent — see below
         assert body["archived_at"] is None
 
     async def test_uppercases_the_key(self, signed_in: AsyncClient) -> None:
@@ -154,39 +166,89 @@ class TestAuditTrail:
         assert entries[0]["payload"] == {"key": "ATL", "name": ATLAS["name"]}
 
 
-OWNER = {
-    "name": "Dhruva N",
-    "kind": "team",
-    "role": "Owner",
-    "responsibilities": "Everything, until somebody else is here to do it.",
-    "is_me": True,
-}
+class TestTheCreatorJoinsTheirProject:
+    """Whoever starts a project is on it from the moment it exists.
 
+    It used to be whoever held ``person.is_me`` — one person, the same one on
+    every project on the deployment. Now it is the caller, which is what makes
+    two people able to start projects on one board and each end up on their
+    own.
 
-class TestTheOwnerJoinsEveryProject:
-    """Whoever is marked as you is on a project from the moment it exists."""
+    The agent joins beside them: a board assigns work to its own members, so a
+    project whose agent had to be added by hand could not be given a card to
+    do until somebody did.
+    """
 
-    async def test_a_new_project_has_the_owner_on_it(self, signed_in: AsyncClient) -> None:
-        owner = (await signed_in.post("/people", json=OWNER)).json()
-
+    async def test_a_new_project_has_its_creator_on_it(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
         project = (await signed_in.post("/projects", json=ATLAS)).json()
 
-        assert project["member_count"] == 1
         members = (await signed_in.get(f"/projects/{project['key']}/members")).json()["members"]
-        assert [person["id"] for person in members] == [owner["id"]]
+        assert str(owner.id) in [person["id"] for person in members]
 
-    async def test_a_project_started_before_there_was_an_owner_is_left_alone(
-        self, signed_in: AsyncClient
-    ) -> None:
+    async def test_a_new_project_has_the_agent_on_it(self, signed_in: AsyncClient) -> None:
         project = (await signed_in.post("/projects", json=ATLAS)).json()
-        await signed_in.post("/people", json=OWNER)
 
-        assert (await signed_in.get(f"/projects/{project['key']}")).json()["member_count"] == 0
+        assert project["member_count"] == 2
+        members = (await signed_in.get(f"/projects/{project['key']}/members")).json()["members"]
+        agents = [person for person in members if person["is_agent"]]
+        assert [person["name"] for person in agents] == ["Agent"]
 
-    async def test_the_owner_can_be_taken_off_a_project_afterwards(
-        self, signed_in: AsyncClient
+    async def test_every_project_shares_one_agent(self, signed_in: AsyncClient) -> None:
+        """One machine in the directory, on as many boards as there are."""
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.post("/projects", json=HERMES)
+
+        agents = [
+            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+        ]
+
+        assert len(agents) == 1
+        on_both = [
+            [
+                person["id"]
+                for person in (await signed_in.get(f"/projects/{key}/members")).json()["members"]
+                if person["is_agent"]
+            ]
+            for key in ("ATL", "HRM")
+        ]
+        assert on_both == [[agents[0]["id"]], [agents[0]["id"]]]
+
+    async def test_two_people_each_join_their_own(
+        self, signed_in: AsyncClient, owner: Person, settings: Settings, database: Database
     ) -> None:
-        await signed_in.post("/people", json=OWNER)
+        aditi, token = await open_account(signed_in, ADITI, "aditi@cylist.dev")
+        mine = (await signed_in.post("/projects", json=ATLAS)).json()
+
+        async with client_for(settings, database) as other:
+            await other.post(
+                "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
+            )
+            theirs = (await other.post("/projects", json=HERMES)).json()
+
+        on_mine = (await signed_in.get(f"/projects/{mine['key']}/members")).json()["members"]
+        on_theirs = (await signed_in.get(f"/projects/{theirs['key']}/members")).json()["members"]
+
+        assert [person["id"] for person in on_mine if not person["is_agent"]] == [str(owner.id)]
+        assert [person["id"] for person in on_theirs if not person["is_agent"]] == [aditi["id"]]
+
+    async def test_a_bootstrap_session_starts_a_project_with_nobody_on_it(
+        self, bootstrapped: AsyncClient
+    ) -> None:
+        """The one caller who is not a person, and so cannot join anything.
+
+        Creating the project still works — refusing would leave a fresh
+        deployment unable to do the first thing anyone does on it — and
+        whoever opens the first account adds themselves.
+        """
+        project = (await bootstrapped.post("/projects", json=ATLAS)).json()
+
+        members = (await bootstrapped.get(f"/projects/{project['key']}/members")).json()["members"]
+        assert [person["is_agent"] for person in members] == [True]
+
+    async def test_the_creator_can_be_taken_off_afterwards(self, signed_in: AsyncClient) -> None:
+        """And so can the agent: neither is a member the board cannot lose."""
         project = (await signed_in.post("/projects", json=ATLAS)).json()
 
         await signed_in.put(f"/projects/{project['key']}/members", json={"person_ids": []})

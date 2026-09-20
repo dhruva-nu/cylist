@@ -132,6 +132,18 @@ class Folder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     called it anything else would be describing something that does not
     exist."""
 
+    default_sensitivity: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'internal'")
+    )
+    """What things uploaded here are classified as unless the upload says.
+
+    A property of the folder rather than of each file, because "everything in
+    Contracts is restricted" is the rule people actually have, and asking on
+    every upload is the reliable way to get a folder of misclassified files.
+    The folder itself is always visible: it is the structure, and a tree with
+    holes in it is harder to trust than one with locked drawers.
+    """
+
     @property
     def is_root(self) -> bool:
         """Whether this is the project's root, which cannot move or go."""
@@ -197,6 +209,18 @@ class FileItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     whose size we cannot know without fetching them."""
 
     mime: Mapped[str | None] = mapped_column(String(255))
+
+    sensitivity: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'internal'")
+    )
+    """How far this may travel — a :class:`~app.core.sensitivity.Sensitivity`.
+
+    Set on upload, defaulting to the folder's :attr:`Folder.default_sensitivity`
+    so that classifying happens once per folder rather than once per file.
+    A role not cleared this high is not shown the row at all, rather than shown
+    it and refused: a listing that says "1 file you may not open" has already
+    told you a file exists.
+    """
 
     added_by: Mapped[UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True),

@@ -46,7 +46,7 @@ async def a_card(client: AsyncClient) -> str:
             json={
                 "name": "Aditi K",
                 "kind": "team",
-                "role": "Backend engineer",
+                "title": "Backend engineer",
                 "responsibilities": "Payments.",
             },
         )

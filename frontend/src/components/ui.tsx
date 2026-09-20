@@ -1,5 +1,6 @@
 /** Shared presentational primitives, styled from the design tokens. */
 
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -7,6 +8,8 @@ import {
   type FiledItem,
   type Person,
   type PersonKind,
+  type Role,
+  type Sensitivity,
   type TaskPriority,
   type TaskStatus,
   type TaskType,
@@ -181,7 +184,7 @@ export function Tagged({
             <span
               key={index}
               className={styles.mention}
-              title={`${run.person.name} — ${run.person.role}`}
+              title={`${run.person.name} — ${run.person.title}`}
             >
               {run.text}
             </span>
@@ -668,6 +671,83 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
 
 export function KindTag({ kind }: { kind: PersonKind }) {
   return <span className={`${styles.tag} ${styles[kind]}`}>{kind}</span>
+}
+
+/**
+ * What somebody is on a project, worn beside their name.
+ *
+ * Coloured inline rather than by class, because a role is invented by whoever
+ * runs the board and so has no name this stylesheet could have known. The fill
+ * is the role's own colour and the ink is whatever reads on it — the same
+ * calculation an avatar makes, for the same reason.
+ */
+export function RoleTag({ role }: { role: Pick<Role, 'name' | 'colour' | 'description'> }) {
+  return (
+    <span
+      className={styles.tag}
+      style={{ background: role.colour, color: readableInkOn(role.colour) }}
+      title={role.description || undefined}
+    >
+      {role.name}
+    </span>
+  )
+}
+
+/**
+ * How far something may travel, when that is worth saying.
+ *
+ * Drawn for `public` and `restricted` and *not* for `internal`, which is what
+ * an upload is unless somebody said otherwise: a tag on every row of every
+ * listing would be noise the eye learns to skip, and the whole job of this is
+ * to be the thing that catches it.
+ */
+export function LevelTag({ level }: { level: Sensitivity }) {
+  if (level === 'internal') return null
+  return (
+    <span className={`${styles.levelTag} ${level === 'restricted' ? styles.restricted : ''}`}>
+      {level === 'restricted' ? 'Restricted' : 'Public'}
+    </span>
+  )
+}
+
+/**
+ * A picker for one of the three levels.
+ *
+ * Takes the catalogue from the server rather than hard-coding three options,
+ * so the words a picker shows are the words the roles screen shows beside a
+ * clearance.
+ */
+export function LevelPicker({
+  projectKey,
+  value,
+  onChange,
+  includeInherit,
+}: {
+  projectKey: string
+  value: Sensitivity | ''
+  onChange: (level: Sensitivity | '') => void
+  /** Offer "take the folder's default", which is what omitting it does. */
+  includeInherit?: string
+}) {
+  // The same query the roles screen draws its clearances from, so a level is
+  // worded identically wherever it appears and the catalogue is fetched once
+  // per project rather than once per picker.
+  const grid = useQuery({
+    queryKey: ['permissions', projectKey],
+    queryFn: () => api.getPermissions(projectKey),
+  })
+  const levels = { data: grid.data?.levels }
+
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value as Sensitivity | '')}>
+      {includeInherit ? <option value="">{includeInherit}</option> : null}
+      {(levels.data ?? []).map((level) => (
+        <option key={level.key} value={level.key}>
+          {level.label}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 export function Eyebrow({ children }: { children: ReactNode }) {

@@ -1,0 +1,428 @@
+.note {
+  max-width: 62ch;
+  margin-bottom: 14px;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+/* Said in the brand tone rather than as an error: a reader who is not an
+   admin has not done anything wrong, they are just looking. */
+.note {
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-card);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+/* --- Who is what here ---------------------------------------------------- */
+
+.who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.you {
+  padding: 2px 8px;
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--radius-control);
+  color: var(--brand-ink);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.picker select {
+  padding: 5px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- Roles down the left, one role's detail on the right ---------------- */
+
+/* The vault's split, and the same 320px: a role name and a head-count is the
+   same shape of thing as a tree name and a node count, and two screens in one
+   app that do the same job should not measure differently. */
+.split {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+  min-height: 60vh;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-content: start;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  height: fit-content;
+}
+
+.listRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.listRow:hover {
+  background: var(--paper-2);
+}
+
+.listRow.selected {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 700;
+}
+
+.listName {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The head-count alone, with no word beside it: the column is one number wide
+   and "4 people" four times over is a word the eye reads once and then skips.
+   Blank rather than "0" for a role nobody holds — an empty seat is not a
+   quantity worth drawing. */
+.listCount {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.listRow.selected .listCount {
+  color: var(--brand-ink);
+}
+
+.pane {
+  align-self: start;
+  padding: 0;
+}
+
+.detail {
+  padding: 22px 26px;
+}
+
+/* The three axes across the pane rather than down it. Each column has a
+   measure of its own — a tick box whose label runs the width of a wide display
+   is one you have to track back along — and `align-items: start` because the
+   permission list is much the taller of the two and a short column has no
+   business being stretched against it. */
+.axes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 40px;
+  align-items: start;
+}
+
+/* One column on anything narrower than a desktop: side by side, these stop
+   being two readable columns well before they stop fitting. */
+@media (width <= 1100px) {
+  .axes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.narrowing {
+  min-width: 0;
+}
+
+/* The first section in each column carries the rule above it; after that the
+   sections separate themselves. In the second column the first child is the
+   workflow, which would otherwise start flush with the permission list's
+   heading and read as its continuation. */
+.narrowing > .axis:first-child {
+  margin-top: 16px;
+}
+
+.detailHead {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.detailTitle {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.detailTitle h2 {
+  font-size: 20px;
+}
+
+/* --- Who holds it -------------------------------------------------------- */
+
+/* Full width above the two columns: who holds a role is what the reader
+   clicked its name to find out, and a name list is not a third axis. */
+.holders {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.holders li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 2px;
+}
+
+.holders li + li {
+  border-top: 1px solid var(--line);
+}
+
+.holders .picker {
+  margin-left: auto;
+}
+
+/* --- The two axes that narrow what the tick boxes allowed ---------------- */
+
+/* Set apart from the permission list above rather than run on from it: these
+   only ever take away from what it granted, and reading them as more of the
+   same list would suggest they add. */
+.axis {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
+
+.axis > header {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.axis > header b {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.axis > header .count {
+  margin-left: auto;
+}
+
+.columns {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.columns th,
+.columns td {
+  padding: 5px 4px;
+  text-align: left;
+}
+
+/* The two heads are the narrow ones and the column name takes the rest, so a
+   board with a long column name does not squeeze the ticks off the card. */
+.columns thead th {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.columns thead th:not(:first-child),
+.columns td {
+  width: 110px;
+  text-align: center;
+}
+
+.columns tbody th {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columns tbody tr + tr th,
+.columns tbody tr + tr td {
+  border-top: 1px solid var(--line);
+}
+
+.columns input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--go);
+}
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.levels label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 2px;
+  cursor: pointer;
+}
+
+.levels label:has(input[disabled]) {
+  cursor: default;
+}
+
+.levels input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--go);
+  flex: none;
+}
+
+.levels span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.levels b {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+}
+
+/* --- Pieces the detail pane shares --------------------------------------- */
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* How much of the catalogue is ticked, how far along the board, how far up the
+   levels — the same pill in all three places, because they answer the same
+   shape of question about the line they sit on. */
+.count {
+  padding: 2px 9px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.why {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+.permissions {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tick + .tick {
+  border-top: 1px solid var(--line);
+}
+
+.tick label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 2px;
+  cursor: pointer;
+}
+
+.tick label:has(input[disabled]) {
+  cursor: default;
+}
+
+.tick input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--go);
+  flex: none;
+}
+
+.tick span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tick b {
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.summary {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+/* Said before the round trip rather than after it, so "Reviewer" and
+   "reviewer" do not look like two different answers to somebody typing. */
+.clash {
+  margin-top: -6px;
+  color: var(--blocked);
+  font-size: 13px;
+}

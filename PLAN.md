@@ -7,7 +7,12 @@ Approved mock: https://claude.ai/code/artifact/27e0344e-ef48-4e2a-a592-5e5c53c1f
 - Personal project/task manager: Projects → { Kanban board, Files, Vault, People }.
 - Stack: React (Vite + TypeScript) · FastAPI (Python 3.12) · PostgreSQL 16.
 - **API-first.** The web UI is one client. An MCP server and a CLI come later and must need *no* backend changes — so every capability is a REST endpoint, auth is token-based, and no logic lives only in React.
-- Single owner (you) plus non-human agents. No multi-tenant auth in v1.
+- Several people, plus non-human agents. One shared workspace: everybody
+  signed in sees the same projects, and an account exists to say *which* of
+  them is acting — not to fence off what they can see. Accounts live on the
+  people directory and are opened by invitation — or handed over outright by
+  an admin, where there is no mailbox an invitation could reach. (v1 was a
+  single owner; see CYLIST-44.)
 - Files stored on the server's disk; vault secrets encrypted at rest.
 
 ## 2. Architecture
@@ -74,11 +79,15 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | Table | Key columns | Notes |
 |---|---|---|
 | `project` | `key` (unique, e.g. ATL), `name`, `description`, `color`, `archived_at` | |
-| `person` | `name`, `kind` (`team`/`client`), `role`, `responsibilities`, `email`, `color` | **Global directory** — a client can appear in several projects |
-| `project_member` | `project_id`, `person_id`, PK(both) | membership; assignee/tag pickers read from this |
+| `person` | `name`, `kind` (`team`/`client`), `title`, `responsibilities`, `email`, `color`, `password_hash`, `is_agent` | **Global directory** — a client can appear in several projects. `title` is the job description; it was called `role` until roles became a thing of their own. `is_agent` marks the one entry that is a machine rather than a person, by a partial unique index: it is assigned work like anybody else and never signs in |
+| `project_role` | `project_id`, `name`, `description`, `colour`, `is_admin` | what somebody is on *this* board. Unique name per project; at most one `is_admin` role, seeded on every project and held by whoever created it |
+| `project_member` | `project_id`, `person_id`, PK(both), `role_id` (nullable) | membership; assignee/tag pickers read from this. `role_id` is a composite FK on `(project_id, role_id)`, so a member cannot wear another project's role |
+| `project_permission` | `project_id`, `role_id` (nullable), `permission` | what a role may do here, one row per grant. `role_id IS NULL` is the project's baseline — everybody on it with no role, and everybody not on it. Two partial unique indexes, because Postgres counts NULLs as distinct. The admin role holds everything and stores nothing |
+| `role_column_rule` | `project_id`, `role_id` (nullable), `column_id`, `may_enter`, `may_stage` | where on the board a role may work. A *restriction*: no row means no restriction, so a new column is open to everybody who may move cards |
+| `role_clearance` | `project_id`, `role_id` (nullable), `level` | the most sensitive thing a role may read. A restriction too — no row means everything |
 | `board_column` | `project_id`, `name`, `description`, `position` | `CHECK` + service rule: 2 ≤ count ≤ 8; first column (`position=0`) is where new tasks land |
 | `goal` | `project_id`, `number` (per-project sequence → ATL-G1), `name`, `description`, `colour`, `status` (`open`/`achieved`/`dropped`), `achieved_at`, `target_date`, `owner_id`→person | an epic. Unique name per project; progress is counted from its cards, never stored |
-| `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards |
+| `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards. `assignee_id` is `NOT NULL` but optional on the wire — a card with no assignee named goes to whoever is writing it |
 | `task_waiting_on` | `task_id`, `person_id` | people tagged on the *current* hold/block; cleared when status returns to active |
 | `task_comment` | `task_id`, `author_id` (person, nullable for agents), `body`, `kind` (`comment`/`status_change`), `meta jsonb` (`{from,to,reason,tagged:[…]}`) | status changes are comments — one timeline |
 | `folder` | `project_id`, `parent_id` (nullable), `name` | adjacency list; path built in API |
@@ -184,7 +193,13 @@ Each phase ends with something usable end-to-end.
 1. **People are a global directory** with per-project membership (not per-project copies).
 2. **Status-change reason is required** for On hold / Blocked, enforced by the API, stored as a comment.
 3. **Tagging people** is available on status changes only in v1; @-mentions in free comments are a later add.
-4. **Single user + API tokens with scopes**; no roles/teams login.
+4. **Accounts on the people directory + API tokens with scopes**; a token
+   acts as whoever minted it. Membership is a picker rather than a fence.
+   *Revised by CYLIST-45:* there are roles now, but they are still not a
+   fence — a role says who somebody is on a board, and the only thing any of
+   them permits is the admin role's holder managing the others.
+   *Revised again by CYLIST-46:* a role is a fence, where an admin has built
+   one. Membership still is not — see decision 20.
 5. **Vault**: only the secret value is encrypted; reveal is a distinct, logged, scoped action.
 6. **Uploads are content-addressed** (sha256) with a configurable size cap (default 200 MB).
 7. **No Tailwind / component library** — the mock's design system is ported as CSS variables + modules.
@@ -202,4 +217,85 @@ These came up while implementing and are worth knowing:
 14. **A goal takes the card's left-hand rail.** The rail used to be the status — green, amber, red, grey. A card on a goal now wears the goal's colour there instead, and only a card on no goal falls back to the status colours. Status was already on the card three times over (the tint, the icon tile, the word on the pill); a goal had nowhere else on a board to be.
 15. **A card belongs to at most one goal**, and a sub-task to none of its own — its card is what belongs to the goal. Both are check constraints rather than conventions: one colour on one rail, and one honest answer to "what is left on this goal".
 16. **A goal's progress is never stored.** It is counted from its cards on every read. A percentage kept beside them is a number that can disagree with them.
-17. **A goal cannot be marked achieved while a card on it is open** — the same shape as the rule that keeps a card out of the last column with a sub-task outstanding, and the refusal names what is holding it open. Dropping a goal carries no such rule.
+17. **A role is per project, and only Admin is seeded.** The same person
+    reviews on one board and does the work on another, so a directory-wide
+    role could only say one of those. Every project gets an `Admin` role and
+    its creator wears it; everybody else starts with none, because a role is
+    something an admin says about you and "not said yet" is an honest state
+    a seeded default would have hidden.
+18. **A project never has to lose its admin, and never refuses a membership
+    edit over one.** Taking the role off its last holder is refused and names
+    them — the intent is unambiguous and so is the fix. Dropping that person
+    from the project is not the same act: that caller is saying who is on the
+    board, so the role passes to whoever has been on it longest. If the last
+    admin is archived, an `admin`-scoped credential can step in, which is the
+    only way back from a board nobody can manage.
+19. **A goal cannot be marked achieved while a card on it is open** — the same shape as the rule that keeps a card out of the last column with a sub-task outstanding, and the refusal names what is holding it open. Dropping a goal carries no such rule.
+20. **Permissions are a fixed vocabulary, granted per role, and every project
+    starts open.** A role's *name* is the admin's invention; what it may do
+    cannot be, because every entry is a fence a particular endpoint
+    recognises. Reading is not fenced at all — a project is a shared
+    workspace, and the one read-shaped permission, `vault_reveal`, was already
+    a distinct logged act. Every project is created with the whole vocabulary
+    granted to its baseline, and the back-fill gave every existing board the
+    same, so turning this on changed nothing for anybody: an admin narrows it
+    from the Roles screen. A new role starts with whatever the baseline
+    allows, so naming somebody a Reviewer is never a demotion nobody asked
+    for.
+21. **The baseline is a line on the grid, not a seeded role.** CYLIST-45
+    turned down a seeded "Member" default because "nobody has said yet" is an
+    honest state a word would hide, and that stands. But the state still has
+    to permit something, so the project carries one set of permissions for it
+    — a `project_permission` row with no `role_id`, drawn as **Everyone else**
+    — which also answers for somebody who is not on the project, since
+    membership is a picker rather than a fence and nobody has said what they
+    are either.
+22. **The per-object layer is made of restrictions, where the flat one is made
+    of grants.** A permission row means yes and its absence means no; a column
+    rule or a clearance row only ever *narrows* what a permission already
+    allowed, and its absence narrows nothing. The two polarities are the
+    layering rather than an inconsistency, and the restriction shape is what
+    makes a board survive changing shape: a column added next month is open to
+    everybody who may move cards, where a grant-shaped table would have locked
+    every role out of it until an admin noticed.
+23. **An upload carries a level and a role carries a clearance** — `public` <
+    `internal` < `restricted` — rather than each file carrying a list of roles.
+    A folder and a vault tree carry a default their children inherit, so
+    "everything in Contracts is restricted" is said once. Something above a
+    reader's clearance is answered **as though it were never there**: left out
+    of listings, 404 by id, 404 to download, and not counted on the hub. A 403
+    naming the file would have told them the part worth knowing. This is the
+    only read Cylist fences; the board, its cards and its goals stay visible to
+    everyone on a project.
+24. **Moving a card into a column and setting that column's sub-stages are
+    separate rights.** Moving a card into Review is work; deciding that a
+    Hotfix in Review passes through "Drafted, Reviewed, Merged" is designing
+    the workflow, and a team often wants the second in one person's hands while
+    everybody does the first. The staging right covers the template's rule for
+    the column and a card's own progress bar together, because they are the
+    same decision written in two places.
+25. **`goals` is three rights.** Changing a goal is a decision about the plan;
+    saying which goal a card counts towards is the daily act of whoever is
+    doing the work; handing a goal to somebody else reassigns it to a person.
+    Naming the owner while *creating* a goal is part of creating it and needs
+    only `goals` — only reassignment needs `goal_owner`.
+26. **A card goes to whoever wrote it unless it says otherwise.** The column
+    stays `NOT NULL` — work nobody is named on is work nobody has agreed to do
+    — so an omitted `assignee_id` is not "nobody", it is the question "whose,
+    then?", and the honest answer is the person in front of it. Handing it on
+    is a `PATCH` away. The default steps aside rather than guessing where it
+    cannot: a caller who is not on the project, and the bootstrap session,
+    which is nobody, are both told to name somebody.
+27. **One entry in the directory is a machine.** A board assigns work to
+    directory entries, so handing a card to an agent needed somebody to hand
+    it to; `Agent` is that somebody, flagged rather than matched on by name,
+    and on every project from the moment the project exists — an entry each
+    board had to be told about by hand would do nothing until somebody found
+    the People screen. It is `team`, because it does the work, and the
+    distinction `is_agent` draws is the other one: whether there is anybody
+    behind the name. It has no email and no password, so it cannot be invited
+    and never signs in — a machine reaches Cylist with an API token minted by
+    whoever runs it, and that token still acts as its owner. Which is why a
+    card written through the MCP server lands on the person behind it rather
+    than on `Agent`: the agent is who work is *given* to, not who does the
+    giving.

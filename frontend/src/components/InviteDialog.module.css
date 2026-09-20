@@ -1,0 +1,38 @@
+.lead {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+/* The link and its copy button. The code box scrolls rather than wraps: a
+   token broken across lines is a token somebody pastes half of. */
+.linkRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.link {
+  flex: 1;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* Amber rather than red: replacing a link or losing one is recoverable, and
+   the red of blocked is spent on things that are not. */
+.warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--hold-soft);
+  color: var(--hold);
+  font-size: 13px;
+  line-height: 1.5;
+}

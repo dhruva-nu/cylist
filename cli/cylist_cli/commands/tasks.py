@@ -64,7 +64,11 @@ def register(subparsers: Any) -> None:
     new.add_argument(
         "--due", metavar="YYYY-MM-DD", help="Optional. Left off, the card has no due date."
     )
-    new.add_argument("--assignee", required=True, metavar="NAME", help="A member of the project.")
+    new.add_argument(
+        "--assignee",
+        metavar="NAME",
+        help="A member of the project. Left off, the card is yours.",
+    )
     new.add_argument("--jira", metavar="REF")
     new.add_argument("--pr", metavar="REF")
     new.set_defaults(handler=_new)
@@ -376,8 +380,12 @@ def _new(args: argparse.Namespace, ctx: Context) -> None:
         "title": args.title,
         "description": args.description,
         "type": args.type,
-        "assignee_id": resolve.person_id(ctx.client, args.assignee, project_ref=args.project),
     }
+    # Left off, the server puts the card on whoever this credential is — which
+    # for a personal token is you. Resolving your own name here first would ask
+    # the same question over two more requests.
+    if args.assignee:
+        body["assignee_id"] = resolve.person_id(ctx.client, args.assignee, project_ref=args.project)
     if args.due:
         body["due_date"] = _due(args.due)
     if args.jira:

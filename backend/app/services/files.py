@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.sensitivity import Sensitivity
 from app.models.file import FileItem, Folder, ItemKind, ItemSource
 from app.models.person import Person
 from app.models.project import Project
@@ -122,7 +123,15 @@ async def create_folder(session: AsyncSession, project: Project, data: FolderCre
     parent = await _destination(session, project.id, data.parent_id)
     await _ensure_depth_allows_a_child(session, parent)
 
-    folder = Folder(project_id=project.id, parent_id=parent.id, name=data.name)
+    folder = Folder(
+        project_id=project.id,
+        parent_id=parent.id,
+        name=data.name,
+        # Inherited rather than defaulted: a subfolder of Contracts is part of
+        # Contracts, and making the caller restate it is how a folder ends up
+        # more open than the one it sits in.
+        default_sensitivity=(data.default_sensitivity or parent.default_sensitivity),
+    )
     session.add(folder)
     try:
         await session.flush()
@@ -204,14 +213,22 @@ async def path_to(session: AsyncSession, folder: Folder) -> list[Folder]:
 async def update_folder(session: AsyncSession, folder: Folder, data: FolderUpdate) -> Folder:
     """Rename a folder, move it, or both.
 
+    Also where a folder's default classification is set, which is the one edit
+    the project's root accepts — see the note below.
+
     Raises:
         ConflictError: if the destination already has a folder with this name.
-        UnprocessableRequestError: if the folder is the project's root, or if
-            the move would put the folder inside its own subtree or past the
-            depth limit.
+        UnprocessableRequestError: if the folder is the project's root and is
+            being renamed or moved, or if the move would put the folder inside
+            its own subtree or past the depth limit.
     """
-    _ensure_not_the_root(folder, "renamed or moved")
     fields = data.model_dump(exclude_unset=True)
+    # Only for the two the root actually refuses. Its default classification
+    # is not one of them: the root is where most of a project's files land, so
+    # a project that wanted everything restricted by default and could not say
+    # so at the top would have to say it on every folder instead.
+    if fields.keys() & {"name", "parent_id"}:
+        _ensure_not_the_root(folder, "renamed or moved")
 
     if "parent_id" in fields:
         parent = await _destination(session, folder.project_id, fields["parent_id"])
@@ -221,6 +238,8 @@ async def update_folder(session: AsyncSession, folder: Folder, data: FolderUpdat
 
     if fields.get("name") is not None:
         folder.name = fields["name"]
+    if fields.get("default_sensitivity") is not None:
+        folder.default_sensitivity = fields["default_sensitivity"]
 
     # Read now, not in the handler below: a failed flush leaves the session
     # unusable, and every attribute read on it would try to reload the row.
@@ -260,6 +279,7 @@ async def upload(
     *,
     max_bytes: int,
     added_by: UUID | None,
+    sensitivity: str | None = None,
 ) -> FileItem:
     """Store an uploaded file in a folder.
 
@@ -291,6 +311,7 @@ async def upload(
             size=size,
             mime=mime,
             added_by=added_by,
+            sensitivity=(sensitivity or folder.default_sensitivity),
         ),
     )
 
@@ -320,6 +341,7 @@ async def add_link(session: AsyncSession, folder: Folder, data: LinkCreate) -> F
             url=data.url,
             source=data.source,
             added_by=data.added_by,
+            sensitivity=(data.sensitivity or folder.default_sensitivity),
         ),
     )
 
@@ -356,6 +378,8 @@ async def update_item(session: AsyncSession, item: FileItem, data: ItemUpdate) -
     if "added_by" in fields:
         await _ensure_person_exists(session, fields["added_by"])
 
+    if fields.get("sensitivity") is not None:
+        item.sensitivity = fields["sensitivity"]
     if fields.get("name") is not None:
         item.name = fields["name"]
     if fields.get("url") is not None:
@@ -384,12 +408,21 @@ async def delete_item(session: AsyncSession, store: BlobStore, item: FileItem) -
     await blobs.collect_garbage(session, store, blob_ids)
 
 
-async def counts(session: AsyncSession, project: Project) -> Counts:
+async def counts(
+    session: AsyncSession, project: Project, *, readable: frozenset[Sensitivity] | None = None
+) -> Counts:
     """How many folders and items the project holds, for its hub card.
 
     The root is not counted. Every project has one and nobody can remove it, so
     counting it would report "1 folder" for a project nothing has been filed in
     yet.
+
+    Args:
+        readable: The levels the reader is cleared for. Items above them are
+            left out — a count is a listing summed up, and one that said "11
+            files" to somebody who can only reach ten would have told them a
+            file exists, which is the whole thing levels are for. ``None``
+            counts everything, for the callers that are not answering a person.
     """
     in_project = select(Folder.id).where(Folder.project_id == project.id)
     folders = await session.scalar(
@@ -397,9 +430,10 @@ async def counts(session: AsyncSession, project: Project) -> Counts:
         .select_from(Folder)
         .where(Folder.project_id == project.id, Folder.parent_id.is_not(None))
     )
-    items = await session.scalar(
-        select(func.count()).select_from(FileItem).where(FileItem.folder_id.in_(in_project))
-    )
+    counting = select(func.count()).select_from(FileItem).where(FileItem.folder_id.in_(in_project))
+    if readable is not None:
+        counting = counting.where(FileItem.sensitivity.in_([level.value for level in readable]))
+    items = await session.scalar(counting)
     return Counts(folders=folders or 0, items=items or 0)
 
 

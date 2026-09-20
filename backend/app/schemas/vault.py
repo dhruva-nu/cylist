@@ -12,12 +12,21 @@ from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 
+from app.core.sensitivity import Sensitivity
 from app.models.vault import VaultNodeKind
 from app.schemas.common import Schema
 
 
 class VaultTreeCreate(Schema):
     name: str = Field(min_length=1, max_length=120, examples=["Logins"])
+    default_sensitivity: Sensitivity | None = Field(
+        default=None,
+        description=(
+            "What nodes added to this tree are classified as unless the caller "
+            "says. A tree is how a vault is already divided, so this is where "
+            '"everything in Certificates is restricted" is said once.'
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -33,6 +42,7 @@ class VaultTreeUpdate(Schema):
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
     position: int | None = Field(default=None, ge=0)
+    default_sensitivity: Sensitivity | None = None
 
 
 class SecretCreate(Schema):
@@ -76,6 +86,13 @@ class VaultNodeCreate(Schema):
     secret: SecretCreate | None = Field(
         default=None, description="Required when `kind` is `secret`, forbidden otherwise."
     )
+    sensitivity: Sensitivity | None = Field(
+        default=None,
+        description=(
+            "How far this may travel. Omit to inherit the parent branch's, or "
+            "the tree's default at the top level."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -105,6 +122,13 @@ class VaultNodeUpdate(Schema):
 
     name: str | None = Field(default=None, min_length=1, max_length=160)
     secret: SecretUpdate | None = None
+    sensitivity: Sensitivity | None = Field(
+        default=None,
+        description=(
+            "Reclassify it. Raising a branch's level hides everything under it "
+            "from anybody not cleared that far."
+        ),
+    )
 
 
 class VaultNodeMove(Schema):
@@ -138,6 +162,9 @@ class VaultNodeRead(Schema):
     name: str
     kind: VaultNodeKind
     position: int
+    sensitivity: Sensitivity = Field(
+        description="How far this may travel. A role not cleared this high is not shown it."
+    )
     created_at: datetime
     updated_at: datetime
     secret: SecretRead | None = Field(
@@ -153,6 +180,9 @@ class VaultTreeRead(Schema):
     project_id: UUID
     name: str
     position: int
+    default_sensitivity: Sensitivity = Field(
+        description="What nodes added here are classified as unless the caller says."
+    )
     node_count: int
     secret_count: int
     created_at: datetime

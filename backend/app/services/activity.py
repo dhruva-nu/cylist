@@ -3,6 +3,11 @@
 Call :func:`record` from the service that performed the change, never from a
 router — that way an action logged once is logged however it was triggered.
 
+Every row carries both halves of "who": the credential, and the person behind
+it. The credential answers *how* — this browser session, that agent's token —
+and the person answers *who*, which is the half that survives the credential
+being revoked and the half a reader actually wants.
+
 Reading is the other half, and it is asked in two shapes. :func:`for_entity`
 narrows the trail to one thing, which is how a card answers "what happened to
 me"; :func:`between` narrows it to one project over a stretch of time, which is
@@ -52,6 +57,7 @@ async def record(
     """
     entry = Activity(
         actor_token_id=principal.token_id,
+        actor_person_id=principal.person_id,
         actor_label=principal.label,
         channel=principal.channel,
         verb=verb,
@@ -369,6 +375,19 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "project.members_changed": lambda p: (
         f"Set the project's membership to {p.get('member_count', 0)} "
         f"{'person' if p.get('member_count') == 1 else 'people'}."
+    ),
+    # --- Roles, and who wears them ------------------------------------------
+    "role.created": lambda p: f"Added the role {_quoted(p.get('name'))}.",
+    "role.updated": lambda p: (
+        f"Renamed the role {_quoted(p.get('was'))} to {_quoted(p.get('name'))}."
+        if p.get("was")
+        else f"Changed the role {_quoted(p.get('name'))}'s {_fields(p)}."
+    ),
+    "role.deleted": lambda p: f"Deleted the role {_quoted(p.get('name'))}.",
+    "member.role_set": lambda p: (
+        f"Made {p.get('person')} {_quoted(p.get('role'))} on this project."
+        if p.get("role")
+        else f"Took {p.get('person')}'s role off."
     ),
     # --- The board's columns ------------------------------------------------
     "column.created": lambda p: f"Added the column {_quoted(p.get('name'))}.",

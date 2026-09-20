@@ -66,21 +66,33 @@ def fresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def password(monkeypatch: pytest.MonkeyPatch) -> None:
+def credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer both prompts: the address to sign in as, and the password.
+
+    Two now rather than one. A deployment with accounts in it signs people in
+    by address, and setup has to ask for one.
+    """
+    monkeypatch.setattr("builtins.input", lambda _: EMAIL)
     monkeypatch.setattr(getpass, "getpass", lambda _: "correct-horse")
+
+
+EMAIL = "dhruva@cylist.dev"
 
 
 def test_a_first_run_mints_a_token_and_writes_it(
     run: Runner,
     recorder: fake_api.Recorder,
     fresh: None,
-    password: None,
+    credentials: None,
     claude_calls: list[list[str]],
 ) -> None:
     result = run("setup")
 
     assert result.code == 0
-    assert recorder.body("POST", "/auth/login") == {"password": "correct-horse"}
+    assert recorder.body("POST", "/auth/login") == {
+        "email": EMAIL,
+        "password": "correct-horse",
+    }
     minted = recorder.body("POST", "/tokens")
     assert minted["scopes"] == ["read", "write"]
     assert minted["name"].endswith("agent")
@@ -89,7 +101,7 @@ def test_a_first_run_mints_a_token_and_writes_it(
 
 
 def test_the_login_carries_no_bearer_header(
-    run: Runner, recorder: fake_api.Recorder, fresh: None, password: None
+    run: Runner, recorder: fake_api.Recorder, fresh: None, credentials: None
 ) -> None:
     """The server reads Authorization in preference to the session cookie, so
     a stale bearer on the login request would refuse the very call that is
@@ -101,7 +113,7 @@ def test_the_login_carries_no_bearer_header(
 
 
 def test_the_session_it_borrows_is_revoked_again(
-    run: Runner, recorder: fake_api.Recorder, fresh: None, password: None
+    run: Runner, recorder: fake_api.Recorder, fresh: None, credentials: None
 ) -> None:
     """The password buys every scope; nothing should keep that lying around."""
     run("setup", "--no-mcp")
@@ -110,7 +122,7 @@ def test_the_session_it_borrows_is_revoked_again(
 
 
 def test_every_address_the_server_answers_on_is_stored(
-    run: Runner, fresh: None, password: None
+    run: Runner, fresh: None, credentials: None
 ) -> None:
     """The whole point: this configuration works on and off the tailnet."""
     run("setup", "--no-mcp")
@@ -119,14 +131,14 @@ def test_every_address_the_server_answers_on_is_stored(
 
 
 @posix_modes_only
-def test_the_config_file_is_owner_only(run: Runner, fresh: None, password: None) -> None:
+def test_the_config_file_is_owner_only(run: Runner, fresh: None, credentials: None) -> None:
     run("setup", "--no-mcp")
 
     assert configuration.describe_mode(configuration.config_path()) == "0600"
 
 
 def test_the_config_file_is_described_as_private_on_every_platform(
-    run: Runner, fresh: None, password: None
+    run: Runner, fresh: None, credentials: None
 ) -> None:
     """What Windows gives instead of a mode is the ACL on the user's profile,
     and `describe_protection` is what says so rather than claiming a 0600 that
@@ -152,7 +164,7 @@ def test_a_working_token_is_kept_and_no_password_is_asked_for(
 
 
 def test_a_token_without_the_scopes_an_agent_needs_is_replaced(
-    run: Runner, recorder: fake_api.Recorder, password: None
+    run: Runner, recorder: fake_api.Recorder, credentials: None
 ) -> None:
     reader = {**fake_api.IDENTITY, "scopes": ["read"]}
     result = run("setup", "--no-mcp", overrides={("GET", "/me"): httpx.Response(200, json=reader)})
@@ -162,7 +174,7 @@ def test_a_token_without_the_scopes_an_agent_needs_is_replaced(
 
 
 def test_a_rejected_token_is_replaced_rather_than_reported(
-    run: Runner, recorder: fake_api.Recorder, password: None
+    run: Runner, recorder: fake_api.Recorder, credentials: None
 ) -> None:
     """A revoked token is the reason to run this, not a reason to fail."""
     refusal = httpx.Response(
@@ -175,7 +187,7 @@ def test_a_rejected_token_is_replaced_rather_than_reported(
 
 
 def test_the_hooks_and_the_work_command_are_installed(
-    run: Runner, fresh: None, password: None
+    run: Runner, fresh: None, credentials: None
 ) -> None:
     run("setup", "--no-mcp")
 
@@ -185,7 +197,7 @@ def test_the_hooks_and_the_work_command_are_installed(
 
 
 def test_the_mcp_server_is_registered_without_a_token_in_it(
-    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, claude_calls: list[list[str]]
 ) -> None:
     """A registration holding a live credential is how tokens reach a repo."""
     result = run("setup")
@@ -204,7 +216,7 @@ def test_the_mcp_server_is_registered_without_a_token_in_it(
 
 
 def test_registering_replaces_whatever_was_there_before(
-    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, claude_calls: list[list[str]]
 ) -> None:
     """``add-json`` refuses a name it knows, and this command must be re-runnable."""
     run("setup")
@@ -213,7 +225,7 @@ def test_registering_replaces_whatever_was_there_before(
 
 
 def test_the_scope_can_be_narrowed_to_this_project(
-    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, claude_calls: list[list[str]]
 ) -> None:
     run("setup", "--scope", "project")
 
@@ -225,7 +237,7 @@ def test_the_scope_can_be_narrowed_to_this_project(
 def test_a_failure_from_claude_is_reported_not_swallowed(
     run: Runner,
     fresh: None,
-    password: None,
+    credentials: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(shutil, "which", _which)
@@ -240,7 +252,7 @@ def test_a_failure_from_claude_is_reported_not_swallowed(
 
 
 def test_no_claude_on_path_prints_the_command_to_run(
-    run: Runner, fresh: None, password: None, monkeypatch: pytest.MonkeyPatch
+    run: Runner, fresh: None, credentials: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: {"uv": "/usr/bin/uv"}.get(name))
 
@@ -251,7 +263,7 @@ def test_no_claude_on_path_prints_the_command_to_run(
 
 
 def test_hooks_and_mcp_can_both_be_declined(
-    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, claude_calls: list[list[str]]
 ) -> None:
     result = run("setup", "--no-hooks", "--no-mcp")
 
@@ -264,6 +276,7 @@ def test_hooks_and_mcp_can_both_be_declined(
 def test_an_empty_password_changes_nothing(
     run: Runner, recorder: fake_api.Recorder, fresh: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("builtins.input", lambda _: EMAIL)
     monkeypatch.setattr(getpass, "getpass", lambda _: "")
 
     result = run("setup")
@@ -282,14 +295,48 @@ def test_the_password_can_come_from_stdin(
 ) -> None:
     monkeypatch.setattr(sys, "stdin", _Stdin("hunter2\n"))
 
-    result = run("setup", "--no-mcp", "--password-stdin")
+    result = run("setup", "--no-mcp", "--password-stdin", "--email", EMAIL)
 
     assert result.code == 0
-    assert recorder.body("POST", "/auth/login") == {"password": "hunter2"}
+    assert recorder.body("POST", "/auth/login") == {"email": EMAIL, "password": "hunter2"}
+
+
+def test_stdin_without_an_email_says_so_rather_than_hanging(
+    run: Runner, fresh: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """There is nothing to prompt with: stdin is already the password."""
+    monkeypatch.setattr(sys, "stdin", _Stdin("hunter2\n"))
+
+    result = run("setup", "--no-mcp", "--password-stdin")
+
+    assert result.code == 1
+    assert "--email" in result.err
+
+
+def test_a_deployment_with_no_accounts_is_not_asked_for_an_email(
+    run: Runner, recorder: fake_api.Recorder, fresh: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bootstrap login belongs to nobody, so there is no address to give.
+
+    ``input`` is left unpatched on purpose: reading it under pytest raises,
+    so a regression that starts prompting here fails rather than hangs.
+    """
+    monkeypatch.setattr(getpass, "getpass", lambda _: "correct-horse")
+
+    result = run(
+        "setup",
+        "--no-mcp",
+        overrides={
+            ("GET", "/setup"): httpx.Response(200, json={**fake_api.SETUP, "has_accounts": False})
+        },
+    )
+
+    assert result.code == 0
+    assert recorder.body("POST", "/auth/login") == {"password": "correct-horse"}
 
 
 def test_a_server_too_old_to_describe_itself_still_works(
-    run: Runner, fresh: None, password: None
+    run: Runner, fresh: None, credentials: None
 ) -> None:
     """During a rollout the CLI is new and the deployment is not yet."""
     result = run(
@@ -322,7 +369,7 @@ def test_a_server_that_cannot_be_found_says_what_it_tried(
 
 
 def test_json_reports_every_step(
-    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, claude_calls: list[list[str]]
 ) -> None:
     result = run("--json", "setup")
 
@@ -462,7 +509,7 @@ def uv_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]
 
 
 def test_a_machine_with_no_checkout_gets_the_server_installed(
-    run: Runner, fresh: None, password: None, no_checkout: None, uv_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, no_checkout: None, uv_calls: list[list[str]]
 ) -> None:
     result = run("--json", "setup")
 
@@ -476,7 +523,7 @@ def test_a_machine_with_no_checkout_gets_the_server_installed(
 
 
 def test_the_installed_binary_is_found_by_asking_uv_not_by_searching_path(
-    run: Runner, fresh: None, password: None, no_checkout: None, uv_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, no_checkout: None, uv_calls: list[list[str]]
 ) -> None:
     """``shutil.which`` cannot see it: uv installs into a directory that is on
     the user's PATH and very often not on this process's — a shell opened
@@ -489,7 +536,7 @@ def test_the_installed_binary_is_found_by_asking_uv_not_by_searching_path(
 
 
 def test_the_source_can_be_pointed_at_a_fork(
-    run: Runner, fresh: None, password: None, no_checkout: None, uv_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, no_checkout: None, uv_calls: list[list[str]]
 ) -> None:
     run("setup", "--mcp-source", "git+https://example.test/fork#subdirectory=mcp")
 
@@ -500,7 +547,7 @@ def test_the_source_can_be_pointed_at_a_fork(
 def test_the_bootstrap_scripts_can_set_the_source_in_the_environment(
     run: Runner,
     fresh: None,
-    password: None,
+    credentials: None,
     no_checkout: None,
     uv_calls: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
@@ -516,7 +563,7 @@ def test_the_bootstrap_scripts_can_set_the_source_in_the_environment(
 
 
 def test_a_checkout_is_still_preferred_to_a_download(
-    run: Runner, fresh: None, password: None, claude_calls: list[list[str]]
+    run: Runner, fresh: None, credentials: None, claude_calls: list[list[str]]
 ) -> None:
     """Nothing is fetched when the source is right there — which is what keeps
     this command usable on the machine the server runs on."""
@@ -530,7 +577,7 @@ def test_a_checkout_is_still_preferred_to_a_download(
 def test_no_install_prints_the_command_instead_of_running_it(
     run: Runner,
     fresh: None,
-    password: None,
+    credentials: None,
     no_checkout: None,
     uv_calls: list[list[str]],
 ) -> None:
@@ -542,7 +589,7 @@ def test_no_install_prints_the_command_instead_of_running_it(
 
 
 def test_no_uv_says_to_install_uv_rather_than_naming_a_uv_command(
-    run: Runner, fresh: None, password: None, no_checkout: None, monkeypatch: pytest.MonkeyPatch
+    run: Runner, fresh: None, credentials: None, no_checkout: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ "Install it with uv tool install" is not useful advice to a machine
     that has no uv."""
@@ -557,7 +604,7 @@ def test_no_uv_says_to_install_uv_rather_than_naming_a_uv_command(
 def test_a_failed_install_names_the_source_it_could_not_reach(
     run: Runner,
     fresh: None,
-    password: None,
+    credentials: None,
     no_checkout: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -576,7 +623,7 @@ def test_a_failed_install_names_the_source_it_could_not_reach(
 def test_the_token_is_still_written_when_the_mcp_server_cannot_be_had(
     run: Runner,
     fresh: None,
-    password: None,
+    credentials: None,
     no_checkout: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

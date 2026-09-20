@@ -15,6 +15,7 @@ import { ProjectFiles } from './routes/ProjectFiles'
 import { ProjectGoals } from './routes/ProjectGoals'
 import { ProjectHub } from './routes/ProjectHub'
 import { ProjectPeople } from './routes/ProjectPeople'
+import { ProjectRoles } from './routes/ProjectRoles'
 import { ProjectVault } from './routes/ProjectVault'
 
 const rootRoute = createRootRoute({ component: Shell })
@@ -69,6 +70,15 @@ const projectPeopleRoute = createRoute({
   component: ProjectPeople,
 })
 
+// Where an admin says who is what on this board and what each of those things
+// may do. Its own route rather than a tab of People, because half of what is
+// on it — the permission grid — is about the board rather than about anybody.
+const projectRolesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/p/$projectKey/roles',
+  component: ProjectRoles,
+})
+
 // A project's area, not the platform's: an agent's token is scoped per
 // project, so what it may do on one board is not what it may do on the next.
 const projectAgentsRoute = createRoute({
@@ -92,6 +102,7 @@ const routeTree = rootRoute.addChildren([
   projectFilesRoute,
   projectVaultRoute,
   projectPeopleRoute,
+  projectRolesRoute,
   projectAgentsRoute,
 ])
 

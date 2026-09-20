@@ -16,13 +16,16 @@ const ADITI: Person = {
   id: 'person-1',
   name: 'Aditi K',
   kind: 'team',
-  role: 'Backend engineer',
+  title: 'Backend engineer',
   responsibilities: '',
   email: null,
   colour: '#1D7D46',
   archived_at: null,
   created_at: '2026-01-01T00:00:00Z',
-  is_me: false,
+  is_agent: false,
+
+  has_account: false,
+  invite_is_pending: false,
 }
 
 function goal(reference: string, target: string | null): Goal {

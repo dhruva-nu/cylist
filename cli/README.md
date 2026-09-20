@@ -50,7 +50,7 @@ cylist setup
 ```
 
 It finds
-the server, asks for the owner's password **once**, mints a `read,write` token
+the server, asks for your email and password **once**, mints a `read,write` token
 named after this machine, stores it `0600`, installs Claude Code's lifecycle
 hooks and the `/work` command, and registers the Cylist MCP server. Run it
 again after a reinstall and it re-points everything at where things are now —
@@ -93,7 +93,7 @@ environment — which is how the bootstrap scripts keep the CLI and the server
 on one ref.
 
 **Why it asks for the password rather than a token.** Minting a token needs the
-`admin` scope, and the owner's password already grants everything. So setup
+`admin` scope, and your own session already grants everything. So setup
 borrows a session with it, mints the narrow token an agent should hold, and
 revokes the session on the way out — nobody has to keep an `admin` token around
 in order to hand out narrow ones.

@@ -7,6 +7,13 @@ These are the two things you need before the first login::
 
 Both print a value to paste into ``.env``. Neither touches the database.
 
+``hash-password`` makes the *bootstrap* password: the one login that belongs
+to nobody, accepted only while no person in the directory has an account. It
+is how a fresh deployment is opened for the first time, and it stops working
+the moment somebody opens an account from it. Nobody signs in with it day to
+day — everybody has their own email and password after that — so there is no
+reason to keep it anywhere but ``.env``.
+
 This is not the ``cylist`` CLI for day-to-day use — that one arrives with the
 agent tooling and talks to the HTTP API.
 """
@@ -25,7 +32,7 @@ _VAULT_KEY_BYTES = 32
 
 
 def _hash_password() -> int:
-    password = getpass.getpass("New owner password: ")
+    password = getpass.getpass("Bootstrap password: ")
     if not password:
         print("Nothing entered; no hash produced.", file=sys.stderr)
         return 1
@@ -50,7 +57,10 @@ def _generate_vault_key() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.cli", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("hash-password", help="Hash a password for CYLIST_PASSWORD_HASH.")
+    subcommands.add_parser(
+        "hash-password",
+        help="Hash the bootstrap password for CYLIST_PASSWORD_HASH.",
+    )
     subcommands.add_parser("generate-vault-key", help="Generate CYLIST_VAULT_KEY.")
 
     args = parser.parse_args(argv)

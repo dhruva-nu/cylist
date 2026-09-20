@@ -32,6 +32,7 @@ class Activity(Base, UUIDPrimaryKeyMixin):
         Index("ix_activity_occurred_at", "occurred_at"),
         Index("ix_activity_project_id_occurred_at", "project_id", "occurred_at"),
         Index("ix_activity_entity_type_entity_id", "entity_type", "entity_id"),
+        Index("ix_activity_actor_person_id_occurred_at", "actor_person_id", "occurred_at"),
     )
 
     occurred_at: Mapped[datetime] = mapped_column(
@@ -42,8 +43,25 @@ class Activity(Base, UUIDPrimaryKeyMixin):
         postgresql.UUID(as_uuid=True),
         ForeignKey("api_token.id", ondelete="SET NULL"),
     )
+    actor_person_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("person.id", ondelete="SET NULL"),
+    )
+    """Which person was behind the change, when one was.
+
+    The token id alone stopped being enough the moment more than one person
+    could hold one: "what did the CLI change at 3am" is now also "and whose
+    CLI was it". Nulled rather than cascaded for the reason
+    :attr:`project_id` is — the record of what happened outlives the
+    directory entry — and null for the bootstrap session, which has no person.
+    """
+
     actor_label: Mapped[str] = mapped_column(String(120), nullable=False)
-    """Readable actor name, kept even if the token row is later deleted."""
+    """Readable actor name, kept even if the token row is later deleted.
+
+    For a person's own session this is their name, so a feed read years later
+    still says who did it without a join that may no longer resolve.
+    """
 
     channel: Mapped[Channel] = mapped_column(
         Enum(

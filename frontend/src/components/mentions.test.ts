@@ -23,13 +23,16 @@ function person(name: string): Person {
     id: name,
     name,
     kind: 'team',
-    role: 'Backend engineer',
+    title: 'Backend engineer',
     responsibilities: '',
     email: null,
     colour: '#1D7D46',
     archived_at: null,
     created_at: '2026-01-01T00:00:00Z',
-    is_me: false,
+    is_agent: false,
+
+    has_account: false,
+    invite_is_pending: false,
   }
 }
 
@@ -39,6 +42,7 @@ function file(name: string, folder = '', kind: 'file' | 'link' = 'file'): FiledI
     folder_id: folder,
     kind,
     name,
+    sensitivity: 'internal',
     url: kind === 'link' ? 'https://drive.example/doc' : null,
     source: kind === 'link' ? 'gdrive' : 'upload',
     size: kind === 'link' ? null : 4096,

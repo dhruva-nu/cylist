@@ -15,10 +15,13 @@
 }
 
 /* 340px rather than 300px, now that the page is allowed the width of the
-   window. A card holds a face, a name, a role, a line of responsibilities and
-   three controls, and at 300px a wide display fitted five of them across and
-   wrapped every one of those lines; 340px is the width the card was drawn at,
-   so four sit across the same room and each reads. */
+   window. A card holds a face, a name, a job title, a line of responsibilities
+   and three controls, and at 300px a wide display fitted five of them across
+   and wrapped every one of those lines; 340px is the width the card was drawn
+   at, so four sit across the same room and each reads. The role badge added in
+   CYLIST-45 sits on the name row, which already wraps, so it costs the card no
+   height until a name is long — which is why it went there and not on a line
+   of its own. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -65,7 +68,7 @@
   text-transform: uppercase;
 }
 
-.role {
+.title {
   color: var(--ink-2);
   font-size: 13.5px;
 }
@@ -146,4 +149,50 @@
 .optionText span {
   color: var(--ink-3);
   font-size: 12.5px;
+}
+
+/* Whether somebody can sign in. Same shape as the "you" tag beside it, in the
+   ok and hold tones rather than the brand one: an account is a settled state
+   and an invitation is a waiting one, which is exactly what those two already
+   mean everywhere else on the board. Quiet on purpose — it is read when you
+   are wondering why somebody has not turned up yet, not before. */
+/* The machine's own tag, in the teal every agent already wears on this board
+   — the ring round a card an agent is working, the rail down its comments. A
+   name that is not a person's is worth saying once, quietly, beside it. */
+.agent,
+.account,
+.invited {
+  padding: 2px 8px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.account {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.invited {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.agent {
+  background: var(--agent-soft);
+  color: var(--agent);
+}
+
+/* A link rather than a button: it goes somewhere, and it is the one control
+   on this page offered to a reader who cannot change anything here. */
+.rolesLink {
+  align-self: center;
+  color: var(--link);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
 }

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
@@ -20,6 +21,7 @@ from app.models.board import BoardColumn
 from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.agent_sessions import AgentPresence
 from app.schemas.common import Acknowledged
@@ -42,7 +44,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import activity, agent_sessions, columns, tasks
+from app.services import activity, agent_sessions, columns, permissions, tasks, templates
 
 router = APIRouter(tags=["tasks"])
 
@@ -58,6 +60,25 @@ async def resolved_task(
 ) -> Task:
     """Turn the path segment into a task, 404-ing if nothing matches."""
     return await tasks.resolve(session, task_ref)
+
+
+async def resolved_checklist_item(
+    item_id: UUID,
+    session: AsyncSession = SessionDependency,
+) -> TaskChecklistItem:
+    """Turn the path segment into a tick box, 404-ing if nothing matches."""
+    return await tasks.get_checklist_item(session, item_id)
+
+
+async def _project_of_checklist_item(session: AsyncSession, item: TaskChecklistItem) -> UUID:
+    """Which project a tick box is on, by way of the card it is on.
+
+    A checklist item is the one thing in this router addressed by an id that
+    names neither a project nor a card, so the hop the guard needs is written
+    out rather than read off the row.
+    """
+    task = await tasks.resolve(session, str(item.task_id))
+    return task.project_id
 
 
 def _comment(entry: TaskComment) -> CommentRead:
@@ -228,6 +249,121 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     )
 
 
+WRITE_CARDS = guards.on_project(Permission.TASKS)
+"""Adding a card, on the one path that names the project rather than a card."""
+
+WRITE_THIS_CARD = guards.for_entity(Permission.TASKS, resolved_task)
+"""Everything done to a card that already exists: editing it, moving it,
+finishing it, changing its status, splitting it, ticking its boxes."""
+
+COMMENT_ON_THIS_CARD = guards.for_entity(Permission.COMMENTS, resolved_task)
+"""Saying something on a card, which is deliberately not the same permission.
+A client who should never move a card is often exactly the person whose
+comment you want. The reason a status change carries is not this — that is
+part of making the change, and goes with it."""
+
+
+async def may_write_this_card(
+    body: TaskUpdate,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(WRITE_THIS_CARD),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """Admit an edit whose *fields* this caller's role allows.
+
+    Two of a card's fields answer to something narrower than "may edit cards".
+    Its sub-stages belong to the column it is in, and its goal is the one
+    goal-shaped thing that happens on a card. Both are checked only when the
+    field is actually sent, so an edit that does not touch them is not asked
+    about them.
+    """
+    project = await session.get(Project, task.project_id)
+    if project is None:  # pragma: no cover - a resolved card's project exists
+        return principal
+
+    fields = body.model_dump(exclude_unset=True)
+    if "sub_statuses" in fields and task.column_id is not None:
+        await permissions.enforce_column_staging(session, project, principal, task.column_id)
+    if "goal_id" in fields:
+        await permissions.enforce(session, project, principal, Permission.GOAL_ASSIGN)
+    return principal
+
+
+async def may_add_card(
+    body: TaskCreate,
+    project: Project = Depends(resolved_project),
+    principal: Principal = Depends(WRITE_CARDS),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """Admit a new card whose fields this caller's role allows.
+
+    The sub-stage check is against the column the card will actually land in
+    — the board's first, or the leftmost its template allows — rather than
+    against the first column flatly, because a template can send a card
+    somewhere else on the way in and that is where its stages would appear.
+    """
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("goal_id") is not None:
+        await permissions.enforce(session, project, principal, Permission.GOAL_ASSIGN)
+
+    if not fields.get("sub_statuses"):
+        return principal
+
+    template = (
+        await templates.get_template(session, body.template_id)
+        if body.template_id is not None
+        else None
+    )
+    board = await columns.list_for_project(session, project)
+    if board:
+        landing = templates.landing_column(template, board[0])
+        await permissions.enforce_column_staging(session, project, principal, landing.id)
+    return principal
+
+
+async def may_move_this_card(
+    body: TaskMove,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(WRITE_THIS_CARD),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """Admit a caller whose role may put a card into the column they named.
+
+    Two checks, and the order matters: `WRITE_THIS_CARD` above asks whether
+    they may move cards at all, and this asks whether they may move one
+    *there*. A role kept out of Done can still shuffle the rest of the board,
+    which is the whole point of the column rules being separate from the flat
+    permission rather than a longer list of it.
+    """
+    project = await session.get(Project, task.project_id)
+    if project is not None:
+        await permissions.enforce_column_entry(session, project, principal, body.column_id)
+    return principal
+
+
+async def may_stage_this_card(
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(WRITE_THIS_CARD),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """Admit a caller whose role may set sub-stages in the card's own column.
+
+    A sub-task has no column, so nothing restricts its stages: the rules are
+    about places on a board, and it is not on one.
+    """
+    project = await session.get(Project, task.project_id)
+    if project is not None and task.column_id is not None:
+        await permissions.enforce_column_staging(session, project, principal, task.column_id)
+    return principal
+
+
+WRITE_THIS_CHECKLIST = guards.for_entity(
+    Permission.TASKS, resolved_checklist_item, locate=_project_of_checklist_item
+)
+"""A tick box is addressed by its own id and knows only its card, so the hop
+to the project is spelled out."""
+
+
 @router.get(
     "/projects/{project_ref}/tasks", response_model=list[TaskRead], summary="List a board's tasks"
 )
@@ -254,12 +390,19 @@ async def list_tasks(
     response_model=TaskDetail,
     status_code=status.HTTP_201_CREATED,
     summary="Add a task",
-    responses={422: {"description": "The assignee is not a member of this project."}},
+    responses={
+        422: {
+            "description": (
+                "The assignee is not a member of this project — or none was named and "
+                "the caller is not one either."
+            )
+        }
+    },
 )
 async def create_task(
     body: TaskCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(may_add_card),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Create a task at the bottom of the board's **first** column.
@@ -273,8 +416,11 @@ async def create_task(
     template does allow, moving it is restricted to the columns its stages
     name, and it starts on the sub-stages that landing column's stage sets —
     its own `sub_statuses`.
+
+    The card lands on **you** unless `assignee_id` names somebody else: a card
+    is the writer's until they hand it on, which `PATCH /tasks/{ref}` does.
     """
-    task = await tasks.create(session, project, body)
+    task = await tasks.create(session, project, body, creator_id=principal.person_id)
     await activity.record(
         session,
         principal,
@@ -357,7 +503,7 @@ async def task_history(
 async def update_task(
     body: TaskUpdate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(may_write_this_card),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Change any subset of a task's details. Omitted fields are left alone.
@@ -381,7 +527,7 @@ async def update_task(
 @router.delete("/tasks/{task_ref}", response_model=Acknowledged, summary="Delete a task")
 async def delete_task(
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a task and its comments.
@@ -419,7 +565,7 @@ async def delete_task(
 async def move_task(
     body: TaskMove,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(may_move_this_card),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Put a card in a column, at a position counted from the top.
@@ -462,7 +608,7 @@ async def move_task(
 async def set_sub_status(
     body: SubStatusMove,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(may_stage_this_card),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Move a task to one of its sub-status stages, forwards or back.
@@ -499,7 +645,7 @@ async def set_sub_status(
 async def finish_task(
     body: TaskFinish,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Tick a sub-task off, or put it back.
@@ -548,7 +694,7 @@ async def finish_task(
 async def change_status(
     body: TaskStatusChange,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Move a task between `active`, `hold` and `blocked`.
@@ -609,7 +755,8 @@ async def list_subtasks(
     responses={
         422: {
             "description": (
-                "The assignee is not a member of this project, or the task is itself a sub-task."
+                "The assignee is not a member of this project — or none was named and the "
+                "caller is not one either — or the task is itself a sub-task."
             )
         }
     },
@@ -617,7 +764,7 @@ async def list_subtasks(
 async def create_subtask(
     body: SubtaskCreate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """Add a sub-task with a reference, an owner and a timeline of its own.
@@ -633,8 +780,13 @@ async def create_subtask(
 
     Until every sub-task is finished or cancelled, the parent cannot be moved to
     the board's last column.
+
+    Its owner is **you** unless `assignee_id` names somebody else — splitting a
+    card is usually taking a piece of it, not handing one out.
     """
-    subtask = await tasks.create(session, task.project, body, parent=task)
+    subtask = await tasks.create(
+        session, task.project, body, creator_id=principal.person_id, parent=task
+    )
     await activity.record(
         session,
         principal,
@@ -660,7 +812,7 @@ async def create_subtask(
 async def add_checklist_item(
     body: ChecklistItemCreate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> ChecklistItemRead:
     """Add a tick-box sub-task to the bottom of a task's checklist.
@@ -689,8 +841,8 @@ async def add_checklist_item(
 )
 async def update_checklist_item(
     body: ChecklistItemUpdate,
-    item_id: UUID,
-    principal: Principal = Depends(require(Scope.WRITE)),
+    item: TaskChecklistItem = Depends(resolved_checklist_item),
+    principal: Principal = Depends(WRITE_THIS_CHECKLIST),
     session: AsyncSession = SessionDependency,
 ) -> ChecklistItemRead:
     """Change one tick box.
@@ -698,7 +850,6 @@ async def update_checklist_item(
     `state` is `open`, `done` or `cancelled`; the last two both count as
     settled, so either one stops the item holding its card back.
     """
-    item = await tasks.get_checklist_item(session, item_id)
     updated = await tasks.update_checklist_item(session, item, body)
     task = await tasks.resolve(session, str(updated.task_id))
     await activity.record(
@@ -721,12 +872,11 @@ async def update_checklist_item(
     "/checklist/{item_id}", response_model=Acknowledged, summary="Delete a checklist item"
 )
 async def delete_checklist_item(
-    item_id: UUID,
-    principal: Principal = Depends(require(Scope.WRITE)),
+    item: TaskChecklistItem = Depends(resolved_checklist_item),
+    principal: Principal = Depends(WRITE_THIS_CHECKLIST),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Remove a tick box entirely. Cancel it instead to keep the record."""
-    item = await tasks.get_checklist_item(session, item_id)
     task = await tasks.resolve(session, str(item.task_id))
     title = item.title
     await tasks.delete_checklist_item(session, item)
@@ -764,7 +914,7 @@ async def list_comments(
 async def add_comment(
     body: CommentCreate,
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(COMMENT_ON_THIS_CARD),
     session: AsyncSession = SessionDependency,
 ) -> CommentRead:
     """Add a comment to a task.

@@ -15,22 +15,25 @@ import { todaysWork, todaysWorkCount } from './today'
 
 const TODAY = '2026-09-08'
 
-function person(id: string, name: string, isMe = false): Person {
+function person(id: string, name: string): Person {
   return {
     id,
     name,
     kind: 'team',
-    role: '',
+    title: '',
     responsibilities: '',
     email: null,
     colour: '#1D7D46',
     archived_at: null,
     created_at: '2026-01-01T00:00:00Z',
-    is_me: isMe,
+    is_agent: false,
+
+    has_account: false,
+    invite_is_pending: false,
   }
 }
 
-const ME = person('me', 'Dhruva', true)
+const ME = person('me', 'Dhruva')
 const ADITI = person('aditi', 'Aditi K')
 
 function column(id: string, name: string, position: number): BoardColumn {
@@ -187,7 +190,7 @@ describe('which cards are today’s work', () => {
     expect(refs(work.due)).toEqual(['A-1'])
   })
 
-  it('falls back to the whole board when nobody is marked as you', () => {
+  it('falls back to the whole board when the session has no person', () => {
     // An empty panel that cannot say why it is empty is worse than a wider
     // answer, so an unclaimed directory gets the project's day rather than
     // nothing at all.

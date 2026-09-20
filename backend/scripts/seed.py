@@ -19,7 +19,7 @@ Four places where the mock and the database do not line up, and what is done
 about each:
 
 *People.* The mock keeps a copy of each person per project, with a different
-role on each. The database has one global directory, so each person is written
+job title on each. The database has one global directory, so each is written
 once and takes their Atlas description, Atlas being the project the mock leads
 with and the one where each of them is described most fully.
 
@@ -107,12 +107,23 @@ class PersonSpec:
     handle: str
     name: str
     kind: PersonKind
-    role: str
+    title: str
     responsibilities: str
     email: str
     colour: str
-    is_me: bool = False
-    """Whether this is the directory's "you". Exactly one spec sets it."""
+    is_owner: bool = False
+    """Whether this is the person the sample projects are created by.
+
+    Exactly one spec sets it. It no longer marks them as "you" — with
+    accounts, who you are is whoever signed in — but somebody has to be the
+    creator the seeded projects name, and the tech lead is the obvious one.
+
+    No password is seeded. A freshly seeded deployment has no accounts, which
+    is the state the bootstrap login exists for: sign in with
+    ``CYLIST_PASSWORD_HASH``, then invite this person like any other. That way
+    the sample data exercises the real path in rather than shipping a
+    credential nobody chose.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,9 +271,9 @@ DIRECTORY: tuple[PersonSpec, ...] = (
     PersonSpec(
         handle="dn",
         name="Dhruva N",
-        is_me=True,
+        is_owner=True,
         kind=PersonKind.TEAM,
-        role="Tech lead",
+        title="Tech lead",
         responsibilities=(
             "Owns architecture and the cutover plan. Escalation point for anything blocked."
         ),
@@ -273,7 +284,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="ak",
         name="Aditi K",
         kind=PersonKind.TEAM,
-        role="Backend engineer",
+        title="Backend engineer",
         responsibilities="Payments, Stripe integration and webhook reliability.",
         email="aditi@think41.com",
         colour="#3B6FC2",
@@ -282,7 +293,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="rs",
         name="Rohan S",
         kind=PersonKind.TEAM,
-        role="Backend engineer",
+        title="Backend engineer",
         responsibilities="Data migration scripts, PDF rendering and reporting.",
         email="rohan@think41.com",
         colour="#C77D00",
@@ -291,7 +302,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="mp",
         name="Meera P",
         kind=PersonKind.TEAM,
-        role="QA & release",
+        title="QA & release",
         responsibilities="Test plans, staging sign-off and release notes.",
         email="meera@think41.com",
         colour="#7A6B9E",
@@ -300,7 +311,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="sf",
         name="Sanjay F",
         kind=PersonKind.CLIENT,
-        role="Finance controller, Atlas",
+        title="Finance controller, Atlas",
         responsibilities=(
             "Approves anything touching tax, invoicing rules or vendor accounts (Avalara, Stripe)."
         ),
@@ -311,7 +322,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="lw",
         name="Lena W",
         kind=PersonKind.CLIENT,
-        role="Legal counsel, Atlas",
+        title="Legal counsel, Atlas",
         responsibilities="Signs off licences and contracts. Slow to respond — chase via Sanjay.",
         email="l.wright@atlas.example",
         colour="#5C6B73",
@@ -320,7 +331,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="pt",
         name="Priya T",
         kind=PersonKind.CLIENT,
-        role="Product owner, Hermes",
+        title="Product owner, Hermes",
         responsibilities="Prioritises the backlog; approves template copy.",
         email="priya@hermes.example",
         colour="#8E6A3D",
@@ -989,6 +1000,7 @@ async def populate(
     """
     summary = Summary()
     directory = await _write_directory(session, summary)
+    owner_id = _owner_of(directory)
 
     for spec in SAMPLE:
         project = await projects.create(
@@ -996,6 +1008,7 @@ async def populate(
             ProjectCreate(
                 key=spec.key, name=spec.name, description=spec.description, colour=spec.colour
             ),
+            creator_id=owner_id,
         )
         await projects.set_members(session, project, [directory[h] for h in spec.members])
 
@@ -1027,16 +1040,23 @@ async def _write_directory(session: AsyncSession, summary: Summary) -> dict[str,
             PersonCreate(
                 name=spec.name,
                 kind=spec.kind,
-                role=spec.role,
+                title=spec.title,
                 responsibilities=spec.responsibilities,
                 email=spec.email,
                 colour=spec.colour,
-                is_me=spec.is_me,
             ),
         )
         directory[spec.handle] = person.id
         summary.people += 1
     return directory
+
+
+def _owner_of(directory: dict[str, UUID]) -> UUID | None:
+    """Whoever the sample data is created by, by handle."""
+    return next(
+        (directory[spec.handle] for spec in DIRECTORY if spec.is_owner),
+        None,
+    )
 
 
 async def _shape_board(

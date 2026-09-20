@@ -155,6 +155,18 @@ def _members(args: argparse.Namespace, ctx: Context) -> None:
 
 def _print_people(people: list[dict[str, Any]]) -> None:
     rows = [
-        [str(person["name"]), str(person["kind"]), str(person.get("role", ""))] for person in people
+        [
+            str(person["name"]),
+            str(person["kind"]),
+            str(person.get("title", "")),
+            _role_name(person),
+        ]
+        for person in people
     ]
-    output.table(["NAME", "KIND", "ROLE"], rows, empty="Nobody is on this project yet.")
+    output.table(["NAME", "KIND", "TITLE", "ROLE"], rows, empty="Nobody is on this project yet.")
+
+
+def _role_name(person: dict[str, Any]) -> str:
+    """Their role on this project, or nothing if an admin has not said yet."""
+    role = person.get("role")
+    return str(role["name"]) if isinstance(role, dict) else ""

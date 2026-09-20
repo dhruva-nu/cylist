@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
@@ -22,6 +23,7 @@ from app.core.errors import NotFoundError
 from app.db import SessionDependency
 from app.models.agent import AgentNote, Skill
 from app.models.project import Project
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.agents import NoteCreate, NoteRead, SkillRead, SkillUpdate
 from app.schemas.common import Acknowledged
@@ -77,6 +79,13 @@ def _note(note: AgentNote) -> NoteRead:
 # --- Skills ----------------------------------------------------------------
 
 
+WRITE_AGENT_KIT = guards.on_project(Permission.AGENTS)
+"""What this project's agents work from — its skills and its learned notes."""
+
+WRITE_THIS_SKILL = guards.for_entity(Permission.AGENTS, resolved_skill)
+WRITE_THIS_NOTE = guards.for_entity(Permission.AGENTS, resolved_note)
+
+
 @router.get(
     "/projects/{project_ref}/skills",
     response_model=list[SkillRead],
@@ -108,7 +117,7 @@ async def list_skills(
 async def upload_skill(
     response: Response,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_AGENT_KIT),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
@@ -163,7 +172,7 @@ async def get_skill(
 async def update_skill(
     body: SkillUpdate,
     skill: Skill = Depends(resolved_skill),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_SKILL),
     session: AsyncSession = SessionDependency,
 ) -> SkillRead:
     """Change a skill's description. Its content is replaced by uploading it again."""
@@ -183,7 +192,7 @@ async def update_skill(
 @router.delete("/skills/{skill_id}", response_model=Acknowledged, summary="Delete a skill")
 async def delete_skill(
     skill: Skill = Depends(resolved_skill),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_SKILL),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
@@ -257,7 +266,7 @@ async def list_notes(
 async def add_note(
     body: NoteCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_AGENT_KIT),
     session: AsyncSession = SessionDependency,
 ) -> NoteRead:
     """Write one line onto the project's scratchpad.
@@ -296,7 +305,7 @@ async def add_note(
 )
 async def delete_note(
     note: AgentNote = Depends(resolved_note),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(WRITE_THIS_NOTE),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Delete a note, because what it says has stopped being true."""

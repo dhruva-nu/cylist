@@ -9,18 +9,19 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity import Activity, Channel
+from tests.conftest import OWNER_NAME
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 ROHAN = {
     "name": "Rohan S",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Data migration and reporting.",
 }
 
@@ -83,7 +84,9 @@ class TestReading:
         entry = (await _history(signed_in, task["reference"]))[0]
 
         assert entry["occurred_at"]
-        assert entry["actor_label"] == "Web session"
+        # The person, not the credential. A board several people work on has
+        # to say which of them did this.
+        assert entry["actor_label"] == OWNER_NAME
         assert entry["channel"] == "web"
 
     async def test_an_agents_work_is_marked_as_an_agents(self, signed_in: AsyncClient) -> None:

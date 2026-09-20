@@ -16,13 +16,13 @@ ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 OUTSIDER = {
     "name": "Sam Client",
     "kind": "client",
-    "role": "Sponsor",
+    "title": "Sponsor",
     "responsibilities": "Signs things off.",
 }
 UNKNOWN_ID = "00000000-0000-7000-8000-000000000000"

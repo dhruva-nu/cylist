@@ -48,6 +48,11 @@ async def create_token(
 
     Grant the narrowest useful set of scopes: an agent that only rearranges the
     board needs ``read`` and ``write``, never ``vault:reveal``.
+
+    The token acts as whoever minted it. An agent moving a card writes that
+    person's name into the card's history, which is the answer everybody
+    wants to "who moved this?" — "an API token" never was, and with several
+    people on one board it would be an answer that names nobody.
     """
     ttl = timedelta(days=body.expires_in_days) if body.expires_in_days else None
     token, plaintext = await tokens.issue(
@@ -55,6 +60,7 @@ async def create_token(
         name=body.name,
         kind=TokenKind.API,
         scopes=body.scopes,
+        person_id=principal.person_id,
         ttl=ttl,
     )
     await activity.record(

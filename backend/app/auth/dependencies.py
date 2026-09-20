@@ -6,7 +6,8 @@ A request authenticates with either
 * the ``cylist_session`` HttpOnly cookie — the browser.
 
 Both resolve to a row in ``api_token``, so there is one lookup path and one
-place where revocation and expiry are enforced.
+place where revocation and expiry are enforced — and one place that answers
+*who* the caller is, since every credential names the person it acts as.
 
 Everything here reads a :class:`~starlette.requests.HTTPConnection` rather
 than a ``Request``, because a WebSocket is not one. FastAPI fills a
@@ -103,6 +104,21 @@ async def resolve_principal(
     if token is None:
         _refused(connection, "unknown credential", channel=channel.value)
         raise UnauthorizedError("That credential is not valid.")
+    if token.person is not None and token.person.is_archived:
+        # Archiving is how somebody leaves. Checked here rather than only at
+        # login because the credential they were holding when they left keeps
+        # working otherwise — a session cookie lasts a month by default, and
+        # an API token does not expire at all. Revocation on archive is the
+        # other half of this and runs first; this is what catches the token
+        # minted between the two, and any that revocation missed.
+        _refused(
+            connection,
+            "credential belongs to an archived person",
+            channel=channel.value,
+            token_id=str(token.id),
+            person_id=str(token.person_id),
+        )
+        raise UnauthorizedError("That credential is not valid.")
     if not token.is_usable:
         # Worth separating from "unknown" in the log even though the client is
         # told the same thing: a revoked or expired token is a caller who used
@@ -123,7 +139,17 @@ async def resolve_principal(
 
     return Principal(
         token_id=token.id,
-        label=token.name,
+        person_id=token.person_id,
+        # The person's own name, when there is one, because this is what the
+        # audit trail is stamped with and "Aditi K" is what a feed should say
+        # rather than "Web session". A token minted for an agent keeps its own
+        # label — "board bot" is the useful half of "Aditi K's board bot", and
+        # the person is on the row beside it either way.
+        label=(
+            token.person.name
+            if token.kind is TokenKind.SESSION and token.person is not None
+            else token.name
+        ),
         scopes=parse_scopes(token.scopes),
         channel=Channel.WEB if token.kind is TokenKind.SESSION else channel,
     )

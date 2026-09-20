@@ -439,3 +439,25 @@
 .fileTag:focus-visible {
   text-decoration: underline;
 }
+
+/* How far something may travel, drawn only where that is not the default —
+   see `LevelTag`. Same shape as the kind tag beside a person's name: it is a
+   fact about the row, not a state it is passing through. */
+.levelTag {
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.levelTag.restricted {
+  border-color: var(--blocked);
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}

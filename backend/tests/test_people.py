@@ -4,19 +4,23 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from app.config import Settings
 from app.core.palette import PALETTE, colour_for
+from app.db import Database
+from app.models.person import Person
+from tests.conftest import INVITEE_PASSWORD, client_for, open_account
 
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments, Stripe integration and webhook reliability.",
     "email": "aditi@think41.com",
 }
 SANJAY = {
     "name": "Sanjay F",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
     "responsibilities": "Approves anything touching tax or vendor accounts.",
 }
 
@@ -97,7 +101,9 @@ class TestListing:
 
         listed = (await signed_in.get("/people")).json()
 
-        assert [person["kind"] for person in listed] == ["team", "client"]
+        # Two team members — Aditi and whoever the session belongs to — then
+        # the client. Ordering is the assertion; the count is incidental.
+        assert [person["kind"] for person in listed] == ["team", "team", "client"]
 
     async def test_can_be_filtered_to_one_kind(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/people", json=ADITI)
@@ -113,16 +119,16 @@ class TestUpdating:
         person = (await signed_in.post("/people", json=ADITI)).json()
 
         updated = (
-            await signed_in.patch(f"/people/{person['id']}", json={"role": "Tech lead"})
+            await signed_in.patch(f"/people/{person['id']}", json={"title": "Tech lead"})
         ).json()
 
-        assert updated["role"] == "Tech lead"
+        assert updated["title"] == "Tech lead"
         assert updated["name"] == "Aditi K"
         assert updated["responsibilities"] == ADITI["responsibilities"]
 
     async def test_unknown_person_is_a_clean_404(self, signed_in: AsyncClient) -> None:
         response = await signed_in.patch(
-            "/people/00000000-0000-7000-8000-000000000000", json={"role": "x"}
+            "/people/00000000-0000-7000-8000-000000000000", json={"title": "x"}
         )
 
         assert response.status_code == 404
@@ -137,8 +143,11 @@ class TestArchiving:
 
         assert (await signed_in.delete(f"/people/{person['id']}")).status_code == 200
 
-        assert (await signed_in.get("/people")).json() == []
-        assert len((await signed_in.get("/people", params={"include_archived": True})).json()) == 1
+        listed = [entry["name"] for entry in (await signed_in.get("/people")).json()]
+        with_archived = (await signed_in.get("/people", params={"include_archived": True})).json()
+
+        assert ADITI["name"] not in listed
+        assert ADITI["name"] in [entry["name"] for entry in with_archived]
 
     async def test_an_archived_person_can_be_brought_back(self, signed_in: AsyncClient) -> None:
         person = (await signed_in.post("/people", json=ADITI)).json()
@@ -149,7 +158,7 @@ class TestArchiving:
         ).json()
 
         assert restored["archived_at"] is None
-        assert len((await signed_in.get("/people")).json()) == 1
+        assert ADITI["name"] in [entry["name"] for entry in (await signed_in.get("/people")).json()]
 
     async def test_archiving_twice_keeps_the_original_timestamp(
         self, signed_in: AsyncClient
@@ -181,53 +190,104 @@ class TestScopes:
         assert response.json()["error"]["details"]["missing_scopes"] == ["write"]
 
 
-class TestWhoIsMe:
-    """One directory entry stands for the owner, and joins every new project."""
+class TestWhoIsAsking:
+    """Who "you" is, now that it is a property of the session rather than a row.
 
-    async def test_nobody_is_me_to_begin_with(self, signed_in: AsyncClient) -> None:
-        await signed_in.post("/people", json=ADITI)
+    There used to be a ``person.is_me`` column and a partial unique index
+    keeping there to only ever be one of them. Both are gone: with several
+    people able to sign in, the directory cannot hold the answer, because the
+    answer is different for each of them.
+    """
 
-        assert (await signed_in.get("/me")).json()["person"] is None
+    async def test_me_is_whoever_signed_in(self, signed_in: AsyncClient, owner: Person) -> None:
+        body = (await signed_in.get("/me")).json()
 
-    async def test_a_person_can_be_created_as_me(self, signed_in: AsyncClient) -> None:
-        body = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+        assert body["person"]["id"] == str(owner.id)
+        assert body["person"]["name"] == owner.name
 
-        assert body["is_me"] is True
-        assert (await signed_in.get("/me")).json()["person"]["id"] == body["id"]
+    async def test_two_sessions_each_get_their_own_answer(
+        self, signed_in: AsyncClient, settings: Settings, database: Database
+    ) -> None:
+        """The point of the whole change, in one test.
 
-    async def test_a_person_can_be_marked_as_me_afterwards(self, signed_in: AsyncClient) -> None:
-        person = (await signed_in.post("/people", json=ADITI)).json()
+        Two people signed in against the same deployment, each asking who
+        they are, and getting different answers — which the old column could
+        not have produced however it was read.
+        """
+        aditi, token = await open_account(signed_in, ADITI, "aditi@cylist.dev")
 
-        updated = (await signed_in.patch(f"/people/{person['id']}", json={"is_me": True})).json()
+        async with client_for(settings, database) as other:
+            accepted = await other.post(
+                "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
+            )
+            assert accepted.status_code == 200, accepted.text
 
-        assert updated["is_me"] is True
+            mine = (await signed_in.get("/me")).json()["person"]
+            theirs = (await other.get("/me")).json()["person"]
 
-    async def test_marking_someone_takes_it_off_whoever_had_it(
+        assert theirs["id"] == aditi["id"]
+        assert mine["id"] != theirs["id"]
+
+    async def test_a_person_is_the_same_person_to_everybody(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        """No ``is_me`` on the wire, so one directory entry is one payload.
+
+        Asserted rather than assumed: a field that means something different
+        depending on who asked is the thing this design is avoiding, and it
+        would be easy to add back by accident.
+        """
+        listed = (await signed_in.get("/people")).json()
+
+        assert all("is_me" not in entry for entry in listed)
+
+    async def test_the_directory_says_who_can_sign_in(self, signed_in: AsyncClient) -> None:
+        added = (await signed_in.post("/people", json=ADITI)).json()
+
+        assert added["has_account"] is False
+        assert added["invite_is_pending"] is False
+
+        me = (await signed_in.get("/me")).json()["person"]
+        assert me["has_account"] is True
+
+
+class TestTheAgent:
+    """CYLIST-47: one entry in the directory that is not a person.
+
+    It is there so that a card meant for a machine has somebody to name —
+    Cylist assigns work to directory entries, and there was nothing in the
+    directory a bot could be. Every project brings it in as it is created and
+    puts it on the board, so a fresh deployment can hand out its first card
+    without anybody setting this up.
+    """
+
+    async def test_creating_a_project_puts_the_machine_in_the_directory(
         self, signed_in: AsyncClient
     ) -> None:
-        first = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
-        second = (await signed_in.post("/people", json={**SANJAY, "is_me": True})).json()
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
 
-        directory = {
-            entry["id"]: entry["is_me"] for entry in (await signed_in.get("/people")).json()
-        }
+        agents = [
+            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+        ]
 
-        assert directory[second["id"]] is True
-        assert directory[first["id"]] is False
+        assert [person["name"] for person in agents] == ["Agent"]
+        assert agents[0]["email"] is None
+        assert agents[0]["has_account"] is False
 
-    async def test_it_can_be_given_up_without_naming_a_successor(
-        self, signed_in: AsyncClient
-    ) -> None:
-        person = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+    async def test_a_colleague_is_not_a_machine(self, signed_in: AsyncClient) -> None:
+        """``is_agent`` is set by Cylist, never by whoever fills in the form."""
+        body = (await signed_in.post("/people", json={**ADITI, "is_agent": True})).json()
 
-        await signed_in.patch(f"/people/{person['id']}", json={"is_me": False})
+        assert body["is_agent"] is False
 
-        assert (await signed_in.get("/me")).json()["person"] is None
+    async def test_the_agent_cannot_be_invited(self, signed_in: AsyncClient) -> None:
+        """A machine does not sign in; it carries a token somebody minted."""
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+        agent = next(
+            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+        )
 
-    async def test_archiving_me_gives_the_flag_up(self, signed_in: AsyncClient) -> None:
-        """An archived person cannot be a member, so they cannot be the owner."""
-        person = (await signed_in.post("/people", json={**ADITI, "is_me": True})).json()
+        response = await signed_in.post(f"/people/{agent['id']}/invite")
 
-        await signed_in.delete(f"/people/{person['id']}")
-
-        assert (await signed_in.get("/me")).json()["person"] is None
+        assert response.status_code == 422
+        assert "machine" in response.json()["error"]["message"]

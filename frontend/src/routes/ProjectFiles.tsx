@@ -29,14 +29,25 @@ import {
   type FolderNode,
   type ItemSource,
   type LinkInput,
+  type Sensitivity,
   type Person,
 } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from '../components/Modal'
 import { formatSize, formatStamp } from '../components/format'
 import { projectFilesKey } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
-import { Avatar, Button, ErrorBanner, LiveRegion, cardStyles, useAnnouncer } from '../components/ui'
+import {
+  Avatar,
+  Button,
+  ErrorBanner,
+  LevelPicker,
+  LevelTag,
+  LiveRegion,
+  cardStyles,
+  useAnnouncer,
+} from '../components/ui'
 import styles from './ProjectFiles.module.css'
+import { usePermissions } from './usePermissions'
 
 const FOLDER_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -144,6 +155,7 @@ function visibleRows(root: FolderNode, expanded: Set<string>): TreeRow[] {
 
 export function ProjectFiles() {
   const { projectKey } = useParams({ from: '/p/$projectKey/files' })
+  const may = usePermissions(projectKey)
   const queryClient = useQueryClient()
 
   const [selected, setSelected] = useState<string | null>(null)
@@ -199,11 +211,19 @@ export function ProjectFiles() {
   const here = contents.data?.folder.name ?? project.data?.name ?? projectKey
 
   const upload = useMutation({
-    mutationFn: async ({ files, addedBy }: { files: File[]; addedBy: string | null }) => {
+    mutationFn: async ({
+      files,
+      addedBy,
+      level,
+    }: {
+      files: File[]
+      addedBy: string | null
+      level: Sensitivity | null
+    }) => {
       if (selectedId === null) throw new Error('The folder tree has not finished loading.')
       // One at a time: two uploads of the same name in one folder race for it,
       // and the loser's 409 is clearer when it is the only thing that failed.
-      for (const file of files) await api.uploadFile(selectedId, file, addedBy)
+      for (const file of files) await api.uploadFile(selectedId, file, addedBy, level)
       return files.length
     },
     onMutate: () => setProblem(null),
@@ -338,19 +358,26 @@ export function ProjectFiles() {
       <PageHead
         title="Files"
         actions={
-          <>
-            {/* Disabled only while the tree is still on its way: every folder
-                it can arrive at, the root included, takes files. */}
-            <Button variant="go" disabled={selectedId === null} onClick={() => setDialog('upload')}>
-              ↑ Upload files
-            </Button>
-            <Button disabled={selectedId === null} onClick={() => setDialog('link')}>
-              + Add a link
-            </Button>
-            <Button disabled={selectedId === null} onClick={() => setDialog('folder')}>
-              + New folder
-            </Button>
-          </>
+          may('files') ? (
+            <>
+              {/* Disabled only while the tree is still on its way: every folder
+                  it can arrive at, the root included, takes files. Absent
+                  entirely for a role that is not allowed files at all. */}
+              <Button
+                variant="go"
+                disabled={selectedId === null}
+                onClick={() => setDialog('upload')}
+              >
+                ↑ Upload files
+              </Button>
+              <Button disabled={selectedId === null} onClick={() => setDialog('link')}>
+                + Add a link
+              </Button>
+              <Button disabled={selectedId === null} onClick={() => setDialog('folder')}>
+                + New folder
+              </Button>
+            </>
+          ) : null
         }
       >
         Files upload to the server. Links to SharePoint or Google Drive sit in the same folders.
@@ -402,7 +429,7 @@ export function ProjectFiles() {
           <DropZone
             here={here}
             busy={upload.isPending}
-            onFiles={(files) => upload.mutate({ files, addedBy: null })}
+            onFiles={(files) => upload.mutate({ files, addedBy: null, level: null })}
           />
         </div>
 
@@ -438,10 +465,13 @@ export function ProjectFiles() {
                       id={folder.id}
                       name={folder.name}
                       onOpen={open}
-                      onDelete={() =>
-                        confirmDelete(`"${folder.name}" and everything in it`, () =>
-                          removeFolder.mutate({ id: folder.id, name: folder.name }),
-                        )
+                      onDelete={
+                        may('files')
+                          ? () =>
+                              confirmDelete(`"${folder.name}" and everything in it`, () =>
+                                removeFolder.mutate({ id: folder.id, name: folder.name }),
+                              )
+                          : null
                       }
                     />
                   ))}
@@ -449,10 +479,13 @@ export function ProjectFiles() {
                     <ItemRow
                       key={item.id}
                       item={item}
-                      onDelete={() =>
-                        confirmDelete(`"${item.name}"`, () =>
-                          removeItem.mutate({ id: item.id, name: item.name }),
-                        )
+                      onDelete={
+                        may('files')
+                          ? () =>
+                              confirmDelete(`"${item.name}"`, () =>
+                                removeItem.mutate({ id: item.id, name: item.name }),
+                              )
+                          : null
                       }
                     />
                   ))}
@@ -478,7 +511,7 @@ export function ProjectFiles() {
           projectKey={projectKey}
           folderName={here}
           busy={upload.isPending}
-          onUpload={(files, addedBy) => upload.mutate({ files, addedBy })}
+          onUpload={(files, addedBy, level) => upload.mutate({ files, addedBy, level })}
           onClose={() => setDialog(null)}
         />
       ) : null}
@@ -544,7 +577,9 @@ function FolderRow({
   id: string
   name: string
   onOpen: (id: string) => void
-  onDelete: () => void
+  /** Null where the reader's role does not allow files — no button, not a
+      button that refuses. */
+  onDelete: (() => void) | null
 }) {
   return (
     // The whole row is clickable for the mouse, but a `tr` is not something
@@ -572,21 +607,23 @@ function FolderRow({
       <td className={styles.mono}>—</td>
       <td>
         <div className={styles.actions}>
-          <GhostAction
-            onClick={(event) => {
-              event.stopPropagation()
-              onDelete()
-            }}
-          >
-            Delete
-          </GhostAction>
+          {onDelete ? (
+            <GhostAction
+              onClick={(event) => {
+                event.stopPropagation()
+                onDelete()
+              }}
+            >
+              Delete
+            </GhostAction>
+          ) : null}
         </div>
       </td>
     </tr>
   )
 }
 
-function ItemRow({ item, onDelete }: { item: FileItem; onDelete: () => void }) {
+function ItemRow({ item, onDelete }: { item: FileItem; onDelete: (() => void) | null }) {
   const isLink = item.kind === 'link'
   const badge = isLink ? { kind: 'link', label: '↗' } : badgeOf(item.name)
 
@@ -597,6 +634,10 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: () => void }) {
           <span className={`${styles.badge} ${styles[badge.kind]}`}>{badge.label}</span>
           <span>
             {item.name}
+            {/* Beside the name rather than in a column of its own: most rows
+                carry no tag at all, and a column that is empty four times in
+                five is a column nobody reads. */}
+            <LevelTag level={item.sensitivity} />
             {item.url ? <div className={styles.url}>{item.url}</div> : null}
           </span>
         </div>
@@ -634,7 +675,7 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: () => void }) {
               Download
             </a>
           )}
-          <GhostAction onClick={() => onDelete()}>Delete</GhostAction>
+          {onDelete ? <GhostAction onClick={() => onDelete()}>Delete</GhostAction> : null}
         </div>
       </td>
     </tr>
@@ -669,9 +710,15 @@ function NewFolderDialog({
   onClose: () => void
 }) {
   const [name, setName] = useState('')
+  const [level, setLevel] = useState<Sensitivity | ''>('')
 
   const create = useMutation({
-    mutationFn: () => api.createFolder(projectKey, { name, parent_id: parentId }),
+    mutationFn: () =>
+      api.createFolder(projectKey, {
+        name,
+        parent_id: parentId,
+        default_sensitivity: level || null,
+      }),
     onSuccess: async (folder) => {
       await onDone(`Folder ${folder.name}`)
       onClose()
@@ -700,6 +747,17 @@ function NewFolderDialog({
         <Field label="Folder name" required hint={`It will sit inside ${parentName}.`}>
           <input value={name} onChange={(event) => setName(event.target.value)} />
         </Field>
+        <Field
+          label="What goes in here is"
+          hint="Said once per folder rather than once per file. Uploads take it unless they say otherwise."
+        >
+          <LevelPicker
+            projectKey={projectKey}
+            value={level}
+            onChange={setLevel}
+            includeInherit={`Same as ${parentName}`}
+          />
+        </Field>
       </ModalBody>
     </Modal>
   )
@@ -715,11 +773,12 @@ function UploadDialog({
   projectKey: string
   folderName: string
   busy: boolean
-  onUpload: (files: File[], addedBy: string | null) => void
+  onUpload: (files: File[], addedBy: string | null, level: Sensitivity | null) => void
   onClose: () => void
 }) {
   const [chosen, setChosen] = useState<File[]>([])
   const [addedBy, setAddedBy] = useState('')
+  const [level, setLevel] = useState<Sensitivity | ''>('')
   const members = useMembers(projectKey)
 
   return (
@@ -733,7 +792,7 @@ function UploadDialog({
             variant="go"
             disabled={busy || chosen.length === 0}
             onClick={() => {
-              onUpload(chosen, addedBy || null)
+              onUpload(chosen, addedBy || null, level || null)
               onClose()
             }}
           >
@@ -759,6 +818,17 @@ function UploadDialog({
               </option>
             ))}
           </select>
+        </Field>
+        <Field
+          label="How far it may travel"
+          hint="A role not cleared this high is not shown that the file exists."
+        >
+          <LevelPicker
+            projectKey={projectKey}
+            value={level}
+            onChange={setLevel}
+            includeInherit={`Same as ${folderName}`}
+          />
         </Field>
       </ModalBody>
     </Modal>
@@ -847,6 +917,14 @@ function LinkDialog({
             </select>
           </Field>
         </FieldPair>
+        <Field label="How far it may travel">
+          <LevelPicker
+            projectKey={projectKey}
+            value={form.sensitivity ?? ''}
+            onChange={(level) => setForm({ ...form, sensitivity: level || null })}
+            includeInherit="Same as this folder"
+          />
+        </Field>
       </ModalBody>
     </Modal>
   )

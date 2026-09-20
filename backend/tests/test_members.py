@@ -9,18 +9,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Person, ProjectMember
+from tests.conftest import OWNER_NAME
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 CLIENT = {
     "name": "Sanjay F",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
     "responsibilities": "Approves tax and vendor accounts.",
 }
 UNKNOWN_ID = "00000000-0000-7000-8000-000000000000"
@@ -34,10 +35,20 @@ async def _project_and_people(client: AsyncClient) -> tuple[str, str]:
 
 
 class TestSettingMembership:
-    async def test_starts_empty(self, signed_in: AsyncClient) -> None:
+    async def test_starts_with_whoever_created_it_and_the_agent(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """A new project is not empty: its creator and the agent are on it.
+
+        Covered at length in ``test_projects.py``; asserted here because every
+        other test in this file counts members, and this is the one they are
+        all counting from.
+        """
         await signed_in.post("/projects", json=ATLAS)
 
-        assert (await signed_in.get("/projects/ATL/members")).json() == {"members": []}
+        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
+
+        assert sorted(member["name"] for member in members) == sorted([OWNER_NAME, "Agent"])
 
     async def test_puts_people_on_a_project(self, signed_in: AsyncClient) -> None:
         team, client_person = await _project_and_people(signed_in)
@@ -73,7 +84,9 @@ class TestSettingMembership:
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": []})
 
-        assert len((await signed_in.get("/people")).json()) == 2
+        # The two this test added, the person it is signed in as, and the
+        # agent the project it created brought into the directory.
+        assert len((await signed_in.get("/people")).json()) == 4
 
     async def test_duplicate_ids_are_collapsed(self, signed_in: AsyncClient) -> None:
         """A double-submitted form must not violate the composite primary key."""
@@ -145,14 +158,15 @@ class TestCounts:
         assert summary["client_count"] == 1
         assert summary["member_count"] == 2
 
-    async def test_summary_counts_are_zero_for_an_empty_project(
+    async def test_a_fresh_project_counts_its_creator_and_the_agent(
         self, signed_in: AsyncClient
     ) -> None:
+        """Both are on the team: one does the work, the other is worked."""
         await signed_in.post("/projects", json=ATLAS)
 
         summary = (await signed_in.get("/projects/ATL/summary")).json()
 
-        assert summary["team_count"] == 0
+        assert summary["team_count"] == 2
         assert summary["client_count"] == 0
 
 
