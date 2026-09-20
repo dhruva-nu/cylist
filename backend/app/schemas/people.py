@@ -130,6 +130,29 @@ class InviteAccept(Schema):
     )
 
 
+class AccountSet(Schema):
+    """An account handed over rather than invited: an address and a password.
+
+    The invitation is the one to reach for wherever it can be used — a link
+    somebody redeems themselves means nobody else ever knows their password.
+    This is for the cases it cannot serve: somebody sitting next to you, a
+    deployment with no way to pass a link on, or an account whose holder has
+    lost the password they already set.
+    """
+
+    email: EmailStr = Field(
+        description="What they sign in with. Replaces the address on their entry."
+    )
+    password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH,
+        max_length=MAX_PASSWORD_LENGTH,
+        description=(
+            "What they sign in with from now on. Tell them to change it under "
+            "Account: until they do, you know it too."
+        ),
+    )
+
+
 class PasswordChange(Schema):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)

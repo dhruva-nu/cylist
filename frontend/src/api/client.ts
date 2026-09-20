@@ -1082,6 +1082,15 @@ export const api = {
 
   /** Mint a one-time link letting a team member set their first password. */
   invitePerson: (id: string) => request<InviteIssued>(`/people/${id}/invite`, { method: 'POST' }),
+  /**
+   * Set the email and password somebody signs in with, on their behalf.
+   *
+   * The other door, for where an invitation cannot reach: it needs no mailbox
+   * and no round trip, at the cost of the caller knowing the password. On
+   * somebody who already had one it is a reset and their other sessions go.
+   */
+  setAccount: (id: string, email: string, password: string) =>
+    request<Person>(`/people/${id}/account`, { method: 'PUT', body: body({ email, password }) }),
   withdrawInvite: (id: string) =>
     request<{ ok: boolean }>(`/people/${id}/invite`, { method: 'DELETE' }),
 

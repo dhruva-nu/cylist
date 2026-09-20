@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, isMe, type Identity, type Member, type Person } from '../api/client'
+import { AccountDialog } from '../components/AccountDialog'
 import { InviteDialog } from '../components/InviteDialog'
 import { Modal, ModalBody } from '../components/Modal'
 import { PersonDialog } from '../components/PersonDialog'
@@ -36,6 +37,7 @@ export function ProjectPeople() {
   const [choosing, setChoosing] = useState(false)
   const [editing, setEditing] = useState<Person | null>(null)
   const [inviting, setInviting] = useState<Person | null>(null)
+  const [opening, setOpening] = useState<Person | null>(null)
   const { message, announce } = useAnnouncer()
 
   // Who is looking. Already in the cache — the auth gate asked for it before
@@ -125,6 +127,7 @@ export function ProjectPeople() {
         mayRemove={maySayWhoIsHere}
         onEdit={setEditing}
         onInvite={setInviting}
+        onOpenAccount={setOpening}
         onRemove={remove.mutate}
       />
       <Group
@@ -134,6 +137,7 @@ export function ProjectPeople() {
         mayRemove={maySayWhoIsHere}
         onEdit={setEditing}
         onInvite={setInviting}
+        onOpenAccount={setOpening}
         onRemove={remove.mutate}
       />
 
@@ -167,6 +171,15 @@ export function ProjectPeople() {
         />
       ) : null}
 
+      {opening ? (
+        <AccountDialog
+          person={opening}
+          onSaved={(name) => announce(`${name} can sign in now.`)}
+          onDone={refresh}
+          onClose={() => setOpening(null)}
+        />
+      ) : null}
+
       {choosing ? (
         <DirectoryDialog
           projectKey={projectKey}
@@ -191,6 +204,7 @@ function Group({
   mayRemove,
   onEdit,
   onInvite,
+  onOpenAccount,
   onRemove,
 }: {
   title: string
@@ -199,6 +213,7 @@ function Group({
   mayRemove: boolean
   onEdit: (person: Person) => void
   onInvite: (person: Person) => void
+  onOpenAccount: (person: Person) => void
   onRemove: (personId: string) => void
 }) {
   return (
@@ -253,6 +268,17 @@ function Group({
                   !person.archived_at ? (
                     <Button variant="ghost" small onClick={() => onInvite(person)}>
                       {person.invite_is_pending ? 'Re-invite' : 'Invite'}
+                    </Button>
+                  ) : null}
+                  {/* The other door, offered on the same row and second: an
+                      invitation is the one that leaves the password with
+                      nobody but them, so it reads first. This one is still
+                      here for somebody with no mailbox you can reach, and is
+                      the only way back in for somebody who has lost the
+                      password they already set. */}
+                  {person.kind === 'team' && !person.is_agent && !person.archived_at ? (
+                    <Button variant="ghost" small onClick={() => onOpenAccount(person)}>
+                      {person.has_account ? 'Reset password' : 'Set a password'}
                     </Button>
                   ) : null}
                   {mayRemove ? (

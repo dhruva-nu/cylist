@@ -189,6 +189,167 @@ class TestInviting:
         assert response.status_code == 403
 
 
+class TestHandingSomebodyAnAccount:
+    """`PUT /people/{id}/account` — the way in that does not go through a link.
+
+    The invitation is still the better one and says so in its own docstring.
+    This is for the cases it cannot serve, and the tests here are mostly about
+    what it refuses: the rules about who may hold an account are the same ones,
+    because they are about the account rather than about how it was opened.
+    """
+
+    async def test_opens_an_account_they_can_sign_in_with(
+        self, signed_in: AsyncClient, client: AsyncClient
+    ) -> None:
+        person = (await signed_in.post("/people", json=ADITI)).json()
+
+        response = await signed_in.put(
+            f"/people/{person['id']}/account",
+            json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["has_account"] is True
+        assert response.json()["email"] == ADITI_EMAIL
+        signed_in_as_them = await client.post(
+            "/auth/login", json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD}
+        )
+        assert signed_in_as_them.status_code == 200, signed_in_as_them.text
+
+    async def test_the_address_comes_from_the_request(self, signed_in: AsyncClient) -> None:
+        """No email on the entry first: the one you sign them in with is the
+        one you are typing, so asking for it twice would be asking twice."""
+        person = (await signed_in.post("/people", json=ADITI)).json()
+        assert person["email"] is None
+
+        opened = (
+            await signed_in.put(
+                f"/people/{person['id']}/account",
+                json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+            )
+        ).json()
+
+        assert opened["email"] == ADITI_EMAIL
+
+    async def test_it_spends_an_outstanding_invitation(
+        self, signed_in: AsyncClient, client: AsyncClient
+    ) -> None:
+        """The account the link would have opened is open, so the link is a
+        second way in that nobody is watching."""
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+
+        await signed_in.put(
+            f"/people/{person['id']}/account",
+            json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+        )
+
+        stale = await client.post(
+            "/auth/accept-invite", json={"token": token, "password": "another-long-password"}
+        )
+        assert stale.status_code == 422
+        assert (await signed_in.get(f"/people/{person['id']}")).json()["invite_is_pending"] is False
+
+    async def test_resetting_one_signs_their_other_sessions_out(
+        self, signed_in: AsyncClient, settings: Settings, database: Database
+    ) -> None:
+        """Which is what a reset is for: the point is the session you cannot
+        reach, in a browser that is not in front of you."""
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        async with client_for(settings, database) as theirs:
+            await _accept(theirs, token)
+            assert (await theirs.get("/me")).status_code == 200
+
+            await signed_in.put(
+                f"/people/{person['id']}/account",
+                json={"email": ADITI_EMAIL, "password": "a-brand-new-long-password"},
+            )
+
+            assert (await theirs.get("/me")).status_code == 401
+
+    async def test_the_caller_keeps_their_own_session(self, signed_in: AsyncClient) -> None:
+        """An admin resetting their own password stays where they are."""
+        me = (await signed_in.get("/me")).json()["person"]
+
+        response = await signed_in.put(
+            f"/people/{me['id']}/account",
+            json={"email": OWNER_EMAIL, "password": "yet-another-long-password"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert (await signed_in.get("/me")).status_code == 200
+
+    async def test_a_client_cannot_be_given_one(self, signed_in: AsyncClient) -> None:
+        person = (await signed_in.post("/people", json=SANJAY)).json()
+
+        response = await signed_in.put(
+            f"/people/{person['id']}/account",
+            json={"email": "sanjay@cylist.dev", "password": INVITEE_PASSWORD},
+        )
+
+        assert response.status_code == 422
+
+    async def test_an_archived_person_cannot_be_given_one(self, signed_in: AsyncClient) -> None:
+        person = (await signed_in.post("/people", json=ADITI)).json()
+        await signed_in.delete(f"/people/{person['id']}")
+
+        response = await signed_in.put(
+            f"/people/{person['id']}/account",
+            json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+        )
+
+        assert response.status_code == 422
+
+    async def test_the_agent_cannot_be_given_one(self, signed_in: AsyncClient) -> None:
+        """It is a machine: it carries a token, not a password."""
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+        agent = next(
+            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+        )
+
+        response = await signed_in.put(
+            f"/people/{agent['id']}/account",
+            json={"email": "agent@cylist.dev", "password": INVITEE_PASSWORD},
+        )
+
+        assert response.status_code == 422
+        assert "machine" in response.json()["error"]["message"]
+
+    async def test_an_address_somebody_else_signs_in_with_is_refused(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = (await signed_in.post("/people", json=ADITI)).json()
+
+        response = await signed_in.put(
+            f"/people/{person['id']}/account",
+            json={"email": OWNER_EMAIL, "password": INVITEE_PASSWORD},
+        )
+
+        assert response.status_code == 409
+        assert (await signed_in.get(f"/people/{person['id']}")).json()["has_account"] is False
+
+    async def test_a_short_password_is_refused(self, signed_in: AsyncClient) -> None:
+        person = (await signed_in.post("/people", json=ADITI)).json()
+
+        response = await signed_in.put(
+            f"/people/{person['id']}/account", json={"email": ADITI_EMAIL, "password": "short"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_the_password_is_not_in_the_audit_trail(self, signed_in: AsyncClient) -> None:
+        """The trail is readable with `read` alone, so it holds no secrets."""
+        person = (await signed_in.post("/people", json=ADITI)).json()
+        secret = "a-password-nobody-should-read"
+
+        await signed_in.put(
+            f"/people/{person['id']}/account", json={"email": ADITI_EMAIL, "password": secret}
+        )
+
+        feed = (await signed_in.get("/activity")).text
+        assert secret not in feed
+        assert "person.account_opened" in feed
+
+
 class TestAcceptingAnInvitation:
     async def test_sets_a_password_and_signs_them_in(
         self, signed_in: AsyncClient, other_client: AsyncClient

@@ -245,6 +245,55 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
     return person, plaintext
 
 
+async def open_account(
+    session: AsyncSession, person_id: UUID, email: str, password: str
+) -> tuple[Person, bool]:
+    """Give somebody an account outright, and say whether they had one already.
+
+    The same rules :func:`invite` applies, because they are rules about who may
+    hold an account rather than about how one is opened: not archived, not the
+    machine, not a client, and not an address somebody who signs in is already
+    using. What it does not need is an email on the entry first — the address
+    is part of the request here, so this sets it and signs them in with it in
+    one go.
+
+    Doing this to somebody who already has a password is a reset, which is half
+    of why it exists: an invitation is no help to somebody who has lost the
+    password they already set. The returned flag says which of the two
+    happened, so the caller can decide what to revoke and what to record.
+
+    Raises:
+        UnprocessableRequestError: if they are archived, are the agent, or are
+            a client.
+        ConflictError: if the address belongs to somebody else who can sign in.
+    """
+    person = await get(session, person_id)
+    if person.is_archived:
+        raise UnprocessableRequestError("An archived person cannot be given an account.")
+    if person.is_agent:
+        raise UnprocessableRequestError(
+            f"{person.name} is a machine, and a machine does not sign in. Mint it an API "
+            "token instead — see Tokens."
+        )
+    if person.kind is not PersonKind.TEAM:
+        raise UnprocessableRequestError(
+            "Only team members get accounts. Clients are named on the work, not signed in to it."
+        )
+
+    await _require_email_free(session, email, excluding=person.id)
+
+    had_one = person.password_hash is not None
+    person.email = email
+    person.password_hash = hash_password(password)
+    # Any outstanding invitation is answered by this: the account it would have
+    # opened is open, and a link that still worked would be a second way in
+    # that nobody is watching.
+    person.invite_token_hash = None
+    person.invite_expires_at = None
+    await session.flush()
+    return person, had_one
+
+
 async def withdraw_invite(session: AsyncSession, person_id: UUID) -> Person:
     """Cancel an outstanding invitation. Doing it twice is not an error."""
     person = await get(session, person_id)
