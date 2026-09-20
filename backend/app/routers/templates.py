@@ -19,12 +19,13 @@ from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.templates import (
+    StageInput,
     StageRead,
     TemplateCreate,
     TemplateRead,
     TemplateUpdate,
 )
-from app.services import activity, templates
+from app.services import activity, permissions, templates
 
 router = APIRouter(tags=["templates"])
 
@@ -72,6 +73,47 @@ columns are."""
 SHAPE_THIS_BOARD = guards.for_entity(Permission.BOARD, resolved_template)
 
 
+async def _stages_are_allowed(
+    session: AsyncSession,
+    project: Project,
+    principal: Principal,
+    stages: list[StageInput] | None,
+) -> None:
+    """Refuse a template whose stages touch a column this role may not stage.
+
+    A template's stage *is* the sub-stage policy for one column, so the same
+    right that decides whether somebody may set a card's stages in Review
+    decides whether they may write the rule those stages come from. Checked
+    per column named, and only for the columns actually sent: replacing a
+    template's whole stage set is one call, and a role allowed two of the
+    three columns in it should be told which one it was stopped at.
+    """
+    for stage in stages or ():
+        await permissions.enforce_column_staging(session, project, principal, stage.column_id)
+
+
+async def may_add_template(
+    body: TemplateCreate,
+    project: Project = Depends(resolved_project),
+    principal: Principal = Depends(SHAPE_BOARD),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    await _stages_are_allowed(session, project, principal, body.stages)
+    return principal
+
+
+async def may_edit_template(
+    body: TemplateUpdate,
+    template: TaskTemplate = Depends(resolved_template),
+    principal: Principal = Depends(SHAPE_THIS_BOARD),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    project = await session.get(Project, template.project_id)
+    if project is not None:
+        await _stages_are_allowed(session, project, principal, body.stages)
+    return principal
+
+
 @router.get(
     "/projects/{project_ref}/templates",
     response_model=list[TemplateRead],
@@ -106,7 +148,7 @@ async def list_templates(
 async def create_template(
     body: TemplateCreate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(SHAPE_BOARD),
+    principal: Principal = Depends(may_add_template),
     session: AsyncSession = SessionDependency,
 ) -> TemplateRead:
     """Add a kind of card to the project, with however many stages it starts
@@ -136,7 +178,7 @@ async def create_template(
 async def update_template(
     body: TemplateUpdate,
     template: TaskTemplate = Depends(resolved_template),
-    principal: Principal = Depends(SHAPE_THIS_BOARD),
+    principal: Principal = Depends(may_edit_template),
     session: AsyncSession = SessionDependency,
 ) -> TemplateRead:
     """Rename a template, reword it, or replace its stages outright.

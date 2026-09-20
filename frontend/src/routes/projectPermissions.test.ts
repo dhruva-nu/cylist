@@ -1,19 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import type { Permission, PermissionInfo, RolePermissions } from '../api/client'
+import type { ColumnRule, Permission, PermissionInfo, RolePermissions } from '../api/client'
 import {
   can,
+  clearanceOf,
   countPeople,
   explain,
   inOrder,
   isEveryoneElse,
   isFixed,
+  isNarrowed,
   summarise,
+  summariseColumns,
   toggled,
+  withColumnRule,
 } from './projectPermissions'
 
 const CATALOGUE: PermissionInfo[] = (['tasks', 'comments', 'goals', 'files'] as Permission[]).map(
   (key) => ({ key, label: key, summary: '' }),
 )
+
+const BOARD: ColumnRule[] = [
+  { column_id: 'c1', name: 'To do', may_enter: true, may_stage: true },
+  { column_id: 'c2', name: 'Review', may_enter: true, may_stage: true },
+  { column_id: 'c3', name: 'Done', may_enter: true, may_stage: true },
+]
 
 function line(overrides: Partial<RolePermissions> = {}): RolePermissions {
   return {
@@ -23,6 +33,8 @@ function line(overrides: Partial<RolePermissions> = {}): RolePermissions {
     is_admin: false,
     member_count: 1,
     permissions: [],
+    columns: BOARD,
+    clearance: 'restricted',
     ...overrides,
   }
 }
@@ -114,6 +126,7 @@ describe('inOrder', () => {
   it('puts the admin first and the baseline last, whatever order they arrive in', () => {
     const grid = {
       catalogue: CATALOGUE,
+      levels: [],
       mine: [] as Permission[],
       may_manage: true,
       roles: [
@@ -130,5 +143,67 @@ describe('inOrder', () => {
       'Reviewer',
       'Everyone else',
     ])
+  })
+})
+
+describe('the workflow line', () => {
+  it('sends the whole line back when one box changes', () => {
+    const next = withColumnRule(BOARD, 'c3', 'may_enter', false)
+
+    expect(next.map((column) => column.may_enter)).toEqual([true, true, false])
+    expect(next).toHaveLength(BOARD.length)
+  })
+
+  it('leaves the original alone', () => {
+    withColumnRule(BOARD, 'c3', 'may_stage', false)
+    expect(BOARD.every((column) => column.may_stage)).toBe(true)
+  })
+
+  it('reads as Anywhere until it is narrowed', () => {
+    expect(summariseColumns(line())).toBe('Anywhere')
+    expect(isNarrowed(line())).toBe(false)
+  })
+
+  it('counts only a narrowed one', () => {
+    const narrowed = line({ columns: withColumnRule(BOARD, 'c3', 'may_enter', false) })
+
+    expect(summariseColumns(narrowed)).toBe('2 of 3 columns')
+    expect(isNarrowed(narrowed)).toBe(true)
+  })
+
+  it('says Nowhere when every column is closed', () => {
+    const closed = line({
+      columns: BOARD.map((column) => ({ ...column, may_enter: false })),
+    })
+
+    expect(summariseColumns(closed)).toBe('Nowhere')
+  })
+
+  it('counts a staging-only restriction as narrowed without changing the count', () => {
+    // The two are different jobs: a role can be trusted to move a card into
+    // Review without being the one who designs what Review asks of it.
+    const staged = line({ columns: withColumnRule(BOARD, 'c2', 'may_stage', false) })
+
+    expect(summariseColumns(staged)).toBe('Anywhere')
+    expect(isNarrowed(staged)).toBe(true)
+  })
+
+  it('says the admin works anywhere whatever is stored', () => {
+    const admin = line({
+      is_admin: true,
+      columns: BOARD.map((column) => ({ ...column, may_enter: false })),
+    })
+
+    expect(summariseColumns(admin)).toBe('Anywhere')
+  })
+})
+
+describe('clearanceOf', () => {
+  it('reads the stored level', () => {
+    expect(clearanceOf(line({ clearance: 'internal' }))).toBe('internal')
+  })
+
+  it('says an admin reads everything, whatever a row might once have said', () => {
+    expect(clearanceOf(line({ is_admin: true, clearance: 'public' }))).toBe('restricted')
   })
 })

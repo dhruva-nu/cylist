@@ -1,5 +1,6 @@
 /** Shared presentational primitives, styled from the design tokens. */
 
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -8,6 +9,7 @@ import {
   type Person,
   type PersonKind,
   type Role,
+  type Sensitivity,
   type TaskPriority,
   type TaskStatus,
   type TaskType,
@@ -688,6 +690,63 @@ export function RoleTag({ role }: { role: Pick<Role, 'name' | 'colour' | 'descri
     >
       {role.name}
     </span>
+  )
+}
+
+/**
+ * How far something may travel, when that is worth saying.
+ *
+ * Drawn for `public` and `restricted` and *not* for `internal`, which is what
+ * an upload is unless somebody said otherwise: a tag on every row of every
+ * listing would be noise the eye learns to skip, and the whole job of this is
+ * to be the thing that catches it.
+ */
+export function LevelTag({ level }: { level: Sensitivity }) {
+  if (level === 'internal') return null
+  return (
+    <span className={`${styles.levelTag} ${level === 'restricted' ? styles.restricted : ''}`}>
+      {level === 'restricted' ? 'Restricted' : 'Public'}
+    </span>
+  )
+}
+
+/**
+ * A picker for one of the three levels.
+ *
+ * Takes the catalogue from the server rather than hard-coding three options,
+ * so the words a picker shows are the words the roles screen shows beside a
+ * clearance.
+ */
+export function LevelPicker({
+  projectKey,
+  value,
+  onChange,
+  includeInherit,
+}: {
+  projectKey: string
+  value: Sensitivity | ''
+  onChange: (level: Sensitivity | '') => void
+  /** Offer "take the folder's default", which is what omitting it does. */
+  includeInherit?: string
+}) {
+  // The same query the roles screen draws its clearances from, so a level is
+  // worded identically wherever it appears and the catalogue is fetched once
+  // per project rather than once per picker.
+  const grid = useQuery({
+    queryKey: ['permissions', projectKey],
+    queryFn: () => api.getPermissions(projectKey),
+  })
+  const levels = { data: grid.data?.levels }
+
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value as Sensitivity | '')}>
+      {includeInherit ? <option value="">{includeInherit}</option> : null}
+      {(levels.data ?? []).map((level) => (
+        <option key={level.key} value={level.key}>
+          {level.label}
+        </option>
+      ))}
+    </select>
   )
 }
 

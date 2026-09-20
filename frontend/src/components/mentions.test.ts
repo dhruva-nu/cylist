@@ -40,6 +40,7 @@ function file(name: string, folder = '', kind: 'file' | 'link' = 'file'): FiledI
     folder_id: folder,
     kind,
     name,
+    sensitivity: 'internal',
     url: kind === 'link' ? 'https://drive.example/doc' : null,
     source: kind === 'link' ? 'gdrive' : 'upload',
     size: kind === 'link' ? null : 4096,

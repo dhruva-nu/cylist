@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
+from app.core.sensitivity import Sensitivity
 from app.models.file import NAME_MAX_LENGTH, ItemKind, ItemSource
 from app.schemas.common import Schema
 from app.schemas.people import PersonRead
@@ -36,6 +37,13 @@ class FolderCreate(Schema):
     parent_id: UUID | None = Field(
         default=None, description="Omit to put the folder in the project's root folder."
     )
+    default_sensitivity: Sensitivity | None = Field(
+        default=None,
+        description=(
+            "What things put in this folder are classified as unless the caller "
+            "says. Omit on create to inherit the parent folder's."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -55,6 +63,7 @@ class FolderUpdate(Schema):
 
     name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_LENGTH)
     parent_id: UUID | None = None
+    default_sensitivity: Sensitivity | None = None
 
     @field_validator("name")
     @classmethod
@@ -72,6 +81,9 @@ class FolderRead(Schema):
             "Whether this is the project's root folder, which is named after the"
             " project and cannot be renamed, moved or deleted."
         )
+    )
+    default_sensitivity: Sensitivity = Field(
+        description="What things uploaded here are classified as unless the caller says."
     )
     created_at: datetime
 
@@ -109,6 +121,9 @@ class ItemRead(Schema):
     folder_id: UUID
     kind: ItemKind
     name: str
+    sensitivity: Sensitivity = Field(
+        description="How far this may travel. A role not cleared this high is not shown it."
+    )
     url: str | None
     source: ItemSource
     size: int | None
@@ -156,6 +171,14 @@ class LinkCreate(Schema):
         default=ItemSource.OTHER, description="Where the document lives. Never `upload`."
     )
     added_by: UUID | None = Field(default=None, description="Which person added it.")
+    sensitivity: Sensitivity | None = Field(
+        default=None,
+        description=(
+            "How far this may travel. Omit to take the folder's default, which "
+            "is how a folder of contracts stays restricted without anybody "
+            "remembering to say so on each upload."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -167,6 +190,9 @@ class ItemUpdate(Schema):
     """Every field optional; omitted fields are left as they are."""
 
     name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_LENGTH)
+    sensitivity: Sensitivity | None = Field(
+        default=None, description="Reclassify it. Needs the `files` permission like any edit."
+    )
     url: str | None = Field(default=None, pattern=_URL_PATTERN, max_length=2000)
     source: ItemSource | None = None
     added_by: UUID | None = None

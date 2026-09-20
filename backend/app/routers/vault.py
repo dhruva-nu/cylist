@@ -22,14 +22,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.core import crypto
+from app.core import sensitivity as sensitivity_of
 from app.core.clock import now
 from app.core.crypto import VaultCipher
+from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
@@ -88,13 +90,58 @@ async def _project_of_node(session: AsyncSession, node: VaultNode) -> UUID:
     return tree.project_id
 
 
+def _within(nodes: list[VaultNode], allowed: frozenset[Sensitivity]) -> list[VaultNode]:
+    """Drop the nodes this caller is not cleared for, and their subtrees.
+
+    A branch above the clearance takes everything under it, whatever those
+    children are classified as. A tree that showed "Production" standing empty
+    would have told the reader which branch is the interesting one, which is
+    most of what there was to learn.
+    """
+    hidden: set[UUID] = set()
+    kept: list[VaultNode] = []
+    # `nodes_in_tree` returns them parent-before-child, so one pass is enough
+    # to carry a hidden branch down onto everything beneath it.
+    for node in nodes:
+        if node.parent_id in hidden or not permissions.readable(node.sensitivity, allowed):
+            hidden.add(node.id)
+            continue
+        kept.append(node)
+    return kept
+
+
+async def visible_node(
+    node: VaultNode = Depends(resolved_node),
+    principal: Principal = Depends(current_principal),
+    session: AsyncSession = SessionDependency,
+) -> VaultNode:
+    """The node, if this caller is cleared to know it exists — else a 404.
+
+    Walks up to the tree's root, because a secret inside a restricted branch
+    is restricted whatever it says about itself: hiding the branch and serving
+    its children by id would be a lock on the door and a window beside it.
+
+    No scope check of its own — every endpoint below states the one it wants,
+    and this runs inside their guards as well as beside them.
+    """
+    project_id = await _project_of_node(session, node)
+    allowed = await permissions.visible_levels_for(session, project_id, principal)
+
+    everything = {row.id: row for row in await vault.nodes_in_tree(session, node.tree_id)}
+    walking: VaultNode | None = node
+    while walking is not None:
+        permissions.enforce_visible(walking.sensitivity, allowed, "node")
+        walking = everything.get(walking.parent_id) if walking.parent_id else None
+    return node
+
+
 CHANGE_VAULT = guards.on_project(Permission.VAULT, Scope.WRITE, Scope.VAULT_READ)
 CHANGE_THIS_TREE = guards.for_entity(Permission.VAULT, resolved_tree, Scope.WRITE, Scope.VAULT_READ)
 CHANGE_THIS_NODE = guards.for_entity(
-    Permission.VAULT, resolved_node, Scope.WRITE, Scope.VAULT_READ, locate=_project_of_node
+    Permission.VAULT, visible_node, Scope.WRITE, Scope.VAULT_READ, locate=_project_of_node
 )
 REVEAL_THIS_SECRET = guards.for_entity(
-    Permission.VAULT_REVEAL, resolved_node, Scope.VAULT_REVEAL, locate=_project_of_node
+    Permission.VAULT_REVEAL, visible_node, Scope.VAULT_REVEAL, locate=_project_of_node
 )
 """Both gates, and they are a pair worth reading together. ``vault:reveal`` is
 what the credential carries; the permission is what this person is on this
@@ -168,16 +215,21 @@ async def create_tree(
     summary="Get a whole vault tree",
 )
 async def get_tree(
-    _: Principal = Depends(READ),
+    principal: Principal = Depends(READ),
     tree: VaultTree = Depends(resolved_tree),
     session: AsyncSession = SessionDependency,
 ) -> VaultTreeDetail:
-    """Every node in the tree, nested, with each secret's metadata.
+    """Every node in the tree the caller is cleared for, nested, with each
+    secret's metadata.
 
     No secret value appears here at any depth. Call
     `POST /vault/nodes/{id}/reveal` for one of those, one at a time.
+
+    The counts are of what came back rather than of what is there, so the
+    header over a filtered tree agrees with the rows under it.
     """
-    nodes = await vault.nodes_in_tree(session, tree.id)
+    allowed = await permissions.visible_levels_for(session, tree.project_id, principal)
+    nodes = _within(await vault.nodes_in_tree(session, tree.id), allowed)
     size = vault.TreeSize(nodes=len(nodes), secrets=sum(1 for node in nodes if node.is_secret))
     return VaultTreeDetail(
         **_tree_read(tree, size).model_dump(),
@@ -274,12 +326,15 @@ async def create_node(
 
 @router.get("/nodes/{node_id}", response_model=VaultNodeRead, summary="Get a node")
 async def get_node(
-    _: Principal = Depends(READ),
-    node: VaultNode = Depends(resolved_node),
+    principal: Principal = Depends(READ),
+    node: VaultNode = Depends(visible_node),
     session: AsyncSession = SessionDependency,
 ) -> VaultNodeRead:
     """One node and its subtree — metadata only, never a secret value."""
-    nodes = await vault.nodes_in_tree(session, node.tree_id)
+    allowed = await permissions.visible_levels_for(
+        session, await _project_of_node(session, node), principal
+    )
+    nodes = _within(await vault.nodes_in_tree(session, node.tree_id), allowed)
     return _node_read(node, children=_nest(nodes, parent_id=node.id))
 
 
@@ -389,7 +444,7 @@ async def move_node(
 )
 async def reveal_secret(
     principal: Principal = Depends(REVEAL_THIS_SECRET),
-    node: VaultNode = Depends(resolved_node),
+    node: VaultNode = Depends(visible_node),
     session: AsyncSession = SessionDependency,
     cipher: VaultCipher = Depends(vault_cipher),
 ) -> SecretRevealed:
@@ -427,6 +482,7 @@ def _tree_read(tree: VaultTree, size: vault.TreeSize) -> VaultTreeRead:
         project_id=tree.project_id,
         name=tree.name,
         position=tree.position,
+        default_sensitivity=sensitivity_of.parse(tree.default_sensitivity, DEFAULT_LEVEL),
         node_count=size.nodes,
         secret_count=size.secrets,
         created_at=tree.created_at,
@@ -448,6 +504,7 @@ def _node_read(node: VaultNode, *, children: list[VaultNodeRead] | None = None) 
         name=node.name,
         kind=node.kind,
         position=node.position,
+        sensitivity=sensitivity_of.parse(node.sensitivity, DEFAULT_LEVEL),
         created_at=node.created_at,
         updated_at=node.updated_at,
         secret=SecretRead.model_validate(node.secret) if node.secret is not None else None,

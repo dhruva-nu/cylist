@@ -137,6 +137,8 @@ export type Permission =
   | 'tasks'
   | 'comments'
   | 'goals'
+  | 'goal_assign'
+  | 'goal_owner'
   | 'board'
   | 'files'
   | 'vault'
@@ -144,6 +146,37 @@ export type Permission =
   | 'people'
   | 'agents'
   | 'project'
+
+/**
+ * How far something stored on a project may travel.
+ *
+ * Uploads carry one; roles carry the highest they may read. Ordered:
+ * `public` < `internal` < `restricted`.
+ */
+export type Sensitivity = 'public' | 'internal' | 'restricted'
+
+/** One level, described well enough to draw a picker. */
+export interface SensitivityInfo {
+  key: Sensitivity
+  label: string
+  summary: string
+}
+
+/**
+ * What one role may do at one column of the board.
+ *
+ * Every column is reported, restricted or not, so the grid draws from this
+ * alone. What is *stored* is only the exceptions — see the server's
+ * `RoleColumnRule`.
+ */
+export interface ColumnRule {
+  column_id: string
+  name: string
+  /** Whether a card may be moved into it. */
+  may_enter: boolean
+  /** Whether the sub-stages a card passes through here may be set. */
+  may_stage: boolean
+}
 
 /** One permission, described well enough to draw a labelled tick box. */
 export interface PermissionInfo {
@@ -166,11 +199,16 @@ export interface RolePermissions {
   is_admin: boolean
   member_count: number
   permissions: Permission[]
+  /** One entry per column of the board, in board order. */
+  columns: ColumnRule[]
+  /** The most sensitive thing this role may read. */
+  clearance: Sensitivity
 }
 
 /** The whole grid, and the words to draw it with. */
 export interface ProjectPermissions {
   catalogue: PermissionInfo[]
+  levels: SensitivityInfo[]
   roles: RolePermissions[]
   /** What the reader may do here — what a client hides buttons by. */
   mine: Permission[]
@@ -760,6 +798,8 @@ export interface VaultTree {
   project_id: string
   name: string
   position: number
+  /** What nodes added here are classified as unless the caller says. */
+  default_sensitivity: Sensitivity
   node_count: number
   secret_count: number
   created_at: string
@@ -787,6 +827,8 @@ export interface VaultNode {
   name: string
   kind: VaultNodeKind
   position: number
+  /** How far it may travel. A branch above your clearance hides its subtree. */
+  sensitivity: Sensitivity
   created_at: string
   updated_at: string
   secret: VaultSecretMeta | null
@@ -806,6 +848,8 @@ export interface VaultNodeInput {
   name: string
   kind: VaultNodeKind
   secret?: SecretInput
+  /** Null or omitted inherits the parent branch's, or the tree's default. */
+  sensitivity?: Sensitivity | null
 }
 
 export interface RevealedSecret {
@@ -864,6 +908,8 @@ export interface Folder {
    * holding files and folders alike, and impossible to rename or delete.
    */
   is_root: boolean
+  /** What things uploaded here are classified as unless the caller says. */
+  default_sensitivity: Sensitivity
   created_at: string
 }
 
@@ -886,6 +932,8 @@ export interface FileItem {
   folder_id: string
   kind: ItemKind
   name: string
+  /** How far it may travel. A role not cleared this high is not shown it. */
+  sensitivity: Sensitivity
   url: string | null
   source: ItemSource
   size: number | null
@@ -919,6 +967,8 @@ export interface LinkInput {
   url: string
   source: ItemSource
   added_by?: string | null
+  /** Null or omitted takes the folder's default. */
+  sensitivity?: Sensitivity | null
 }
 
 export interface Health {
@@ -1080,13 +1130,54 @@ export const api = {
       method: 'PUT',
       body: body({ permissions }),
     }),
+  /**
+   * Where on the board a role may work. The whole line every time — a column
+   * left out is left unrestricted.
+   */
+  setColumnRules: (ref: string, roleId: string | null, columns: ColumnRule[]) =>
+    request<RolePermissions>(
+      roleId === null
+        ? `/projects/${ref}/permissions/everyone-else/columns`
+        : `/projects/${ref}/roles/${roleId}/columns`,
+      {
+        method: 'PUT',
+        body: body({
+          columns: columns.map(({ column_id, may_enter, may_stage }) => ({
+            column_id,
+            may_enter,
+            may_stage,
+          })),
+        }),
+      },
+    ),
+  /** How sensitive a thing a role may read. */
+  setClearance: (ref: string, roleId: string | null, clearance: Sensitivity) =>
+    request<RolePermissions>(
+      roleId === null
+        ? `/projects/${ref}/permissions/everyone-else/clearance`
+        : `/projects/${ref}/roles/${roleId}/clearance`,
+      { method: 'PUT', body: body({ clearance }) },
+    ),
 
   /** The project's root folder, with the whole tree nested inside it. */
   getTree: (ref: string) => request<FolderNode>(`/projects/${ref}/tree`),
-  createFolder: (ref: string, input: { name: string; parent_id: string | null }) =>
-    request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
-  updateFolder: (id: string, input: { name?: string; parent_id?: string | null }) =>
-    request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
+  createFolder: (
+    ref: string,
+    input: {
+      name: string
+      parent_id: string | null
+      /** Null inherits the parent folder's, which is usually what is wanted. */
+      default_sensitivity?: Sensitivity | null
+    },
+  ) => request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
+  updateFolder: (
+    id: string,
+    input: {
+      name?: string
+      parent_id?: string | null
+      default_sensitivity?: Sensitivity
+    },
+  ) => request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
   /**
@@ -1095,10 +1186,18 @@ export const api = {
    */
   listProjectItems: (ref: string) => request<FiledItem[]>(`/projects/${ref}/items`),
 
-  uploadFile: (folderId: string, file: File, addedBy?: string | null) => {
+  uploadFile: (
+    folderId: string,
+    file: File,
+    addedBy?: string | null,
+    level?: Sensitivity | null,
+  ) => {
     const form = new FormData()
     form.append('file', file)
     if (addedBy) form.append('added_by', addedBy)
+    // Left off rather than sent empty: omitting it is what makes the server
+    // fall back to the folder's default.
+    if (level) form.append('sensitivity', level)
     return request<FileItem>(`/folders/${folderId}/upload`, { method: 'POST', body: form })
   },
   addLink: (folderId: string, input: LinkInput) =>
@@ -1227,8 +1326,11 @@ export const api = {
   archivePerson: (id: string) => request<{ ok: boolean }>(`/people/${id}`, { method: 'DELETE' }),
 
   listVaultTrees: (ref: string) => request<VaultTree[]>(`/projects/${ref}/vault/trees`),
-  createVaultTree: (ref: string, name: string) =>
-    request<VaultTree>(`/projects/${ref}/vault/trees`, { method: 'POST', body: body({ name }) }),
+  createVaultTree: (ref: string, name: string, defaultSensitivity?: Sensitivity | null) =>
+    request<VaultTree>(`/projects/${ref}/vault/trees`, {
+      method: 'POST',
+      body: body({ name, default_sensitivity: defaultSensitivity ?? null }),
+    }),
   getVaultTree: (treeId: string) => request<VaultTreeDetail>(`/vault/trees/${treeId}`),
   renameVaultTree: (treeId: string, name: string) =>
     request<VaultTree>(`/vault/trees/${treeId}`, { method: 'PATCH', body: body({ name }) }),
@@ -1237,8 +1339,10 @@ export const api = {
 
   createVaultNode: (input: VaultNodeInput) =>
     request<VaultNode>('/vault/nodes', { method: 'POST', body: body(input) }),
-  updateVaultNode: (nodeId: string, input: { name?: string; secret?: SecretInput }) =>
-    request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: body(input) }),
+  updateVaultNode: (
+    nodeId: string,
+    input: { name?: string; secret?: SecretInput; sensitivity?: Sensitivity },
+  ) => request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: body(input) }),
   deleteVaultNode: (nodeId: string) =>
     request<{ ok: boolean }>(`/vault/nodes/${nodeId}`, { method: 'DELETE' }),
   moveVaultNode: (nodeId: string, parentId: string | null, position: number) =>

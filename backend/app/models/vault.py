@@ -28,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -61,6 +62,17 @@ class VaultTree(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    default_sensitivity: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'internal'")
+    )
+    """What nodes added to this tree are classified as unless the caller says.
+
+    A tree is how a vault is already divided — "Logins", "Certificates & keys"
+    — so it is where the classification belongs: an admin says *Certificates is
+    restricted* once, and every key put there is, without anybody remembering.
+    The tree itself stays listed whatever its contents are.
+    """
 
 
 class VaultNode(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -108,6 +120,18 @@ class VaultNode(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    sensitivity: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'internal'")
+    )
+    """How far this node may travel — a :class:`~app.core.sensitivity.Sensitivity`.
+
+    Carried by branches as well as secrets, and for a branch it does two jobs:
+    it is the branch's own level, and it is what nodes created under it
+    inherit. A branch above your clearance is not returned and neither is
+    anything beneath it, because a tree that showed "Production" with nothing
+    in it would have told you what the interesting branch is called.
+    """
 
     secret: Mapped[VaultSecret | None] = relationship(
         back_populates="node",

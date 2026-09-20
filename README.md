@@ -128,7 +128,9 @@ a vocabulary the server fixes:
 |---|---|
 | `tasks` | Create, edit, move and finish cards, sub-tasks and checklists. |
 | `comments` | Say something on a card. |
-| `goals` | Create, rename, retarget and drop goals. |
+| `goals` | Create, rename, retarget, drop and finish goals. |
+| `goal_assign` | Say which goal a card counts towards. |
+| `goal_owner` | Hand an existing goal to somebody else. |
 | `board` | Columns, and card templates — the shape of the board. |
 | `files` | Folders, uploads and links. |
 | `vault` | Add, change and delete credentials. Not read them. |
@@ -158,11 +160,46 @@ Scopes and permissions are both checked and neither stands in for the other: a
 read-only token held by an admin still cannot write, and a `write` token held
 by somebody whose role does not allow cards still cannot move one.
 
-`GET /projects/{ref}/permissions` returns the whole grid — the vocabulary, each
-role's line, and `mine`, what the caller may do here, which is what the web app
-hides buttons by. `PUT /projects/{ref}/roles/{role}/permissions` and
-`PUT /projects/{ref}/permissions/everyone-else` replace one line of it. The
-**Roles** tab on a project is the screen all of that is drawn from.
+### Where on the board, and how sensitive
+
+Two of those permissions are too blunt on their own, so each is narrowed by
+rules about the *thing* rather than the area. Both are **restrictions**: the
+flat permission is still the gate, and a missing rule narrows nothing. That is
+also why a column added next month is open to everybody who may move cards,
+rather than closed until somebody notices.
+
+**Where on the board.** Per role, per column, two answers: may a card be moved
+*into* it, and may the sub-stages a card passes through there be set — both the
+template's rule for the column and a card's own progress bar, because they are
+the same decision. A role with `tasks` switched off is not asked about columns
+at all.
+
+**How sensitive.** Every uploaded file, link and vault node carries a level —
+`public`, `internal` or `restricted` — and every role carries the highest it
+may read. Folders and vault trees carry a *default* that new children inherit,
+so "everything in Contracts is restricted" is said once rather than on each
+upload. Something above your clearance is answered **as though it were never
+there**: left out of listings, a 404 by id, a 404 to download, and not counted
+on the project hub. A 403 on `redundancy-list-final.xlsx` would already have
+told you the interesting part. A restricted vault branch takes its whole
+subtree with it.
+
+Reading is otherwise still unfenced — a project is a shared workspace, and its
+board, cards and goals are visible to everyone on it.
+
+`GET /projects/{ref}/permissions` returns the whole grid — the vocabulary, the
+levels, each role's line with its columns and clearance, and `mine`, what the
+caller may do here, which is what the web app hides buttons by. Five PUTs
+replace one line of it:
+
+```
+PUT /projects/{ref}/roles/{role}/permissions
+PUT /projects/{ref}/roles/{role}/columns
+PUT /projects/{ref}/roles/{role}/clearance
+PUT /projects/{ref}/permissions/everyone-else            # …/columns, …/clearance too
+```
+
+The **Roles** tab on a project is the screen all of that is drawn from.
 
 ### Auditing
 

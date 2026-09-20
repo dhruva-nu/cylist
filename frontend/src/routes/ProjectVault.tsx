@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import {
   api,
   type SecretInput,
+  type Sensitivity,
   type VaultNode,
   type VaultNodeKind,
   type VaultTreeDetail,
@@ -25,6 +26,8 @@ import {
   EmptyState,
   ErrorBanner,
   Eyebrow,
+  LevelPicker,
+  LevelTag,
   LiveRegion,
   cardStyles,
   useAnnouncer,
@@ -247,6 +250,7 @@ export function ProjectVault() {
 
       {adding ? (
         <NodeDialog
+          projectKey={projectKey}
           destination={adding}
           onCreated={(created) => {
             setOpenTrees((current) =>
@@ -265,6 +269,7 @@ export function ProjectVault() {
 
       {editing ? (
         <NodeDialog
+          projectKey={projectKey}
           node={editing}
           destination={{ treeId: editing.tree_id, parentId: editing.parent_id }}
           onDone={async (name) => {
@@ -517,7 +522,9 @@ function NodeDetail({
       <div className={styles.detailHead}>
         <div>
           <div className={styles.path}>{path.slice(0, -1).join(' / ')}</div>
-          <h2>{node.name}</h2>
+          <h2>
+            {node.name} <LevelTag level={node.sensitivity} />
+          </h2>
           {node.kind === 'branch' ? (
             <p className={styles.note}>
               Branch with {node.children.length} child{node.children.length === 1 ? '' : 'ren'}.
@@ -749,9 +756,10 @@ function TreeDialog({
   onClose: () => void
 }) {
   const [name, setName] = useState('')
+  const [level, setLevel] = useState<Sensitivity | ''>('')
 
   const save = useMutation({
-    mutationFn: () => api.createVaultTree(projectKey, name.trim()),
+    mutationFn: () => api.createVaultTree(projectKey, name.trim(), level || null),
     onSuccess: async () => {
       // The name goes back up rather than the dialog announcing it: the screen
       // owns the live region, and the dialog is about to stop existing.
@@ -784,6 +792,17 @@ function TreeDialog({
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="e.g. Cloud accounts"
+          />
+        </Field>
+        <Field
+          label="What goes in here is"
+          hint="A tree is how a vault is already divided, so this is where it is said once."
+        >
+          <LevelPicker
+            projectKey={projectKey}
+            value={level}
+            onChange={setLevel}
+            includeInherit="Internal"
           />
         </Field>
       </ModalBody>
@@ -875,12 +894,14 @@ interface SecretForm {
  * keeps whatever is there.
  */
 function NodeDialog({
+  projectKey,
   node,
   destination,
   onCreated,
   onDone,
   onClose,
 }: {
+  projectKey: string
   node?: VaultNode
   destination: Destination
   /** What was just added, so the screen can open the tree onto it. */
@@ -897,6 +918,7 @@ function NodeDialog({
     url: node?.secret?.url ?? '',
     notes: node?.secret?.notes ?? '',
   })
+  const [level, setLevel] = useState<Sensitivity | ''>(node?.sensitivity ?? '')
 
   const save = useMutation({
     mutationFn: async () => {
@@ -909,6 +931,7 @@ function NodeDialog({
       if (node) {
         await api.updateVaultNode(node.id, {
           name: name.trim(),
+          ...(level ? { sensitivity: level } : {}),
           ...(node.kind === 'secret' ? { secret } : {}),
         })
         return null
@@ -918,6 +941,7 @@ function NodeDialog({
         parent_id: destination.parentId,
         name: name.trim(),
         kind,
+        sensitivity: level || null,
         ...(kind === 'secret' ? { secret: { ...secret, value: form.value } } : {}),
       })
     },
@@ -958,6 +982,26 @@ function NodeDialog({
             <KindPicker kind={kind} onPick={setKind} />
           </Field>
         )}
+
+        <Field
+          label="How far it may travel"
+          hint={
+            kind === 'branch'
+              ? 'A branch above somebody\u2019s clearance hides everything under it.'
+              : 'A role not cleared this high is not shown that it exists.'
+          }
+        >
+          {editing ? (
+            <LevelPicker projectKey={projectKey} value={level} onChange={setLevel} />
+          ) : (
+            <LevelPicker
+              projectKey={projectKey}
+              value={level}
+              onChange={setLevel}
+              includeInherit="Same as where it goes"
+            />
+          )}
+        </Field>
 
         {kind === 'secret' ? (
           <>

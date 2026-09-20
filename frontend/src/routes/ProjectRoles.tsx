@@ -19,12 +19,15 @@ import { useState } from 'react'
 import {
   api,
   isMe,
+  type ColumnRule,
   type Identity,
   type Member,
   type Permission,
   type PermissionInfo,
   type RolePermissions,
   type RoleSummary,
+  type Sensitivity,
+  type SensitivityInfo,
 } from '../api/client'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
@@ -40,13 +43,16 @@ import {
   useAnnouncer,
 } from '../components/ui'
 import {
+  clearanceOf,
   countPeople,
   explain,
   inOrder,
   isEveryoneElse,
   isFixed,
   summarise,
+  summariseColumns,
   toggled,
+  withColumnRule,
 } from './projectPermissions'
 import styles from './ProjectRoles.module.css'
 import { nameIsTaken, whyUndeletable } from './projectRoles'
@@ -70,6 +76,7 @@ export function ProjectRoles() {
    * reaches for is to click it again.
    */
   const [pending, setPending] = useState<Record<string, Permission[]>>({})
+  const [pendingColumns, setPendingColumns] = useState<Record<string, ColumnRule[]>>({})
 
   const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
   const members = useQuery({
@@ -114,6 +121,31 @@ export function ProjectRoles() {
     },
   })
 
+  const saveColumns = useMutation({
+    mutationFn: ({ line, columns }: { line: RolePermissions; columns: ColumnRule[] }) =>
+      api.setColumnRules(projectKey, line.role_id, columns),
+    onSuccess: async (saved) => {
+      await refresh()
+      announce(`${saved.name}: ${summariseColumns(saved)}.`)
+    },
+    onSettled: (_saved, _error, { line }) => {
+      setPendingColumns((held) => {
+        const rest = { ...held }
+        delete rest[keyOf(line)]
+        return rest
+      })
+    },
+  })
+
+  const saveClearance = useMutation({
+    mutationFn: ({ line, clearance }: { line: RolePermissions; clearance: Sensitivity }) =>
+      api.setClearance(projectKey, line.role_id, clearance),
+    onSuccess: async (saved) => {
+      await refresh()
+      announce(`${saved.name} now reads up to ${saved.clearance}.`)
+    },
+  })
+
   const setRole = useMutation({
     mutationFn: ({ personId, role }: { personId: string; role: string | null }) =>
       api.setMemberRole(projectKey, personId, role),
@@ -152,6 +184,8 @@ export function ProjectRoles() {
       </PageHead>
 
       {save.error ? <ErrorBanner>{save.error.message}</ErrorBanner> : null}
+      {saveColumns.error ? <ErrorBanner>{saveColumns.error.message}</ErrorBanner> : null}
+      {saveClearance.error ? <ErrorBanner>{saveClearance.error.message}</ErrorBanner> : null}
       {setRole.error ? <ErrorBanner>{setRole.error.message}</ErrorBanner> : null}
       {drop.error ? <ErrorBanner>{drop.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
@@ -183,6 +217,7 @@ export function ProjectRoles() {
       <div className={styles.grid}>
         {inOrder(grid.data).map((line) => {
           const held = pending[keyOf(line)] ?? line.permissions
+          const board = pendingColumns[keyOf(line)] ?? line.columns
           const role = (roles.data ?? []).find((candidate) => candidate.id === line.role_id)
           const undeletable = role ? whyUndeletable(role) : 'This is not a role anybody holds.'
 
@@ -233,6 +268,28 @@ export function ProjectRoles() {
                   />
                 ))}
               </ul>
+
+              {/* Both of these narrow what the tick boxes above allowed —
+                  they never widen it — so they read after them rather than
+                  beside them. */}
+              <Workflow
+                board={board}
+                summary={summariseColumns({ ...line, columns: board })}
+                disabled={!amAdmin || isFixed(line) || saveColumns.isPending}
+                gated={!isFixed(line) && !held.includes('tasks')}
+                onChange={(columnId, field, on) => {
+                  const next = withColumnRule(board, columnId, field, on)
+                  setPendingColumns((current) => ({ ...current, [keyOf(line)]: next }))
+                  saveColumns.mutate({ line, columns: next })
+                }}
+              />
+
+              <Clearance
+                levels={grid.data.levels}
+                value={clearanceOf(line)}
+                disabled={!amAdmin || isFixed(line) || saveClearance.isPending}
+                onChange={(clearance) => saveClearance.mutate({ line, clearance })}
+              />
             </section>
           )
         })}
@@ -278,6 +335,132 @@ function Tick({
         </span>
       </label>
     </li>
+  )
+}
+
+/**
+ * Where on the board this role may work.
+ *
+ * Two ticks per column and they are different jobs: moving a card into Review
+ * is work, while deciding that a Hotfix in Review passes through "Drafted,
+ * Reviewed, Merged" is designing the workflow — and a team often wants the
+ * second in one person's hands while everybody does the first.
+ */
+function Workflow({
+  board,
+  summary,
+  disabled,
+  gated,
+  onChange,
+}: {
+  board: ColumnRule[]
+  summary: string
+  disabled: boolean
+  /** Whether the flat `tasks` permission is off, which makes all of this moot. */
+  gated: boolean
+  onChange: (columnId: string, field: 'may_enter' | 'may_stage', on: boolean) => void
+}) {
+  if (board.length === 0) return null
+
+  return (
+    <section className={styles.axis}>
+      <header>
+        <b>Where on the board</b>
+        <span className={styles.count}>{gated ? 'No cards at all' : summary}</span>
+      </header>
+      {gated ? (
+        <p className={styles.why}>
+          This role cannot change cards, so where on the board it may do so does not arise.
+        </p>
+      ) : (
+        <table className={styles.columns}>
+          <thead>
+            <tr>
+              <th scope="col">Column</th>
+              <th scope="col">Move cards in</th>
+              <th scope="col">Set sub-stages</th>
+            </tr>
+          </thead>
+          <tbody>
+            {board.map((column) => (
+              <tr key={column.column_id}>
+                <th scope="row">{column.name}</th>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={column.may_enter}
+                    disabled={disabled}
+                    aria-label={`Move cards into ${column.name}`}
+                    onChange={(event) =>
+                      onChange(column.column_id, 'may_enter', event.target.checked)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={column.may_stage}
+                    disabled={disabled}
+                    aria-label={`Set the sub-stages for ${column.name}`}
+                    onChange={(event) =>
+                      onChange(column.column_id, 'may_stage', event.target.checked)
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
+
+/**
+ * How sensitive a thing this role may read.
+ *
+ * A radio group rather than a select: there are three, they are ordered, and
+ * the whole point of the control is seeing at a glance which way along that
+ * order a role sits.
+ */
+function Clearance({
+  levels,
+  value,
+  disabled,
+  onChange,
+}: {
+  levels: SensitivityInfo[]
+  value: Sensitivity
+  disabled: boolean
+  onChange: (level: Sensitivity) => void
+}) {
+  if (levels.length === 0) return null
+
+  return (
+    <section className={styles.axis}>
+      <header>
+        <b>Uploads it can read</b>
+        <span className={styles.count}>up to {value}</span>
+      </header>
+      <ul className={styles.levels}>
+        {levels.map((level) => (
+          <li key={level.key}>
+            <label>
+              <input
+                type="radio"
+                checked={value === level.key}
+                disabled={disabled}
+                onChange={() => onChange(level.key)}
+              />
+              <span>
+                <b>{level.label}</b>
+                <span className={styles.summary}>{level.summary}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

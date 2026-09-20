@@ -48,7 +48,26 @@ class Permission(StrEnum):
     """
 
     GOALS = "goals"
-    """Create, rename, retarget and drop this project's goals."""
+    """Create, rename, retarget, drop and finish this project's goals."""
+
+    GOAL_ASSIGN = "goal_assign"
+    """Put a card on a goal, or take it off.
+
+    Separate from :attr:`GOALS` because it is the one goal-shaped thing that
+    happens daily, on a card, by whoever is doing the work — while renaming a
+    goal or moving its target date is a decision about the plan. A board where
+    only the person who owns the plan may say which goal a card counts towards
+    is a board whose goals are always slightly out of date.
+    """
+
+    GOAL_OWNER = "goal_owner"
+    """Change whose goal a goal is.
+
+    Its own right because it is the one edit that reassigns work to a person
+    rather than describing it. Naming the owner while *creating* a goal is
+    part of creating it and needs only :attr:`GOALS`; handing an existing one
+    to somebody else is this.
+    """
 
     BOARD = "board"
     """Change the shape of the board: its columns, and its card templates."""
@@ -108,8 +127,20 @@ CATALOGUE: tuple[PermissionInfo, ...] = (
     PermissionInfo(
         Permission.GOALS,
         "Goals",
-        "Create, rename, retarget and drop goals.",
+        "Create, rename, retarget, drop and finish goals.",
         "change goals",
+    ),
+    PermissionInfo(
+        Permission.GOAL_ASSIGN,
+        "Goal of a card",
+        "Say which goal a card counts towards.",
+        "say which goal a card is on",
+    ),
+    PermissionInfo(
+        Permission.GOAL_OWNER,
+        "Goal owner",
+        "Hand an existing goal to somebody else.",
+        "change whose goal a goal is",
     ),
     PermissionInfo(
         Permission.BOARD,

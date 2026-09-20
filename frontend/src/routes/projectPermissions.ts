@@ -11,7 +11,14 @@
  * and the member list is where the server already said it.
  */
 
-import type { Permission, PermissionInfo, ProjectPermissions, RolePermissions } from '../api/client'
+import type {
+  ColumnRule,
+  Permission,
+  PermissionInfo,
+  ProjectPermissions,
+  RolePermissions,
+  Sensitivity,
+} from '../api/client'
 
 /**
  * Whether the reader may do this here.
@@ -101,4 +108,52 @@ export function explain(line: RolePermissions): string | null {
 export function inOrder(grid: ProjectPermissions): RolePermissions[] {
   const rank = (line: RolePermissions) => (line.is_admin ? 0 : isEveryoneElse(line) ? 2 : 1)
   return [...grid.roles].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+}
+
+/**
+ * The result of ticking one box on a role's workflow line.
+ *
+ * The whole line goes back to the server every time — see `api.setColumnRules`
+ * — so this returns the whole line rather than the one entry that changed.
+ */
+export function withColumnRule(
+  columns: ColumnRule[],
+  columnId: string,
+  field: 'may_enter' | 'may_stage',
+  on: boolean,
+): ColumnRule[] {
+  return columns.map((column) =>
+    column.column_id === columnId ? { ...column, [field]: on } : column,
+  )
+}
+
+/**
+ * How a role's workflow line reads at a glance.
+ *
+ * "Anywhere" rather than "5 of 5", because an unrestricted line is the normal
+ * state and a fraction invites the reader to work out whether it is the whole
+ * board. Only a narrowed line gets counted.
+ */
+export function summariseColumns(line: RolePermissions): string {
+  if (isFixed(line)) return 'Anywhere'
+  const enter = line.columns.filter((column) => column.may_enter).length
+  if (enter === line.columns.length) return 'Anywhere'
+  if (enter === 0) return 'Nowhere'
+  return `${enter} of ${line.columns.length} columns`
+}
+
+/** Whether anything on this line has been narrowed — what a "reset" offers. */
+export function isNarrowed(line: RolePermissions): boolean {
+  return line.columns.some((column) => !column.may_enter || !column.may_stage)
+}
+
+/**
+ * The clearance to show for a line.
+ *
+ * An admin's is not stored and not editable — they read everything by being
+ * an admin — so the grid shows the top level rather than whatever a row might
+ * once have said.
+ */
+export function clearanceOf(line: RolePermissions): Sensitivity {
+  return isFixed(line) ? 'restricted' : line.clearance
 }

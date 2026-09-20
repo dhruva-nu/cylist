@@ -15,12 +15,14 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
+from app.core import sensitivity
 from app.core.errors import NotFoundError, UnprocessableRequestError
+from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.db import SessionDependency
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
@@ -40,7 +42,7 @@ from app.schemas.files import (
     LinkCreate,
 )
 from app.schemas.people import PersonRead
-from app.services import activity, blobs, files
+from app.services import activity, blobs, files, permissions
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["files"])
@@ -69,6 +71,7 @@ def _folder(folder: Folder) -> FolderRead:
         parent_id=folder.parent_id,
         name=folder.name,
         is_root=folder.is_root,
+        default_sensitivity=sensitivity.parse(folder.default_sensitivity, DEFAULT_LEVEL),
         created_at=folder.created_at,
     )
 
@@ -80,6 +83,7 @@ def _item(item: FileItem) -> ItemRead:
         folder_id=item.folder_id,
         kind=item.kind,
         name=item.name,
+        sensitivity=sensitivity.parse(item.sensitivity, DEFAULT_LEVEL),
         url=item.url,
         source=item.source,
         size=item.size,
@@ -129,9 +133,30 @@ async def _project_of_item(session: AsyncSession, item: FileItem) -> UUID:
     return folder.project_id
 
 
+async def visible_item(
+    item: FileItem = Depends(resolved_item),
+    principal: Principal = Depends(current_principal),
+    session: AsyncSession = SessionDependency,
+) -> FileItem:
+    """The item, if this caller is cleared to know it exists — else a 404.
+
+    Every path that reaches one item goes through this: the reads, the
+    download that hands over the bytes, and the writes, because a role that
+    cannot be shown a file has no business renaming it either.
+
+    It checks no scope of its own. Each endpoint below already says which one
+    it wants, and a second `read` check here would refuse a `write`-only token
+    on a path its own guard had allowed.
+    """
+    folder = await files.get_folder(session, item.folder_id)
+    allowed = await permissions.visible_levels_for(session, folder.project_id, principal)
+    permissions.enforce_visible(item.sensitivity, allowed, "file or link")
+    return item
+
+
 WRITE_FILES = guards.on_project(Permission.FILES)
 WRITE_IN_THIS_FOLDER = guards.for_entity(Permission.FILES, resolved_folder)
-WRITE_THIS_ITEM = guards.for_entity(Permission.FILES, resolved_item, locate=_project_of_item)
+WRITE_THIS_ITEM = guards.for_entity(Permission.FILES, visible_item, locate=_project_of_item)
 
 
 @router.get(
@@ -221,17 +246,24 @@ async def get_tree(
 )
 async def get_children(
     folder: Folder = Depends(resolved_folder),
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
 ) -> FolderChildren:
-    """The subfolders and items directly inside a folder, plus its breadcrumb."""
+    """The subfolders and items directly inside a folder, plus its breadcrumb.
+
+    Items classified above the caller's clearance are left out rather than
+    listed and refused — see :func:`app.services.permissions.enforce_visible`.
+    Subfolders are structure and are always listed: a tree with holes in it is
+    harder to trust than one with locked drawers.
+    """
     subfolders, items = await files.children(session, folder)
     path = await files.path_to(session, folder)
+    allowed = await permissions.visible_levels_for(session, folder.project_id, principal)
     return FolderChildren(
         folder=_folder(folder),
         path=[FolderCrumb(id=crumb.id, name=crumb.name) for crumb in path],
         folders=[_folder(subfolder) for subfolder in subfolders],
-        items=[_item(item) for item in items],
+        items=[_item(item) for item in items if permissions.readable(item.sensitivity, allowed)],
     )
 
 
@@ -325,6 +357,11 @@ async def upload_file(
     settings: Settings = Depends(app_settings),
     file: UploadFile = File(description="The file itself."),
     added_by: UUID | None = Form(default=None, description="Which person is uploading it."),
+    classified: Sensitivity | None = Form(
+        default=None,
+        alias="sensitivity",
+        description="How far it may travel. Omit to take the folder's default.",
+    ),
 ) -> ItemRead:
     """Store a file in this folder as `multipart/form-data`.
 
@@ -339,6 +376,7 @@ async def upload_file(
         file,
         max_bytes=settings.max_upload_bytes,
         added_by=added_by,
+        sensitivity=classified.value if classified is not None else None,
     )
     await activity.record(
         session,
@@ -347,7 +385,7 @@ async def upload_file(
         entity_type="item",
         entity_id=item.id,
         project_id=folder.project_id,
-        payload={"name": item.name, "size": item.size},
+        payload={"name": item.name, "size": item.size, "sensitivity": item.sensitivity},
     )
     return _item(item)
 
@@ -391,7 +429,7 @@ async def add_link(
 )
 async def list_project_items(
     project: Project = Depends(resolved_project),
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
 ) -> list[FiledItem]:
     """Every item in the project, flat and alphabetical, each with its path.
@@ -401,12 +439,17 @@ async def list_project_items(
     this, and so is anything else that has to recognise a file by name rather
     than find it by walking. Use `/folders/{folder_id}/children` to browse.
     """
-    return [_filed(filed) for filed in await files.list_items(session, project)]
+    allowed = await permissions.readable_levels(session, project, principal)
+    return [
+        _filed(filed)
+        for filed in await files.list_items(session, project)
+        if permissions.readable(filed.item.sensitivity, allowed)
+    ]
 
 
 @router.get("/items/{item_id}", response_model=ItemRead, summary="Get a file or link")
 async def get_item(
-    item: FileItem = Depends(resolved_item),
+    item: FileItem = Depends(visible_item),
     _: Principal = Depends(require(Scope.READ)),
 ) -> ItemRead:
     return _item(item)
@@ -475,7 +518,7 @@ async def delete_item(
     },
 )
 async def download_item(
-    item: FileItem = Depends(resolved_item),
+    item: FileItem = Depends(visible_item),
     _: Principal = Depends(require(Scope.READ)),
     store: BlobStore = Depends(get_blob_store),
 ) -> FileResponse:

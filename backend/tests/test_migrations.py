@@ -910,3 +910,163 @@ class TestUndoingPermissions:
         assert gone.scalar() is True
         roles = await connection.execute(text("SELECT count(*) FROM project_role"))
         assert roles.scalar() == 3
+
+
+# --- Per-object access, and the split of the goals permission --------------
+
+WITH_PER_OBJECT = "0026"
+
+
+async def granted_permissions(connection: AsyncConnection, role: str) -> list[Any]:
+    rows = await connection.execute(
+        text(
+            "SELECT permission FROM project_permission"
+            " JOIN project_role ON project_role.id = project_permission.role_id"
+            " WHERE project_role.name = :name ORDER BY permission"
+        ),
+        {"name": role},
+    )
+    return list(rows.scalars())
+
+
+class TestSplittingTheGoalsPermission:
+    async def test_a_role_that_could_change_goals_keeps_all_three(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Until 0026 those *were* the goals permission. Granting only the
+        narrow one would take two things away from everybody who had the wide
+        one, which is not what splitting a word into three is for."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await migrate(WITH_PER_OBJECT)
+
+        assert await granted_permissions(connection, "Reviewer") == [
+            "agents",
+            "board",
+            "comments",
+            "files",
+            "goal_assign",
+            "goal_owner",
+            "goals",
+            "people",
+            "project",
+            "tasks",
+            "vault",
+            "vault_reveal",
+        ]
+
+    async def test_a_role_that_could_not_gains_neither(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+        await connection.execute(
+            text(
+                "DELETE FROM project_permission WHERE permission = 'goals' AND role_id IS NOT NULL"
+            )
+        )
+
+        await migrate(WITH_PER_OBJECT)
+
+        assert "goal_assign" not in await granted_permissions(connection, "Reviewer")
+
+    async def test_the_baseline_is_split_too(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await migrate(WITH_PER_OBJECT)
+
+        rows = await connection.execute(
+            text(
+                "SELECT count(*) FROM project_permission"
+                " WHERE role_id IS NULL AND permission IN ('goal_assign', 'goal_owner')"
+            )
+        )
+        assert rows.scalar() == 2
+
+
+class TestClassifyingWhatIsAlreadyStored:
+    async def test_every_upload_comes_through_internal(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The same people see the same files the day after this runs."""
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+        await connection.execute(
+            text(
+                "INSERT INTO folder (id, project_id, parent_id, name)"
+                " SELECT gen_random_uuid(), id, NULL, 'Atlas' FROM project WHERE key = 'ATL'"
+            )
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO file_item (id, folder_id, kind, name, url, source)"
+                " SELECT gen_random_uuid(), folder.id, 'link', 'Statement of work',"
+                " 'https://example.test/sow', 'other' FROM folder"
+            )
+        )
+
+        await migrate(WITH_PER_OBJECT)
+
+        levels = await connection.execute(text("SELECT DISTINCT sensitivity FROM file_item"))
+        assert list(levels.scalars()) == ["internal"]
+
+    async def test_and_nobody_is_given_a_clearance(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """No row means no restriction, so the back-fill is the empty one."""
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PER_OBJECT)
+
+        rows = await connection.execute(text("SELECT count(*) FROM role_clearance"))
+        assert rows.scalar() == 0
+
+    async def test_nor_a_column_rule(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PER_OBJECT)
+
+        rows = await connection.execute(text("SELECT count(*) FROM role_column_rule"))
+        assert rows.scalar() == 0
+
+
+class TestUndoingPerObjectAccess:
+    async def test_it_folds_the_goal_rights_back_and_drops_the_levels(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+        await migrate(WITH_PER_OBJECT)
+
+        await rewind(WITH_PERMISSIONS)
+
+        assert "goals" in await granted_permissions(connection, "Reviewer")
+        assert "goal_assign" not in await granted_permissions(connection, "Reviewer")
+        gone = await connection.execute(text("SELECT to_regclass('role_clearance') IS NULL"))
+        assert gone.scalar() is True

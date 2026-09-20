@@ -36,6 +36,7 @@ from app.services import (
     columns,
     files,
     goals,
+    permissions,
     projects,
     roles,
     tasks,
@@ -135,17 +136,23 @@ async def get_project(
 )
 async def get_summary(
     project: Project = Depends(resolved_project),
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
 ) -> ProjectSummary:
     """The counts behind the project hub's cards.
 
     One request behind all four cards on the project hub.
+
+    The file and secret counts are of what *this reader* can reach. A count is
+    a listing summed up, and one that said "11 files" to somebody who can only
+    open ten would have told them a file exists — which is the one thing a
+    level is for.
     """
+    readable = await permissions.readable_levels(session, project, principal)
     people_counts = await projects.member_counts(session, project)
     task_counts = await tasks.status_counts(session, project)
-    contents = await files.counts(session, project)
-    stored = await vault.counts(session, project)
+    contents = await files.counts(session, project, readable=readable)
+    stored = await vault.counts(session, project, readable=readable)
     agent_material = await agents.counts(session, project)
     goal_count, open_goals = await goals.counts_for_project(session, project)
     return ProjectSummary(

@@ -82,6 +82,8 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | `project_role` | `project_id`, `name`, `description`, `colour`, `is_admin` | what somebody is on *this* board. Unique name per project; at most one `is_admin` role, seeded on every project and held by whoever created it |
 | `project_member` | `project_id`, `person_id`, PK(both), `role_id` (nullable) | membership; assignee/tag pickers read from this. `role_id` is a composite FK on `(project_id, role_id)`, so a member cannot wear another project's role |
 | `project_permission` | `project_id`, `role_id` (nullable), `permission` | what a role may do here, one row per grant. `role_id IS NULL` is the project's baseline — everybody on it with no role, and everybody not on it. Two partial unique indexes, because Postgres counts NULLs as distinct. The admin role holds everything and stores nothing |
+| `role_column_rule` | `project_id`, `role_id` (nullable), `column_id`, `may_enter`, `may_stage` | where on the board a role may work. A *restriction*: no row means no restriction, so a new column is open to everybody who may move cards |
+| `role_clearance` | `project_id`, `role_id` (nullable), `level` | the most sensitive thing a role may read. A restriction too — no row means everything |
 | `board_column` | `project_id`, `name`, `description`, `position` | `CHECK` + service rule: 2 ≤ count ≤ 8; first column (`position=0`) is where new tasks land |
 | `goal` | `project_id`, `number` (per-project sequence → ATL-G1), `name`, `description`, `colour`, `status` (`open`/`achieved`/`dropped`), `achieved_at`, `target_date`, `owner_id`→person | an epic. Unique name per project; progress is counted from its cards, never stored |
 | `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards |
@@ -247,3 +249,32 @@ These came up while implementing and are worth knowing:
     — which also answers for somebody who is not on the project, since
     membership is a picker rather than a fence and nobody has said what they
     are either.
+22. **The per-object layer is made of restrictions, where the flat one is made
+    of grants.** A permission row means yes and its absence means no; a column
+    rule or a clearance row only ever *narrows* what a permission already
+    allowed, and its absence narrows nothing. The two polarities are the
+    layering rather than an inconsistency, and the restriction shape is what
+    makes a board survive changing shape: a column added next month is open to
+    everybody who may move cards, where a grant-shaped table would have locked
+    every role out of it until an admin noticed.
+23. **An upload carries a level and a role carries a clearance** — `public` <
+    `internal` < `restricted` — rather than each file carrying a list of roles.
+    A folder and a vault tree carry a default their children inherit, so
+    "everything in Contracts is restricted" is said once. Something above a
+    reader's clearance is answered **as though it were never there**: left out
+    of listings, 404 by id, 404 to download, and not counted on the hub. A 403
+    naming the file would have told them the part worth knowing. This is the
+    only read Cylist fences; the board, its cards and its goals stay visible to
+    everyone on a project.
+24. **Moving a card into a column and setting that column's sub-stages are
+    separate rights.** Moving a card into Review is work; deciding that a
+    Hotfix in Review passes through "Drafted, Reviewed, Merged" is designing
+    the workflow, and a team often wants the second in one person's hands while
+    everybody does the first. The staging right covers the template's rule for
+    the column and a card's own progress bar together, because they are the
+    same decision written in two places.
+25. **`goals` is three rights.** Changing a goal is a decision about the plan;
+    saying which goal a card counts towards is the daily act of whoever is
+    doing the work; handing a goal to somebody else reassigns it to a person.
+    Naming the owner while *creating* a goal is part of creating it and needs
+    only `goals` — only reassignment needs `goal_owner`.
