@@ -18,7 +18,7 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns, files, permissions, roles
+from app.services import columns, files, people, permissions, roles
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -46,6 +46,12 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
     board that permitted nothing until somebody ticked boxes would make
     creating one a two-step job, and would answer decision 4 differently from
     the way Cylist has answered it since the start.
+
+    The agent joins too, with no role. A board only assigns work to its own
+    members, so an agent that had to be added by hand before it could be given
+    a card would be a directory entry that did nothing until somebody found the
+    People screen. It is an ordinary member once it is there: drop it from the
+    project and the board simply stops handing work to machines.
 
     Args:
         creator_id: Who is starting it, and so the project's first member and
@@ -79,6 +85,11 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
 
     if creator_id is not None:
         session.add(ProjectMember(project_id=project.id, person_id=creator_id, role_id=admin.id))
+        await session.flush()
+
+    machine = await people.ensure_agent(session)
+    if not machine.is_archived and machine.id != creator_id:
+        session.add(ProjectMember(project_id=project.id, person_id=machine.id))
         await session.flush()
 
     # `members` is only populated by a SELECT, and a just-inserted row has not
@@ -265,6 +276,23 @@ async def require_members(
         )
 
     return [found[person_id] for person_id in person_ids]
+
+
+async def is_member(session: AsyncSession, project_id: UUID, person_id: UUID) -> bool:
+    """Whether one person is on one project.
+
+    The same question :func:`require_members` asks, for the caller that wants
+    to answer it rather than refuse over it — a default that quietly steps
+    aside is not the same thing as a request that cannot be honoured.
+    """
+    return (
+        await session.scalar(
+            select(ProjectMember.person_id).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.person_id == person_id,
+            )
+        )
+    ) is not None
 
 
 async def member_counts(session: AsyncSession, project: Project) -> dict[PersonKind, int]:

@@ -12,6 +12,12 @@ no separate ``user`` table, because there is no such thing as a user who is
 not in the directory: the person the board assigns work to and the person who
 signs in to do it are the same person, and two tables would only be two places
 to keep that agreement.
+
+One entry is not a person at all. ``is_agent`` marks the machine — see
+:data:`AGENT_NAME` — and it lives here for the same reason: a card handed to an
+agent has to name somebody, and the only thing a board can name is a directory
+entry. It has no email and no password, so it never signs in; it is worked
+through an API token, which belongs to whoever minted it.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Case, DateTime, Enum, Index, String, Text, case, text
+from sqlalchemy import Boolean, Case, DateTime, Enum, Index, String, Text, case, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.clock import now
@@ -37,6 +43,27 @@ Written once here because the index and the service that checks before writing
 have to mean the same thing by "account", and a predicate spelled out twice is
 a predicate that eventually says two things.
 """
+
+
+AGENT_NAME = "Agent"
+"""What the machine in the directory is called.
+
+One name rather than one per harness, because what the board is saying is *a
+machine is on this*, not which process: the running ones are already told apart
+by their agent sessions and by the token each holds. So a deployment has one,
+which :attr:`Person.is_agent` and its partial unique index make a fact about
+the table rather than a convention.
+"""
+
+AGENT_TITLE = "Machine, worked through the API"
+"""Its one line in the directory, which is also what the assignee picker shows
+beside its name. It says what it is rather than repeating what it is called.
+"""
+
+AGENT_RESPONSIBILITIES = (
+    "Works the cards it is given, through the API. It signs in as nobody: it "
+    "carries a token minted by whoever runs it."
+)
 
 
 class PersonKind(StrEnum):
@@ -62,6 +89,10 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             unique=True,
             postgresql_where=text(_IS_ACCOUNT),
         ),
+        # Partial, so the flag costs an index entry on one row rather than on
+        # the whole directory, and so "there is one agent" is something the
+        # schema holds rather than something every caller has to check first.
+        Index("ix_person_is_agent", "is_agent", unique=True, postgresql_where=text("is_agent")),
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -124,6 +155,21 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     invite_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     """When that invitation stops working. An invite that never expires is a
     password sitting in somebody's mailbox forever."""
+
+    is_agent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    """Whether this entry is the machine rather than a person.
+
+    Set by :func:`app.services.people.ensure_agent` and by nothing else — not
+    by ``POST /people``, which is how a colleague is added. Read so that the
+    row can be found without matching on a name anybody may edit, and so that a
+    screen can say which of the names on a board belongs to a bot.
+
+    An agent is :attr:`PersonKind.TEAM`: it does the work, which is what that
+    kind means. The line this draws is a different one — whether there is
+    anybody behind the name.
+    """
 
     @property
     def is_archived(self) -> bool:

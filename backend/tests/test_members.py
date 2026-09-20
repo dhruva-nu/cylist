@@ -35,8 +35,10 @@ async def _project_and_people(client: AsyncClient) -> tuple[str, str]:
 
 
 class TestSettingMembership:
-    async def test_starts_with_whoever_created_it(self, signed_in: AsyncClient) -> None:
-        """A new project is not empty: the person who started it is on it.
+    async def test_starts_with_whoever_created_it_and_the_agent(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """A new project is not empty: its creator and the agent are on it.
 
         Covered at length in ``test_projects.py``; asserted here because every
         other test in this file counts members, and this is the one they are
@@ -46,7 +48,7 @@ class TestSettingMembership:
 
         members = (await signed_in.get("/projects/ATL/members")).json()["members"]
 
-        assert [member["name"] for member in members] == [OWNER_NAME]
+        assert sorted(member["name"] for member in members) == sorted([OWNER_NAME, "Agent"])
 
     async def test_puts_people_on_a_project(self, signed_in: AsyncClient) -> None:
         team, client_person = await _project_and_people(signed_in)
@@ -82,8 +84,9 @@ class TestSettingMembership:
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": []})
 
-        # The two this test added, plus the person it is signed in as.
-        assert len((await signed_in.get("/people")).json()) == 3
+        # The two this test added, the person it is signed in as, and the
+        # agent the project it created brought into the directory.
+        assert len((await signed_in.get("/people")).json()) == 4
 
     async def test_duplicate_ids_are_collapsed(self, signed_in: AsyncClient) -> None:
         """A double-submitted form must not violate the composite primary key."""
@@ -155,12 +158,15 @@ class TestCounts:
         assert summary["client_count"] == 1
         assert summary["member_count"] == 2
 
-    async def test_a_fresh_project_counts_only_its_creator(self, signed_in: AsyncClient) -> None:
+    async def test_a_fresh_project_counts_its_creator_and_the_agent(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Both are on the team: one does the work, the other is worked."""
         await signed_in.post("/projects", json=ATLAS)
 
         summary = (await signed_in.get("/projects/ATL/summary")).json()
 
-        assert summary["team_count"] == 1
+        assert summary["team_count"] == 2
         assert summary["client_count"] == 0
 
 

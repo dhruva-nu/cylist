@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BoardColumn, Person, Project, Task
+from tests.conftest import OWNER_NAME
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -47,6 +48,13 @@ def _task(assignee: str, **overrides: Any) -> dict[str, Any]:
         "assignee_id": assignee,
         **overrides,
     }
+
+
+def _no_assignee(**overrides: Any) -> dict[str, Any]:
+    """A card that says nothing about who owns it."""
+    body = _task("", **overrides)
+    del body["assignee_id"]
+    return body
 
 
 async def _create(client: AsyncClient, assignee: str, **overrides: Any) -> dict[str, Any]:
@@ -173,9 +181,12 @@ class TestCreating:
         ).status_code == 422
 
     async def test_what_a_card_cannot_be_created_without(self, signed_in: AsyncClient) -> None:
+        """``assignee_id`` is not among them since CYLIST-47 — see
+        :class:`TestWhoTheCardLandsOn`, which is where the card goes without
+        one."""
         person = await _setup(signed_in)
 
-        for field in ("title", "description", "type", "assignee_id"):
+        for field in ("title", "description", "type"):
             body = _task(person)
             del body[field]
 
@@ -258,6 +269,92 @@ class TestCreating:
 
         assert entries[0]["verb"] == "task.created"
         assert entries[0]["payload"]["reference"] == task["reference"]
+
+
+class TestWhoTheCardLandsOn:
+    """CYLIST-47: a card goes to whoever wrote it unless it names somebody.
+
+    A card names somebody or it is not a card, so an omitted ``assignee_id``
+    is not a card belonging to nobody — it is the question "whose, then?",
+    and the answer is the person writing it. Handing it on is a ``PATCH``
+    away, and covered under :class:`TestUpdating`.
+
+    These tests create the project and leave its membership alone, so the
+    caller is on it. ``_setup`` elsewhere in this file replaces the member
+    list with one other person, which is exactly the case the last two cover.
+    """
+
+    async def test_a_card_with_no_assignee_goes_to_whoever_created_it(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+
+        response = await signed_in.post("/projects/ATL/tasks", json=_no_assignee())
+
+        assert response.status_code == 201, response.text
+        assert response.json()["assignee"]["name"] == OWNER_NAME
+
+    async def test_naming_somebody_else_still_puts_it_on_them(self, signed_in: AsyncClient) -> None:
+        """The default is a default, not a rule about who may own work."""
+        await signed_in.post("/projects", json=ATLAS)
+        aditi = (await signed_in.post("/people", json=ADITI)).json()["id"]
+        await signed_in.put("/projects/ATL/members", json={"person_ids": [aditi]})
+
+        task = await _create(signed_in, aditi)
+
+        assert task["assignee"]["name"] == "Aditi K"
+
+    async def test_a_card_can_be_handed_to_the_agent(self, signed_in: AsyncClient) -> None:
+        """Which is the whole reason the agent is in the directory."""
+        await signed_in.post("/projects", json=ATLAS)
+        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
+        agent = next(person for person in members if person["is_agent"])
+
+        task = await _create(signed_in, agent["id"])
+
+        assert task["assignee"]["name"] == "Agent"
+
+    async def test_a_subtask_with_no_assignee_goes_to_whoever_split_the_card(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+        parent = (await signed_in.post("/projects/ATL/tasks", json=_no_assignee())).json()
+
+        response = await signed_in.post(f"/tasks/{parent['id']}/subtasks", json=_no_assignee())
+
+        assert response.status_code == 201, response.text
+        assert response.json()["assignee"]["name"] == OWNER_NAME
+
+    async def test_a_creator_who_is_not_on_the_project_has_to_name_somebody(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """The default steps aside rather than putting a card on an outsider.
+
+        ``_setup`` leaves the board with one member who is not the caller, so
+        there is somebody to name — the message says to name them.
+        """
+        await _setup(signed_in)
+
+        response = await signed_in.post("/projects/ATL/tasks", json=_no_assignee())
+
+        assert response.status_code == 422
+        assert "not on ATL" in response.json()["error"]["message"]
+
+    async def test_a_bootstrap_session_has_to_name_somebody(
+        self, bootstrapped: AsyncClient
+    ) -> None:
+        """The one caller who is not anybody: there is nobody to default to."""
+        await bootstrapped.post("/projects", json=ATLAS)
+        members = (await bootstrapped.get("/projects/ATL/members")).json()["members"]
+
+        response = await bootstrapped.post("/projects/ATL/tasks", json=_no_assignee())
+
+        assert response.status_code == 422
+        assert response.json()["error"]["message"].startswith("Say who this card is for.")
+        # And the agent it could have guessed at is right there, unnamed: a
+        # card put on a machine because nobody said otherwise would be work
+        # nobody agreed to do.
+        assert [person["is_agent"] for person in members] == [True]
 
 
 class TestNumbering:

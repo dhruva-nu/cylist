@@ -63,7 +63,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
     rows = [
         [
             str(person["name"]),
-            str(person["kind"]),
+            _kind_of(person),
             output.truncate(str(person.get("title", "")), TITLE_WIDTH),
             *([_role_of(person)] if on_a_project else []),
             str(person.get("email") or ""),
@@ -72,6 +72,18 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
     ]
     headings = ["NAME", "KIND", "TITLE", *(["ROLE"] if on_a_project else []), "EMAIL"]
     output.table(headings, rows, empty="Nobody in the directory yet.")
+
+
+def _kind_of(person: dict[str, Any]) -> str:
+    """Which side of the work they are on — or that they are not a person.
+
+    The agent is on the team, because it does the work, so the kind column
+    alone would show it as a colleague with no email. It is the one row in the
+    directory worth saying more about than its kind.
+    """
+    if person.get("is_agent"):
+        return "agent"
+    return str(person["kind"])
 
 
 def _role_of(person: dict[str, Any]) -> str:

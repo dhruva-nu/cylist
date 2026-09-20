@@ -139,11 +139,53 @@ happened to send the fields.
 """
 
 
+async def _assignee_for(
+    session: AsyncSession,
+    project: Project,
+    data: TaskCreate,
+    creator_id: UUID | None,
+) -> UUID:
+    """Who the new card belongs to: whoever was named, or whoever is writing it.
+
+    A card names somebody or it is not a card — see
+    :attr:`app.models.task.Task.assignee_id` — so the question an omitted
+    ``assignee_id`` asks is not "can this be nobody's?" but "whose, then?", and
+    the honest answer is the person in front of it. Work somebody writes down
+    is usually work they mean to do; a card that starts on the wrong person is
+    one hand-off away from the right one, where a required field is a question
+    asked on every card to get the same answer almost every time.
+
+    Raises:
+        UnprocessableRequestError: if the assignee named is not a member of the
+            project, or if there is nobody to fall back to.
+    """
+    if data.assignee_id is not None:
+        await projects.require_members(session, project.id, [data.assignee_id])
+        return data.assignee_id
+
+    if creator_id is None:
+        raise UnprocessableRequestError(
+            "Say who this card is for. It would otherwise go to whoever created it, and "
+            "this credential is nobody in the directory.",
+            details={"project": project.key},
+        )
+
+    if not await projects.is_member(session, project.id, creator_id):
+        raise UnprocessableRequestError(
+            f"Say who this card is for. It would otherwise go to you, and you are not on "
+            f"{project.key} — add yourself under People, or name somebody who is.",
+            details={"project": project.key, "non_member_person_ids": [str(creator_id)]},
+        )
+
+    return creator_id
+
+
 async def create(
     session: AsyncSession,
     project: Project,
     data: TaskCreate,
     *,
+    creator_id: UUID | None = None,
     parent: Task | None = None,
 ) -> Task:
     """Add a task to the bottom of the board's first column.
@@ -160,12 +202,19 @@ async def create(
     say about a sub-task; it may still name one, because what kind of work it is
     stays true whether or not the board is arranging it.
 
+    Args:
+        creator_id: Who is writing the card, and so who it lands on when
+            ``data`` does not name an assignee — see :func:`_assignee_for`.
+            ``None`` where there is nobody: the bootstrap session, and the
+            seed script, both of which name the assignee themselves.
+
     Raises:
         UnprocessableRequestError: if the assignee is not a project member, if
-            the template or the goal belongs to another project, if a sub-task
-            is given a goal of its own, or if ``parent`` is itself a sub-task.
+            no assignee was named and none can be assumed, if the template or
+            the goal belongs to another project, if a sub-task is given a goal
+            of its own, or if ``parent`` is itself a sub-task.
     """
-    await projects.require_members(session, project.id, [data.assignee_id])
+    assignee_id = await _assignee_for(session, project, data, creator_id)
     template = await templates.require_template(session, project.id, data.template_id)
     await goals.require_goal(session, project.id, data.goal_id)
 
@@ -216,7 +265,7 @@ async def create(
         sub_statuses=sub_statuses,
         sub_status_index=0 if sub_statuses else None,
         due_date=data.due_date,
-        assignee_id=data.assignee_id,
+        assignee_id=assignee_id,
         template_id=data.template_id,
         goal_id=data.goal_id,
         status=TaskStatus.ACTIVE,

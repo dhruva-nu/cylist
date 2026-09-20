@@ -92,6 +92,12 @@ class PersonRead(Schema):
     archived_at: datetime | None
     created_at: datetime
 
+    is_agent: bool = Field(
+        description=(
+            "Whether this entry is the machine rather than a person. It is "
+            "assigned work like anybody else and never signs in."
+        ),
+    )
     has_account: bool = Field(
         description="Whether they can sign in as themselves right now.",
     )

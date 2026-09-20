@@ -242,6 +242,41 @@ async def test_create_task_resolves_the_assignee(
     assert body["type"] == "chore"
 
 
+async def test_create_task_without_an_assignee_leaves_it_to_the_server(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """CYLIST-47. The card goes to whoever the token belongs to.
+
+    Said by leaving the field out rather than by resolving a name: the tool
+    does not know who it is, and the server does.
+    """
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Draft the cutover plan",
+        description="A written plan with dates.",
+        task_type="chore",
+    )
+    assert not result.is_error
+    assert "assignee_id" not in recorder.body("POST", "/tasks")
+
+
+async def test_create_subtask_without_an_assignee_leaves_it_to_the_server(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "create_subtask",
+        task="ATL-2",
+        title="Drain the old queue",
+        description="Nothing left in it.",
+        task_type="chore",
+    )
+    assert not result.is_error
+    assert "assignee_id" not in recorder.body("POST", "/tasks/ATL-2/subtasks")
+
+
 async def test_create_task_omits_a_due_date_it_was_not_given(
     server: MCPServer, recorder: fake_api.Recorder
 ) -> None:

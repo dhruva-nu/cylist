@@ -87,8 +87,11 @@ class TestWhatAProjectStartsWith:
 
         members = (await signed_in.get("/projects/ATL/members")).json()["members"]
 
-        assert [member["name"] for member in members] == [OWNER_NAME]
-        assert members[0]["role"]["name"] == "Admin"
+        wearing = {member["name"]: member["role"] for member in members}
+        assert wearing[OWNER_NAME]["name"] == "Admin"
+        # The agent joins every project too, and wears nothing: it is given
+        # work, not authority over the board.
+        assert wearing["Agent"] is None
 
     async def test_a_member_added_afterwards_has_no_role(self, signed_in: AsyncClient) -> None:
         """Nothing is seeded onto a new member. A role is something said about

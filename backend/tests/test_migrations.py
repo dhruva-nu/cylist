@@ -1070,3 +1070,131 @@ class TestUndoingPerObjectAccess:
         assert "goal_assign" not in await granted_permissions(connection, "Reviewer")
         gone = await connection.execute(text("SELECT to_regclass('role_clearance') IS NULL"))
         assert gone.scalar() is True
+
+
+# --- A name on the board that belongs to a machine -------------------------
+
+BEFORE_THE_AGENT = "0026"
+WITH_THE_AGENT = "0027"
+
+
+async def seed_two_boards(connection: AsyncConnection) -> None:
+    """Two projects with one person between them, as 0026 left things."""
+    for key, name in (("ATL", "Atlas Billing Migration"), ("HRM", "Hermes Notifications")):
+        await connection.execute(
+            text(
+                "INSERT INTO project (id, key, name, description, colour, task_counter)"
+                " VALUES (gen_random_uuid(), :key, :name, '', '#1D7D46', 0)"
+            ),
+            {"key": key, "name": name},
+        )
+    await connection.execute(
+        text(
+            "INSERT INTO person (id, name, kind, title, responsibilities, colour)"
+            " VALUES (gen_random_uuid(), 'Aditi K', 'team', 'Engineer', '', '#1D7D46')"
+        )
+    )
+
+
+async def agents(connection: AsyncConnection) -> list[Any]:
+    """The directory entries flagged as the machine, by name."""
+    rows = await connection.execute(text("SELECT name FROM person WHERE is_agent"))
+    return list(rows.scalars())
+
+
+class TestPuttingAnAgentInTheDirectory:
+    async def test_the_directory_gains_one_agent(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+
+        await migrate(WITH_THE_AGENT)
+
+        assert await agents(connection) == ["Agent"]
+
+    async def test_it_joins_every_board_there_already_is(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Membership is what makes a name assignable, so it is not enough to
+        write the row and leave every board to be told by hand."""
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+
+        await migrate(WITH_THE_AGENT)
+
+        joined = await connection.execute(
+            text(
+                "SELECT project.key FROM project_member"
+                " JOIN project ON project.id = project_member.project_id"
+                " JOIN person ON person.id = project_member.person_id"
+                " WHERE person.is_agent ORDER BY project.key"
+            )
+        )
+        assert list(joined.scalars()) == ["ATL", "HRM"]
+
+    async def test_it_wears_no_role_and_cannot_sign_in(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+
+        await migrate(WITH_THE_AGENT)
+
+        row = await connection.execute(
+            text(
+                "SELECT person.email, person.password_hash, project_member.role_id"
+                " FROM person JOIN project_member ON project_member.person_id = person.id"
+                " WHERE person.is_agent LIMIT 1"
+            )
+        )
+        assert row.one() == (None, None, None)
+
+    async def test_a_second_agent_is_refused_by_the_index(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """ "There is one agent" is the table's answer, not a convention."""
+        await migrate(WITH_THE_AGENT)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO person (id, name, kind, title, responsibilities, colour,"
+                    " is_agent)"
+                    " VALUES (gen_random_uuid(), 'Agent 2', 'team', '', '', '#1D7D46', true)"
+                )
+            )
+
+
+class TestUndoingTheAgent:
+    async def test_it_keeps_the_entry_and_drops_the_flag(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Deleting it would take every card assigned to it, so it stays — as
+        a colleague who never signs in, which is what it was before 0027."""
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+        await migrate(WITH_THE_AGENT)
+
+        await rewind(BEFORE_THE_AGENT)
+
+        names = await connection.execute(text("SELECT name FROM person ORDER BY name"))
+        assert list(names.scalars()) == ["Aditi K", "Agent"]
+        gone = await connection.execute(
+            text(
+                "SELECT count(*) FROM information_schema.columns"
+                " WHERE table_name = 'person' AND column_name = 'is_agent'"
+            )
+        )
+        assert gone.scalar() == 0

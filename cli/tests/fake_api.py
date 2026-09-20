@@ -59,6 +59,19 @@ ADITI = {
     "archived_at": None,
     "created_at": "2026-01-04T09:00:00Z",
 }
+MACHINE = {
+    "id": "0192f3c4-0004-7000-8000-00000000000f",
+    "name": "Agent",
+    "kind": "team",
+    "title": "Machine, worked through the API",
+    "role": None,
+    "responsibilities": "Works the cards it is given.",
+    "email": None,
+    "colour": "#4A7B8C",
+    "archived_at": None,
+    "created_at": "2026-01-04T09:00:00Z",
+    "is_agent": True,
+}
 LENA = {
     "id": LENA_ID,
     "name": "Lena W",
@@ -610,7 +623,7 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
 
     if path == "/people" and method == "GET":
         kind = request.url.params.get("kind")
-        people = [ADITI, LENA, LEO]
+        people = [ADITI, MACHINE, LENA, LEO]
         if kind:
             people = [person for person in people if person["kind"] == kind]
         return httpx.Response(200, json=people)

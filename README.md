@@ -344,6 +344,9 @@ cylist files ls ATL                   cylist vault reveal ATL Logins/Stripe --sh
 
 Names work where a human would use one — `--assignee "Aditi K"`, `--column "In progress"`
 — and an ambiguous name is an error rather than a guess. Every command takes `--json`.
+Leave `--assignee` off and the card is yours: a card goes to whoever wrote it
+unless it names somebody else, and `Agent` is the name to give it when the work
+is for a machine.
 
 Each project carries what its agents work from, under its **Agents** tab: skills
 you upload for them to follow, and a scratchpad they write one-line findings back

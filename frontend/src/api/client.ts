@@ -70,6 +70,13 @@ export interface Person {
   colour: string
   archived_at: string | null
   created_at: string
+  /**
+   * Whether this entry is the machine rather than a person.
+   *
+   * It is assigned work like anybody else and never signs in — a board hands
+   * a card to it the way it hands one to a colleague.
+   */
+  is_agent: boolean
   /** Whether they can sign in as themselves right now. */
   has_account: boolean
   /** Whether an unaccepted, unexpired invitation is outstanding. */
@@ -764,6 +771,10 @@ export interface TaskInput {
    * on the board.
    */
   column_due_dates?: ColumnDueDateInput[]
+  /**
+   * Who owns it. The form always sends one — it opens on whoever is signed
+   * in — though the API takes a card without it and puts it on its creator.
+   */
   assignee_id: string
   /** One of the project's templates, or null for a card with no template. */
   template_id: string | null

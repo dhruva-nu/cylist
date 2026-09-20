@@ -78,7 +78,7 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | Table | Key columns | Notes |
 |---|---|---|
 | `project` | `key` (unique, e.g. ATL), `name`, `description`, `color`, `archived_at` | |
-| `person` | `name`, `kind` (`team`/`client`), `title`, `responsibilities`, `email`, `color`, `password_hash` | **Global directory** — a client can appear in several projects. `title` is the job description; it was called `role` until roles became a thing of their own |
+| `person` | `name`, `kind` (`team`/`client`), `title`, `responsibilities`, `email`, `color`, `password_hash`, `is_agent` | **Global directory** — a client can appear in several projects. `title` is the job description; it was called `role` until roles became a thing of their own. `is_agent` marks the one entry that is a machine rather than a person, by a partial unique index: it is assigned work like anybody else and never signs in |
 | `project_role` | `project_id`, `name`, `description`, `colour`, `is_admin` | what somebody is on *this* board. Unique name per project; at most one `is_admin` role, seeded on every project and held by whoever created it |
 | `project_member` | `project_id`, `person_id`, PK(both), `role_id` (nullable) | membership; assignee/tag pickers read from this. `role_id` is a composite FK on `(project_id, role_id)`, so a member cannot wear another project's role |
 | `project_permission` | `project_id`, `role_id` (nullable), `permission` | what a role may do here, one row per grant. `role_id IS NULL` is the project's baseline — everybody on it with no role, and everybody not on it. Two partial unique indexes, because Postgres counts NULLs as distinct. The admin role holds everything and stores nothing |
@@ -86,7 +86,7 @@ All ids are UUIDv7; all tables have `created_at`, `updated_at`.
 | `role_clearance` | `project_id`, `role_id` (nullable), `level` | the most sensitive thing a role may read. A restriction too — no row means everything |
 | `board_column` | `project_id`, `name`, `description`, `position` | `CHECK` + service rule: 2 ≤ count ≤ 8; first column (`position=0`) is where new tasks land |
 | `goal` | `project_id`, `number` (per-project sequence → ATL-G1), `name`, `description`, `colour`, `status` (`open`/`achieved`/`dropped`), `achieved_at`, `target_date`, `owner_id`→person | an epic. Unique name per project; progress is counted from its cards, never stored |
-| `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards |
+| `task` | `project_id`, `number` (per-project sequence → ATL-41), `column_id`, `position`, `title`, `description`, `type` (`feature`/`bug`/`chore`), `due_date`, `assignee_id`→person, `status` (`active`/`hold`/`blocked`), `goal_id` (nullable, `SET NULL`), `jira_ref`, `pr_ref` | required fields enforced in schema; `goal_id` only on top-level cards. `assignee_id` is `NOT NULL` but optional on the wire — a card with no assignee named goes to whoever is writing it |
 | `task_waiting_on` | `task_id`, `person_id` | people tagged on the *current* hold/block; cleared when status returns to active |
 | `task_comment` | `task_id`, `author_id` (person, nullable for agents), `body`, `kind` (`comment`/`status_change`), `meta jsonb` (`{from,to,reason,tagged:[…]}`) | status changes are comments — one timeline |
 | `folder` | `project_id`, `parent_id` (nullable), `name` | adjacency list; path built in API |
@@ -278,3 +278,23 @@ These came up while implementing and are worth knowing:
     doing the work; handing a goal to somebody else reassigns it to a person.
     Naming the owner while *creating* a goal is part of creating it and needs
     only `goals` — only reassignment needs `goal_owner`.
+26. **A card goes to whoever wrote it unless it says otherwise.** The column
+    stays `NOT NULL` — work nobody is named on is work nobody has agreed to do
+    — so an omitted `assignee_id` is not "nobody", it is the question "whose,
+    then?", and the honest answer is the person in front of it. Handing it on
+    is a `PATCH` away. The default steps aside rather than guessing where it
+    cannot: a caller who is not on the project, and the bootstrap session,
+    which is nobody, are both told to name somebody.
+27. **One entry in the directory is a machine.** A board assigns work to
+    directory entries, so handing a card to an agent needed somebody to hand
+    it to; `Agent` is that somebody, flagged rather than matched on by name,
+    and on every project from the moment the project exists — an entry each
+    board had to be told about by hand would do nothing until somebody found
+    the People screen. It is `team`, because it does the work, and the
+    distinction `is_agent` draws is the other one: whether there is anybody
+    behind the name. It has no email and no password, so it cannot be invited
+    and never signs in — a machine reaches Cylist with an API token minted by
+    whoever runs it, and that token still acts as its owner. Which is why a
+    card written through the MCP server lands on the person behind it rather
+    than on `Agent`: the agent is who work is *given* to, not who does the
+    giving.

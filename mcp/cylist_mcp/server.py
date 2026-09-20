@@ -247,12 +247,15 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         description=(
             "Add a task to a project's board. It always lands at the bottom of "
             "the board's first column; call move_task afterwards if it belongs "
-            "elsewhere. Title, description, type and assignee are required by the "
-            "server: a card with no description or owner is the kind that goes "
-            "stale. A due date is optional — leave it off rather than inventing "
-            "one, because a card is only ever overdue against a date somebody "
-            "actually chose. The assignee must already be a member of the "
-            "project. `goal` puts the card under one of the project's epics — "
+            "elsewhere. Title, description and type are required by the server: "
+            "a card with no description is the kind that goes stale. A due date "
+            "is optional — leave it off rather than inventing one, because a "
+            "card is only ever overdue against a date somebody actually chose. "
+            "So is the assignee: leave it off and the card goes to whoever this "
+            "token belongs to, which is whoever asked for it. Name somebody to "
+            "put it on them instead — 'Agent' is the board's own machine — and "
+            "whoever you name must already be a member of the project. `goal` "
+            "puts the card under one of the project's epics — "
             "see list_goals — which is what colours it on the board. Returns "
             "the created task, including its new reference."
         ),
@@ -262,7 +265,15 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         title: Annotated[str, Field(description="One line naming the work.")],
         description: Annotated[str, Field(description="What done looks like.")],
         task_type: Annotated[str, Field(description="One of 'feature', 'bug' or 'chore'.")],
-        assignee: Annotated[str, Field(description="Who owns it: a project member's name or id.")],
+        assignee: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Who owns it: a project member's name or id. Omit it to put "
+                    "the card on whoever this token belongs to."
+                )
+            ),
+        ] = None,
         due_date: Annotated[
             str | None,
             Field(description="ISO date, e.g. '2026-03-31'. Omit for a card with no date."),
@@ -285,8 +296,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                 "title": title,
                 "description": description,
                 "type": task_type,
-                "assignee_id": await resolve.person_id(client, assignee, project_ref=project),
             }
+            if assignee:
+                body["assignee_id"] = await resolve.person_id(client, assignee, project_ref=project)
             if goal:
                 reference = await resolve.goal_ref(client, project, goal)
                 body["goal_id"] = (await client.get(f"/goals/{reference}"))["id"]
@@ -310,7 +322,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "and finish_subtask is what completes it rather than move_task. "
             "Sub-tasks go one level deep, so splitting a sub-task again is "
             "refused. Use add_checklist_item instead when the piece needs no "
-            "owner and no reference of its own. Returns the created sub-task."
+            "owner and no reference of its own. The assignee is optional here "
+            "too: leave it off and the piece stays with whoever this token "
+            "belongs to. Returns the created sub-task."
         ),
     )
     async def create_subtask(
@@ -320,7 +334,15 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
         title: Annotated[str, Field(description="One line naming the work.")],
         description: Annotated[str, Field(description="What done looks like.")],
         task_type: Annotated[str, Field(description="One of 'feature', 'bug' or 'chore'.")],
-        assignee: Annotated[str, Field(description="Who owns it: a project member's name or id.")],
+        assignee: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Who owns it: a project member's name or id. Omit it to "
+                    "keep the piece with whoever this token belongs to."
+                )
+            ),
+        ] = None,
         due_date: Annotated[
             str | None,
             Field(description="ISO date, e.g. '2026-03-31'. Omit for a card with no date."),
@@ -336,8 +358,11 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
                 "title": title,
                 "description": description,
                 "type": task_type,
-                "assignee_id": await resolve.person_id(client, assignee, project_ref=project_ref),
             }
+            if assignee:
+                body["assignee_id"] = await resolve.person_id(
+                    client, assignee, project_ref=project_ref
+                )
             if due_date:
                 body["due_date"] = due_date
             if jira_ref:
@@ -711,7 +736,9 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "title, responsibilities and email. Title is their job description "
             "('Finance controller, Atlas'); a project's members also carry "
             "role, which is what they are on that board and is null until an "
-            "admin has said."
+            "admin has said. One entry carries is_agent: 'Agent' is the board's "
+            "own machine, on every project, and is who to assign a card to when "
+            "the work is meant for one."
         ),
     )
     async def list_people(

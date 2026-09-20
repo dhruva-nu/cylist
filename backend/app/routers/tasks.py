@@ -390,7 +390,14 @@ async def list_tasks(
     response_model=TaskDetail,
     status_code=status.HTTP_201_CREATED,
     summary="Add a task",
-    responses={422: {"description": "The assignee is not a member of this project."}},
+    responses={
+        422: {
+            "description": (
+                "The assignee is not a member of this project — or none was named and "
+                "the caller is not one either."
+            )
+        }
+    },
 )
 async def create_task(
     body: TaskCreate,
@@ -409,8 +416,11 @@ async def create_task(
     template does allow, moving it is restricted to the columns its stages
     name, and it starts on the sub-stages that landing column's stage sets —
     its own `sub_statuses`.
+
+    The card lands on **you** unless `assignee_id` names somebody else: a card
+    is the writer's until they hand it on, which `PATCH /tasks/{ref}` does.
     """
-    task = await tasks.create(session, project, body)
+    task = await tasks.create(session, project, body, creator_id=principal.person_id)
     await activity.record(
         session,
         principal,
@@ -745,7 +755,8 @@ async def list_subtasks(
     responses={
         422: {
             "description": (
-                "The assignee is not a member of this project, or the task is itself a sub-task."
+                "The assignee is not a member of this project — or none was named and the "
+                "caller is not one either — or the task is itself a sub-task."
             )
         }
     },
@@ -769,8 +780,13 @@ async def create_subtask(
 
     Until every sub-task is finished or cancelled, the parent cannot be moved to
     the board's last column.
+
+    Its owner is **you** unless `assignee_id` names somebody else — splitting a
+    card is usually taking a piece of it, not handing one out.
     """
-    subtask = await tasks.create(session, task.project, body, parent=task)
+    subtask = await tasks.create(
+        session, task.project, body, creator_id=principal.person_id, parent=task
+    )
     await activity.record(
         session,
         principal,

@@ -71,6 +71,7 @@ import {
   type ColumnDueDate,
   type FiledItem,
   type Goal,
+  isMe,
   type Person,
   type Task,
   type TaskComment,
@@ -864,6 +865,11 @@ function TaskForm({
    */
   onCancel: () => void
 }) {
+  // Who is looking, so a new card defaults to being theirs — the same answer
+  // the API gives a card created without an assignee. Read from the cache the
+  // auth gate already filled; a card started before it lands falls through to
+  // the first member, which is what it used to do for everybody.
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
   const [form, setForm] = useState<TaskInput>({
     title: task?.title ?? '',
     description: task?.description ?? '',
@@ -873,7 +879,11 @@ function TaskForm({
     // The date input's empty value is '', not null; the mutation turns it back
     // into the null the API reads as "no date".
     due_date: task?.due_date ?? '',
-    assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
+    assignee_id:
+      task?.assignee.id ??
+      members.find((person) => isMe(person, identity.data))?.id ??
+      members[0]?.id ??
+      '',
     template_id: task?.template_id ?? null,
     goal_id: task?.goal_id ?? defaultGoalId ?? null,
     jira_ref: task?.jira_ref ?? '',

@@ -156,6 +156,10 @@
    and an invitation is a waiting one, which is exactly what those two already
    mean everywhere else on the board. Quiet on purpose — it is read when you
    are wondering why somebody has not turned up yet, not before. */
+/* The machine's own tag, in the teal every agent already wears on this board
+   — the ring round a card an agent is working, the rail down its comments. A
+   name that is not a person's is worth saying once, quietly, beside it. */
+.agent,
 .account,
 .invited {
   padding: 2px 8px;
@@ -175,6 +179,11 @@
 .invited {
   background: var(--hold-soft);
   color: var(--hold);
+}
+
+.agent {
+  background: var(--agent-soft);
+  color: var(--agent);
 }
 
 /* A link rather than a button: it goes somewhere, and it is the one control

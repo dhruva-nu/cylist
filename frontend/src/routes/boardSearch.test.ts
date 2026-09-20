@@ -30,6 +30,8 @@ const ADITI: Person = {
   colour: '#1D7D46',
   archived_at: null,
   created_at: '2026-01-01T00:00:00Z',
+  is_agent: false,
+
   has_account: false,
   invite_is_pending: false,
 }

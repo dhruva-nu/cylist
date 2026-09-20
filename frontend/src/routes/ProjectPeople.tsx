@@ -219,6 +219,14 @@ function Group({
                   <b>{person.name}</b>
                   <KindTag kind={person.kind} />
                   {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
+                  {person.is_agent ? (
+                    <span
+                      className={styles.agent}
+                      title="Cylist's own machine. It is given work like anybody else, and never signs in."
+                    >
+                      agent
+                    </span>
+                  ) : null}
                   {person.role ? <RoleTag role={person.role} /> : null}
                   <AccountTag person={person} />
                 </div>
@@ -234,11 +242,15 @@ function Group({
                   <Button variant="ghost" small onClick={() => onEdit(person)}>
                     Edit
                   </Button>
-                  {/* Clients are named on the work, not signed in to it, and
+                  {/* Clients are named on the work, not signed in to it,
+                      the agent is a machine and does not sign in at all, and
                       somebody who already has an account has nothing to
                       accept — so the button is only offered where it would
                       do something. */}
-                  {person.kind === 'team' && !person.has_account && !person.archived_at ? (
+                  {person.kind === 'team' &&
+                  !person.is_agent &&
+                  !person.has_account &&
+                  !person.archived_at ? (
                     <Button variant="ghost" small onClick={() => onInvite(person)}>
                       {person.invite_is_pending ? 'Re-invite' : 'Invite'}
                     </Button>
