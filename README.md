@@ -6,7 +6,7 @@ agents can use it as readily as you can.
 
 | Area | What it holds |
 | --- | --- |
-| **Kanban board** | Tasks as cards across 2–8 named columns, each of which folds down to a rail when you would rather not look at it. A card that goes *on hold* or *blocked* must say why, and can name the person it is waiting on. The last column is where a card is done, and can be divided into up to three outcomes — Done, Cancelled, In prod — so the board says how work ended as well as that it did. |
+| **Kanban board** | Tasks as cards across 2–8 named columns, each of which folds down to a rail when you would rather not look at it. A card that goes *on hold* or *blocked* must say why, and can name the person it is waiting on. The last column is where a card is done, and can be divided into up to three outcomes — Done, Cancelled, In prod — so the board says how work ended as well as that it did. While an agent is on a card, the card's own border says so: working, waiting on you, or finished. |
 | **Goals** | The epics a board's cards are written under. Each has a colour of its own, which every card on it wears down its left-hand edge, and a page listing what is left on it. Cards are grouped into lanes by goal on the board when you want to read it that way. |
 | **Files** | Folders of uploaded files, with SharePoint and Google Drive links sitting alongside them. |
 | **Vault** | Logins, keys and links in trees you shape yourself. Secrets are encrypted at rest and revealed only on request. |
@@ -365,6 +365,73 @@ To mint a token by hand, scoped to what the agent actually needs:
 curl -X POST localhost:8000/api/v1/tokens -b cookies \
   -d '{"name":"board agent","scopes":["read","write"]}'
 ```
+
+## Showing an agent's work on the board
+
+A Claude Code session bound to a card appears on the board while it runs. The
+card's border pulses teal while the agent is working, turns amber the moment it
+is waiting on you — a permission prompt, or simply the end of its turn — and
+green when the session ends. Nothing the agent does or says is involved:
+Claude Code's own lifecycle hooks report it, so there is nothing for a model to
+remember to call and nothing it can misreport.
+
+Set it up once per machine, pointed at the board you actually use:
+
+```bash
+uv tool install ./cli        # puts `cylist` on your PATH — see below for why that matters
+cylist login --url https://dnu-home-1.tail222f46.ts.net
+cylist hook install          # six hooks in ~/.claude/settings.json, plus a /work command
+```
+
+`cylist login` asks for an API token, hidden rather than typed as an argument.
+Mint one against production the way any agent's token is minted — sign in, then
+ask for it. `read` and `write` are the whole of what the hook needs:
+
+```bash
+curl -sc /tmp/cyl -X POST https://dnu-home-1.tail222f46.ts.net/api/v1/auth/login \
+  -H 'content-type: application/json' -d '{"password":"…"}'
+curl -sb /tmp/cyl -X POST https://dnu-home-1.tail222f46.ts.net/api/v1/tokens \
+  -H 'content-type: application/json' \
+  -d '{"name":"claude on this machine","scopes":["read","write"]}'
+```
+
+Hooks load when a session starts, so open a **new** Claude Code session
+afterwards. Then bind it to a card:
+
+```
+/work ATL-41             bind the session you are in; it renames itself to the card
+/work off                unbind it
+cylist work ATL-41       start a session already bound to a card
+```
+
+Nothing else binds a session. A prompt that merely mentions `ATL-41` never does
+— otherwise "don't touch ATL-41" would put you on it — and an **unbound session
+makes no requests at all**, so the sessions you run on unrelated projects never
+appear on any board.
+
+Three things are worth knowing before the first time it looks broken.
+
+- **The hook reports to whichever server `cylist login` pointed at**, since it
+  reads the same `~/.config/cylist/config.toml` you do. Pointing it at
+  production is what puts a session on the real board; `cylist login --url
+  http://localhost:8000` instead when you are working on Cylist itself, which
+  needs its own token from your own database.
+- **A machine with no token reports nothing and says nothing about it.** That is
+  the usual reason for a card that stays blank. Set `CYLIST_HOOK_DEBUG=1` in a
+  session's environment and the hook explains itself on stderr instead.
+- **`hook install` records the absolute path of the `cylist` binary**, because a
+  hook runs with whatever PATH it inherits. That is why it is worth installing
+  as a tool rather than leaving it in a checkout's virtualenv, which a
+  `uv sync` can replace underneath it. Run `cylist hook install` again after
+  moving or reinstalling it and the recorded path is corrected in place.
+
+Failing silently is deliberate: `cylist hook` sits in front of every prompt you
+type, so a board that is unreachable, a token that has been revoked or an event
+it cannot parse all cost you nothing and interrupt nothing. `cylist hook
+uninstall` takes it all back out and leaves any other hooks you have alone.
+
+`cylist board ATL` says the same thing in the terminal. `cli/README.md` has the
+rest, including what each lifecycle event reports.
 
 ## Status
 

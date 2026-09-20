@@ -456,6 +456,26 @@ MINTED = {
     "token": MINTED_TOKEN,
 }
 
+TAILNET_URL = "https://cylist.tailnet.test"
+
+SETUP = {
+    "urls": ["http://cylist.test", TAILNET_URL],
+    "environment": "test",
+    "agent_scopes": ["read", "write"],
+}
+
+MINTED_TOKEN = "cyl_minted_for_this_machine"
+
+MINTED = {
+    "id": "0192f3c4-000a-7000-8000-000000000002",
+    "name": "a laptop agent",
+    "scopes": ["read", "write"],
+    "created_at": "2026-02-06T09:00:00Z",
+    "expires_at": None,
+    "last_used_at": None,
+    "token": MINTED_TOKEN,
+}
+
 
 @dataclass
 class Recorder:
