@@ -7,9 +7,9 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from '@tanstack/react-router'
+import { Link, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, isMe, type Identity, type Person } from '../api/client'
+import { api, isMe, type Identity, type Member, type Person } from '../api/client'
 import { InviteDialog } from '../components/InviteDialog'
 import { Modal, ModalBody } from '../components/Modal'
 import { PersonDialog } from '../components/PersonDialog'
@@ -22,10 +22,12 @@ import {
   KindTag,
   LiveRegion,
   MailIcon,
+  RoleTag,
   cardStyles,
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectPeople.module.css'
+import { usePermissions } from './usePermissions'
 
 export function ProjectPeople() {
   const { projectKey } = useParams({ from: '/p/$projectKey/people' })
@@ -46,12 +48,17 @@ export function ProjectPeople() {
     queryFn: () => api.listMembers(projectKey),
   })
 
+  // What the reader may do here. Membership is one permission of its own —
+  // saying who is on a board is a different job from renaming it.
+  const may = usePermissions(projectKey)
+
   async function refresh() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['members', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['projects'] }),
       queryClient.invalidateQueries({ queryKey: ['people'] }),
+      queryClient.invalidateQueries({ queryKey: ['permissions', projectKey] }),
     ])
   }
 
@@ -76,6 +83,7 @@ export function ProjectPeople() {
 
   const team = members.data.members.filter((person) => person.kind === 'team')
   const clients = members.data.members.filter((person) => person.kind === 'client')
+  const maySayWhoIsHere = may('people')
 
   return (
     <>
@@ -83,10 +91,23 @@ export function ProjectPeople() {
         title="People"
         actions={
           <>
-            <Button variant="go" onClick={() => setAdding(true)}>
-              + Add a person
-            </Button>
-            <Button onClick={() => setChoosing(true)}>From the directory</Button>
+            {/* A button that always refuses is worse than one that is not
+                there, so both of these are drawn only for somebody whose role
+                lets them say who is on this board. */}
+            {maySayWhoIsHere ? (
+              <>
+                <Button variant="go" onClick={() => setAdding(true)}>
+                  + Add a person
+                </Button>
+                <Button onClick={() => setChoosing(true)}>From the directory</Button>
+              </>
+            ) : null}
+            {/* Readable by everybody: a badge nobody can look up is a badge
+                nobody can read. What can be changed there is the server's
+                business, and that page says so. */}
+            <Link to="/p/$projectKey/roles" params={{ projectKey }} className={styles.rolesLink}>
+              Roles &amp; permissions
+            </Link>
           </>
         }
       >
@@ -101,6 +122,7 @@ export function ProjectPeople() {
         title="Team"
         people={team}
         identity={identity.data}
+        mayRemove={maySayWhoIsHere}
         onEdit={setEditing}
         onInvite={setInviting}
         onRemove={remove.mutate}
@@ -109,6 +131,7 @@ export function ProjectPeople() {
         title="Clients"
         people={clients}
         identity={identity.data}
+        mayRemove={maySayWhoIsHere}
         onEdit={setEditing}
         onInvite={setInviting}
         onRemove={remove.mutate}
@@ -165,13 +188,15 @@ function Group({
   title,
   people,
   identity,
+  mayRemove,
   onEdit,
   onInvite,
   onRemove,
 }: {
   title: string
-  people: Person[]
+  people: Member[]
   identity: Identity | undefined
+  mayRemove: boolean
   onEdit: (person: Person) => void
   onInvite: (person: Person) => void
   onRemove: (personId: string) => void
@@ -194,9 +219,18 @@ function Group({
                   <b>{person.name}</b>
                   <KindTag kind={person.kind} />
                   {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
+                  {person.is_agent ? (
+                    <span
+                      className={styles.agent}
+                      title="Cylist's own machine. It is given work like anybody else, and never signs in."
+                    >
+                      agent
+                    </span>
+                  ) : null}
+                  {person.role ? <RoleTag role={person.role} /> : null}
                   <AccountTag person={person} />
                 </div>
-                <span className={styles.role}>{person.role}</span>
+                <span className={styles.title}>{person.title}</span>
                 <div className={styles.responsibilities}>{person.responsibilities}</div>
                 <div className={styles.contact}>
                   {person.email ? (
@@ -208,18 +242,24 @@ function Group({
                   <Button variant="ghost" small onClick={() => onEdit(person)}>
                     Edit
                   </Button>
-                  {/* Clients are named on the work, not signed in to it, and
+                  {/* Clients are named on the work, not signed in to it,
+                      the agent is a machine and does not sign in at all, and
                       somebody who already has an account has nothing to
                       accept — so the button is only offered where it would
                       do something. */}
-                  {person.kind === 'team' && !person.has_account && !person.archived_at ? (
+                  {person.kind === 'team' &&
+                  !person.is_agent &&
+                  !person.has_account &&
+                  !person.archived_at ? (
                     <Button variant="ghost" small onClick={() => onInvite(person)}>
                       {person.invite_is_pending ? 'Re-invite' : 'Invite'}
                     </Button>
                   ) : null}
-                  <Button variant="ghost" small danger onClick={() => onRemove(person.id)}>
-                    Remove
-                  </Button>
+                  {mayRemove ? (
+                    <Button variant="ghost" small danger onClick={() => onRemove(person.id)}>
+                      Remove
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -296,7 +336,7 @@ function DirectoryDialog({
                 <span className={styles.optionText}>
                   <b>{person.name}</b>
                   <span>
-                    {person.kind} · {person.role}
+                    {person.kind} · {person.title}
                   </span>
                 </span>
               </label>

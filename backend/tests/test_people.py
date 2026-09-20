@@ -13,14 +13,14 @@ from tests.conftest import INVITEE_PASSWORD, client_for, open_account
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments, Stripe integration and webhook reliability.",
     "email": "aditi@think41.com",
 }
 SANJAY = {
     "name": "Sanjay F",
     "kind": "client",
-    "role": "Finance controller, Atlas",
+    "title": "Finance controller, Atlas",
     "responsibilities": "Approves anything touching tax or vendor accounts.",
 }
 
@@ -119,16 +119,16 @@ class TestUpdating:
         person = (await signed_in.post("/people", json=ADITI)).json()
 
         updated = (
-            await signed_in.patch(f"/people/{person['id']}", json={"role": "Tech lead"})
+            await signed_in.patch(f"/people/{person['id']}", json={"title": "Tech lead"})
         ).json()
 
-        assert updated["role"] == "Tech lead"
+        assert updated["title"] == "Tech lead"
         assert updated["name"] == "Aditi K"
         assert updated["responsibilities"] == ADITI["responsibilities"]
 
     async def test_unknown_person_is_a_clean_404(self, signed_in: AsyncClient) -> None:
         response = await signed_in.patch(
-            "/people/00000000-0000-7000-8000-000000000000", json={"role": "x"}
+            "/people/00000000-0000-7000-8000-000000000000", json={"title": "x"}
         )
 
         assert response.status_code == 404
@@ -249,3 +249,45 @@ class TestWhoIsAsking:
 
         me = (await signed_in.get("/me")).json()["person"]
         assert me["has_account"] is True
+
+
+class TestTheAgent:
+    """CYLIST-47: one entry in the directory that is not a person.
+
+    It is there so that a card meant for a machine has somebody to name —
+    Cylist assigns work to directory entries, and there was nothing in the
+    directory a bot could be. Every project brings it in as it is created and
+    puts it on the board, so a fresh deployment can hand out its first card
+    without anybody setting this up.
+    """
+
+    async def test_creating_a_project_puts_the_machine_in_the_directory(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+
+        agents = [
+            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+        ]
+
+        assert [person["name"] for person in agents] == ["Agent"]
+        assert agents[0]["email"] is None
+        assert agents[0]["has_account"] is False
+
+    async def test_a_colleague_is_not_a_machine(self, signed_in: AsyncClient) -> None:
+        """``is_agent`` is set by Cylist, never by whoever fills in the form."""
+        body = (await signed_in.post("/people", json={**ADITI, "is_agent": True})).json()
+
+        assert body["is_agent"] is False
+
+    async def test_the_agent_cannot_be_invited(self, signed_in: AsyncClient) -> None:
+        """A machine does not sign in; it carries a token somebody minted."""
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+        agent = next(
+            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+        )
+
+        response = await signed_in.post(f"/people/{agent['id']}/invite")
+
+        assert response.status_code == 422
+        assert "machine" in response.json()["error"]["message"]

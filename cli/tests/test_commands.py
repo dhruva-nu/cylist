@@ -188,6 +188,29 @@ def test_task_new_without_a_due_date_omits_it(run: Runner, recorder: fake_api.Re
     assert "due_date" not in recorder.body("POST", "/tasks")
 
 
+def test_task_new_without_an_assignee_says_nothing_about_one(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    """CYLIST-47. The card is yours unless you hand it to somebody.
+
+    The CLI does not resolve its own name to say so: an absent `assignee_id`
+    is the request, and the server answers it with whoever the credential is.
+    """
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "Draft the cutover plan",
+        "--description",
+        "A written plan with dates.",
+        "--type",
+        "chore",
+    )
+    assert result.code == 0
+    assert "assignee_id" not in recorder.body("POST", "/tasks")
+
+
 def test_task_new_rejects_a_date_that_is_not_a_date(run: Runner) -> None:
     result = run(
         "task",
@@ -344,6 +367,15 @@ def test_people_ls_lists_the_directory(run: Runner) -> None:
     assert "Leo Wren" in result.out
 
 
+def test_people_ls_says_which_entry_is_a_machine(run: Runner) -> None:
+    """CYLIST-47. The agent is on the team, so its kind alone would read as a
+    colleague with no email address."""
+    result = run("people", "ls")
+    assert result.code == 0
+    agent_row = next(line for line in result.out.splitlines() if line.startswith("Agent"))
+    assert "agent" in agent_row
+
+
 def test_people_ls_passes_the_kind_filter_to_the_api(
     run: Runner, recorder: fake_api.Recorder
 ) -> None:
@@ -361,7 +393,7 @@ def test_people_new_posts_the_required_fields(run: Runner, recorder: fake_api.Re
         "Ravi S",
         "--kind",
         "team",
-        "--role",
+        "--title",
         "Data engineer",
         "--responsibilities",
         "Owns the export pipeline.",

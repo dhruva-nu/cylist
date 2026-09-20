@@ -107,7 +107,15 @@ class TaskCreate(Schema):
             "not on the board."
         ),
     )
-    assignee_id: UUID = Field(description="Must be a member of the project.")
+    assignee_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Who owns it — a member of the project. Omit it and the card goes "
+            "to whoever is creating it, which is where most cards start; hand "
+            "it on afterwards with `PATCH /tasks/{ref}`, or name somebody else "
+            "here to begin with."
+        ),
+    )
     template_id: UUID | None = Field(
         default=None,
         description=(

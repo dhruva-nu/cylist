@@ -19,7 +19,7 @@ Four places where the mock and the database do not line up, and what is done
 about each:
 
 *People.* The mock keeps a copy of each person per project, with a different
-role on each. The database has one global directory, so each person is written
+job title on each. The database has one global directory, so each is written
 once and takes their Atlas description, Atlas being the project the mock leads
 with and the one where each of them is described most fully.
 
@@ -107,7 +107,7 @@ class PersonSpec:
     handle: str
     name: str
     kind: PersonKind
-    role: str
+    title: str
     responsibilities: str
     email: str
     colour: str
@@ -273,7 +273,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         name="Dhruva N",
         is_owner=True,
         kind=PersonKind.TEAM,
-        role="Tech lead",
+        title="Tech lead",
         responsibilities=(
             "Owns architecture and the cutover plan. Escalation point for anything blocked."
         ),
@@ -284,7 +284,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="ak",
         name="Aditi K",
         kind=PersonKind.TEAM,
-        role="Backend engineer",
+        title="Backend engineer",
         responsibilities="Payments, Stripe integration and webhook reliability.",
         email="aditi@think41.com",
         colour="#3B6FC2",
@@ -293,7 +293,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="rs",
         name="Rohan S",
         kind=PersonKind.TEAM,
-        role="Backend engineer",
+        title="Backend engineer",
         responsibilities="Data migration scripts, PDF rendering and reporting.",
         email="rohan@think41.com",
         colour="#C77D00",
@@ -302,7 +302,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="mp",
         name="Meera P",
         kind=PersonKind.TEAM,
-        role="QA & release",
+        title="QA & release",
         responsibilities="Test plans, staging sign-off and release notes.",
         email="meera@think41.com",
         colour="#7A6B9E",
@@ -311,7 +311,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="sf",
         name="Sanjay F",
         kind=PersonKind.CLIENT,
-        role="Finance controller, Atlas",
+        title="Finance controller, Atlas",
         responsibilities=(
             "Approves anything touching tax, invoicing rules or vendor accounts (Avalara, Stripe)."
         ),
@@ -322,7 +322,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="lw",
         name="Lena W",
         kind=PersonKind.CLIENT,
-        role="Legal counsel, Atlas",
+        title="Legal counsel, Atlas",
         responsibilities="Signs off licences and contracts. Slow to respond — chase via Sanjay.",
         email="l.wright@atlas.example",
         colour="#5C6B73",
@@ -331,7 +331,7 @@ DIRECTORY: tuple[PersonSpec, ...] = (
         handle="pt",
         name="Priya T",
         kind=PersonKind.CLIENT,
-        role="Product owner, Hermes",
+        title="Product owner, Hermes",
         responsibilities="Prioritises the backlog; approves template copy.",
         email="priya@hermes.example",
         colour="#8E6A3D",
@@ -1040,7 +1040,7 @@ async def _write_directory(session: AsyncSession, summary: Summary) -> dict[str,
             PersonCreate(
                 name=spec.name,
                 kind=spec.kind,
-                role=spec.role,
+                title=spec.title,
                 responsibilities=spec.responsibilities,
                 email=spec.email,
                 colour=spec.colour,

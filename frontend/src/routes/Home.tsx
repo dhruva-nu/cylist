@@ -133,7 +133,7 @@ function MeCard({ onSaved }: { onSaved: (message: string) => void }) {
               <b>{me.name}</b>
               <span className={styles.youTag}>you</span>
             </div>
-            <span className={styles.meRole}>{me.role}</span>
+            <span className={styles.meRole}>{me.title}</span>
             <span className={styles.meNote}>
               On every project you create, and pickable as an assignee from the moment it exists.
             </span>
@@ -275,14 +275,14 @@ function FirstAccountDialog({
   onDone: () => Promise<void>
   onClose: () => void
 }) {
-  const [form, setForm] = useState({ name: '', role: '', email: '', password: '' })
+  const [form, setForm] = useState({ name: '', title: '', email: '', password: '' })
 
   const open = useMutation({
     mutationFn: async () => {
       const person = await api.createPerson({
         name: form.name.trim(),
         kind: 'team',
-        role: form.role.trim(),
+        title: form.title.trim(),
         responsibilities: 'Runs this Cylist.',
         email: form.email.trim(),
       })
@@ -299,7 +299,7 @@ function FirstAccountDialog({
 
   const ready =
     form.name.trim() &&
-    form.role.trim() &&
+    form.title.trim() &&
     form.email.trim() &&
     form.password.length >= MIN_PASSWORD_LENGTH
 
@@ -326,8 +326,8 @@ function FirstAccountDialog({
         </Field>
         <Field label="Who are you?" required>
           <input
-            value={form.role}
-            onChange={(event) => setForm({ ...form, role: event.target.value })}
+            value={form.title}
+            onChange={(event) => setForm({ ...form, title: event.target.value })}
             placeholder="Tech lead"
           />
         </Field>

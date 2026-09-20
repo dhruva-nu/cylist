@@ -21,7 +21,14 @@ from app.auth.tokens import hash_token
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
-from app.models.person import KIND_ORDER, Person, PersonKind
+from app.models.person import (
+    AGENT_NAME,
+    AGENT_RESPONSIBILITIES,
+    AGENT_TITLE,
+    KIND_ORDER,
+    Person,
+    PersonKind,
+)
 from app.schemas.people import PersonCreate, PersonUpdate
 from app.services import tokens
 
@@ -31,7 +38,7 @@ async def create(session: AsyncSession, data: PersonCreate) -> Person:
     person = Person(
         name=data.name,
         kind=data.kind,
-        role=data.role,
+        title=data.title,
         responsibilities=data.responsibilities,
         email=data.email,
         colour=data.colour or colour_for(data.name),
@@ -39,6 +46,47 @@ async def create(session: AsyncSession, data: PersonCreate) -> Person:
     session.add(person)
     await session.flush()
     return person
+
+
+async def agent(session: AsyncSession) -> Person | None:
+    """The machine's directory entry, or ``None`` if there is not one yet.
+
+    Found by the flag rather than by the name: the name is editable, and a
+    board that renamed its agent "Claude" should not thereby have two.
+    """
+    found: Person | None = await session.scalar(select(Person).where(Person.is_agent))
+    return found
+
+
+async def ensure_agent(session: AsyncSession) -> Person:
+    """Return the agent's entry, adding it to the directory if it is missing.
+
+    Every deployment has one — migration ``0027`` writes it — so this finds it
+    rather than creating it almost every time. It creates rather than assuming,
+    because a card can be handed to the agent long before anybody thinks to
+    check whether it is there, and because a schema built from the models
+    (which is what the tests run against) has no migration behind it.
+
+    Archived is left archived. Taking the agent off the boards is a thing
+    somebody did on purpose, and un-doing it because a project was created
+    would be the one way this could surprise anybody.
+    """
+    existing = await agent(session)
+    if existing is not None:
+        return existing
+
+    machine = Person(
+        name=AGENT_NAME,
+        kind=PersonKind.TEAM,
+        title=AGENT_TITLE,
+        responsibilities=AGENT_RESPONSIBILITIES,
+        email=None,
+        colour=colour_for(AGENT_NAME),
+        is_agent=True,
+    )
+    session.add(machine)
+    await session.flush()
+    return machine
 
 
 async def get(session: AsyncSession, person_id: UUID) -> Person:
@@ -164,14 +212,19 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
     would mean waiting a week for the first to expire.
 
     Raises:
-        UnprocessableRequestError: if they are archived, are a client, or have
-            no email address to send it to.
+        UnprocessableRequestError: if they are archived, are the agent, are a
+            client, or have no email address to send it to.
         ConflictError: if they already have a password, or if their email
             belongs to somebody who can already sign in.
     """
     person = await get(session, person_id)
     if person.is_archived:
         raise UnprocessableRequestError("An archived person cannot be given an account.")
+    if person.is_agent:
+        raise UnprocessableRequestError(
+            f"{person.name} is a machine, and a machine does not sign in. Mint it an API "
+            "token instead — see Tokens."
+        )
     if person.kind is not PersonKind.TEAM:
         raise UnprocessableRequestError(
             "Only team members get accounts. Clients are named on the work, not signed in to it."

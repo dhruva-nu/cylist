@@ -100,6 +100,107 @@ that works:
 An agent that tidies your board wants `read` and `write` — and nothing else.
 It cannot mint itself a broader token, because that needs `admin`.
 
+### Roles
+
+Scopes say what a *credential* may do anywhere. A **role** says who somebody is
+on one board — "Reviewer", "QA", "Designer" — and it is the project's admin who
+invents them. Every project is created with one role, `Admin`, worn by whoever
+created it; everybody added afterwards has no role until an admin says what
+they are.
+
+Only a holder of `Admin` can create a role, rename one, hand one out, or say
+what any of them may do. Because a credential acts as whoever minted it, an
+agent token owned by an admin can do that too — narrowing *that* is what a
+smaller scope on the token is for.
+
+Roles are per project, so the same person can be the Admin of one board and a
+Reviewer on another. `GET /projects/{ref}/roles` lists them, and each entry in
+`GET /projects/{ref}/members` carries the one its member wears — alongside
+`title`, which is the job description the directory holds and is not a role at
+all.
+
+### Permissions
+
+A role carries a set of permissions saying what its holders may do *here*, from
+a vocabulary the server fixes:
+
+| Permission | Allows |
+|---|---|
+| `tasks` | Create, edit, move and finish cards, sub-tasks and checklists. |
+| `comments` | Say something on a card. |
+| `goals` | Create, rename, retarget, drop and finish goals. |
+| `goal_assign` | Say which goal a card counts towards. |
+| `goal_owner` | Hand an existing goal to somebody else. |
+| `board` | Columns, and card templates — the shape of the board. |
+| `files` | Folders, uploads and links. |
+| `vault` | Add, change and delete credentials. Not read them. |
+| `vault_reveal` | Decrypt and read a stored secret. |
+| `people` | Say who is on this project. |
+| `agents` | The skills and notes this project's agents work from. |
+| `project` | Rename, describe and archive the project. |
+
+A role's *name* is the admin's invention; what it may do cannot be, because
+every entry is a fence a particular endpoint recognises. Reading is not on the
+list: a project is a shared workspace, and everyone who can reach a board can
+read it. `vault_reveal` is the one read-shaped entry, and it was already a
+distinct, logged, separately scoped act before roles existed.
+
+Three things hold everything, always. The `Admin` role, by being it. The
+bootstrap session, which belongs to nobody. And whoever the project's grid
+grants it to.
+
+The line called **Everyone else** is what somebody on the project with no role
+may do — and what somebody who is not on it may do, since membership has never
+been a fence here. A project is created with every box on that line ticked, so
+a new board behaves exactly as boards did before permissions existed, and its
+admin narrows it from there. A new role starts with whatever that line allows,
+so naming somebody a Reviewer is never a demotion nobody asked for.
+
+Scopes and permissions are both checked and neither stands in for the other: a
+read-only token held by an admin still cannot write, and a `write` token held
+by somebody whose role does not allow cards still cannot move one.
+
+### Where on the board, and how sensitive
+
+Two of those permissions are too blunt on their own, so each is narrowed by
+rules about the *thing* rather than the area. Both are **restrictions**: the
+flat permission is still the gate, and a missing rule narrows nothing. That is
+also why a column added next month is open to everybody who may move cards,
+rather than closed until somebody notices.
+
+**Where on the board.** Per role, per column, two answers: may a card be moved
+*into* it, and may the sub-stages a card passes through there be set — both the
+template's rule for the column and a card's own progress bar, because they are
+the same decision. A role with `tasks` switched off is not asked about columns
+at all.
+
+**How sensitive.** Every uploaded file, link and vault node carries a level —
+`public`, `internal` or `restricted` — and every role carries the highest it
+may read. Folders and vault trees carry a *default* that new children inherit,
+so "everything in Contracts is restricted" is said once rather than on each
+upload. Something above your clearance is answered **as though it were never
+there**: left out of listings, a 404 by id, a 404 to download, and not counted
+on the project hub. A 403 on `redundancy-list-final.xlsx` would already have
+told you the interesting part. A restricted vault branch takes its whole
+subtree with it.
+
+Reading is otherwise still unfenced — a project is a shared workspace, and its
+board, cards and goals are visible to everyone on it.
+
+`GET /projects/{ref}/permissions` returns the whole grid — the vocabulary, the
+levels, each role's line with its columns and clearance, and `mine`, what the
+caller may do here, which is what the web app hides buttons by. Five PUTs
+replace one line of it:
+
+```
+PUT /projects/{ref}/roles/{role}/permissions
+PUT /projects/{ref}/roles/{role}/columns
+PUT /projects/{ref}/roles/{role}/clearance
+PUT /projects/{ref}/permissions/everyone-else            # …/columns, …/clearance too
+```
+
+The **Roles** tab on a project is the screen all of that is drawn from.
+
 ### Auditing
 
 Every mutation writes a row to `activity` recording who did it, what changed,
@@ -243,6 +344,9 @@ cylist files ls ATL                   cylist vault reveal ATL Logins/Stripe --sh
 
 Names work where a human would use one — `--assignee "Aditi K"`, `--column "In progress"`
 — and an ambiguous name is an error rather than a guess. Every command takes `--json`.
+Leave `--assignee` off and the card is yours: a card goes to whoever wrote it
+unless it names somebody else, and `Agent` is the name to give it when the work
+is for a machine.
 
 Each project carries what its agents work from, under its **Agents** tab: skills
 you upload for them to follow, and a scratchpad they write one-line findings back

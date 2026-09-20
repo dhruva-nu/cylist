@@ -32,6 +32,7 @@ import {
 } from '../components/ui'
 import { WEEKDAYS, dayName, goalsByDate, monthName, monthWeeks, openingMonth } from './goalCalendar'
 import styles from './ProjectGoals.module.css'
+import { usePermissions } from './usePermissions'
 
 type View = 'list' | 'calendar'
 
@@ -78,6 +79,7 @@ function useGoalView(projectKey: string) {
 
 export function ProjectGoals() {
   const { projectKey } = useParams({ from: '/p/$projectKey/goals' })
+  const may = usePermissions(projectKey)
   const queryClient = useQueryClient()
   const { message, announce } = useAnnouncer()
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
@@ -117,9 +119,13 @@ export function ProjectGoals() {
         actions={
           <>
             <ViewToggle view={view} onPick={setView} />
-            <Button variant="go" onClick={() => setEditing('new')}>
-              + New goal
-            </Button>
+            {/* Not drawn for a role that is not allowed goals: a button that
+                always refuses is worse than one that is not there. */}
+            {may('goals') ? (
+              <Button variant="go" onClick={() => setEditing('new')}>
+                + New goal
+              </Button>
+            ) : null}
           </>
         }
       >

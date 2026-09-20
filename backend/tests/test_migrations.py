@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -592,3 +592,609 @@ class TestUndoingTheWidenedReason:
         await rewind(NARROW_REASON)
 
         assert await reasons(connection) == ["session_ended"]
+
+
+# --- An admin for every project that predates roles ------------------------
+
+BEFORE_ROLES = "0023"
+WITH_ROLES = "0024"
+
+
+async def seed_a_board_with_members(connection: AsyncConnection) -> None:
+    """One project with three people on it, joined in a known order.
+
+    The order is the whole point: the back-fill has to pick *one* of them to
+    be the admin, and which one is the only interesting thing it decides.
+    ``created_at`` is written by hand rather than left to ``now()``, because
+    three rows inserted in one statement share a transaction timestamp and the
+    question would then have no answer to test.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 0)"
+        )
+    )
+    for name, joined, archived in (
+        ("Rohan T", datetime(2026, 1, 3, tzinfo=UTC), None),
+        ("Aditi K", datetime(2026, 1, 1, tzinfo=UTC), None),
+        ("Sanjay F", datetime(2026, 1, 2, tzinfo=UTC), None),
+    ):
+        await connection.execute(
+            text(
+                "INSERT INTO person (id, name, kind, role, responsibilities, colour,"
+                " archived_at)"
+                " VALUES (gen_random_uuid(), :name, 'team', 'Engineer', '', '#1D7D46',"
+                " :archived)"
+            ),
+            {"name": name, "archived": archived},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO project_member (project_id, person_id, created_at, updated_at)"
+                " SELECT project.id, person.id, :joined, :joined"
+                " FROM project, person WHERE person.name = :name"
+            ),
+            {"name": name, "joined": joined},
+        )
+
+
+async def admins(connection: AsyncConnection) -> list[Any]:
+    """Whoever ended up wearing the admin role, by name."""
+    rows = await connection.execute(
+        text(
+            "SELECT person.name FROM project_member"
+            " JOIN project_role ON project_role.id = project_member.role_id"
+            " JOIN person ON person.id = project_member.person_id"
+            " WHERE project_role.is_admin"
+        )
+    )
+    return list(rows.scalars())
+
+
+class TestBackFillingAnAdmin:
+    async def test_every_project_gets_the_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        names = await connection.execute(text("SELECT name FROM project_role"))
+        assert list(names.scalars()) == ["Admin"]
+
+    async def test_the_longest_standing_member_wears_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Not the first row inserted — the earliest to have joined."""
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        assert await admins(connection) == ["Aditi K"]
+
+    async def test_nobody_else_is_given_a_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """A role is something said about somebody. The migration says it once."""
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        unworn = await connection.execute(
+            text("SELECT count(*) FROM project_member WHERE role_id IS NULL")
+        )
+        assert unworn.scalar() == 2
+
+    async def test_a_project_with_nobody_on_it_still_gets_the_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Unworn until somebody joins, which the service then notices."""
+        await migrate(BEFORE_ROLES)
+        await connection.execute(
+            text(
+                "INSERT INTO project (id, key, name, description, colour, task_counter)"
+                " VALUES (gen_random_uuid(), 'ORB', 'Orbit Internal Portal', '',"
+                " '#3B6FC2', 0)"
+            )
+        )
+
+        await migrate(WITH_ROLES)
+
+        assert await admins(connection) == []
+        roles = await connection.execute(text("SELECT count(*) FROM project_role"))
+        assert roles.scalar() == 1
+
+    async def test_the_job_title_moves_to_its_own_word(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """``person.role`` was always the job title; roles are now a real thing."""
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+
+        await migrate(WITH_ROLES)
+
+        titles = await connection.execute(text("SELECT DISTINCT title FROM person"))
+        assert list(titles.scalars()) == ["Engineer"]
+
+
+class TestUndoingRoles:
+    async def test_puts_the_job_title_back_and_drops_the_roles(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_ROLES)
+        await seed_a_board_with_members(connection)
+        await migrate(WITH_ROLES)
+
+        await rewind(BEFORE_ROLES)
+
+        titles = await connection.execute(text("SELECT DISTINCT role FROM person"))
+        assert list(titles.scalars()) == ["Engineer"]
+        tables = await connection.execute(text("SELECT to_regclass('project_role') IS NULL"))
+        assert tables.scalar() is True
+
+
+# --- Every board comes through permitting what it already permitted --------
+
+WITH_PERMISSIONS = "0025"
+
+PERMISSION_COUNT = 10
+"""How many permissions revision 0025 knows about. Written out rather than
+imported for the reason the revision writes them out: this asserts what that
+back-fill did, not what today's vocabulary happens to be."""
+
+
+async def seed_a_board_with_roles(connection: AsyncConnection) -> None:
+    """A project with its admin role and two the admin invented."""
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 0)"
+        )
+    )
+    for name, is_admin in (("Admin", True), ("Reviewer", False), ("QA", False)):
+        await connection.execute(
+            text(
+                "INSERT INTO project_role (id, project_id, name, description, colour, is_admin)"
+                " SELECT gen_random_uuid(), project.id, :name, '', '#1D7D46', :is_admin"
+                " FROM project WHERE project.key = 'ATL'"
+            ),
+            {"name": name, "is_admin": is_admin},
+        )
+
+
+async def granted_to(connection: AsyncConnection, role: str | None) -> int:
+    """How many permissions a role — or the role-less baseline — was given."""
+    if role is None:
+        rows = await connection.execute(
+            text("SELECT count(*) FROM project_permission WHERE role_id IS NULL")
+        )
+    else:
+        rows = await connection.execute(
+            text(
+                "SELECT count(*) FROM project_permission"
+                " JOIN project_role ON project_role.id = project_permission.role_id"
+                " WHERE project_role.name = :name"
+            ),
+            {"name": role},
+        )
+    return int(rows.scalar() or 0)
+
+
+class TestBackFillingPermissions:
+    async def test_every_role_keeps_being_able_to_do_everything(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Turning the fence on must not fence a board nobody has narrowed."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PERMISSIONS)
+
+        assert await granted_to(connection, "Reviewer") == PERMISSION_COUNT
+        assert await granted_to(connection, "QA") == PERMISSION_COUNT
+
+    async def test_and_so_does_everybody_with_no_role(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PERMISSIONS)
+
+        assert await granted_to(connection, None) == PERMISSION_COUNT
+
+    async def test_the_admin_role_is_granted_nothing(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """It holds everything by being the admin role. Rows saying so would be
+        rows somebody could delete."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PERMISSIONS)
+
+        assert await granted_to(connection, "Admin") == 0
+
+    async def test_a_grant_cannot_be_written_twice(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO project_permission (id, project_id, role_id, permission)"
+                    " SELECT gen_random_uuid(), project_id, role_id, permission"
+                    " FROM project_permission WHERE role_id IS NOT NULL LIMIT 1"
+                )
+            )
+
+    async def test_nor_can_a_baseline_one_be(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The half a plain unique constraint would have missed: Postgres counts
+        NULL role_ids as distinct from each other."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO project_permission (id, project_id, role_id, permission)"
+                    " SELECT gen_random_uuid(), project_id, NULL, permission"
+                    " FROM project_permission WHERE role_id IS NULL LIMIT 1"
+                )
+            )
+
+    async def test_deleting_the_project_takes_its_grants_with_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The deferred composite key must not make which cascade fires first
+        decide whether a project can be deleted."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await connection.execute(text("DELETE FROM project WHERE key = 'ATL'"))
+
+        left = await connection.execute(text("SELECT count(*) FROM project_permission"))
+        assert left.scalar() == 0
+
+
+class TestUndoingPermissions:
+    async def test_it_drops_every_grant_and_leaves_the_roles(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await rewind(WITH_ROLES)
+
+        gone = await connection.execute(text("SELECT to_regclass('project_permission') IS NULL"))
+        assert gone.scalar() is True
+        roles = await connection.execute(text("SELECT count(*) FROM project_role"))
+        assert roles.scalar() == 3
+
+
+# --- Per-object access, and the split of the goals permission --------------
+
+WITH_PER_OBJECT = "0026"
+
+
+async def granted_permissions(connection: AsyncConnection, role: str) -> list[Any]:
+    rows = await connection.execute(
+        text(
+            "SELECT permission FROM project_permission"
+            " JOIN project_role ON project_role.id = project_permission.role_id"
+            " WHERE project_role.name = :name ORDER BY permission"
+        ),
+        {"name": role},
+    )
+    return list(rows.scalars())
+
+
+class TestSplittingTheGoalsPermission:
+    async def test_a_role_that_could_change_goals_keeps_all_three(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Until 0026 those *were* the goals permission. Granting only the
+        narrow one would take two things away from everybody who had the wide
+        one, which is not what splitting a word into three is for."""
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await migrate(WITH_PER_OBJECT)
+
+        assert await granted_permissions(connection, "Reviewer") == [
+            "agents",
+            "board",
+            "comments",
+            "files",
+            "goal_assign",
+            "goal_owner",
+            "goals",
+            "people",
+            "project",
+            "tasks",
+            "vault",
+            "vault_reveal",
+        ]
+
+    async def test_a_role_that_could_not_gains_neither(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+        await connection.execute(
+            text(
+                "DELETE FROM project_permission WHERE permission = 'goals' AND role_id IS NOT NULL"
+            )
+        )
+
+        await migrate(WITH_PER_OBJECT)
+
+        assert "goal_assign" not in await granted_permissions(connection, "Reviewer")
+
+    async def test_the_baseline_is_split_too(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+
+        await migrate(WITH_PER_OBJECT)
+
+        rows = await connection.execute(
+            text(
+                "SELECT count(*) FROM project_permission"
+                " WHERE role_id IS NULL AND permission IN ('goal_assign', 'goal_owner')"
+            )
+        )
+        assert rows.scalar() == 2
+
+
+class TestClassifyingWhatIsAlreadyStored:
+    async def test_every_upload_comes_through_internal(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The same people see the same files the day after this runs."""
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+        await connection.execute(
+            text(
+                "INSERT INTO folder (id, project_id, parent_id, name)"
+                " SELECT gen_random_uuid(), id, NULL, 'Atlas' FROM project WHERE key = 'ATL'"
+            )
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO file_item (id, folder_id, kind, name, url, source)"
+                " SELECT gen_random_uuid(), folder.id, 'link', 'Statement of work',"
+                " 'https://example.test/sow', 'other' FROM folder"
+            )
+        )
+
+        await migrate(WITH_PER_OBJECT)
+
+        levels = await connection.execute(text("SELECT DISTINCT sensitivity FROM file_item"))
+        assert list(levels.scalars()) == ["internal"]
+
+    async def test_and_nobody_is_given_a_clearance(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """No row means no restriction, so the back-fill is the empty one."""
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PER_OBJECT)
+
+        rows = await connection.execute(text("SELECT count(*) FROM role_clearance"))
+        assert rows.scalar() == 0
+
+    async def test_nor_a_column_rule(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_PERMISSIONS)
+        await seed_a_board_with_roles(connection)
+
+        await migrate(WITH_PER_OBJECT)
+
+        rows = await connection.execute(text("SELECT count(*) FROM role_column_rule"))
+        assert rows.scalar() == 0
+
+
+class TestUndoingPerObjectAccess:
+    async def test_it_folds_the_goal_rights_back_and_drops_the_levels(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(WITH_ROLES)
+        await seed_a_board_with_roles(connection)
+        await migrate(WITH_PERMISSIONS)
+        await migrate(WITH_PER_OBJECT)
+
+        await rewind(WITH_PERMISSIONS)
+
+        assert "goals" in await granted_permissions(connection, "Reviewer")
+        assert "goal_assign" not in await granted_permissions(connection, "Reviewer")
+        gone = await connection.execute(text("SELECT to_regclass('role_clearance') IS NULL"))
+        assert gone.scalar() is True
+
+
+# --- A name on the board that belongs to a machine -------------------------
+
+BEFORE_THE_AGENT = "0026"
+WITH_THE_AGENT = "0027"
+
+
+async def seed_two_boards(connection: AsyncConnection) -> None:
+    """Two projects with one person between them, as 0026 left things."""
+    for key, name in (("ATL", "Atlas Billing Migration"), ("HRM", "Hermes Notifications")):
+        await connection.execute(
+            text(
+                "INSERT INTO project (id, key, name, description, colour, task_counter)"
+                " VALUES (gen_random_uuid(), :key, :name, '', '#1D7D46', 0)"
+            ),
+            {"key": key, "name": name},
+        )
+    await connection.execute(
+        text(
+            "INSERT INTO person (id, name, kind, title, responsibilities, colour)"
+            " VALUES (gen_random_uuid(), 'Aditi K', 'team', 'Engineer', '', '#1D7D46')"
+        )
+    )
+
+
+async def agents(connection: AsyncConnection) -> list[Any]:
+    """The directory entries flagged as the machine, by name."""
+    rows = await connection.execute(text("SELECT name FROM person WHERE is_agent"))
+    return list(rows.scalars())
+
+
+class TestPuttingAnAgentInTheDirectory:
+    async def test_the_directory_gains_one_agent(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+
+        await migrate(WITH_THE_AGENT)
+
+        assert await agents(connection) == ["Agent"]
+
+    async def test_it_joins_every_board_there_already_is(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Membership is what makes a name assignable, so it is not enough to
+        write the row and leave every board to be told by hand."""
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+
+        await migrate(WITH_THE_AGENT)
+
+        joined = await connection.execute(
+            text(
+                "SELECT project.key FROM project_member"
+                " JOIN project ON project.id = project_member.project_id"
+                " JOIN person ON person.id = project_member.person_id"
+                " WHERE person.is_agent ORDER BY project.key"
+            )
+        )
+        assert list(joined.scalars()) == ["ATL", "HRM"]
+
+    async def test_it_wears_no_role_and_cannot_sign_in(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+
+        await migrate(WITH_THE_AGENT)
+
+        row = await connection.execute(
+            text(
+                "SELECT person.email, person.password_hash, project_member.role_id"
+                " FROM person JOIN project_member ON project_member.person_id = person.id"
+                " WHERE person.is_agent LIMIT 1"
+            )
+        )
+        assert row.one() == (None, None, None)
+
+    async def test_a_second_agent_is_refused_by_the_index(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """ "There is one agent" is the table's answer, not a convention."""
+        await migrate(WITH_THE_AGENT)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO person (id, name, kind, title, responsibilities, colour,"
+                    " is_agent)"
+                    " VALUES (gen_random_uuid(), 'Agent 2', 'team', '', '', '#1D7D46', true)"
+                )
+            )
+
+
+class TestUndoingTheAgent:
+    async def test_it_keeps_the_entry_and_drops_the_flag(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Deleting it would take every card assigned to it, so it stays — as
+        a colleague who never signs in, which is what it was before 0027."""
+        await migrate(BEFORE_THE_AGENT)
+        await seed_two_boards(connection)
+        await migrate(WITH_THE_AGENT)
+
+        await rewind(BEFORE_THE_AGENT)
+
+        names = await connection.execute(text("SELECT name FROM person ORDER BY name"))
+        assert list(names.scalars()) == ["Aditi K", "Agent"]
+        gone = await connection.execute(
+            text(
+                "SELECT count(*) FROM information_schema.columns"
+                " WHERE table_name = 'person' AND column_name = 'is_agent'"
+            )
+        )
+        assert gone.scalar() == 0

@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 from app.models.project import KEY_MAX_LENGTH
 from app.schemas.common import Schema
 from app.schemas.people import PersonRead
+from app.schemas.roles import RoleRead
 
 _COLOUR_PATTERN = r"^#(?:[0-9a-fA-F]{6})$"
 _KEY_PATTERN = r"^[A-Za-z][A-Za-z0-9]{1,5}$"
@@ -123,5 +124,20 @@ class MembershipUpdate(Schema):
         return list(seen)
 
 
+class MemberRead(PersonRead):
+    """A person as they appear *on a project*, rather than in the directory.
+
+    Everything a directory entry has, plus the one thing that only exists once
+    somebody is on a board: what they are on it. ``role`` is that role and not
+    the job title, which is :attr:`PersonRead.title` — the two were the same
+    word until CYLIST-45 and are deliberately no longer.
+    """
+
+    role: RoleRead | None = Field(
+        default=None,
+        description="Their role on this project, or null if they have none yet.",
+    )
+
+
 class Membership(Schema):
-    members: list[PersonRead]
+    members: list[MemberRead]

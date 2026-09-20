@@ -18,7 +18,7 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns, files
+from app.services import columns, files, people, permissions, roles
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -36,11 +36,29 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
     person, which is the whole difference multiple users make here — two
     people each get their own name on the projects they start.
 
+    They are also its admin. A project is seeded with the one role Cylist
+    makes — see :func:`app.services.roles.seed_admin` — and the creator wears
+    it, because "these roles are created by whoever creates the project" is
+    not a rule anybody can follow if the project starts with nobody able to.
+
+    And it starts open: everybody on it may do everything until its admin says
+    otherwise, which is what :func:`app.services.permissions.seed` writes. A
+    board that permitted nothing until somebody ticked boxes would make
+    creating one a two-step job, and would answer decision 4 differently from
+    the way Cylist has answered it since the start.
+
+    The agent joins too, with no role. A board only assigns work to its own
+    members, so an agent that had to be added by hand before it could be given
+    a card would be a directory entry that did nothing until somebody found the
+    People screen. It is an ordinary member once it is there: drop it from the
+    project and the board simply stops handing work to machines.
+
     Args:
-        creator_id: Who is starting it, and so the project's first member.
-            ``None`` for the bootstrap session, which has no person yet; the
-            project is simply created with nobody on it, and whoever creates
-            their account next adds themselves.
+        creator_id: Who is starting it, and so the project's first member and
+            first admin. ``None`` for the bootstrap session, which has no
+            person yet; the project is created with the admin role and nobody
+            in it, and the first person added to it takes the role — see
+            :func:`app.services.roles.fill_admin_vacancy`.
 
     Raises:
         ConflictError: if the key is already taken.
@@ -62,9 +80,16 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
 
     await columns.seed(session, project)
     await files.seed_root(session, project)
+    admin = await roles.seed_admin(session, project)
+    await permissions.seed(session, project)
 
     if creator_id is not None:
-        session.add(ProjectMember(project_id=project.id, person_id=creator_id))
+        session.add(ProjectMember(project_id=project.id, person_id=creator_id, role_id=admin.id))
+        await session.flush()
+
+    machine = await people.ensure_agent(session)
+    if not machine.is_archived and machine.id != creator_id:
+        session.add(ProjectMember(project_id=project.id, person_id=machine.id))
         await session.flush()
 
     # `members` is only populated by a SELECT, and a just-inserted row has not
@@ -144,19 +169,51 @@ async def set_members(
 ) -> list[Person]:
     """Replace the project's membership with exactly these people.
 
+    A diff rather than a rewrite. The obvious implementation — delete every
+    row, insert the new list — was fine while a membership row held nothing
+    but the two ids it joined; now that it also holds a role, that would throw
+    everyone's role away on every save, and the CLI's ``projects members
+    --add`` reads the list, appends one name and PUTs the whole thing back.
+    So the rows that survive are left exactly where they are.
+
+    Dropping the project's last admin is allowed, and the role passes to
+    whoever has been on the board longest — see
+    :func:`app.services.roles.fill_admin_vacancy`. This caller is saying who
+    is on the project, not who administers it, and refusing a membership edit
+    over a role would be answering a question nobody asked.
+
     Raises:
         UnprocessableRequestError: if any id is not in the directory, or names
             someone who has been archived.
     """
     people = await _load_people(session, person_ids)
 
-    await session.execute(delete(ProjectMember).where(ProjectMember.project_id == project.id))
+    wanted = set(person_ids)
+    current = set(
+        await session.scalars(
+            select(ProjectMember.person_id).where(ProjectMember.project_id == project.id)
+        )
+    )
+
+    leaving = current - wanted
+    if leaving:
+        await session.execute(
+            delete(ProjectMember).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.person_id.in_(leaving),
+            )
+        )
+
     session.add_all(
-        ProjectMember(project_id=project.id, person_id=person_id) for person_id in person_ids
+        ProjectMember(project_id=project.id, person_id=person_id)
+        for person_id in person_ids
+        if person_id not in current
     )
     await session.flush()
 
-    # The relationship was loaded before the rewrite; drop it so the next read
+    await roles.fill_admin_vacancy(session, project)
+
+    # The relationship was loaded before the change; drop it so the next read
     # reflects what we just wrote.
     await session.refresh(project, ["members"])
     return people
@@ -219,6 +276,23 @@ async def require_members(
         )
 
     return [found[person_id] for person_id in person_ids]
+
+
+async def is_member(session: AsyncSession, project_id: UUID, person_id: UUID) -> bool:
+    """Whether one person is on one project.
+
+    The same question :func:`require_members` asks, for the caller that wants
+    to answer it rather than refuse over it — a default that quietly steps
+    aside is not the same thing as a request that cannot be honoured.
+    """
+    return (
+        await session.scalar(
+            select(ProjectMember.person_id).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.person_id == person_id,
+            )
+        )
+    ) is not None
 
 
 async def member_counts(session: AsyncSession, project: Project) -> dict[PersonKind, int]:

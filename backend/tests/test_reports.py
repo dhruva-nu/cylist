@@ -24,7 +24,7 @@ TODAY = "2026-09-02"
 ADITI = {
     "name": "Aditi K",
     "kind": "team",
-    "role": "Backend engineer",
+    "title": "Backend engineer",
     "responsibilities": "Payments and webhooks.",
 }
 

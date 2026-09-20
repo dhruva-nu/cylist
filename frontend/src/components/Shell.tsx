@@ -44,6 +44,7 @@ function usePageWidth(): string | undefined {
     matchRoute({ to: '/p/$projectKey' }) ||
     matchRoute({ to: '/p/$projectKey/agents' }) ||
     matchRoute({ to: '/p/$projectKey/people' }) ||
+    matchRoute({ to: '/p/$projectKey/roles' }) ||
     matchRoute({ to: '/p/$projectKey/files' }) ||
     matchRoute({ to: '/p/$projectKey/goals' }) ||
     matchRoute({ to: '/p/$projectKey/goals/$goalRef' }) ||
@@ -160,6 +161,9 @@ function ProjectTabs() {
       >
         People
       </Link>
+      <Link to="/p/$projectKey/roles" params={{ projectKey }} activeProps={{ className: 'active' }}>
+        Roles
+      </Link>
       <Link
         to="/p/$projectKey/agents"
         params={{ projectKey }}
@@ -178,6 +182,7 @@ function Breadcrumbs() {
   const onBoard = matchRoute({ to: '/p/$projectKey/board' })
   const onFiles = matchRoute({ to: '/p/$projectKey/files' })
   const onPeople = matchRoute({ to: '/p/$projectKey/people' })
+  const onRoles = matchRoute({ to: '/p/$projectKey/roles' })
   const onVault = matchRoute({ to: '/p/$projectKey/vault' })
   // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
   const onGoals = matchRoute({ to: '/p/$projectKey/goals', fuzzy: true })
@@ -191,9 +196,11 @@ function Breadcrumbs() {
           ? 'Vault'
           : onPeople
             ? 'People'
-            : onAgents
-              ? 'Agents'
-              : null
+            : onRoles
+              ? 'Roles'
+              : onAgents
+                ? 'Agents'
+                : null
 
   if (!inProject) {
     return (

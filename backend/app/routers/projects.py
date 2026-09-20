@@ -10,15 +10,18 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
+from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.models.person import PersonKind
+from app.models.person import Person, PersonKind
 from app.models.project import Project
 from app.models.task import TaskStatus
+from app.routers import guards
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
+    MemberRead,
     Membership,
     MembershipUpdate,
     ProjectCreate,
@@ -26,7 +29,19 @@ from app.schemas.projects import (
     ProjectSummary,
     ProjectUpdate,
 )
-from app.services import activity, agents, columns, files, goals, projects, tasks, vault
+from app.schemas.roles import RoleRead
+from app.services import (
+    activity,
+    agents,
+    columns,
+    files,
+    goals,
+    permissions,
+    projects,
+    roles,
+    tasks,
+    vault,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -55,6 +70,14 @@ def _read(project: Project) -> ProjectRead:
         created_at=project.created_at,
         member_count=len(project.members),
     )
+
+
+CHANGE_PROJECT = guards.on_project(Permission.PROJECT)
+"""Renaming, rewording and archiving the project itself."""
+
+CHANGE_MEMBERSHIP = guards.on_project(Permission.PEOPLE)
+"""Saying who is on it. A different question from what the project is called,
+and often a different person's job, so it is a permission of its own."""
 
 
 @router.get("", response_model=list[ProjectRead], summary="List projects")
@@ -113,17 +136,23 @@ async def get_project(
 )
 async def get_summary(
     project: Project = Depends(resolved_project),
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
 ) -> ProjectSummary:
     """The counts behind the project hub's cards.
 
     One request behind all four cards on the project hub.
+
+    The file and secret counts are of what *this reader* can reach. A count is
+    a listing summed up, and one that said "11 files" to somebody who can only
+    open ten would have told them a file exists — which is the one thing a
+    level is for.
     """
+    readable = await permissions.readable_levels(session, project, principal)
     people_counts = await projects.member_counts(session, project)
     task_counts = await tasks.status_counts(session, project)
-    contents = await files.counts(session, project)
-    stored = await vault.counts(session, project)
+    contents = await files.counts(session, project, readable=readable)
+    stored = await vault.counts(session, project, readable=readable)
     agent_material = await agents.counts(session, project)
     goal_count, open_goals = await goals.counts_for_project(session, project)
     return ProjectSummary(
@@ -154,7 +183,7 @@ async def get_summary(
 async def update_project(
     body: ProjectUpdate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(CHANGE_PROJECT),
     session: AsyncSession = SessionDependency,
 ) -> ProjectRead:
     """Change any subset of a project's details. Omitted fields are left alone."""
@@ -174,7 +203,7 @@ async def update_project(
 @router.delete("/{project_ref}", response_model=Acknowledged, summary="Archive a project")
 async def archive_project(
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(CHANGE_PROJECT),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Archive a project, hiding it from the grid.
@@ -196,13 +225,38 @@ async def archive_project(
     return Acknowledged()
 
 
+async def _membership(session: AsyncSession, project: Project, members: list[Person]) -> Membership:
+    """Build the member list with each person's role on this project attached.
+
+    The roles come from a query of their own because ``Project.members`` runs
+    through ``secondary=`` and so never sees the join row the role sits on —
+    see :func:`app.services.roles.member_roles`.
+    """
+    worn = await roles.member_roles(session, project)
+    return Membership(
+        members=[
+            MemberRead(
+                **PersonRead.model_validate(person).model_dump(),
+                role=(RoleRead.model_validate(worn[person.id]) if person.id in worn else None),
+            )
+            for person in members
+        ]
+    )
+
+
 @router.get("/{project_ref}/members", response_model=Membership, summary="List members")
 async def list_members(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
 ) -> Membership:
-    """Who is on this project — the pool the assignee picker draws from."""
-    return Membership(members=[PersonRead.model_validate(p) for p in project.members])
+    """Who is on this project, and what each of them is on it.
+
+    The pool the assignee picker draws from, and the one place a person's role
+    is read from — `role` is null for anybody an admin has not said what they
+    are yet.
+    """
+    return await _membership(session, project, list(project.members))
 
 
 @router.put(
@@ -214,7 +268,7 @@ async def list_members(
 async def set_members(
     body: MembershipUpdate,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(CHANGE_MEMBERSHIP),
     session: AsyncSession = SessionDependency,
 ) -> Membership:
     """Set the project's membership to exactly these people.
@@ -233,4 +287,4 @@ async def set_members(
         project_id=project.id,
         payload={"member_count": len(people)},
     )
-    return Membership(members=[PersonRead.model_validate(person) for person in people])
+    return await _membership(session, project, people)

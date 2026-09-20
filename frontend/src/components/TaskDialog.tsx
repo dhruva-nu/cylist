@@ -71,6 +71,7 @@ import {
   type ColumnDueDate,
   type FiledItem,
   type Goal,
+  isMe,
   type Person,
   type Task,
   type TaskComment,
@@ -353,7 +354,7 @@ function TaskDetailView({
             <span className={styles.person}>
               <Avatar name={task.assignee.name} colour={task.assignee.colour} />
               {task.assignee.name}
-              <span className={styles.role}>· {task.assignee.role.split(',')[0]}</span>
+              <span className={styles.aside}>· {task.assignee.title.split(',')[0]}</span>
             </span>
           </ReadField>
           <ReadField label="Due date">
@@ -389,9 +390,9 @@ function TaskDetailView({
             // card still on its way says where it is and nothing more.
             <ReadField label="Column">
               {column?.name ?? '—'}
-              {task.outcome ? <span className={styles.role}>· {task.outcome}</span> : null}
+              {task.outcome ? <span className={styles.aside}>· {task.outcome}</span> : null}
               {task.finished_at ? (
-                <span className={styles.role}>
+                <span className={styles.aside}>
                   · finished {formatDue(task.finished_at.slice(0, 10))}
                 </span>
               ) : null}
@@ -511,7 +512,7 @@ function AgentSessions({
                 wording the history below uses. */}
             <span className={styles.agent}>agent</span>
             {session.actor_label}
-            <span className={styles.role}>
+            <span className={styles.aside}>
               · started {formatWhen(session.started_at)} · last seen{' '}
               {silentFor(session.last_seen_at, now)} ago
             </span>
@@ -864,6 +865,11 @@ function TaskForm({
    */
   onCancel: () => void
 }) {
+  // Who is looking, so a new card defaults to being theirs — the same answer
+  // the API gives a card created without an assignee. Read from the cache the
+  // auth gate already filled; a card started before it lands falls through to
+  // the first member, which is what it used to do for everybody.
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
   const [form, setForm] = useState<TaskInput>({
     title: task?.title ?? '',
     description: task?.description ?? '',
@@ -873,7 +879,11 @@ function TaskForm({
     // The date input's empty value is '', not null; the mutation turns it back
     // into the null the API reads as "no date".
     due_date: task?.due_date ?? '',
-    assignee_id: task?.assignee.id ?? members[0]?.id ?? '',
+    assignee_id:
+      task?.assignee.id ??
+      members.find((person) => isMe(person, identity.data))?.id ??
+      members[0]?.id ??
+      '',
     template_id: task?.template_id ?? null,
     goal_id: task?.goal_id ?? defaultGoalId ?? null,
     jira_ref: task?.jira_ref ?? '',
@@ -1274,7 +1284,7 @@ function TaskForm({
               >
                 {members.map((person) => (
                   <option key={person.id} value={person.id}>
-                    {person.name} — {person.role}
+                    {person.name} — {person.title}
                   </option>
                 ))}
               </select>
@@ -1381,7 +1391,7 @@ function TaskForm({
                     >
                       <Avatar name={person.name} colour={person.colour} />
                       {person.name.split(' ')[0]}
-                      <span className={styles.role}>· {person.role.split(',')[0]}</span>
+                      <span className={styles.aside}>· {person.title.split(',')[0]}</span>
                     </button>
                   ))}
                 </div>

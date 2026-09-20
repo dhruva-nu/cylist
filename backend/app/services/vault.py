@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import KEY_VERSION, VaultCipher
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.ids import uuid7
+from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 from app.schemas.vault import (
@@ -71,7 +72,12 @@ async def create_tree(session: AsyncSession, project: Project, data: VaultTreeCr
             details={"name": data.name},
         )
 
-    tree = VaultTree(project_id=project.id, name=data.name, position=len(existing))
+    tree = VaultTree(
+        project_id=project.id,
+        name=data.name,
+        position=len(existing),
+        default_sensitivity=(data.default_sensitivity or DEFAULT_LEVEL),
+    )
     session.add(tree)
     await session.flush()
     return tree
@@ -117,6 +123,9 @@ async def update_tree(session: AsyncSession, tree: VaultTree, data: VaultTreeUpd
     if data.position is not None:
         tree.position = data.position
 
+    if data.default_sensitivity is not None:
+        tree.default_sensitivity = data.default_sensitivity
+
     await session.flush()
     await session.refresh(tree)
     return tree
@@ -157,14 +166,26 @@ async def tree_sizes(session: AsyncSession, tree_ids: Sequence[UUID]) -> dict[UU
     return sizes
 
 
-async def counts(session: AsyncSession, project: Project) -> VaultCounts:
-    """Count a project's trees, and the credentials across all of them."""
+async def counts(
+    session: AsyncSession, project: Project, *, readable: frozenset[Sensitivity] | None = None
+) -> VaultCounts:
+    """Count a project's trees, and the credentials across all of them.
+
+    Args:
+        readable: The levels the reader is cleared for. Secrets above them are
+            not counted, for the reason they are not listed — see
+            :func:`app.services.files.counts`. Trees are structure and are
+            always counted.
+    """
+    secrets = func.count(VaultNode.id).filter(VaultNode.kind == VaultNodeKind.SECRET)
+    if readable is not None:
+        secrets = func.count(VaultNode.id).filter(
+            VaultNode.kind == VaultNodeKind.SECRET,
+            VaultNode.sensitivity.in_([level.value for level in readable]),
+        )
     row = (
         await session.execute(
-            select(
-                func.count(func.distinct(VaultTree.id)),
-                func.count(VaultNode.id).filter(VaultNode.kind == VaultNodeKind.SECRET),
-            )
+            select(func.count(func.distinct(VaultTree.id)), secrets)
             .select_from(VaultTree)
             .outerjoin(VaultNode, VaultNode.tree_id == VaultTree.id)
             .where(VaultTree.project_id == project.id)
@@ -226,6 +247,14 @@ async def create_node(
         name=data.name,
         kind=data.kind,
         position=len(siblings),
+        # Inherited from the branch above, or from the tree at the top level.
+        # A secret put inside Production is a Production secret, and asking
+        # the caller to say so again is how one ends up more readable than
+        # everything around it.
+        sensitivity=(
+            data.sensitivity
+            or (parent.sensitivity if parent is not None else tree.default_sensitivity)
+        ),
     )
     if data.secret is not None:
         node.secret = _seal(cipher, node.id, data.secret)
@@ -252,6 +281,9 @@ async def update_node(
 
     if data.secret is not None:
         _amend_secret(cipher, node, data.secret)
+
+    if data.sensitivity is not None:
+        node.sensitivity = data.sensitivity
 
     await session.flush()
     await session.refresh(node)

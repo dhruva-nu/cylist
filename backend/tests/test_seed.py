@@ -103,11 +103,17 @@ class TestWhatItWrites:
     async def test_writes_each_person_once(
         self, session: AsyncSession, seeded: seed.Summary
     ) -> None:
-        """The mock repeats people per project; the directory is global."""
+        """The mock repeats people per project; the directory is global.
+
+        "Agent" is not one of the mock's people and is not written here: it is
+        the machine, and every project brings it into the directory as it is
+        created — see :func:`app.services.projects.create`.
+        """
         names = list(await session.scalars(select(Person.name)))
 
         assert sorted(names) == [
             "Aditi K",
+            "Agent",
             "Dhruva N",
             "Lena W",
             "Meera P",
@@ -382,7 +388,7 @@ class TestSurveying:
             ("ORB", "Orbit Internal Portal"),
         ]
         assert inventory.tasks == 15
-        assert inventory.people == 7
+        assert inventory.people == 8  # the mock's seven, and the agent
 
     async def test_does_not_count_the_root_folders(
         self, session: AsyncSession, seeded: seed.Summary
@@ -509,7 +515,7 @@ class TestForcing:
 
         assert code == 0
         assert await count_of(session, Project) == 3
-        assert await count_of(session, Person) == 7
+        assert await count_of(session, Person) == 8
         assert await count_of(session, Task) == 15
 
     async def test_leaves_the_audit_trail_and_the_tokens_alone(
@@ -588,7 +594,7 @@ class TestFailingPartWay:
 
         assert await count_of(session, Project) == 3
         assert await count_of(session, Task) == 15
-        assert await count_of(session, Person) == 7
+        assert await count_of(session, Person) == 8
 
     async def test_the_bytes_survive_a_failed_force(
         self,

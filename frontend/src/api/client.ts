@@ -58,12 +58,25 @@ export interface Person {
   id: string
   name: string
   kind: PersonKind
-  role: string
+  /**
+   * Their job description — "Finance controller, Atlas".
+   *
+   * Called `title` rather than `role` since CYLIST-45, which gave the word
+   * role to a thing a project's admin creates and hands out. See `Role`.
+   */
+  title: string
   responsibilities: string
   email: string | null
   colour: string
   archived_at: string | null
   created_at: string
+  /**
+   * Whether this entry is the machine rather than a person.
+   *
+   * It is assigned work like anybody else and never signs in — a board hands
+   * a card to it the way it hands one to a colleague.
+   */
+  is_agent: boolean
   /** Whether they can sign in as themselves right now. */
   has_account: boolean
   /** Whether an unaccepted, unexpired invitation is outstanding. */
@@ -84,9 +97,148 @@ export const isMe = (person: Pick<Person, 'id'>, identity: Identity | undefined)
 export interface PersonInput {
   name: string
   kind: PersonKind
-  role: string
+  title: string
   responsibilities: string
   email?: string | null
+}
+
+/**
+ * A role on a project — "Reviewer", "QA" — invented by that project's admin.
+ *
+ * Per project, not per person: the same person can be the Admin of one board
+ * and a Reviewer on another. Since CYLIST-46 a role also carries a set of
+ * `Permission`s saying what its holders may do here; the admin role holds
+ * every one of them by being the admin role, and is the only one that can
+ * hand the others out.
+ */
+export interface Role {
+  id: string
+  name: string
+  description: string
+  colour: string
+  /** Whether holders of this role may manage the project's roles. */
+  is_admin: boolean
+}
+
+/** A role as the page an admin manages them from needs it. */
+export interface RoleSummary extends Role {
+  member_count: number
+  created_at: string
+}
+
+export interface RoleInput {
+  name: string
+  description?: string
+  colour?: string | null
+}
+
+/**
+ * One thing a role may allow, from a vocabulary the server fixes.
+ *
+ * A role's *name* is the admin's invention; what it may do cannot be, because
+ * every entry is a fence a particular endpoint recognises. Kept as a union
+ * rather than a bare string so that a typo in a permission name is a build
+ * error rather than a tick box that silently never matches.
+ */
+export type Permission =
+  | 'tasks'
+  | 'comments'
+  | 'goals'
+  | 'goal_assign'
+  | 'goal_owner'
+  | 'board'
+  | 'files'
+  | 'vault'
+  | 'vault_reveal'
+  | 'people'
+  | 'agents'
+  | 'project'
+
+/**
+ * How far something stored on a project may travel.
+ *
+ * Uploads carry one; roles carry the highest they may read. Ordered:
+ * `public` < `internal` < `restricted`.
+ */
+export type Sensitivity = 'public' | 'internal' | 'restricted'
+
+/** One level, described well enough to draw a picker. */
+export interface SensitivityInfo {
+  key: Sensitivity
+  label: string
+  summary: string
+}
+
+/**
+ * What one role may do at one column of the board.
+ *
+ * Every column is reported, restricted or not, so the grid draws from this
+ * alone. What is *stored* is only the exceptions — see the server's
+ * `RoleColumnRule`.
+ */
+export interface ColumnRule {
+  column_id: string
+  name: string
+  /** Whether a card may be moved into it. */
+  may_enter: boolean
+  /** Whether the sub-stages a card passes through here may be set. */
+  may_stage: boolean
+}
+
+/** One permission, described well enough to draw a labelled tick box. */
+export interface PermissionInfo {
+  key: Permission
+  label: string
+  summary: string
+}
+
+/**
+ * One line of the grid: a role, and what it allows.
+ *
+ * `role_id` is null for the line called "Everyone else" — the project's
+ * baseline, which covers everybody on it who has no role and everybody who is
+ * not on it at all.
+ */
+export interface RolePermissions {
+  role_id: string | null
+  name: string
+  colour: string
+  is_admin: boolean
+  member_count: number
+  permissions: Permission[]
+  /** One entry per column of the board, in board order. */
+  columns: ColumnRule[]
+  /** The most sensitive thing this role may read. */
+  clearance: Sensitivity
+}
+
+/** The whole grid, and the words to draw it with. */
+export interface ProjectPermissions {
+  catalogue: PermissionInfo[]
+  levels: SensitivityInfo[]
+  roles: RolePermissions[]
+  /** What the reader may do here — what a client hides buttons by. */
+  mine: Permission[]
+  /**
+   * Whether the reader may change any of it.
+   *
+   * The server's answer rather than one worked out from the member list:
+   * three different callers may — the admin role's holders, the bootstrap
+   * session, and an `admin`-scoped credential on a project whose last admin
+   * was archived — and a client that reimplemented the rule would be wrong
+   * about at least one of them.
+   */
+  may_manage: boolean
+}
+
+/**
+ * A person as they appear on a project, rather than in the directory.
+ *
+ * `role` is null until an admin has said what they are, which is what every
+ * member starts as.
+ */
+export interface Member extends Person {
+  role: Role | null
 }
 
 export interface Project {
@@ -619,6 +771,10 @@ export interface TaskInput {
    * on the board.
    */
   column_due_dates?: ColumnDueDateInput[]
+  /**
+   * Who owns it. The form always sends one — it opens on whoever is signed
+   * in — though the API takes a card without it and puts it on its creator.
+   */
   assignee_id: string
   /** One of the project's templates, or null for a card with no template. */
   template_id: string | null
@@ -653,6 +809,8 @@ export interface VaultTree {
   project_id: string
   name: string
   position: number
+  /** What nodes added here are classified as unless the caller says. */
+  default_sensitivity: Sensitivity
   node_count: number
   secret_count: number
   created_at: string
@@ -680,6 +838,8 @@ export interface VaultNode {
   name: string
   kind: VaultNodeKind
   position: number
+  /** How far it may travel. A branch above your clearance hides its subtree. */
+  sensitivity: Sensitivity
   created_at: string
   updated_at: string
   secret: VaultSecretMeta | null
@@ -699,6 +859,8 @@ export interface VaultNodeInput {
   name: string
   kind: VaultNodeKind
   secret?: SecretInput
+  /** Null or omitted inherits the parent branch's, or the tree's default. */
+  sensitivity?: Sensitivity | null
 }
 
 export interface RevealedSecret {
@@ -757,6 +919,8 @@ export interface Folder {
    * holding files and folders alike, and impossible to rename or delete.
    */
   is_root: boolean
+  /** What things uploaded here are classified as unless the caller says. */
+  default_sensitivity: Sensitivity
   created_at: string
 }
 
@@ -779,6 +943,8 @@ export interface FileItem {
   folder_id: string
   kind: ItemKind
   name: string
+  /** How far it may travel. A role not cleared this high is not shown it. */
+  sensitivity: Sensitivity
   url: string | null
   source: ItemSource
   size: number | null
@@ -812,6 +978,8 @@ export interface LinkInput {
   url: string
   source: ItemSource
   added_by?: string | null
+  /** Null or omitted takes the folder's default. */
+  sensitivity?: Sensitivity | null
 }
 
 export interface Health {
@@ -938,19 +1106,89 @@ export const api = {
   archiveProject: (ref: string) =>
     request<{ ok: boolean }>(`/projects/${ref}`, { method: 'DELETE' }),
 
-  listMembers: (ref: string) => request<{ members: Person[] }>(`/projects/${ref}/members`),
+  listMembers: (ref: string) => request<{ members: Member[] }>(`/projects/${ref}/members`),
   setMembers: (ref: string, personIds: string[]) =>
-    request<{ members: Person[] }>(`/projects/${ref}/members`, {
+    request<{ members: Member[] }>(`/projects/${ref}/members`, {
       method: 'PUT',
       body: body({ person_ids: personIds }),
     }),
 
+  listRoles: (ref: string) => request<RoleSummary[]>(`/projects/${ref}/roles`),
+  createRole: (ref: string, input: RoleInput) =>
+    request<RoleSummary>(`/projects/${ref}/roles`, { method: 'POST', body: body(input) }),
+  updateRole: (ref: string, roleRef: string, input: Partial<RoleInput>) =>
+    request<RoleSummary>(`/projects/${ref}/roles/${roleRef}`, {
+      method: 'PATCH',
+      body: body(input),
+    }),
+  deleteRole: (ref: string, roleRef: string) =>
+    request<void>(`/projects/${ref}/roles/${roleRef}`, { method: 'DELETE' }),
+  /** `role` is a role id or name; null takes their role off. */
+  setMemberRole: (ref: string, personId: string, role: string | null) =>
+    request<Role | null>(`/projects/${ref}/members/${personId}/role`, {
+      method: 'PUT',
+      body: body({ role }),
+    }),
+  getPermissions: (ref: string) => request<ProjectPermissions>(`/projects/${ref}/permissions`),
+  setRolePermissions: (ref: string, roleRef: string, permissions: Permission[]) =>
+    request<RolePermissions>(`/projects/${ref}/roles/${roleRef}/permissions`, {
+      method: 'PUT',
+      body: body({ permissions }),
+    }),
+  /** What somebody here with no role — and anybody not on the project — may do. */
+  setBaselinePermissions: (ref: string, permissions: Permission[]) =>
+    request<RolePermissions>(`/projects/${ref}/permissions/everyone-else`, {
+      method: 'PUT',
+      body: body({ permissions }),
+    }),
+  /**
+   * Where on the board a role may work. The whole line every time — a column
+   * left out is left unrestricted.
+   */
+  setColumnRules: (ref: string, roleId: string | null, columns: ColumnRule[]) =>
+    request<RolePermissions>(
+      roleId === null
+        ? `/projects/${ref}/permissions/everyone-else/columns`
+        : `/projects/${ref}/roles/${roleId}/columns`,
+      {
+        method: 'PUT',
+        body: body({
+          columns: columns.map(({ column_id, may_enter, may_stage }) => ({
+            column_id,
+            may_enter,
+            may_stage,
+          })),
+        }),
+      },
+    ),
+  /** How sensitive a thing a role may read. */
+  setClearance: (ref: string, roleId: string | null, clearance: Sensitivity) =>
+    request<RolePermissions>(
+      roleId === null
+        ? `/projects/${ref}/permissions/everyone-else/clearance`
+        : `/projects/${ref}/roles/${roleId}/clearance`,
+      { method: 'PUT', body: body({ clearance }) },
+    ),
+
   /** The project's root folder, with the whole tree nested inside it. */
   getTree: (ref: string) => request<FolderNode>(`/projects/${ref}/tree`),
-  createFolder: (ref: string, input: { name: string; parent_id: string | null }) =>
-    request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
-  updateFolder: (id: string, input: { name?: string; parent_id?: string | null }) =>
-    request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
+  createFolder: (
+    ref: string,
+    input: {
+      name: string
+      parent_id: string | null
+      /** Null inherits the parent folder's, which is usually what is wanted. */
+      default_sensitivity?: Sensitivity | null
+    },
+  ) => request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
+  updateFolder: (
+    id: string,
+    input: {
+      name?: string
+      parent_id?: string | null
+      default_sensitivity?: Sensitivity
+    },
+  ) => request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
   /**
@@ -959,10 +1197,18 @@ export const api = {
    */
   listProjectItems: (ref: string) => request<FiledItem[]>(`/projects/${ref}/items`),
 
-  uploadFile: (folderId: string, file: File, addedBy?: string | null) => {
+  uploadFile: (
+    folderId: string,
+    file: File,
+    addedBy?: string | null,
+    level?: Sensitivity | null,
+  ) => {
     const form = new FormData()
     form.append('file', file)
     if (addedBy) form.append('added_by', addedBy)
+    // Left off rather than sent empty: omitting it is what makes the server
+    // fall back to the folder's default.
+    if (level) form.append('sensitivity', level)
     return request<FileItem>(`/folders/${folderId}/upload`, { method: 'POST', body: form })
   },
   addLink: (folderId: string, input: LinkInput) =>
@@ -1091,8 +1337,11 @@ export const api = {
   archivePerson: (id: string) => request<{ ok: boolean }>(`/people/${id}`, { method: 'DELETE' }),
 
   listVaultTrees: (ref: string) => request<VaultTree[]>(`/projects/${ref}/vault/trees`),
-  createVaultTree: (ref: string, name: string) =>
-    request<VaultTree>(`/projects/${ref}/vault/trees`, { method: 'POST', body: body({ name }) }),
+  createVaultTree: (ref: string, name: string, defaultSensitivity?: Sensitivity | null) =>
+    request<VaultTree>(`/projects/${ref}/vault/trees`, {
+      method: 'POST',
+      body: body({ name, default_sensitivity: defaultSensitivity ?? null }),
+    }),
   getVaultTree: (treeId: string) => request<VaultTreeDetail>(`/vault/trees/${treeId}`),
   renameVaultTree: (treeId: string, name: string) =>
     request<VaultTree>(`/vault/trees/${treeId}`, { method: 'PATCH', body: body({ name }) }),
@@ -1101,8 +1350,10 @@ export const api = {
 
   createVaultNode: (input: VaultNodeInput) =>
     request<VaultNode>('/vault/nodes', { method: 'POST', body: body(input) }),
-  updateVaultNode: (nodeId: string, input: { name?: string; secret?: SecretInput }) =>
-    request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: body(input) }),
+  updateVaultNode: (
+    nodeId: string,
+    input: { name?: string; secret?: SecretInput; sensitivity?: Sensitivity },
+  ) => request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: body(input) }),
   deleteVaultNode: (nodeId: string) =>
     request<{ ok: boolean }>(`/vault/nodes/${nodeId}`, { method: 'DELETE' }),
   moveVaultNode: (nodeId: string, parentId: string | null, position: number) =>
