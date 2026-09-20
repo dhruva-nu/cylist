@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Person, ProjectMember
+from tests.conftest import OWNER_NAME
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
@@ -34,10 +35,18 @@ async def _project_and_people(client: AsyncClient) -> tuple[str, str]:
 
 
 class TestSettingMembership:
-    async def test_starts_empty(self, signed_in: AsyncClient) -> None:
+    async def test_starts_with_whoever_created_it(self, signed_in: AsyncClient) -> None:
+        """A new project is not empty: the person who started it is on it.
+
+        Covered at length in ``test_projects.py``; asserted here because every
+        other test in this file counts members, and this is the one they are
+        all counting from.
+        """
         await signed_in.post("/projects", json=ATLAS)
 
-        assert (await signed_in.get("/projects/ATL/members")).json() == {"members": []}
+        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
+
+        assert [member["name"] for member in members] == [OWNER_NAME]
 
     async def test_puts_people_on_a_project(self, signed_in: AsyncClient) -> None:
         team, client_person = await _project_and_people(signed_in)
@@ -73,7 +82,8 @@ class TestSettingMembership:
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": []})
 
-        assert len((await signed_in.get("/people")).json()) == 2
+        # The two this test added, plus the person it is signed in as.
+        assert len((await signed_in.get("/people")).json()) == 3
 
     async def test_duplicate_ids_are_collapsed(self, signed_in: AsyncClient) -> None:
         """A double-submitted form must not violate the composite primary key."""
@@ -145,14 +155,12 @@ class TestCounts:
         assert summary["client_count"] == 1
         assert summary["member_count"] == 2
 
-    async def test_summary_counts_are_zero_for_an_empty_project(
-        self, signed_in: AsyncClient
-    ) -> None:
+    async def test_a_fresh_project_counts_only_its_creator(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)
 
         summary = (await signed_in.get("/projects/ATL/summary")).json()
 
-        assert summary["team_count"] == 0
+        assert summary["team_count"] == 1
         assert summary["client_count"] == 0
 
 

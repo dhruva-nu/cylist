@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from typing import NamedTuple
 from uuid import UUID
 
 from sqlalchemy import select
@@ -31,9 +32,24 @@ from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.models.activity import Channel
 from app.models.agent_session import AgentSession, AgentSessionReason
+from app.models.api_token import ApiToken
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
 from app.services import activity, agent_sessions
+
+
+class OpenRow(NamedTuple):
+    """An open agent session, with the two facts closing it needs.
+
+    Both are one join away from the session row and neither is on it, so they
+    are fetched with it rather than looked up per row: the project to publish
+    the change into, and the person whose token the agent is holding.
+    """
+
+    row: AgentSession
+    project_id: UUID
+    person_id: UUID | None
+
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +115,9 @@ async def end_session(
     one open row, and this finds it without being told which.
     """
     rows = [
-        pair for pair in await _open_rows(session) if pair[0].client_session_id == client_session_id
+        entry
+        for entry in await _open_rows(session)
+        if entry.row.client_session_id == client_session_id
     ]
     return await _end_each(session, rows, cause=cause, reason=reason)
 
@@ -120,11 +138,7 @@ async def reap_unwitnessed(
     """
     cutoff = clock_now() - quiet_after
     rows = await _open_rows(session, quiet_before=cutoff)
-    forgotten = [
-        (row, project_id)
-        for row, project_id in rows
-        if row.client_session_id not in live_session_ids
-    ]
+    forgotten = [entry for entry in rows if entry.row.client_session_id not in live_session_ids]
     return await _end_each(session, forgotten, cause="unwitnessed")
 
 
@@ -132,18 +146,33 @@ async def _open_rows(
     session: AsyncSession,
     *,
     quiet_before: datetime | None = None,
-) -> list[tuple[AgentSession, UUID]]:
-    """Every open session, with the project its card belongs to."""
-    query = select(AgentSession, Task.project_id).join(Task, Task.id == AgentSession.task_id)
-    query = query.where(AgentSession.ended_at.is_(None))
+) -> list[OpenRow]:
+    """Every open session, with the project its card belongs to and whose it is.
+
+    The person comes along on an outer join rather than a lookup per row: the
+    trail entry this ends up writing has to name the same person every other
+    entry about this agent named, and a reaper that quietly attributed them to
+    nobody would leave a gap in one person's feed exactly where their agent
+    went quiet. Outer because the token may since have been revoked and
+    deleted, and a session whose owner cannot be named still has to be closed.
+    """
+    query = (
+        select(AgentSession, Task.project_id, ApiToken.person_id)
+        .join(Task, Task.id == AgentSession.task_id)
+        .outerjoin(ApiToken, ApiToken.id == AgentSession.token_id)
+        .where(AgentSession.ended_at.is_(None))
+    )
     if quiet_before is not None:
         query = query.where(AgentSession.last_seen_at < quiet_before)
-    return [(row, project_id) for row, project_id in (await session.execute(query)).all()]
+    return [
+        OpenRow(row, project_id, person_id)
+        for row, project_id, person_id in (await session.execute(query)).all()
+    ]
 
 
 async def _end_each(
     session: AsyncSession,
-    rows: list[tuple[AgentSession, UUID]],
+    rows: list[OpenRow],
     *,
     cause: str,
     reason: AgentSessionReason = AgentSessionReason.CONNECTION_LOST,
@@ -158,11 +187,11 @@ async def _end_each(
         return 0
 
     moment = clock_now()
-    for row, project_id in rows:
+    for row, project_id, person_id in rows:
         transition = agent_sessions.close(row, reason, project_id, moment, cause=cause)
         await activity.record(
             session,
-            _principal_of(row),
+            _principal_of(row, person_id),
             transition.verb,
             entity_type="task",
             entity_id=transition.task_id,
@@ -178,17 +207,18 @@ async def _end_each(
     return len(rows)
 
 
-def _principal_of(row: AgentSession) -> Principal:
+def _principal_of(row: AgentSession, person_id: UUID | None) -> Principal:
     """Attribute the ending to the agent it happened to, not to the server.
 
     The trail reads "the agent's session ended", and the actor it names should
     be the agent — under the label the row was written with, which outlives
-    the token that made it. No scopes: nothing downstream of ``activity.record``
-    checks them, and inventing some would be claiming authority this has not
-    been given.
+    the token that made it — acting for whoever's token it was. No scopes:
+    nothing downstream of ``activity.record`` checks them, and inventing some
+    would be claiming authority this has not been given.
     """
     return Principal(
         token_id=row.token_id,
+        person_id=person_id,
         label=row.actor_label,
         scopes=frozenset(),
         channel=Channel.API,

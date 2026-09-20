@@ -3,6 +3,11 @@
 Call :func:`record` from the service that performed the change, never from a
 router — that way an action logged once is logged however it was triggered.
 
+Every row carries both halves of "who": the credential, and the person behind
+it. The credential answers *how* — this browser session, that agent's token —
+and the person answers *who*, which is the half that survives the credential
+being revoked and the half a reader actually wants.
+
 Reading is the other half, and it is asked in two shapes. :func:`for_entity`
 narrows the trail to one thing, which is how a card answers "what happened to
 me"; :func:`between` narrows it to one project over a stretch of time, which is
@@ -52,6 +57,7 @@ async def record(
     """
     entry = Activity(
         actor_token_id=principal.token_id,
+        actor_person_id=principal.person_id,
         actor_label=principal.label,
         channel=principal.channel,
         verb=verb,

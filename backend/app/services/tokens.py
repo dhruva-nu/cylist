@@ -7,6 +7,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.scopes import Scope
@@ -22,12 +23,20 @@ async def issue(
     name: str,
     kind: TokenKind,
     scopes: Iterable[Scope],
+    person_id: UUID | None,
     ttl: timedelta | None = None,
 ) -> tuple[ApiToken, str]:
     """Create a credential and return it with its one-time plaintext.
 
     The plaintext is the only copy; it is returned to the caller and then
     forgotten. Only its digest reaches the database.
+
+    Args:
+        person_id: Who the credential acts as — whoever signed in, or whoever
+            minted it for an agent. Keyword-only and without a default on
+            purpose: every caller has to have an answer, and the one correct
+            ``None`` (the bootstrap session, before any account exists) is
+            worth writing out at the call site rather than falling into.
     """
     plaintext, digest = generate_token()
     token = ApiToken(
@@ -35,6 +44,7 @@ async def issue(
         kind=kind,
         token_hash=digest,
         scopes=sorted(scope.value for scope in scopes),
+        person_id=person_id,
         expires_at=now() + ttl if ttl is not None else None,
     )
     session.add(token)
@@ -55,6 +65,11 @@ async def list_api_tokens(session: AsyncSession) -> list[ApiToken]:
 
     Session cookies are excluded: they are an implementation detail of being
     logged in, not something to manage on a settings page.
+
+    Everybody's, not just the caller's. Tokens are managed with the ``admin``
+    scope, and an admin who can revoke a credential but cannot see it is an
+    admin who cannot do the job the scope exists for. Which person each one
+    acts as is on the row.
     """
     result = await session.scalars(
         select(ApiToken)
@@ -70,6 +85,28 @@ async def revoke(session: AsyncSession, token_id: UUID) -> ApiToken:
     if not token.is_revoked:
         token.revoked_at = now()
     return token
+
+
+async def revoke_for_person(session: AsyncSession, person_id: UUID) -> int:
+    """Revoke every live credential belonging to one person, returning how many.
+
+    What archiving somebody calls. Their sessions and their agents' tokens go
+    at once, because "they have left" has to mean it before the cookie in
+    their browser expires a month from now.
+
+    A bulk UPDATE rather than a loop: this runs inside the request that
+    archives them, and the number of tokens one person holds is not bounded by
+    anything.
+    """
+    result = await session.execute(
+        sql_update(ApiToken)
+        .where(ApiToken.person_id == person_id, ApiToken.revoked_at.is_(None))
+        .values(revoked_at=now())
+        # Postgres counts what it touched for free; without this the caller
+        # would have to SELECT first to be able to say how many went.
+        .returning(ApiToken.id)
+    )
+    return len(result.all())
 
 
 async def revoke_by_digest(session: AsyncSession, digest: str) -> None:

@@ -20,9 +20,12 @@ on purpose, and the endpoint says nothing about what is behind them.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Environment, Settings, app_settings
+from app.db import SessionDependency
 from app.schemas.common import Schema
+from app.services import people
 
 router = APIRouter(tags=["setup"])
 
@@ -50,14 +53,29 @@ class SetupInfo(Schema):
     environment: Environment
     agent_scopes: list[str]
 
+    has_accounts: bool
+    """Whether anybody here can sign in yet.
+
+    False means this deployment is still on its bootstrap password, and the
+    sign-in screen should ask for a password alone rather than for an email
+    that does not exist yet. Saying so reveals nothing a stranger can use:
+    they still need the password, and a server that answered "some account
+    exists" for every deployment would simply make the screen wrong on the one
+    day it matters.
+    """
+
 
 @router.get("/setup", response_model=SetupInfo, summary="How to reach this server")
-async def setup(settings: Settings = Depends(app_settings)) -> SetupInfo:
+async def setup(
+    settings: Settings = Depends(app_settings),
+    session: AsyncSession = SessionDependency,
+) -> SetupInfo:
     """Describe this deployment to a client that is configuring itself."""
     return SetupInfo(
         urls=_normalise(settings.client_urls),
         environment=settings.environment,
         agent_scopes=AGENT_SCOPES,
+        has_accounts=await people.has_any_account(session),
     )
 
 

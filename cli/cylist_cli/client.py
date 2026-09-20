@@ -74,7 +74,7 @@ class Client:
         """``urls`` is one address or an ordered list of them to try.
 
         ``token`` is ``None`` for the two things that happen before there is
-        one: reading ``/setup``, and exchanging the owner's password for a
+        one: reading ``/setup``, and exchanging your password for a
         token. No header at all rather than an empty one, because the server
         reads ``Authorization`` in preference to the session cookie — an empty
         bearer would refuse the very request that is trying to log in.

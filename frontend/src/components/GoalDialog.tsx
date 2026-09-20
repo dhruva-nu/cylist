@@ -9,9 +9,9 @@
  * a board that has stopped looking like one thing.
  */
 
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, type Goal, type GoalInput, type GoalStatus, type Person } from '../api/client'
+import { api, isMe, type Goal, type GoalInput, type GoalStatus, type Person } from '../api/client'
 import { GOAL_STATUS_LABELS } from './GoalMarks'
 import { MentionBox } from './Mentions'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
@@ -65,6 +65,10 @@ export function GoalDialog({
   /** Where to go once the goal is gone; the goal's own page leaves for the list. */
   onDeleted?: () => void
 }) {
+  // Who is looking, so a new goal defaults to being owned by them. Read from
+  // the cache the auth gate already filled; a goal started before it lands
+  // falls through to the first member, which is what it used to do anyway.
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
   const [form, setForm] = useState<GoalInput>(
     goal
       ? {
@@ -82,7 +86,8 @@ export function GoalDialog({
           // by the server from the name, which is a better guess than the
           // first swatch and stays stable if the goal is renamed and remade.
           target_date: null,
-          owner_id: members.find((person) => person.is_me)?.id ?? members[0]?.id ?? '',
+          owner_id:
+            members.find((person) => isMe(person, identity.data))?.id ?? members[0]?.id ?? '',
         },
   )
   const [confirmingDelete, setConfirmingDelete] = useState(false)

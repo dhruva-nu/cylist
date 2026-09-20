@@ -73,7 +73,9 @@ class Settings(BaseSettings):
 
     Secrets (``password_hash``, ``vault_key``) default to empty so the app can
     boot in development before they are generated; the endpoints that need them
-    fail loudly rather than silently accepting everything.
+    fail loudly rather than silently accepting everything — an empty
+    ``password_hash`` refuses every bootstrap login rather than accepting
+    every one.
     """
 
     model_config = SettingsConfigDict(
@@ -101,6 +103,14 @@ class Settings(BaseSettings):
 
     # --- Secrets ----------------------------------------------------------
     password_hash: str = ""
+    """Argon2 hash of the *bootstrap* password — see :mod:`app.routers.auth`.
+
+    Not anybody's password. It is accepted at ``POST /auth/login`` only while
+    no person in the directory has one of their own, which makes it the way a
+    fresh deployment is opened and nothing else. Everyday passwords live on
+    ``person.password_hash`` and never pass through configuration.
+    """
+
     vault_key: str = ""
 
     # --- HTTP -------------------------------------------------------------

@@ -18,10 +18,10 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns, files, people
+from app.services import columns, files
 
 
-async def create(session: AsyncSession, data: ProjectCreate) -> Project:
+async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
     """Start a new project, board and file tree included.
 
     The starter columns and the root folder are part of creating a project
@@ -30,9 +30,17 @@ async def create(session: AsyncSession, data: ProjectCreate) -> Project:
     nothing useful to do with the project until someone had run a setup step
     whose outcome was never in doubt.
 
-    Whoever is marked as you (:func:`app.services.people.get_me`) joins the
-    project for the same reason: the first task needs an assignee, and it is
-    never a surprise that the person who started the project is on it.
+    Whoever started it joins it for the same reason: the first task needs an
+    assignee, and it is never a surprise that the person who created the
+    project is on it. That is the caller now rather than a single flagged
+    person, which is the whole difference multiple users make here — two
+    people each get their own name on the projects they start.
+
+    Args:
+        creator_id: Who is starting it, and so the project's first member.
+            ``None`` for the bootstrap session, which has no person yet; the
+            project is simply created with nobody on it, and whoever creates
+            their account next adds themselves.
 
     Raises:
         ConflictError: if the key is already taken.
@@ -55,9 +63,8 @@ async def create(session: AsyncSession, data: ProjectCreate) -> Project:
     await columns.seed(session, project)
     await files.seed_root(session, project)
 
-    me = await people.get_me(session)
-    if me is not None and not me.is_archived:
-        session.add(ProjectMember(project_id=project.id, person_id=me.id))
+    if creator_id is not None:
+        session.add(ProjectMember(project_id=project.id, person_id=creator_id))
         await session.flush()
 
     # `members` is only populated by a SELECT, and a just-inserted row has not

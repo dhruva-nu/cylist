@@ -389,11 +389,29 @@ ACTIVITY = [
     }
 ]
 
+PERSON = {
+    "id": "0192f3c4-000a-7000-8000-00000000000a",
+    "name": "Dhruva N",
+    "kind": "team",
+    "role": "Tech lead",
+    "responsibilities": "Runs this Cylist.",
+    "email": "dhruva@cylist.dev",
+    "colour": "#1D7D46",
+    "archived_at": None,
+    "created_at": "2026-02-06T09:00:00Z",
+    "has_account": True,
+    "invite_is_pending": False,
+}
+
 IDENTITY = {
     "token_id": "0192f3c4-000a-7000-8000-000000000001",
     "label": "board-tidy agent",
     "channel": "api",
     "scopes": ["read", "write"],
+    # A token acts as whoever minted it, so every identity here has a person
+    # behind it. The one shape that does not is the bootstrap session, which
+    # `test_setup` builds explicitly where it needs one.
+    "person": PERSON,
 }
 
 TAILNET_URL = "https://cylist.tailnet.test"
@@ -402,6 +420,7 @@ SETUP = {
     "urls": ["http://cylist.test", TAILNET_URL],
     "environment": "test",
     "agent_scopes": ["read", "write"],
+    "has_accounts": True,
 }
 
 MINTED_TOKEN = "cyl_minted_for_this_machine"

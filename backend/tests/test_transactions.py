@@ -96,7 +96,7 @@ class TestCommitOrdering:
         listed = (await signed_in.get("/people")).json()
 
         assert created.status_code == 201
-        assert [person["id"] for person in listed] == [created.json()["id"]]
+        assert created.json()["id"] in [person["id"] for person in listed]
 
     async def test_an_archived_person_is_out_of_the_very_next_listing(
         self, signed_in: AsyncClient
@@ -105,4 +105,5 @@ class TestCommitOrdering:
 
         await signed_in.delete(f"/people/{created['id']}")
 
-        assert (await signed_in.get("/people")).json() == []
+        listed = (await signed_in.get("/people")).json()
+        assert created["id"] not in [person["id"] for person in listed]

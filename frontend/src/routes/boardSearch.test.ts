@@ -30,7 +30,8 @@ const ADITI: Person = {
   colour: '#1D7D46',
   archived_at: null,
   created_at: '2026-01-01T00:00:00Z',
-  is_me: false,
+  has_account: false,
+  invite_is_pending: false,
 }
 
 function goal(name: string, colour = '#3B6FC2'): Goal {

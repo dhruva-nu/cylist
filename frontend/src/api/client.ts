@@ -15,13 +15,43 @@ const API_BASE = '/api/v1'
 export type Scope = 'read' | 'write' | 'vault:read' | 'vault:reveal' | 'admin'
 export type PersonKind = 'team' | 'client'
 
+/**
+ * The server's password floor, repeated so a form can say so before the trip.
+ *
+ * Length rather than character classes, which is what both OWASP and NIST now
+ * recommend — the rules that ask for a symbol mostly produce `Password1!`.
+ * Kept in step with `MIN_PASSWORD_LENGTH` in `app/schemas/people.py`; the
+ * server is what enforces it, and this only saves a round trip.
+ */
+export const MIN_PASSWORD_LENGTH = 12
+
 export interface Identity {
   token_id: string
   label: string
   channel: 'web' | 'api'
   scopes: Scope[]
-  /** The directory entry marked as you, if one has been named yet. */
+  /**
+   * Who this session is. Null only on a deployment with no accounts yet,
+   * where you are signed in with the bootstrap password and the first thing
+   * to do is open an account.
+   */
   person: Person | null
+}
+
+export interface SetupInfo {
+  urls: string[]
+  environment: string
+  agent_scopes: string[]
+  /** False while the deployment is still on its bootstrap password. */
+  has_accounts: boolean
+}
+
+export interface InviteIssued {
+  person: Person
+  /** Shown once. Cylist sends no email, so this is yours to pass on. */
+  token: string
+  url: string
+  expires_at: string
 }
 
 export interface Person {
@@ -34,9 +64,22 @@ export interface Person {
   colour: string
   archived_at: string | null
   created_at: string
-  /** Whether this is you. At most one person in the directory is. */
-  is_me: boolean
+  /** Whether they can sign in as themselves right now. */
+  has_account: boolean
+  /** Whether an unaccepted, unexpired invitation is outstanding. */
+  invite_is_pending: boolean
 }
+
+/**
+ * Whether a directory entry is the person currently signed in.
+ *
+ * There is deliberately no `is_me` on the wire: one person is one payload
+ * whoever fetched it. The session already knows who it is — `api.me()` said
+ * so — which makes this a comparison rather than a field the server has to
+ * get right per request.
+ */
+export const isMe = (person: Pick<Person, 'id'>, identity: Identity | undefined) =>
+  identity?.person?.id === person.id
 
 export interface PersonInput {
   name: string
@@ -44,8 +87,6 @@ export interface PersonInput {
   role: string
   responsibilities: string
   email?: string | null
-  /** Claim the directory's one "this is me" slot, taking it off whoever held it. */
-  is_me?: boolean
 }
 
 export interface Project {
@@ -844,10 +885,37 @@ const body = (value: unknown) => JSON.stringify(value)
 export const api = {
   health: () => request<Health>('/health'),
 
-  signIn: (password: string) =>
+  /** What this deployment is, and whether anybody can sign in to it yet. */
+  setup: () => request<SetupInfo>('/setup'),
+
+  signIn: (email: string, password: string) =>
+    request<Identity>('/auth/login', { method: 'POST', body: body({ email, password }) }),
+  /**
+   * The one login that belongs to nobody, for a deployment with no accounts.
+   * Refused the moment the first account exists, so the sign-in screen offers
+   * it only while `setup().has_accounts` is false.
+   */
+  bootstrapSignIn: (password: string) =>
     request<Identity>('/auth/login', { method: 'POST', body: body({ password }) }),
   signOut: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   me: () => request<Identity>('/me'),
+
+  /** Turn an invitation link into an account, and sign in with it. */
+  acceptInvite: (token: string, password: string) =>
+    request<Identity>('/auth/accept-invite', {
+      method: 'POST',
+      body: body({ token, password }),
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: boolean }>('/auth/password', {
+      method: 'POST',
+      body: body({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
+  /** Mint a one-time link letting a team member set their first password. */
+  invitePerson: (id: string) => request<InviteIssued>(`/people/${id}/invite`, { method: 'POST' }),
+  withdrawInvite: (id: string) =>
+    request<{ ok: boolean }>(`/people/${id}/invite`, { method: 'DELETE' }),
 
   listProjects: () => request<Project[]>('/projects'),
   getProject: (ref: string) => request<Project>(`/projects/${ref}`),

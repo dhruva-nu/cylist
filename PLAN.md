@@ -7,7 +7,11 @@ Approved mock: https://claude.ai/code/artifact/27e0344e-ef48-4e2a-a592-5e5c53c1f
 - Personal project/task manager: Projects → { Kanban board, Files, Vault, People }.
 - Stack: React (Vite + TypeScript) · FastAPI (Python 3.12) · PostgreSQL 16.
 - **API-first.** The web UI is one client. An MCP server and a CLI come later and must need *no* backend changes — so every capability is a REST endpoint, auth is token-based, and no logic lives only in React.
-- Single owner (you) plus non-human agents. No multi-tenant auth in v1.
+- Several people, plus non-human agents. One shared workspace: everybody
+  signed in sees the same projects, and an account exists to say *which* of
+  them is acting — not to fence off what they can see. Accounts live on the
+  people directory and are opened by invitation. (v1 was a single owner; see
+  CYLIST-44.)
 - Files stored on the server's disk; vault secrets encrypted at rest.
 
 ## 2. Architecture
@@ -184,7 +188,9 @@ Each phase ends with something usable end-to-end.
 1. **People are a global directory** with per-project membership (not per-project copies).
 2. **Status-change reason is required** for On hold / Blocked, enforced by the API, stored as a comment.
 3. **Tagging people** is available on status changes only in v1; @-mentions in free comments are a later add.
-4. **Single user + API tokens with scopes**; no roles/teams login.
+4. **Accounts on the people directory + API tokens with scopes**; a token
+   acts as whoever minted it. No roles, and membership is a picker rather
+   than a fence.
 5. **Vault**: only the secret value is encrypted; reveal is a distinct, logged, scoped action.
 6. **Uploads are content-addressed** (sha256) with a configurable size cap (default 200 MB).
 7. **No Tailwind / component library** — the mock's design system is ported as CSS variables + modules.

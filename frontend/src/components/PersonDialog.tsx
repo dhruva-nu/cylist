@@ -6,6 +6,11 @@
  * that changes is what happens around the edges of the save. From inside a
  * project the new person is put on that project straight away — being asked to
  * then go and add them would be silly.
+ *
+ * Being in the directory and being able to sign in are separate facts, and
+ * this form only sets the first. Nobody gets an account by having a row typed
+ * for them; they get one by accepting an invitation, which is a button on the
+ * People screen and a password only they ever see.
  */
 
 import { useMutation } from '@tanstack/react-query'
@@ -13,7 +18,6 @@ import { useState } from 'react'
 import { api, type Person, type PersonInput, type PersonKind } from '../api/client'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { Button, ErrorBanner } from './ui'
-import styles from './PersonDialog.module.css'
 
 const EMPTY: PersonInput = {
   name: '',
@@ -21,7 +25,6 @@ const EMPTY: PersonInput = {
   role: '',
   responsibilities: '',
   email: '',
-  is_me: false,
 }
 
 export function PersonDialog({
@@ -29,7 +32,6 @@ export function PersonDialog({
   person,
   projectKey,
   currentMemberIds,
-  claimingMe = false,
   onSaved,
   onDone,
   onClose,
@@ -39,8 +41,6 @@ export function PersonDialog({
   /** Set to put the new person on that project as well as in the directory. */
   projectKey?: string
   currentMemberIds?: string[]
-  /** Open with "this is me" already ticked — the home screen's card does. */
-  claimingMe?: boolean
   onSaved: (name: string) => void
   onDone: () => Promise<void>
   onClose: () => void
@@ -53,9 +53,8 @@ export function PersonDialog({
           role: person.role,
           responsibilities: person.responsibilities,
           email: person.email ?? '',
-          is_me: person.is_me,
         }
-      : { ...EMPTY, is_me: claimingMe },
+      : EMPTY,
   )
 
   const save = useMutation({
@@ -133,27 +132,20 @@ export function PersonDialog({
             onChange={(event) => setForm({ ...form, responsibilities: event.target.value })}
           />
         </Field>
-        <Field label="Email">
+        <Field
+          label="Email"
+          hint={
+            form.kind === 'team'
+              ? 'Also what they sign in with, once you invite them.'
+              : 'Clients are named on the work, not signed in to it.'
+          }
+        >
           <input
             type="email"
             value={form.email ?? ''}
             onChange={(event) => setForm({ ...form, email: event.target.value })}
           />
         </Field>
-        <label className={styles.me}>
-          <input
-            type="checkbox"
-            checked={form.is_me ?? false}
-            onChange={(event) => setForm({ ...form, is_me: event.target.checked })}
-          />
-          <span>
-            <b>This is me</b>
-            <span className={styles.hint}>
-              One entry in the directory is you. You are put on every project you create, and
-              whoever held it before gives it up.
-            </span>
-          </span>
-        </label>
       </ModalBody>
     </Modal>
   )

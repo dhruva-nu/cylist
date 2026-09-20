@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from tests.conftest import OWNER_NAME
+
 
 async def test_signing_in_is_recorded(signed_in: AsyncClient) -> None:
     entries = (await signed_in.get("/activity")).json()
@@ -23,7 +25,7 @@ async def test_records_who_issued_a_token_and_through_which_door(
         if entry["verb"] == "token.issued"
     )
 
-    assert issued["actor_label"] == "Web session"
+    assert issued["actor_label"] == OWNER_NAME
     assert issued["entity_type"] == "token"
     assert issued["payload"] == {"name": "board agent", "scopes": ["read"]}
 

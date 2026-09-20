@@ -9,7 +9,7 @@ from app.auth.dependencies import SESSION_COOKIE
 from app.auth.passwords import hash_password, needs_rehash, verify_password
 from app.config import Settings
 from app.db import Database
-from tests.conftest import OWNER_PASSWORD, client_for
+from tests.conftest import OWNER_NAME, OWNER_PASSWORD, client_for
 
 
 class TestPasswordHashing:
@@ -99,7 +99,8 @@ class TestIdentity:
         response = await signed_in.get("/me")
 
         assert response.status_code == 200
-        assert response.json()["label"] == "Web session"
+        assert response.json()["label"] == OWNER_NAME
+        assert response.json()["person"]["name"] == OWNER_NAME
 
     async def test_a_session_reports_the_web_channel(self, signed_in: AsyncClient) -> None:
         """Regression: enum columns must load back as enums, not bare strings.
