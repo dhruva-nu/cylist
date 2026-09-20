@@ -10,8 +10,9 @@ Approved mock: https://claude.ai/code/artifact/27e0344e-ef48-4e2a-a592-5e5c53c1f
 - Several people, plus non-human agents. One shared workspace: everybody
   signed in sees the same projects, and an account exists to say *which* of
   them is acting — not to fence off what they can see. Accounts live on the
-  people directory and are opened by invitation. (v1 was a single owner; see
-  CYLIST-44.)
+  people directory and are opened by invitation — or handed over outright by
+  an admin, where there is no mailbox an invitation could reach. (v1 was a
+  single owner; see CYLIST-44.)
 - Files stored on the server's disk; vault secrets encrypted at rest.
 
 ## 2. Architecture

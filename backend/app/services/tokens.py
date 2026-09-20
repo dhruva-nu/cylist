@@ -87,7 +87,9 @@ async def revoke(session: AsyncSession, token_id: UUID) -> ApiToken:
     return token
 
 
-async def revoke_for_person(session: AsyncSession, person_id: UUID) -> int:
+async def revoke_for_person(
+    session: AsyncSession, person_id: UUID, *, keeping: UUID | None = None
+) -> int:
     """Revoke every live credential belonging to one person, returning how many.
 
     What archiving somebody calls. Their sessions and their agents' tokens go
@@ -97,10 +99,20 @@ async def revoke_for_person(session: AsyncSession, person_id: UUID) -> int:
     A bulk UPDATE rather than a loop: this runs inside the request that
     archives them, and the number of tokens one person holds is not bounded by
     anything.
+
+    Args:
+        keeping: One credential to leave alone — the caller's own, where the
+            caller is the person being revoked. An admin who sets their own
+            password should not be signed out by the act of setting it, while
+            every other browser they left themselves signed in on should.
     """
+    live = [ApiToken.person_id == person_id, ApiToken.revoked_at.is_(None)]
+    if keeping is not None:
+        live.append(ApiToken.id != keeping)
+
     result = await session.execute(
         sql_update(ApiToken)
-        .where(ApiToken.person_id == person_id, ApiToken.revoked_at.is_(None))
+        .where(*live)
         .values(revoked_at=now())
         # Postgres counts what it touched for free; without this the caller
         # would have to SELECT first to be able to say how many went.
