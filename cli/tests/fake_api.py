@@ -59,7 +59,10 @@ ADITI = {
     "archived_at": None,
     "created_at": "2026-01-04T09:00:00Z",
 }
-MACHINE = {
+# Annotated because its `is_agent` is the only bool among these payloads, and
+# an inferred value type of `object` makes every person in the directory
+# unindexable to mypy.
+MACHINE: dict[str, Any] = {
     "id": "0192f3c4-0004-7000-8000-00000000000f",
     "name": "Agent",
     "kind": "team",
