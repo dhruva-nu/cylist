@@ -67,17 +67,17 @@ export function todaysWork(
   // The last column is the board's own definition of done — the same one the
   // server enforces when it refuses to move a card there with sub-tasks still
   // outstanding. A board with no columns has no done column either.
-  const done = columns.at(-1)?.id ?? null
+  const doneColumnId = columns.at(-1)?.id ?? null
 
-  const mine = tasks.filter((task) => {
+  const wantedByToday = tasks.filter((task) => {
     if (task.status === 'cancelled') return false
-    if (done !== null && task.column_id === done) return false
+    if (doneColumnId !== null && task.column_id === doneColumnId) return false
     if (me && task.assignee.id !== me.id) return false
     return task.next_due_date !== null && task.next_due_date <= today
   })
 
   return {
-    overdue: mine
+    overdue: wantedByToday
       .filter((task) => task.next_due_date !== null && task.next_due_date < today)
       // Oldest first: how long a card has been late is the whole of what makes
       // one overdue card more pressing than another, and it outranks priority
@@ -85,7 +85,7 @@ export function todaysWork(
       .sort(
         (a, b) => (a.next_due_date ?? '').localeCompare(b.next_due_date ?? '') || byPriority(a, b),
       ),
-    due: mine.filter((task) => task.next_due_date === today).sort(byPriority),
+    due: wantedByToday.filter((task) => task.next_due_date === today).sort(byPriority),
   }
 }
 

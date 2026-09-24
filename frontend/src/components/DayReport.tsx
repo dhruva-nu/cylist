@@ -77,11 +77,11 @@ export function DayReportPanel() {
   const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
   const projectKey = match ? match.projectKey : null
 
-  const [reporting, setReporting] = useState(false)
+  const [showingReport, setShowingReport] = useState(false)
   /** The card being read over the report, by reference — which is what the
    * report holds and what `/tasks/{ref}` takes, so there is nothing to look up
    * before opening one. */
-  const [reading, setReading] = useState<string | null>(null)
+  const [openCardRef, setOpenCardRef] = useState<string | null>(null)
 
   return (
     /* No count on this one. Today's is worth carrying because it changes on
@@ -91,22 +91,22 @@ export function DayReportPanel() {
       name="Day report"
       disabled={projectKey === null}
       title={projectKey === null ? 'Open a project to read a day of it' : undefined}
-      onOpen={() => setReporting(true)}
+      onOpen={() => setShowingReport(true)}
     >
-      {reporting && projectKey !== null ? (
+      {showingReport && projectKey !== null ? (
         <ReportDialog
           projectKey={projectKey}
-          onOpenCard={setReading}
-          onClose={() => setReporting(false)}
+          onOpenCard={setOpenCardRef}
+          onClose={() => setShowingReport(false)}
         />
       ) : null}
 
-      {reading !== null && projectKey !== null ? (
+      {openCardRef !== null && projectKey !== null ? (
         <OpenCard
           projectKey={projectKey}
-          reference={reading}
-          onOpen={setReading}
-          onClose={() => setReading(null)}
+          reference={openCardRef}
+          onOpen={setOpenCardRef}
+          onClose={() => setOpenCardRef(null)}
         />
       ) : null}
     </SidebarAction>
@@ -135,7 +135,7 @@ function ReportDialog({
     placeholderData: keepPreviousData,
   })
 
-  function go(to: string) {
+  function showDay(to: string) {
     setDay(to)
     setCopied(false)
   }
@@ -152,7 +152,7 @@ function ReportDialog({
     }
   }
 
-  const shown = report.data
+  const loadedReport = report.data
 
   return (
     <Modal
@@ -160,11 +160,13 @@ function ReportDialog({
       onClose={onClose}
       footer={
         <>
-          <span className={styles.zone}>Midnight to midnight, {shown?.timezone ?? zone}</span>
+          <span className={styles.zone}>
+            Midnight to midnight, {loadedReport?.timezone ?? zone}
+          </span>
           <Button
             variant="go"
-            disabled={!shown || shown.entry_count === 0}
-            onClick={() => shown && void copy(shown.markdown)}
+            disabled={!loadedReport || loadedReport.entry_count === 0}
+            onClick={() => loadedReport && void copy(loadedReport.markdown)}
           >
             {copied ? 'Copied' : 'Copy as Markdown'}
           </Button>
@@ -178,7 +180,7 @@ function ReportDialog({
             small
             variant="ghost"
             aria-label="The day before"
-            onClick={() => go(shiftDay(day, -1))}
+            onClick={() => showDay(shiftDay(day, -1))}
           >
             ‹
           </Button>
@@ -188,7 +190,7 @@ function ReportDialog({
               type="date"
               value={day}
               max={today}
-              onChange={(event) => go(event.currentTarget.value || today)}
+              onChange={(event) => showDay(event.currentTarget.value || today)}
             />
           </label>
           <Button
@@ -197,20 +199,20 @@ function ReportDialog({
             aria-label="The day after"
             // Tomorrow cannot hold anything yet, so there is nothing to go to.
             disabled={day >= today}
-            onClick={() => go(shiftDay(day, 1))}
+            onClick={() => showDay(shiftDay(day, 1))}
           >
             ›
           </Button>
-          <Button small variant="ghost" disabled={day === today} onClick={() => go(today)}>
+          <Button small variant="ghost" disabled={day === today} onClick={() => showDay(today)}>
             Today
           </Button>
         </div>
 
         {report.error ? <ErrorBanner>{report.error.message}</ErrorBanner> : null}
-        {shown === undefined && report.isFetching ? (
+        {loadedReport === undefined && report.isFetching ? (
           <EmptyState>Reading the day…</EmptyState>
         ) : null}
-        {shown ? <Report report={shown} onOpen={onOpenCard} /> : null}
+        {loadedReport ? <ReportContents report={loadedReport} onOpen={onOpenCard} /> : null}
       </ModalBody>
     </Modal>
   )
@@ -228,7 +230,13 @@ function stillThere(card: TaskDay): boolean {
   return card.column !== null || card.parent !== null
 }
 
-function Report({ report, onOpen }: { report: DayReport; onOpen: (reference: string) => void }) {
+function ReportContents({
+  report,
+  onOpen,
+}: {
+  report: DayReport
+  onOpen: (reference: string) => void
+}) {
   return (
     <div className={styles.report}>
       <p className={styles.headline}>{report.headline}</p>
@@ -265,7 +273,7 @@ function Report({ report, onOpen }: { report: DayReport; onOpen: (reference: str
         <section>
           <h3 className={styles.section}>Cards</h3>
           {report.tasks.map((card) => (
-            <Card key={card.reference} card={card} onOpen={onOpen} />
+            <ReportCard key={card.reference} card={card} onOpen={onOpen} />
           ))}
         </section>
       ) : null}
@@ -275,7 +283,7 @@ function Report({ report, onOpen }: { report: DayReport; onOpen: (reference: str
           <h3 className={styles.section}>Elsewhere on the project</h3>
           <div className={styles.entries}>
             {report.elsewhere.map((entry) => (
-              <Entry key={entry.id} entry={entry} />
+              <ReportEntry key={entry.id} entry={entry} />
             ))}
           </div>
         </section>
@@ -284,18 +292,13 @@ function Report({ report, onOpen }: { report: DayReport; onOpen: (reference: str
   )
 }
 
-function Card({ card, onOpen }: { card: TaskDay; onOpen: (reference: string) => void }) {
+/** One card's part of the day: its head, and what happened to it. */
+function ReportCard({ card, onOpen }: { card: TaskDay; onOpen: (reference: string) => void }) {
   const head = (
     <>
       <span className={styles.reference}>{card.reference}</span>
       <span className={styles.title}>{card.title}</span>
-      {/* Where this piece of work stands: a card names its column, a sub-task
-          names the card it belongs to, and something with neither has been
-          deleted. Read straight off the column, an absent one would make
-          every sub-task in the report look deleted. */}
-      <span className={card.finished ? styles.done : styles.where}>
-        {card.column ?? (card.parent ? `of ${card.parent}` : 'deleted')}
-      </span>
+      <span className={card.finished ? styles.done : styles.where}>{whereItStands(card)}</span>
     </>
   )
 
@@ -320,16 +323,27 @@ function Card({ card, onOpen }: { card: TaskDay; onOpen: (reference: string) => 
       )}
       <div className={styles.entries}>
         {card.entries.map((entry) => (
-          <Entry key={entry.id} entry={entry} />
+          <ReportEntry key={entry.id} entry={entry} />
         ))}
       </div>
     </div>
   )
 }
 
+/**
+ * Where a piece of work stands: a card names its column, a sub-task names the
+ * card it belongs to, and something with neither has been deleted. Read
+ * straight off the column, an absent one would make every sub-task in the
+ * report look deleted.
+ */
+function whereItStands(card: TaskDay): string {
+  const withoutColumn = card.parent ? `of ${card.parent}` : 'deleted'
+  return card.column ?? withoutColumn
+}
+
 /** One thing that happened: when, what, and who if it was not a person. */
-function Entry({ entry }: { entry: TaskHistoryEntry }) {
-  const at = new Date(entry.occurred_at).toLocaleTimeString([], {
+function ReportEntry({ entry }: { entry: TaskHistoryEntry }) {
+  const time = new Date(entry.occurred_at).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -337,7 +351,7 @@ function Entry({ entry }: { entry: TaskHistoryEntry }) {
   return (
     <p className={styles.entry}>
       <time className={styles.at} dateTime={entry.occurred_at}>
-        {at}
+        {time}
       </time>
       <span className={styles.what}>{entry.summary}</span>
       {/* Agents act through the same API as the browser, so this is the only

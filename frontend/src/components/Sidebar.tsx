@@ -19,8 +19,9 @@
  * back, the count of what is due today and the project's four areas. So the
  * objections to a panel that shuts all go: there is no state in which Settings
  * is unreachable, no state in which three overdue cards are behind something
- * you forgot was there, and no state in which the way to the board is. What the rail buys is the width, which is the one thing a board four
- * columns wide actually wants back.
+ * you forgot was there, and no state in which the way to the board is. What
+ * the rail buys is the width, which is the one thing a board four columns wide
+ * actually wants back.
  *
  * Collapsed or not is remembered between visits, and it collapses by gliding
  * rather than by swapping: the two widths are drawn one over the other and
@@ -77,7 +78,7 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
  * press of the handle writes this one, so what is under it is always an
  * answer rather than an echo of the default.
  */
-const OPEN_KEY = 'cylist.sidebar.showing'
+const SHOWING_KEY = 'cylist.sidebar.showing'
 const FOLDED_KEY = 'cylist.sidebar.folded'
 
 /**
@@ -94,9 +95,9 @@ const FOLDED_KEY = 'cylist.sidebar.folded'
  * reading it throws outright in a private window, and a frame that will not
  * render is a worse outcome than a preference that is not remembered.
  */
-function readOpen(): boolean {
+function readShowing(): boolean {
   try {
-    return window.localStorage.getItem(OPEN_KEY) === 'true'
+    return window.localStorage.getItem(SHOWING_KEY) === 'true'
   } catch {
     // A private window. Collapsed is the answer for a first visit anyway.
     return false
@@ -140,7 +141,7 @@ function readFolded(): string[] {
 }
 
 export function Sidebar() {
-  const [open, setOpen] = useState<boolean>(readOpen)
+  const [open, setOpen] = useState<boolean>(readShowing)
   const [folded, setFolded] = useState<string[]>(readFolded)
 
   /**
@@ -154,7 +155,7 @@ export function Sidebar() {
   const showSidebar = useCallback((showing: boolean) => {
     setOpen(showing)
     try {
-      window.localStorage.setItem(OPEN_KEY, String(showing))
+      window.localStorage.setItem(SHOWING_KEY, String(showing))
     } catch {
       // It still holds for this visit; it just will not be remembered.
     }
@@ -261,15 +262,15 @@ export function Sidebar() {
  * button you have to be told about.
  */
 function Handle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const says = open ? 'Collapse the sidebar' : 'Expand the sidebar'
+  const label = open ? 'Collapse the sidebar' : 'Expand the sidebar'
 
   return (
     <button
       type="button"
       className={styles.handle}
       aria-expanded={open}
-      aria-label={says}
-      title={says}
+      aria-label={label}
+      title={label}
       onClick={onToggle}
     >
       <span aria-hidden="true">{open ? '‹' : '›'}</span>
@@ -325,10 +326,11 @@ function ThemeChoiceGroup() {
     const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
 
     event.preventDefault()
-    const at = THEME_CHOICES.indexOf(theme)
+    const currentIndex = THEME_CHOICES.indexOf(theme)
     // The fallback never fires — the modulo keeps the index in range — but
     // saying so costs less than an assertion that stops being true.
-    const next = THEME_CHOICES[(at + step + THEME_CHOICES.length) % THEME_CHOICES.length] ?? theme
+    const next =
+      THEME_CHOICES[(currentIndex + step + THEME_CHOICES.length) % THEME_CHOICES.length] ?? theme
     setTheme(next)
     // Focus follows selection in a radio group, and the button for `next` is
     // the only one that will be tabbable after this render.
