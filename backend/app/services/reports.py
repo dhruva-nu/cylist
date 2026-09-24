@@ -70,11 +70,11 @@ async def for_day(
     entries = await activity.between(session, project.id, starts_at, ends_at)
 
     board = await columns.list_for_project(session, project)
-    last_column = board[-1].id if board else None
+    last_column_id = board[-1].id if board else None
     column_names = {column.id: column.name for column in board}
     # Keyed by the string a payload stores, for the moves too old to have
     # recorded a column's name themselves — see `activity.describe`.
-    named = {str(column.id): column.name for column in board}
+    column_names_by_payload_id = {str(column.id): column.name for column in board}
     # Every task, not only the board's cards: a sub-task is not on the board but
     # it is as likely as anything else to be in a day's work.
     cards = {card.reference: card for card in await tasks.all_for_project(session, project)}
@@ -86,12 +86,12 @@ async def for_day(
     for entry in entries:
         reference = _card_reference(entry)
         if reference is None:
-            elsewhere.append(activity.entry_of(entry, named))
+            elsewhere.append(activity.entry_of(entry, column_names_by_payload_id))
         else:
             by_card.setdefault(reference, []).append(entry)
 
     touched = [
-        _task_day(reference, rows, cards, column_names, last_column, named)
+        _task_day(reference, rows, cards, column_names, last_column_id, column_names_by_payload_id)
         for reference, rows in by_card.items()
     ]
     finished = [card.reference for card in touched if card.finished]
@@ -148,13 +148,13 @@ def _task_day(
     rows: list[Activity],
     cards: dict[str, Task],
     column_names: dict[UUID, str],
-    last_column: UUID | None,
-    named: dict[str, str],
+    last_column_id: UUID | None,
+    column_names_by_payload_id: dict[str, str],
 ) -> TaskDay:
     """One card's entries, with where the card stands now."""
     card = cards.get(reference)
-    entries = _condensed([activity.entry_of(row, named) for row in rows])
-    finished = _ended_in(rows, last_column)
+    entries = _condensed([activity.entry_of(row, column_names_by_payload_id) for row in rows])
+    finished = _ended_in(rows, last_column_id)
 
     if card is None:
         # Deleted, or created under a reference the board no longer holds. The
@@ -312,22 +312,22 @@ def _markdown(
     if tasks:
         lines += ["", "## Cards", ""]
         for card in tasks:
-            where = _where(card)
+            where = _where_it_stands(card)
             lines += [f"### {card.reference} — {card.title}{where}", ""]
-            lines += [_line(entry, zone) for entry in card.entries]
+            lines += [_bullet(entry, zone) for entry in card.entries]
             lines.append("")
         lines.pop()
 
     if elsewhere:
         lines += ["", "## Elsewhere", ""]
-        lines += [_line(entry, zone) for entry in elsewhere]
+        lines += [_bullet(entry, zone) for entry in elsewhere]
 
     # A trailing newline, so appending this to a longer note does not run the
     # last line into whatever follows it.
     return "\n".join(lines) + "\n"
 
 
-def _where(card: TaskDay) -> str:
+def _where_it_stands(card: TaskDay) -> str:
     """What to put after a heading to say where this piece of work stands.
 
     Three answers, and the middle one is why this is a function: a card names
@@ -342,7 +342,7 @@ def _where(card: TaskDay) -> str:
     return " (deleted)"
 
 
-def _line(entry: HistoryEntry, zone: ZoneInfo) -> str:
+def _bullet(entry: HistoryEntry, zone: ZoneInfo) -> str:
     """One event as a bullet: when, what, and who if it was not a person.
 
     An agent's work is named because the report is read as an account of a

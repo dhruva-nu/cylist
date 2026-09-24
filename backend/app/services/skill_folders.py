@@ -143,15 +143,15 @@ def _from_zip(filename: str, description: str | None, content: bytes) -> SkillFo
         for info in entries:
             relative = paths[info.filename].parts[len(root) :]
             with archive.open(info) as handle:
-                data = handle.read(budget + 1)
-            budget -= len(data)
+                content = handle.read(budget + 1)
+            budget -= len(content)
             if budget < 0:
                 raise _refuse(filename, f"it unpacks to more than {_megabytes(MAX_UNPACKED_BYTES)}")
             mode = info.external_attr >> 16
             files.append(
                 FolderFile(
                     path="/".join(relative),
-                    data=data,
+                    data=content,
                     executable=bool(mode & stat.S_IXUSR),
                 )
             )

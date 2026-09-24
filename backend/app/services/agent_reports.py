@@ -67,8 +67,8 @@ async def report(
     trail entries, which is the whole reason ``upsert`` reports them
     separately rather than logging as it goes.
     """
-    result = await agent_sessions.upsert(session, principal, task, client_session_id, data)
-    for transition in result.transitions:
+    upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
+    for transition in upserted.transitions:
         await activity.record(
             session,
             principal,
@@ -78,7 +78,7 @@ async def report(
             project_id=transition.project_id,
             payload=transition.payload,
         )
-    return agent_sessions.read(result.row)
+    return agent_sessions.read(upserted.row)
 
 
 async def end_open_sessions(
