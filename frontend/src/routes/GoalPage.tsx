@@ -19,7 +19,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, type BoardColumn, type Task } from '../api/client'
+import {
+  api,
+  type BoardColumn,
+  type FiledItem,
+  type GoalDetail,
+  type Person,
+  type Task,
+} from '../api/client'
 import { GOAL_STATUS_LABELS, GoalProgressBar, GoalTargetMark } from '../components/GoalMarks'
 import { GoalDialog } from '../components/GoalDialog'
 import { useProjectFiles } from '../components/projectFiles'
@@ -51,7 +58,7 @@ export function GoalPage() {
   /** What the list is narrowed to: a word, and a column. Neither is remembered
       between visits — a filter you cannot see the state of is a page that
       looks broken when you come back to it, and both are visible here. */
-  const [needle, setNeedle] = useState('')
+  const [searchText, setSearchText] = useState('')
   const [onlyColumn, setOnlyColumn] = useState<string | null>(null)
 
   const goal = useQuery({
@@ -95,22 +102,24 @@ export function GoalPage() {
   if (goal.error) return <ErrorBanner>{goal.error.message}</ErrorBanner>
   if (board.error) return <ErrorBanner>{board.error.message}</ErrorBanner>
 
-  const found = goal.data
+  const goalDetail = goal.data
   const columns = board.data.columns
-  const { total, done, open, blocked, on_hold: onHold, cancelled } = found.progress
+  const memberList = members.data?.members ?? []
 
-  const word = needle.trim().toLowerCase()
-  const matches = (task: Task) =>
-    !word || `${task.reference} ${task.title}`.toLowerCase().includes(word)
+  const searchWord = searchText.trim().toLowerCase()
+  const matchesSearch = (task: Task) =>
+    !searchWord || `${task.reference} ${task.title}`.toLowerCase().includes(searchWord)
   // The word narrows what the column chips count, and the column narrows what
   // the list shows. In that order: a chip that says 3 and then shows nothing
   // because a word was typed is a chip that lies.
-  const wordMatched = found.tasks.filter(matches)
-  const shown = wordMatched.filter((task) => onlyColumn === null || task.column_id === onlyColumn)
-  const byColumn = columns
+  const searchMatched = goalDetail.tasks.filter(matchesSearch)
+  const shownTasks = searchMatched.filter(
+    (task) => onlyColumn === null || task.column_id === onlyColumn,
+  )
+  const columnGroups = columns
     .map((column) => ({
       column,
-      tasks: shown.filter((task) => task.column_id === column.id),
+      tasks: shownTasks.filter((task) => task.column_id === column.id),
     }))
     .filter((group) => group.tasks.length > 0)
 
@@ -119,16 +128,20 @@ export function GoalPage() {
       <PageHead
         eyebrow={
           <Eyebrow>
-            <span className={styles.rail} style={{ background: found.colour }} aria-hidden="true" />
-            {found.reference}
-            {found.status === 'open' ? null : (
-              <span className={`${styles.pill} ${styles[found.status]}`}>
-                {GOAL_STATUS_LABELS[found.status]}
+            <span
+              className={styles.rail}
+              style={{ background: goalDetail.colour }}
+              aria-hidden="true"
+            />
+            {goalDetail.reference}
+            {goalDetail.status === 'open' ? null : (
+              <span className={`${styles.pill} ${styles[goalDetail.status]}`}>
+                {GOAL_STATUS_LABELS[goalDetail.status]}
               </span>
             )}
           </Eyebrow>
         }
-        title={found.name}
+        title={goalDetail.name}
         actions={
           <>
             {/* Straight to the board with the goal already in the search box,
@@ -136,7 +149,7 @@ export function GoalPage() {
             <Link
               to="/p/$projectKey/board"
               params={{ projectKey }}
-              search={{ q: `goal:"${found.name}"` }}
+              search={{ q: `goal:"${goalDetail.name}"` }}
               className={styles.boardLink}
             >
               On the board
@@ -157,47 +170,10 @@ export function GoalPage() {
           on a narrow window — where there is only one column — what the goal
           is still arrives before the list of what is on it. */}
       <div className={styles.detail}>
-        <aside className={styles.side} aria-label="About this goal">
-          <section className={styles.summary}>
-            <GoalProgressBar goal={found} large />
-            <div className={styles.stats}>
-              <Stat label="Cards" value={total} />
-              <Stat label="Done" value={done} />
-              <Stat label="Left" value={open} />
-              {blocked ? <Stat label="Blocked" value={blocked} tone="blocked" /> : null}
-              {onHold ? <Stat label="On hold" value={onHold} tone="hold" /> : null}
-              {cancelled ? <Stat label="Cancelled" value={cancelled} /> : null}
-            </div>
-            <div className={styles.facts}>
-              <div className={styles.owner}>
-                <Avatar name={found.owner.name} colour={found.owner.colour} />
-                <div>
-                  <span className={styles.statLabel}>Owner</span>
-                  <b>{found.owner.name}</b>
-                </div>
-              </div>
-              <GoalTargetMark goal={found} />
-            </div>
-          </section>
-
-          <section className={styles.about}>
-            <h2>What it is</h2>
-            <p>
-              {found.description ? (
-                <Tagged
-                  text={found.description}
-                  members={members.data?.members ?? []}
-                  files={files}
-                />
-              ) : (
-                'No description yet.'
-              )}
-            </p>
-          </section>
-        </aside>
+        <GoalAside goal={goalDetail} members={memberList} files={files} />
 
         <div className={styles.list}>
-          {found.tasks.length === 0 ? (
+          {goalDetail.tasks.length === 0 ? (
             <EmptyState>
               No cards on this goal yet. Link the ones already on the board, or pick this goal when
               you write a new card.
@@ -205,24 +181,24 @@ export function GoalPage() {
           ) : (
             <Filters
               columns={columns}
-              tasks={wordMatched}
-              needle={needle}
-              onNeedle={setNeedle}
+              tasks={searchMatched}
+              searchText={searchText}
+              onSearchText={setSearchText}
               onlyColumn={onlyColumn}
               onColumn={setOnlyColumn}
-              total={found.tasks.length}
-              showing={shown.length}
+              total={goalDetail.tasks.length}
+              showing={shownTasks.length}
             />
           )}
 
-          {found.tasks.length > 0 && shown.length === 0 ? (
+          {goalDetail.tasks.length > 0 && shownTasks.length === 0 ? (
             <EmptyState>
               No card on this goal matches that.{' '}
               <button
                 type="button"
                 className={styles.clear}
                 onClick={() => {
-                  setNeedle('')
+                  setSearchText('')
                   setOnlyColumn(null)
                 }}
               >
@@ -231,7 +207,7 @@ export function GoalPage() {
             </EmptyState>
           ) : null}
 
-          {byColumn.map(({ column, tasks }) => (
+          {columnGroups.map(({ column, tasks }) => (
             <section key={column.id} className={styles.group}>
               <h2>
                 {column.name}
@@ -239,37 +215,13 @@ export function GoalPage() {
               </h2>
               <ul className={styles.cards}>
                 {tasks.map((task) => (
-                  <li key={task.id} className={styles.card}>
-                    <button
-                      type="button"
-                      className={styles.cardOpen}
-                      onClick={() => setOpenTaskId(task.id)}
-                    >
-                      <span className={styles.cardMark} title={task.status}>
-                        {task.status === 'active' ? (
-                          <TypeIcon type={task.type} size={15} />
-                        ) : (
-                          <StatusIcon status={task.status} size={15} />
-                        )}
-                      </span>
-                      <span className={styles.cardRef}>{task.reference}</span>
-                      <span
-                        className={`${styles.cardTitle} ${task.status === 'cancelled' ? styles.struck : ''}`}
-                      >
-                        {task.title}
-                      </span>
-                      <Avatar name={task.assignee.name} colour={task.assignee.colour} />
-                    </button>
-                    <Button
-                      variant="ghost"
-                      small
-                      disabled={unlink.isPending}
-                      aria-label={`Take ${task.reference} off this goal`}
-                      onClick={() => unlink.mutate(task)}
-                    >
-                      ×
-                    </Button>
-                  </li>
+                  <GoalCardRow
+                    key={task.id}
+                    task={task}
+                    unlinking={unlink.isPending}
+                    onOpen={() => setOpenTaskId(task.id)}
+                    onUnlink={() => unlink.mutate(task)}
+                  />
                 ))}
               </ul>
             </section>
@@ -280,8 +232,8 @@ export function GoalPage() {
       {editing ? (
         <GoalDialog
           projectKey={projectKey}
-          goal={found}
-          members={members.data?.members ?? []}
+          goal={goalDetail}
+          members={memberList}
           announce={announce}
           onDone={refresh}
           onClose={() => setEditing(false)}
@@ -296,8 +248,8 @@ export function GoalPage() {
       {linking ? (
         <LinkCardsDialog
           projectKey={projectKey}
-          goalId={found.id}
-          goalName={found.name}
+          goalId={goalDetail.id}
+          goalName={goalDetail.name}
           columns={columns}
           announce={announce}
           onDone={refresh}
@@ -312,7 +264,7 @@ export function GoalPage() {
           columns={columns}
           firstColumn={columns[0]}
           templates={templates.data ?? []}
-          goals={[found]}
+          goals={[goalDetail]}
           announce={announce}
           onOpenTask={setOpenTaskId}
           onDone={refresh}
@@ -320,6 +272,103 @@ export function GoalPage() {
         />
       ) : null}
     </>
+  )
+}
+
+/**
+ * The goal itself, down the side of its page: how far along it is, who owns
+ * it, when it is wanted, and what it is.
+ */
+function GoalAside({
+  goal,
+  members,
+  files,
+}: {
+  goal: GoalDetail
+  /** Only to draw the description's `@` tags as tags. */
+  members: Person[]
+  /** Likewise its `>` tags, drawn as links to the files. */
+  files: readonly FiledItem[]
+}) {
+  const { total, done, open, blocked, on_hold: onHold, cancelled } = goal.progress
+
+  return (
+    <aside className={styles.side} aria-label="About this goal">
+      <section className={styles.summary}>
+        <GoalProgressBar goal={goal} large />
+        <div className={styles.stats}>
+          <Stat label="Cards" value={total} />
+          <Stat label="Done" value={done} />
+          <Stat label="Left" value={open} />
+          {blocked ? <Stat label="Blocked" value={blocked} tone="blocked" /> : null}
+          {onHold ? <Stat label="On hold" value={onHold} tone="hold" /> : null}
+          {cancelled ? <Stat label="Cancelled" value={cancelled} /> : null}
+        </div>
+        <div className={styles.facts}>
+          <div className={styles.owner}>
+            <Avatar name={goal.owner.name} colour={goal.owner.colour} />
+            <div>
+              <span className={styles.statLabel}>Owner</span>
+              <b>{goal.owner.name}</b>
+            </div>
+          </div>
+          <GoalTargetMark goal={goal} />
+        </div>
+      </section>
+
+      <section className={styles.about}>
+        <h2>What it is</h2>
+        <p>
+          {goal.description ? (
+            <Tagged text={goal.description} members={members} files={files} />
+          ) : (
+            'No description yet.'
+          )}
+        </p>
+      </section>
+    </aside>
+  )
+}
+
+/** One card on the goal: a button that opens it, and a × that takes it off. */
+function GoalCardRow({
+  task,
+  unlinking,
+  onOpen,
+  onUnlink,
+}: {
+  task: Task
+  /** Whether a card is already being taken off, which holds every × still. */
+  unlinking: boolean
+  onOpen: () => void
+  onUnlink: () => void
+}) {
+  return (
+    <li className={styles.card}>
+      <button type="button" className={styles.cardOpen} onClick={onOpen}>
+        <span className={styles.cardMark} title={task.status}>
+          {task.status === 'active' ? (
+            <TypeIcon type={task.type} size={15} />
+          ) : (
+            <StatusIcon status={task.status} size={15} />
+          )}
+        </span>
+        <span className={styles.cardRef}>{task.reference}</span>
+        <span className={`${styles.cardTitle} ${task.status === 'cancelled' ? styles.struck : ''}`}>
+          {task.title}
+        </span>
+        <Avatar name={task.assignee.name} colour={task.assignee.colour} />
+      </button>
+      <Button
+        variant="ghost"
+        small
+        disabled={unlinking}
+        aria-label={`Take ${task.reference} off this goal`}
+        onClick={onUnlink}
+      >
+        ×
+      </Button>
+    </li>
   )
 }
 
@@ -339,8 +388,8 @@ export function GoalPage() {
 function Filters({
   columns,
   tasks,
-  needle,
-  onNeedle,
+  searchText,
+  onSearchText,
   onlyColumn,
   onColumn,
   total,
@@ -349,23 +398,23 @@ function Filters({
   columns: BoardColumn[]
   /** The cards the word matched — what the column chips count. */
   tasks: Task[]
-  needle: string
-  onNeedle: (needle: string) => void
+  searchText: string
+  onSearchText: (searchText: string) => void
   /** The column the list is narrowed to, or null for all of them. */
   onlyColumn: string | null
   onColumn: (columnId: string | null) => void
   total: number
   showing: number
 }) {
-  const counted = (columnId: string) => tasks.filter((task) => task.column_id === columnId).length
+  const countIn = (columnId: string) => tasks.filter((task) => task.column_id === columnId).length
 
   return (
     <div className={styles.filters}>
       <div className={styles.search}>
         <input
           type="search"
-          value={needle}
-          onChange={(event) => onNeedle(event.target.value)}
+          value={searchText}
+          onChange={(event) => onSearchText(event.target.value)}
           placeholder="Find a card — ATL-41, or part of a title"
           aria-label="Find a card on this goal"
         />
@@ -384,21 +433,21 @@ function Filters({
           All columns
         </button>
         {columns.map((column) => {
-          const here = counted(column.id)
+          const inColumn = countIn(column.id)
           const on = onlyColumn === column.id
           return (
             <button
               key={column.id}
               type="button"
               aria-pressed={on}
-              className={[on ? styles.chipOn : '', here === 0 ? styles.chipEmpty : '']
+              className={[on ? styles.chipOn : '', inColumn === 0 ? styles.chipEmpty : '']
                 .filter(Boolean)
                 .join(' ')}
               // Pressing the chip you are on takes the filter off again.
               onClick={() => onColumn(on ? null : column.id)}
             >
               {column.name}
-              <span className={styles.chipCount}>{here}</span>
+              <span className={styles.chipCount}>{inColumn}</span>
             </button>
           )
         })}
@@ -441,7 +490,7 @@ function LinkCardsDialog({
   onDone: () => Promise<void>
   onClose: () => void
 }) {
-  const [filter, setFilter] = useState('')
+  const [searchText, setSearchText] = useState('')
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
     queryFn: () => api.listTasks(projectKey),
@@ -455,11 +504,13 @@ function LinkCardsDialog({
     },
   })
 
-  const needle = filter.trim().toLowerCase()
-  const named = (id: string | null) => columns.find((column) => column.id === id)?.name ?? ''
+  const searchWord = searchText.trim().toLowerCase()
+  const columnName = (id: string | null) => columns.find((column) => column.id === id)?.name ?? ''
   const offered = (tasks.data ?? [])
     .filter((task) => task.goal_id === null)
-    .filter((task) => !needle || `${task.reference} ${task.title}`.toLowerCase().includes(needle))
+    .filter(
+      (task) => !searchWord || `${task.reference} ${task.title}`.toLowerCase().includes(searchWord),
+    )
 
   return (
     <Modal
@@ -471,8 +522,8 @@ function LinkCardsDialog({
         {link.error ? <ErrorBanner>{link.error.message}</ErrorBanner> : null}
         <Field label="Find a card" hint="Cards already on another goal are not offered here.">
           <input
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
             placeholder="ATL-41, or part of a title"
           />
         </Field>
@@ -480,7 +531,7 @@ function LinkCardsDialog({
         {tasks.isPending ? <EmptyState>Loading the board…</EmptyState> : null}
         {tasks.data && offered.length === 0 ? (
           <EmptyState>
-            {needle ? 'No card matches that.' : 'Every card on the board is already on a goal.'}
+            {searchWord ? 'No card matches that.' : 'Every card on the board is already on a goal.'}
           </EmptyState>
         ) : null}
 
@@ -495,7 +546,7 @@ function LinkCardsDialog({
               >
                 <span className={styles.cardRef}>{task.reference}</span>
                 <span className={styles.cardTitle}>{task.title}</span>
-                <span className={styles.offerColumn}>{named(task.column_id)}</span>
+                <span className={styles.offerColumn}>{columnName(task.column_id)}</span>
                 <span aria-hidden="true">+</span>
               </button>
             </li>
