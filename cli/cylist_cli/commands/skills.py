@@ -52,7 +52,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from cylist_cli import output
-from cylist_cli.commands.files import _size as size_of
 from cylist_cli.commands.hook import REFERENCE, claude_config_dir
 from cylist_cli.context import Context
 from cylist_cli.errors import ApiError, CylistError
@@ -139,7 +138,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         [
             [
                 output.truncate(str(skill["name"]), NAME_WIDTH),
-                size_of(skill.get("size")),
+                output.human_size(skill.get("size")),
                 output.truncate(str(skill.get("description") or ""), DESCRIPTION_WIDTH),
             ]
             for skill in skills

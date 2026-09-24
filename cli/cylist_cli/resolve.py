@@ -106,7 +106,9 @@ def person_id(client: Client, name: str, *, project_ref: str | None = None) -> s
 
 
 def _people(payload: Any) -> list[JsonDict]:
-    return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+    if not isinstance(payload, list):
+        return []
+    return [person for person in payload if isinstance(person, dict)]
 
 
 # --- Board columns ---------------------------------------------------------
@@ -159,7 +161,7 @@ def folder(client: Client, project_ref: str, path: str) -> JsonDict:
     return current
 
 
-def item(client: Client, project_ref: str, path: str) -> JsonDict:
+def file_item(client: Client, project_ref: str, path: str) -> JsonDict:
     """Find one file or link by its path, e.g. ``Contracts/2026/msa.pdf``."""
     segments = split_path(path)
     if not segments:
