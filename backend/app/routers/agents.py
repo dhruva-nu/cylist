@@ -59,7 +59,7 @@ async def resolved_note(
     return await agents.get_note(session, note_id)
 
 
-def _skill(skill: Skill) -> SkillRead:
+def _skill_read(skill: Skill) -> SkillRead:
     person = skill.added_by_person
     return SkillRead(
         id=skill.id,
@@ -73,7 +73,7 @@ def _skill(skill: Skill) -> SkillRead:
     )
 
 
-def _note(note: AgentNote) -> NoteRead:
+def _note_read(note: AgentNote) -> NoteRead:
     person = note.added_by_person
     return NoteRead(
         id=note.id,
@@ -111,7 +111,7 @@ async def list_skills(
     `/skills/{skill_id}/download`, or as the folder Claude Code loads it from
     with `/skills/{skill_id}/folder`.
     """
-    return [_skill(skill) for skill in await agents.list_skills(session, project)]
+    return [_skill_read(skill) for skill in await agents.list_skills(session, project)]
 
 
 @router.post(
@@ -166,7 +166,7 @@ async def upload_skill(
         project_id=project.id,
         payload={"name": skill.name, "size": skill.size},
     )
-    return _skill(skill)
+    return _skill_read(skill)
 
 
 @router.get("/skills/{skill_id}", response_model=SkillRead, summary="Get a skill")
@@ -175,7 +175,7 @@ async def get_skill(
     _: Principal = Depends(require(Scope.READ)),
 ) -> SkillRead:
     """One skill's details, without its content."""
-    return _skill(skill)
+    return _skill_read(skill)
 
 
 @router.patch("/skills/{skill_id}", response_model=SkillRead, summary="Describe a skill")
@@ -196,7 +196,7 @@ async def update_skill(
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True))},
     )
-    return _skill(updated)
+    return _skill_read(updated)
 
 
 @router.delete("/skills/{skill_id}", response_model=Acknowledged, summary="Delete a skill")
@@ -275,23 +275,23 @@ async def skill_folder(
     content = await to_thread.run_sync(store.locate(skill.blob.path).read_bytes)
     folder = await to_thread.run_sync(skill_folders.unpack, skill.name, skill.description, content)
     return SkillFolderRead(
-        skill=_skill(skill),
+        skill=_skill_read(skill),
         folder=folder.name,
-        files=[_folder_file(one) for one in folder.files],
+        files=[_folder_file(folder_file) for folder_file in folder.files],
     )
 
 
-def _folder_file(one: skill_folders.FolderFile) -> SkillFolderFile:
+def _folder_file(folder_file: skill_folders.FolderFile) -> SkillFolderFile:
     try:
-        content, encoding = one.data.decode("utf-8"), "utf-8"
+        content, encoding = folder_file.data.decode("utf-8"), "utf-8"
     except UnicodeDecodeError:
-        content, encoding = base64.b64encode(one.data).decode("ascii"), "base64"
+        content, encoding = base64.b64encode(folder_file.data).decode("ascii"), "base64"
     return SkillFolderFile(
-        path=one.path,
+        path=folder_file.path,
         encoding=encoding,
         content=content,
-        size=len(one.data),
-        executable=one.executable,
+        size=len(folder_file.data),
+        executable=folder_file.executable,
     )
 
 
@@ -314,7 +314,7 @@ async def list_notes(
     that it would otherwise have to work out again. Read this before starting
     work here.
     """
-    return [_note(note) for note in await agents.list_notes(session, project)]
+    return [_note_read(note) for note in await agents.list_notes(session, project)]
 
 
 @router.post(
@@ -360,7 +360,7 @@ async def add_note(
         project_id=project.id,
         payload={"body": note.body},
     )
-    return _note(note)
+    return _note_read(note)
 
 
 @router.delete(

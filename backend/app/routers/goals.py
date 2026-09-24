@@ -40,7 +40,7 @@ async def resolved_goal(
     return await goals.resolve(session, goal_ref)
 
 
-def _read(goal: Goal, progress: GoalProgress) -> GoalRead:
+def _goal_read(goal: Goal, progress: GoalProgress) -> GoalRead:
     return GoalRead(
         id=goal.id,
         project_id=goal.project_id,
@@ -58,15 +58,15 @@ def _read(goal: Goal, progress: GoalProgress) -> GoalRead:
     )
 
 
-async def _one(session: AsyncSession, goal: Goal) -> GoalRead:
+async def _counted_goal_read(session: AsyncSession, goal: Goal) -> GoalRead:
     counted = await goals.progress(session, goal.project_id, [goal.id])
-    return _read(goal, counted[goal.id])
+    return _goal_read(goal, counted[goal.id])
 
 
-async def _detail(session: AsyncSession, goal: Goal) -> GoalDetail:
+async def _goal_detail(session: AsyncSession, goal: Goal) -> GoalDetail:
     linked = await goals.tasks_for(session, goal)
     return GoalDetail(
-        **(await _one(session, goal)).model_dump(),
+        **(await _counted_goal_read(session, goal)).model_dump(),
         tasks=await read_tasks(session, linked),
     )
 
@@ -127,7 +127,7 @@ async def list_goals(
     """
     found = await goals.list_for_project(session, project, include_settled=not open_only)
     counted = await goals.progress(session, project.id, [goal.id for goal in found])
-    return [_read(goal, counted[goal.id]) for goal in found]
+    return [_goal_read(goal, counted[goal.id]) for goal in found]
 
 
 @router.post(
@@ -166,7 +166,7 @@ async def create_goal(
         project_id=project.id,
         payload={"reference": goal.reference, "name": goal.name},
     )
-    return await _detail(session, goal)
+    return await _goal_detail(session, goal)
 
 
 @router.get("/goals/{goal_ref}", response_model=GoalDetail, summary="Get a goal")
@@ -176,7 +176,7 @@ async def get_goal(
     session: AsyncSession = SessionDependency,
 ) -> GoalDetail:
     """One goal, its progress, and the cards linked to it in board order."""
-    return await _detail(session, goal)
+    return await _goal_detail(session, goal)
 
 
 @router.patch(
@@ -221,7 +221,7 @@ async def update_goal(
             "fields": sorted(body.model_dump(exclude_unset=True)),
         },
     )
-    return await _detail(session, updated)
+    return await _goal_detail(session, updated)
 
 
 @router.delete("/goals/{goal_ref}", response_model=Acknowledged, summary="Delete a goal")

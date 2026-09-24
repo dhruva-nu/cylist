@@ -81,7 +81,7 @@ async def _project_of_checklist_item(session: AsyncSession, item: TaskChecklistI
     return task.project_id
 
 
-def _comment(entry: TaskComment) -> CommentRead:
+def _comment_read(entry: TaskComment) -> CommentRead:
     return CommentRead(
         id=entry.id,
         task_id=entry.task_id,
@@ -93,7 +93,7 @@ def _comment(entry: TaskComment) -> CommentRead:
     )
 
 
-def _item(item: TaskChecklistItem) -> ChecklistItemRead:
+def _checklist_item_read(item: TaskChecklistItem) -> ChecklistItemRead:
     return ChecklistItemRead(
         id=item.id,
         task_id=item.task_id,
@@ -104,7 +104,7 @@ def _item(item: TaskChecklistItem) -> ChecklistItemRead:
     )
 
 
-def _read(
+def _task_read(
     task: Task,
     comment_count: int,
     split: tasks.Split = tasks.Split(0, 0),
@@ -155,7 +155,7 @@ def _read(
         pr_ref=task.pr_ref,
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
         comment_count=comment_count,
-        checklist=[_item(item) for item in task.checklist],
+        checklist=[_checklist_item_read(item) for item in task.checklist],
         outcome=task.outcome,
         outcome_index=task.outcome_index,
         finished_at=task.finished_at,
@@ -180,11 +180,11 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
     counts = await tasks.comment_counts(session, ids)
     split = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
-    boards = await _boards(session, found)
+    boards = await _boards_by_project(session, found)
     # One query for the agents on every card.
     agents = await agent_sessions.for_tasks(session, ids)
     return [
-        _read(
+        _task_read(
             task,
             counts.get(task.id, 0),
             split.get(task.id, tasks.Split(0, 0)),
@@ -196,7 +196,9 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
     ]
 
 
-async def _boards(session: AsyncSession, found: list[Task]) -> dict[UUID, list[BoardColumn]]:
+async def _boards_by_project(
+    session: AsyncSession, found: list[Task]
+) -> dict[UUID, list[BoardColumn]]:
     """The columns of every board these cards are on, left to right.
 
     A card's dates only mean anything against the order of its own board — met
@@ -219,7 +221,7 @@ async def _boards(session: AsyncSession, found: list[Task]) -> dict[UUID, list[B
     return boards
 
 
-async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
+async def _task_detail(session: AsyncSession, task: Task) -> TaskDetail:
     timeline = await tasks.comments(session, task)
     children = await tasks.subtasks(session, task)
     ids = [task.id, *(child.id for child in children)]
@@ -228,7 +230,7 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
     board = await columns.list_for_project(session, task.project)
     agents = await agent_sessions.list_for_task(session, task)
     return TaskDetail(
-        **_read(
+        **_task_read(
             task,
             len(timeline),
             counts.get(task.id, tasks.Split(0, 0)),
@@ -236,14 +238,14 @@ async def _detail(session: AsyncSession, task: Task) -> TaskDetail:
             board,
             agent_sessions.presence(agents),
         ).model_dump(),
-        comments=[_comment(entry) for entry in timeline],
+        comments=[_comment_read(entry) for entry in timeline],
         agent_sessions=[agent_sessions.read(row) for row in agents],
         # A sub-task cannot be split again, so its own counts are always zero —
         # asked for all the same, because the loop that reads them does not know
         # which of these is which and a special case here would be a lie waiting
         # to come true.
         subtasks=[
-            _read(child, 0, counts.get(child.id, tasks.Split(0, 0)), owners.get(child.id))
+            _task_read(child, 0, counts.get(child.id, tasks.Split(0, 0)), owners.get(child.id))
             for child in children
         ],
     )
@@ -430,7 +432,7 @@ async def create_task(
         project_id=project.id,
         payload={"reference": task.reference, "title": task.title},
     )
-    return await _detail(session, task)
+    return await _task_detail(session, task)
 
 
 @router.get("/tasks/{task_ref}", response_model=TaskDetail, summary="Get a task")
@@ -440,7 +442,7 @@ async def get_task(
     session: AsyncSession = SessionDependency,
 ) -> TaskDetail:
     """One card and its whole timeline."""
-    return await _detail(session, task)
+    return await _task_detail(session, task)
 
 
 @router.get(
@@ -521,7 +523,7 @@ async def update_task(
         project_id=updated.project_id,
         payload={"reference": updated.reference, "changes": changes},
     )
-    return await _detail(session, updated)
+    return await _task_detail(session, updated)
 
 
 @router.delete("/tasks/{task_ref}", response_model=Acknowledged, summary="Delete a task")
@@ -594,7 +596,7 @@ async def move_task(
             "changes": changes,
         },
     )
-    return await _detail(session, moved)
+    return await _task_detail(session, moved)
 
 
 @router.post(
@@ -631,7 +633,7 @@ async def set_sub_status(
             "changes": changes,
         },
     )
-    return await _detail(session, updated)
+    return await _task_detail(session, updated)
 
 
 @router.post(
@@ -680,7 +682,7 @@ async def finish_task(
                 "changes": changes,
             },
         )
-    return await _detail(session, updated)
+    return await _task_detail(session, updated)
 
 
 @router.post(
@@ -725,7 +727,7 @@ async def change_status(
             ],
         },
     )
-    return await _detail(session, updated)
+    return await _task_detail(session, updated)
 
 
 @router.get(
@@ -744,7 +746,7 @@ async def list_subtasks(
     along on the task itself, as `checklist`.
     """
     children = await tasks.subtasks(session, task)
-    return [_read(child, 0) for child in children]
+    return [_task_read(child, 0) for child in children]
 
 
 @router.post(
@@ -800,7 +802,7 @@ async def create_subtask(
             "title": subtask.title,
         },
     )
-    return await _detail(session, subtask)
+    return await _task_detail(session, subtask)
 
 
 @router.post(
@@ -831,7 +833,7 @@ async def add_checklist_item(
         project_id=task.project_id,
         payload={"reference": task.reference, "title": item.title},
     )
-    return _item(item)
+    return _checklist_item_read(item)
 
 
 @router.patch(
@@ -865,7 +867,7 @@ async def update_checklist_item(
             "state": updated.state.value,
         },
     )
-    return _item(updated)
+    return _checklist_item_read(updated)
 
 
 @router.delete(
@@ -901,7 +903,7 @@ async def list_comments(
     session: AsyncSession = SessionDependency,
 ) -> list[CommentRead]:
     """Comments and status changes together, oldest first."""
-    return [_comment(entry) for entry in await tasks.comments(session, task)]
+    return [_comment_read(entry) for entry in await tasks.comments(session, task)]
 
 
 @router.post(
@@ -940,4 +942,4 @@ async def add_comment(
             "comment": activity.excerpt(entry.body),
         },
     )
-    return _comment(entry)
+    return _comment_read(entry)

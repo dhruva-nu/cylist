@@ -64,7 +64,7 @@ async def resolved_item(
     return await files.get_item(session, item_id)
 
 
-def _folder(folder: Folder) -> FolderRead:
+def _folder_read(folder: Folder) -> FolderRead:
     return FolderRead(
         id=folder.id,
         project_id=folder.project_id,
@@ -76,7 +76,7 @@ def _folder(folder: Folder) -> FolderRead:
     )
 
 
-def _item(item: FileItem) -> ItemRead:
+def _file_item_read(item: FileItem) -> ItemRead:
     person = item.added_by_person
     return ItemRead(
         id=item.id,
@@ -93,13 +93,13 @@ def _item(item: FileItem) -> ItemRead:
     )
 
 
-def _filed(filed: files.Filed) -> FiledItem:
+def _filed_item(filed: files.Filed) -> FiledItem:
     """An item plus where it is filed, built from the plain row's own shape so
     the two listings cannot drift apart."""
-    return FiledItem(**_item(filed.item).model_dump(), folder_path=filed.folder_path)
+    return FiledItem(**_file_item_read(filed.item).model_dump(), folder_path=filed.folder_path)
 
 
-def _nest(folders: list[Folder]) -> list[FolderNode]:
+def _nested_folders(folders: list[Folder]) -> list[FolderNode]:
     """Turn the project's flat folder list into the tree it describes."""
     by_parent: dict[UUID | None, list[Folder]] = defaultdict(list)
     for folder in folders:
@@ -173,7 +173,7 @@ async def list_folders(
 
     Use `/tree` for the same folders arranged as a tree.
     """
-    return [_folder(folder) for folder in await files.list_folders(session, project)]
+    return [_folder_read(folder) for folder in await files.list_folders(session, project)]
 
 
 @router.post(
@@ -208,7 +208,7 @@ async def create_folder(
             "parent_id": str(folder.parent_id) if folder.parent_id else None,
         },
     )
-    return _folder(folder)
+    return _folder_read(folder)
 
 
 @router.get(
@@ -231,7 +231,7 @@ async def get_tree(
     left-hand pane, and a request per expanded node would make every click wait
     on the network.
     """
-    tree = _nest(await files.list_folders(session, project))
+    tree = _nested_folders(await files.list_folders(session, project))
     if not tree:
         raise UnprocessableRequestError(
             "This project has no root folder.", details={"project_id": str(project.id)}
@@ -260,10 +260,14 @@ async def get_children(
     path = await files.path_to(session, folder)
     allowed = await permissions.visible_levels_for(session, folder.project_id, principal)
     return FolderChildren(
-        folder=_folder(folder),
+        folder=_folder_read(folder),
         path=[FolderCrumb(id=crumb.id, name=crumb.name) for crumb in path],
-        folders=[_folder(subfolder) for subfolder in subfolders],
-        items=[_item(item) for item in items if permissions.readable(item.sensitivity, allowed)],
+        folders=[_folder_read(subfolder) for subfolder in subfolders],
+        items=[
+            _file_item_read(item)
+            for item in items
+            if permissions.readable(item.sensitivity, allowed)
+        ],
     )
 
 
@@ -302,7 +306,7 @@ async def update_folder(
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
     )
-    return _folder(updated)
+    return _folder_read(updated)
 
 
 @router.delete(
@@ -387,7 +391,7 @@ async def upload_file(
         project_id=folder.project_id,
         payload={"name": item.name, "size": item.size, "sensitivity": item.sensitivity},
     )
-    return _item(item)
+    return _file_item_read(item)
 
 
 @router.post(
@@ -419,7 +423,7 @@ async def add_link(
         project_id=folder.project_id,
         payload={"name": item.name, "source": item.source.value},
     )
-    return _item(item)
+    return _file_item_read(item)
 
 
 @router.get(
@@ -441,7 +445,7 @@ async def list_project_items(
     """
     allowed = await permissions.readable_levels(session, project, principal)
     return [
-        _filed(filed)
+        _filed_item(filed)
         for filed in await files.list_items(session, project)
         if permissions.readable(filed.item.sensitivity, allowed)
     ]
@@ -452,7 +456,7 @@ async def get_item(
     item: FileItem = Depends(visible_item),
     _: Principal = Depends(require(Scope.READ)),
 ) -> ItemRead:
-    return _item(item)
+    return _file_item_read(item)
 
 
 @router.patch(
@@ -479,7 +483,7 @@ async def update_item(
         project_id=folder.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
     )
-    return _item(updated)
+    return _file_item_read(updated)
 
 
 @router.delete("/items/{item_id}", response_model=Acknowledged, summary="Delete a file or link")

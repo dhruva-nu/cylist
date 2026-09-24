@@ -59,7 +59,7 @@ async def resolved_project(
     return await projects.resolve(session, project_ref)
 
 
-def _read(project: Project) -> ProjectRead:
+def _project_read(project: Project) -> ProjectRead:
     return ProjectRead(
         id=project.id,
         key=project.key,
@@ -88,7 +88,7 @@ async def list_projects(
 ) -> list[ProjectRead]:
     """Return every project, newest first — the home screen's grid."""
     found = await projects.list_projects(session, include_archived=include_archived)
-    return [_read(project) for project in found]
+    return [_project_read(project) for project in found]
 
 
 @router.post(
@@ -118,7 +118,7 @@ async def create_project(
         project_id=project.id,
         payload={"key": project.key, "name": project.name},
     )
-    return _read(project)
+    return _project_read(project)
 
 
 @router.get("/{project_ref}", response_model=ProjectRead, summary="Get a project")
@@ -126,7 +126,7 @@ async def get_project(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
 ) -> ProjectRead:
-    return _read(project)
+    return _project_read(project)
 
 
 @router.get(
@@ -156,7 +156,7 @@ async def get_summary(
     agent_material = await agents.counts(session, project)
     goal_count, open_goals = await goals.counts_for_project(session, project)
     return ProjectSummary(
-        **_read(project).model_dump(),
+        **_project_read(project).model_dump(),
         team_count=people_counts[PersonKind.TEAM],
         client_count=people_counts[PersonKind.CLIENT],
         task_count=await tasks.card_count(session, project),
@@ -197,7 +197,7 @@ async def update_project(
         project_id=updated.id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True))},
     )
-    return _read(updated)
+    return _project_read(updated)
 
 
 @router.delete("/{project_ref}", response_model=Acknowledged, summary="Archive a project")
