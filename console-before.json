@@ -1,0 +1,47 @@
+[
+  {
+    "page": "desktop/signin",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  },
+  {
+    "page": "desktop/signin",
+    "type": "http 401",
+    "text": "http://localhost:5250/api/v1/me"
+  },
+  {
+    "page": "desktop/signin",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  },
+  {
+    "page": "desktop/board",
+    "type": "warning",
+    "text": "WebSocket connection to 'ws://localhost:5250/api/v1/projects/ATL/board/ws' failed: WebSocket is closed before the connection is established."
+  },
+  {
+    "page": "desktop/task",
+    "type": "warning",
+    "text": "WebSocket connection to 'ws://localhost:5250/api/v1/projects/ATL/board/ws' failed: WebSocket is closed before the connection is established."
+  },
+  {
+    "page": "phone/signin",
+    "type": "http 401",
+    "text": "http://localhost:5250/api/v1/me"
+  },
+  {
+    "page": "phone/signin",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  },
+  {
+    "page": "phone/board",
+    "type": "warning",
+    "text": "WebSocket connection to 'ws://localhost:5250/api/v1/projects/ATL/board/ws' failed: WebSocket is closed before the connection is established."
+  },
+  {
+    "page": "phone/task",
+    "type": "warning",
+    "text": "WebSocket connection to 'ws://localhost:5250/api/v1/projects/ATL/board/ws' failed: WebSocket is closed before the connection is established."
+  }
+]
