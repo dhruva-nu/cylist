@@ -367,6 +367,10 @@ Each project carries what its agents work from, under its **Agents** tab: skills
 you upload for them to follow, and a scratchpad they write one-line findings back
 onto. `note_learned` is how an agent leaves something it worked out the hard way,
 capped at 280 characters so the next one reads the pad rather than skimming it.
+The MCP instructions and the `/work` command tell an agent to read the pad before
+it starts on a card and to write to it as it learns, not at the end; a line that
+says what one already there says is refused, so the pad stays a list of facts
+rather than a log.
 
 The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
 It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an

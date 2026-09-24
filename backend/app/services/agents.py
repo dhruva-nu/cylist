@@ -12,11 +12,15 @@ old one first.
 
 *A note is written once and never edited.* See :class:`~app.models.agent.
 AgentNote` — a rewritten note is a different thing learned, and its timestamp
-is part of what it says.
+is part of what it says. Nor is it written twice: a line that says what one
+already on the scratchpad says is refused, because the scratchpad is read in
+full by every agent that arrives and a fact repeated is a fact the next one
+reads twice.
 """
 
 from __future__ import annotations
 
+import re
 from typing import NamedTuple
 from uuid import UUID
 
@@ -25,7 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.models.agent import AgentNote, Skill
 from app.models.person import Person
 from app.models.project import Project
@@ -192,10 +196,12 @@ async def add_note(
     """Write a line onto the project's scratchpad.
 
     Raises:
+        ConflictError: if a line saying the same thing is already on it.
         UnprocessableRequestError: if ``added_by`` names nobody in the
             directory.
     """
     await _ensure_person_exists(session, added_by)
+    await _ensure_not_already_noted(session, project, data.body)
     note = AgentNote(
         project_id=project.id,
         body=data.body,
@@ -206,6 +212,40 @@ async def add_note(
     await session.flush()
     await session.refresh(note, ["added_by_person"])
     return note
+
+
+_NOT_A_WORD = re.compile(r"[\W_]+")
+
+
+def _gist(body: str) -> str:
+    """A note reduced to its words: case, spacing and punctuation dropped.
+
+    Deliberately no cleverer than that. Two agents that learn the same thing
+    usually write it the same way, give or take a full stop or a backtick, and
+    that is the duplicate worth catching; deciding that two differently worded
+    lines *mean* the same is a judgement, and the one making it should be the
+    agent that has just read the scratchpad, not this.
+    """
+    return _NOT_A_WORD.sub(" ", body.casefold()).strip()
+
+
+async def _ensure_not_already_noted(session: AsyncSession, project: Project, body: str) -> None:
+    """Refuse a line the scratchpad already holds, naming the one it matches.
+
+    Compared in Python over the project's own notes rather than by an index:
+    a scratchpad is tens of lines, and the comparison is on a normalised form
+    no column holds.
+    """
+    gist = _gist(body)
+    rows = await session.execute(
+        select(AgentNote.id, AgentNote.body).where(AgentNote.project_id == project.id)
+    )
+    for note_id, existing in rows:
+        if _gist(existing) == gist:
+            raise ConflictError(
+                f"That is already on the scratchpad: {existing!r}",
+                details={"note_id": str(note_id), "body": existing},
+            )
 
 
 async def delete_note(session: AsyncSession, note: AgentNote) -> None:

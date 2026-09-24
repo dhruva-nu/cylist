@@ -382,6 +382,49 @@ class TestTheScratchpad:
             await session.flush()
         await session.rollback()
 
+    async def test_refuses_a_line_already_on_it(self, project: AsyncClient) -> None:
+        first = (
+            await project.post(
+                "/projects/ATL/agent-notes", json={"body": "Run `uv run pytest` from backend/."}
+            )
+        ).json()
+
+        response = await project.post(
+            "/projects/ATL/agent-notes", json={"body": "run uv run pytest  from Backend"}
+        )
+
+        assert response.status_code == 409
+        error = response.json()["error"]
+        assert error["details"]["note_id"] == first["id"], "it names the line that is there"
+        assert len((await project.get("/projects/ATL/agent-notes")).json()) == 1
+
+    async def test_a_different_fact_is_not_a_duplicate(self, project: AsyncClient) -> None:
+        await project.post("/projects/ATL/agent-notes", json={"body": "Run pytest from backend/."})
+
+        response = await project.post(
+            "/projects/ATL/agent-notes", json={"body": "Run vitest from frontend/."}
+        )
+
+        assert response.status_code == 201
+
+    async def test_the_same_line_may_be_on_two_projects(self, project: AsyncClient) -> None:
+        await project.post("/projects", json=HERMES)
+        await project.post("/projects/ATL/agent-notes", json={"body": "Deploys run on Fridays."})
+
+        response = await project.post(
+            "/projects/HRM/agent-notes", json={"body": "Deploys run on Fridays."}
+        )
+
+        assert response.status_code == 201
+
+    async def test_a_line_rubbed_off_may_be_written_again(self, project: AsyncClient) -> None:
+        note = (await project.post("/projects/ATL/agent-notes", json={"body": "true again"})).json()
+        await project.delete(f"/agent-notes/{note['id']}")
+
+        response = await project.post("/projects/ATL/agent-notes", json={"body": "true again"})
+
+        assert response.status_code == 201
+
     async def test_rubs_a_line_off(self, project: AsyncClient) -> None:
         note = (
             await project.post("/projects/ATL/agent-notes", json={"body": "no longer true"})
