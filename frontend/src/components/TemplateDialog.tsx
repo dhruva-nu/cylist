@@ -14,7 +14,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { api, type BoardColumn, type Template } from '../api/client'
 import { Field, Modal, ModalBody } from './Modal'
 import { Button, EmptyState, ErrorBanner } from './ui'
@@ -103,7 +103,7 @@ export function TemplateDialog({
               <div key={template.id} className={styles.row}>
                 <div className={styles.rowText}>
                   <strong>{template.name}</strong>
-                  <span className={styles.muted}>{summarise(template, columns)}</span>
+                  <span className={styles.muted}>{summariseTemplate(template, columns)}</span>
                 </div>
                 <Button small variant="ghost" onClick={() => setEditing(template)}>
                   Edit
@@ -122,7 +122,7 @@ export function TemplateDialog({
 }
 
 /** What a template amounts to on this board, in one line. */
-function summarise(template: Template, columns: BoardColumn[]): string {
+function summariseTemplate(template: Template, columns: BoardColumn[]): string {
   if (!template.stages.length) return 'Any column — unrestricted.'
   return template.stages
     .map(
@@ -159,13 +159,7 @@ function TemplateEditor({
 }) {
   const [name, setName] = useState(template?.name ?? '')
   const [description, setDescription] = useState(template?.description ?? '')
-  const [stages, setStages] = useState<DraftStage[]>(
-    (template?.stages ?? []).map((stage) => ({
-      column_id: stage.column_id,
-      sub_stage_labels: [...stage.sub_stage_labels],
-      allowed_outcomes: [...stage.allowed_outcomes],
-    })),
-  )
+  const [stages, setStages] = useState<DraftStage[]>(draftStagesOf(template))
 
   const save = useMutation({
     mutationFn: () => {
@@ -190,7 +184,7 @@ function TemplateEditor({
     },
   })
 
-  const complete = Boolean(name.trim())
+  const named = Boolean(name.trim())
   const error = save.error ?? remove.error
 
   function toggleStage(columnId: string) {
@@ -209,35 +203,17 @@ function TemplateEditor({
     )
   }
 
-  /**
-   * Turn one of a column's outcomes on or off for this stage.
-   *
-   * An empty list means all of them, so the toggles start lit and the first
-   * click has to take one *out* of the full set rather than add one to
-   * nothing. Choosing every one is the same rule as choosing none and is
-   * stored as none, which is the form that survives an outcome being renamed;
-   * choosing none at all is refused, because it would light them all straight
-   * back up and read as a click that did nothing.
-   */
   function toggleOutcome(columnId: string, outcome: string, all: string[]) {
     setStages((current) =>
-      current.map((stage) => {
-        if (stage.column_id !== columnId) return stage
-        const chosen = new Set(stage.allowed_outcomes.length ? stage.allowed_outcomes : all)
-        if (chosen.has(outcome)) chosen.delete(outcome)
-        else chosen.add(outcome)
-        if (chosen.size === 0) return stage
-        // In the column's own order, so the template reads the way the board
-        // draws it however the toggles were clicked.
-        const next = all.filter((one) => chosen.has(one))
-        return { ...stage, allowed_outcomes: next.length === all.length ? [] : next }
-      }),
+      current.map((stage) =>
+        stage.column_id === columnId ? withOutcomeToggled(stage, outcome, all) : stage,
+      ),
     )
   }
 
   // Board order, not the order columns were added to the template: a
   // template reads along the board, the same way a card crosses it.
-  const ordered = [...stages].sort(
+  const stagesInBoardOrder = [...stages].sort(
     (a, b) =>
       columns.findIndex((column) => column.id === a.column_id) -
       columns.findIndex((column) => column.id === b.column_id),
@@ -261,8 +237,8 @@ function TemplateEditor({
             </Button>
           ) : null}
           <Button onClick={onBack}>Back</Button>
-          <Button variant="go" disabled={save.isPending || !complete} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving…' : template ? 'Save changes' : 'Create template'}
+          <Button variant="go" disabled={save.isPending || !named} onClick={() => save.mutate()}>
+            {saveButtonLabel(save.isPending, template)}
           </Button>
         </>
       }
@@ -297,70 +273,28 @@ function TemplateEditor({
             role="group"
             aria-label="Columns this template's cards may sit in"
           >
-            {columns.map((column) => {
-              const allowed = stages.some((stage) => stage.column_id === column.id)
-              return (
-                <button
-                  key={column.id}
-                  type="button"
-                  className={`${styles.columnToggle} ${allowed ? styles.columnToggleActive : ''}`}
-                  aria-pressed={allowed}
-                  onClick={() => toggleStage(column.id)}
-                >
-                  {column.name}
-                </button>
-              )
-            })}
+            {columns.map((column) => (
+              <ToggleButton
+                key={column.id}
+                pressed={stages.some((stage) => stage.column_id === column.id)}
+                onClick={() => toggleStage(column.id)}
+              >
+                {column.name}
+              </ToggleButton>
+            ))}
           </div>
 
-          {ordered.length ? (
+          {stagesInBoardOrder.length ? (
             <div className={styles.stages}>
-              {ordered.map((stage) => {
-                const column = columns.find((candidate) => candidate.id === stage.column_id)
-                return (
-                  <div key={stage.column_id} className={styles.stage}>
-                    <div className={styles.stageHead}>
-                      <strong>{column?.name ?? 'Unknown column'}</strong>
-                    </div>
-                    <SubStageLabelsEditor
-                      value={stage.sub_stage_labels}
-                      onChange={(labels) => setLabels(stage.column_id, labels)}
-                    />
-                    {/* Only where the column has sections to choose between,
-                        which is the board's last and only once it has been
-                        divided. Choosing none is choosing all of them, the
-                        same silence the columns above keep. */}
-                    {column?.outcomes.length ? (
-                      <div
-                        className={styles.columnToggles}
-                        role="group"
-                        aria-label={`How ${column.name} may end for this template's cards`}
-                      >
-                        {column.outcomes.map((outcome) => {
-                          const chosen =
-                            stage.allowed_outcomes.length === 0 ||
-                            stage.allowed_outcomes.includes(outcome)
-                          return (
-                            <button
-                              key={outcome}
-                              type="button"
-                              className={`${styles.columnToggle} ${
-                                chosen ? styles.columnToggleActive : ''
-                              }`}
-                              aria-pressed={chosen}
-                              onClick={() =>
-                                toggleOutcome(stage.column_id, outcome, column.outcomes)
-                              }
-                            >
-                              {outcome}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })}
+              {stagesInBoardOrder.map((stage) => (
+                <StageEditor
+                  key={stage.column_id}
+                  stage={stage}
+                  column={columns.find((candidate) => candidate.id === stage.column_id)}
+                  onLabels={(labels) => setLabels(stage.column_id, labels)}
+                  onToggleOutcome={(outcome, all) => toggleOutcome(stage.column_id, outcome, all)}
+                />
+              ))}
             </div>
           ) : (
             <EmptyState>
@@ -370,6 +304,114 @@ function TemplateEditor({
         </Field>
       </ModalBody>
     </Modal>
+  )
+}
+
+/** A template's stages as the editor holds them: copies, so editing leaves the template alone. */
+function draftStagesOf(template: Template | null): DraftStage[] {
+  return (template?.stages ?? []).map((stage) => ({
+    column_id: stage.column_id,
+    sub_stage_labels: [...stage.sub_stage_labels],
+    allowed_outcomes: [...stage.allowed_outcomes],
+  }))
+}
+
+/**
+ * A stage with one of its column's outcomes turned on or off.
+ *
+ * An empty list means all of them, so the toggles start lit and the first
+ * click has to take one *out* of the full set rather than add one to
+ * nothing. Choosing every one is the same rule as choosing none and is
+ * stored as none, which is the form that survives an outcome being renamed;
+ * choosing none at all is refused, because it would light them all straight
+ * back up and read as a click that did nothing.
+ */
+function withOutcomeToggled(stage: DraftStage, outcome: string, all: string[]): DraftStage {
+  const chosen = new Set(stage.allowed_outcomes.length ? stage.allowed_outcomes : all)
+  if (chosen.has(outcome)) chosen.delete(outcome)
+  else chosen.add(outcome)
+  if (chosen.size === 0) return stage
+  // In the column's own order, so the template reads the way the board
+  // draws it however the toggles were clicked.
+  const next = all.filter((one) => chosen.has(one))
+  return { ...stage, allowed_outcomes: next.length === all.length ? [] : next }
+}
+
+/** What the Save button says it will do. */
+function saveButtonLabel(saving: boolean, template: Template | null): string {
+  if (saving) return 'Saving…'
+  if (template) return 'Save changes'
+  return 'Create template'
+}
+
+/**
+ * One column under this template: its sub-stages, and — where the column is
+ * divided into outcomes — which of those a card of this template may end in.
+ */
+function StageEditor({
+  stage,
+  column,
+  onLabels,
+  onToggleOutcome,
+}: {
+  stage: DraftStage
+  /** Undefined when the column has gone from the board since the stage was set. */
+  column: BoardColumn | undefined
+  onLabels: (labels: string[]) => void
+  onToggleOutcome: (outcome: string, all: string[]) => void
+}) {
+  return (
+    <div className={styles.stage}>
+      <div className={styles.stageHead}>
+        <strong>{column?.name ?? 'Unknown column'}</strong>
+      </div>
+      <SubStageLabelsEditor value={stage.sub_stage_labels} onChange={onLabels} />
+      {/* Only where the column has sections to choose between,
+          which is the board's last and only once it has been
+          divided. Choosing none is choosing all of them, the
+          same silence the columns above keep. */}
+      {column?.outcomes.length ? (
+        <div
+          className={styles.columnToggles}
+          role="group"
+          aria-label={`How ${column.name} may end for this template's cards`}
+        >
+          {column.outcomes.map((outcome) => (
+            <ToggleButton
+              key={outcome}
+              pressed={
+                stage.allowed_outcomes.length === 0 || stage.allowed_outcomes.includes(outcome)
+              }
+              onClick={() => onToggleOutcome(outcome, column.outcomes)}
+            >
+              {outcome}
+            </ToggleButton>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** One of the lit-or-unlit buttons a template's columns and outcomes are picked with. */
+function ToggleButton({
+  pressed,
+  onClick,
+  children,
+}: {
+  pressed: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className={`${styles.columnToggle} ${pressed ? styles.columnToggleActive : ''}`}
+      aria-pressed={pressed}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }
 
