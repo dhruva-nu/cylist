@@ -144,16 +144,22 @@ class CommentKind(StrEnum):
 
 
 def _enum(python_type: type[StrEnum], name: str) -> Enum:
-    """Store an enum as its values in a VARCHAR, never as a native PG type.
+    """Store an enum as its values in a VARCHAR plus a CHECK, never as a native
+    PG type.
 
-    A native enum needs a migration to gain a member and cannot be altered
-    inside a transaction — a lot of ceremony for a list that exists to keep
-    three strings honest.
+    A native enum cannot be altered inside a transaction, which is a lot of
+    ceremony for a list that exists to keep three strings honest. The CHECK —
+    ``ck_<table>_<name>`` — is what keeps them honest in the database too: a
+    value the ORM cannot map back to a member does not fail where it was
+    written, it fails wherever the row is next read, which for a card is the
+    whole board. So gaining a member is a migration that swaps the CHECK (and
+    widens the column, if the member is the longest yet) — see revision 0031.
     """
     return Enum(
         python_type,
         name=name,
         native_enum=False,
+        create_constraint=True,
         values_callable=lambda enum: [member.value for member in enum],
     )
 

@@ -114,6 +114,7 @@ class VaultNode(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             VaultNodeKind,
             name="vault_node_kind",
             native_enum=False,
+            create_constraint=True,
             values_callable=lambda enum: [member.value for member in enum],
         ),
         nullable=False,
@@ -175,6 +176,8 @@ class VaultSecret(Base, TimestampMixin):
             VaultNodeKind,
             name="vault_node_kind",
             native_enum=False,
+            # No CHECK of its own: `node_kind_is_secret` already pins this to
+            # one value, which says more than "one of the two".
             values_callable=lambda enum: [member.value for member in enum],
         ),
         nullable=False,
