@@ -96,11 +96,3 @@ def remember(url: str) -> None:
         # which is the behaviour this module exists to improve rather than to
         # depend on.
         return
-
-
-def forget() -> None:
-    """Drop the memory, so the next command tries the configured order."""
-    try:
-        memory_path().unlink(missing_ok=True)
-    except OSError:
-        return

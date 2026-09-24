@@ -93,13 +93,6 @@ def test_remembering_never_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert endpoints.remembered() is None
 
 
-def test_forgetting_puts_the_configured_order_back() -> None:
-    endpoints.remember(PUBLIC)
-    endpoints.forget()
-
-    assert endpoints.order([HOME, PUBLIC]) == (HOME, PUBLIC)
-
-
 # --- Falling over to the next one ------------------------------------------
 
 
