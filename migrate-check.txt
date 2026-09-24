@@ -1,0 +1,118 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Credentials and audit trail.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Projects and people.
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, The Kanban board.
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Files: folders, items and content-addressed blobs.
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, The vault: trees, nodes and encrypted secrets.
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, Give every project a root folder.
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, Mark one person in the directory as you.
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, Sub-tasks: cards under a card, and tick boxes on one.
+INFO  [alembic.runtime.migration] Running upgrade 0008 -> 0009, Widen ``task.jira_ref`` to hold a URL, like ``task.pr_ref`` already does.
+INFO  [alembic.runtime.migration] Running upgrade 0009 -> 0010, Task priority: 0 (urgent) to 3 (someday), color-flagged on the board.
+INFO  [alembic.runtime.migration] Running upgrade 0010 -> 0011, Task sub-status: up to 4 stage labels and a pointer into them.
+INFO  [alembic.runtime.migration] Running upgrade 0011 -> 0012, Make a task's due date optional.
+INFO  [alembic.runtime.migration] Running upgrade 0012 -> 0013, Task templates: what kind of card a task is, which columns it may sit in,
+and the sub-stages it passes through in each before it can move on.
+INFO  [alembic.runtime.migration] Running upgrade 0013 -> 0014, Sub-tasks come off the board: no column, and a finishing time of their own.
+INFO  [alembic.runtime.migration] Running upgrade 0014 -> 0015, Goals: the epic a card belongs to, and the colour it wears on the board.
+INFO  [alembic.runtime.migration] Running upgrade 0015 -> 0016, A card in the board's last column carries a finishing time of its own.
+INFO  [alembic.runtime.migration] Running upgrade 0016 -> 0017, The last column is divided into outcomes, and a card says which it ended on.
+INFO  [alembic.runtime.migration] Running upgrade 0017 -> 0018, Task priority said as a level: p0, p1, p2, p3.
+INFO  [alembic.runtime.migration] Running upgrade 0018 -> 0019, A card can be dated per column, not only at the end of the board.
+INFO  [alembic.runtime.migration] Running upgrade 0019 -> 0020, Agent sessions: which harness session is on which card, and how it stands.
+INFO  [alembic.runtime.migration] Running upgrade 0020 -> 0021, Skills an agent can be given, and the scratchpad it writes on.
+INFO  [alembic.runtime.migration] Running upgrade 0021 -> 0022, A reason for the sessions nobody said goodbye for.
+INFO  [alembic.runtime.migration] Running upgrade 0022 -> 0023, More than one person can sign in.
+INFO  [alembic.runtime.migration] Running upgrade 0023 -> 0024, Everyone on a project is something on it, and somebody says what.
+INFO  [alembic.runtime.migration] Running upgrade 0024 -> 0025, A role says what its holders may do, and the admin says what that is.
+INFO  [alembic.runtime.migration] Running upgrade 0025 -> 0026, Access that knows which column, which upload, and which goal.
+INFO  [alembic.runtime.migration] Running upgrade 0026 -> 0027, A name on the board that belongs to a machine.
+INFO  [alembic.runtime.migration] Running upgrade 0027 -> 0028, A role's grants, rules and clearance go when the role does.
+INFO  [alembic.runtime.migration] Running upgrade 0028 -> 0029, A blob's size lives on the blob, and nowhere else.
+INFO  [alembic.runtime.migration] Running upgrade 0029 -> 0030, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running upgrade 0030 -> 0031, Every enum column is checked by the database, not only by the ORM.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.schemas
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.tables
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.types
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.constraints
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.defaults
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.comments
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.checkconstraint_byname
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 0031 -> 0030, Every enum column is checked by the database, not only by the ORM.
+INFO  [alembic.runtime.migration] Running downgrade 0030 -> 0029, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running downgrade 0029 -> 0028, A blob's size lives on the blob, and nowhere else.
+INFO  [alembic.runtime.migration] Running downgrade 0028 -> 0027, A role's grants, rules and clearance go when the role does.
+INFO  [alembic.runtime.migration] Running downgrade 0027 -> 0026, A name on the board that belongs to a machine.
+INFO  [alembic.runtime.migration] Running downgrade 0026 -> 0025, Access that knows which column, which upload, and which goal.
+INFO  [alembic.runtime.migration] Running downgrade 0025 -> 0024, A role says what its holders may do, and the admin says what that is.
+INFO  [alembic.runtime.migration] Running downgrade 0024 -> 0023, Everyone on a project is something on it, and somebody says what.
+INFO  [alembic.runtime.migration] Running downgrade 0023 -> 0022, More than one person can sign in.
+INFO  [alembic.runtime.migration] Running downgrade 0022 -> 0021, A reason for the sessions nobody said goodbye for.
+INFO  [alembic.runtime.migration] Running downgrade 0021 -> 0020, Skills an agent can be given, and the scratchpad it writes on.
+INFO  [alembic.runtime.migration] Running downgrade 0020 -> 0019, Agent sessions: which harness session is on which card, and how it stands.
+INFO  [alembic.runtime.migration] Running downgrade 0019 -> 0018, A card can be dated per column, not only at the end of the board.
+INFO  [alembic.runtime.migration] Running downgrade 0018 -> 0017, Task priority said as a level: p0, p1, p2, p3.
+INFO  [alembic.runtime.migration] Running downgrade 0017 -> 0016, The last column is divided into outcomes, and a card says which it ended on.
+INFO  [alembic.runtime.migration] Running downgrade 0016 -> 0015, A card in the board's last column carries a finishing time of its own.
+INFO  [alembic.runtime.migration] Running downgrade 0015 -> 0014, Goals: the epic a card belongs to, and the colour it wears on the board.
+INFO  [alembic.runtime.migration] Running downgrade 0014 -> 0013, Sub-tasks come off the board: no column, and a finishing time of their own.
+INFO  [alembic.runtime.migration] Running downgrade 0013 -> 0012, Task templates: what kind of card a task is, which columns it may sit in,
+and the sub-stages it passes through in each before it can move on.
+INFO  [alembic.runtime.migration] Running downgrade 0012 -> 0011, Make a task's due date optional.
+INFO  [alembic.runtime.migration] Running downgrade 0011 -> 0010, Task sub-status: up to 4 stage labels and a pointer into them.
+INFO  [alembic.runtime.migration] Running downgrade 0010 -> 0009, Task priority: 0 (urgent) to 3 (someday), color-flagged on the board.
+INFO  [alembic.runtime.migration] Running downgrade 0009 -> 0008, Widen ``task.jira_ref`` to hold a URL, like ``task.pr_ref`` already does.
+INFO  [alembic.runtime.migration] Running downgrade 0008 -> 0007, Sub-tasks: cards under a card, and tick boxes on one.
+INFO  [alembic.runtime.migration] Running downgrade 0007 -> 0006, Mark one person in the directory as you.
+INFO  [alembic.runtime.migration] Running downgrade 0006 -> 0005, Give every project a root folder.
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, The vault: trees, nodes and encrypted secrets.
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Files: folders, items and content-addressed blobs.
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, The Kanban board.
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Projects and people.
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Credentials and audit trail.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Credentials and audit trail.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Projects and people.
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, The Kanban board.
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Files: folders, items and content-addressed blobs.
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, The vault: trees, nodes and encrypted secrets.
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, Give every project a root folder.
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, Mark one person in the directory as you.
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, Sub-tasks: cards under a card, and tick boxes on one.
+INFO  [alembic.runtime.migration] Running upgrade 0008 -> 0009, Widen ``task.jira_ref`` to hold a URL, like ``task.pr_ref`` already does.
+INFO  [alembic.runtime.migration] Running upgrade 0009 -> 0010, Task priority: 0 (urgent) to 3 (someday), color-flagged on the board.
+INFO  [alembic.runtime.migration] Running upgrade 0010 -> 0011, Task sub-status: up to 4 stage labels and a pointer into them.
+INFO  [alembic.runtime.migration] Running upgrade 0011 -> 0012, Make a task's due date optional.
+INFO  [alembic.runtime.migration] Running upgrade 0012 -> 0013, Task templates: what kind of card a task is, which columns it may sit in,
+and the sub-stages it passes through in each before it can move on.
+INFO  [alembic.runtime.migration] Running upgrade 0013 -> 0014, Sub-tasks come off the board: no column, and a finishing time of their own.
+INFO  [alembic.runtime.migration] Running upgrade 0014 -> 0015, Goals: the epic a card belongs to, and the colour it wears on the board.
+INFO  [alembic.runtime.migration] Running upgrade 0015 -> 0016, A card in the board's last column carries a finishing time of its own.
+INFO  [alembic.runtime.migration] Running upgrade 0016 -> 0017, The last column is divided into outcomes, and a card says which it ended on.
+INFO  [alembic.runtime.migration] Running upgrade 0017 -> 0018, Task priority said as a level: p0, p1, p2, p3.
+INFO  [alembic.runtime.migration] Running upgrade 0018 -> 0019, A card can be dated per column, not only at the end of the board.
+INFO  [alembic.runtime.migration] Running upgrade 0019 -> 0020, Agent sessions: which harness session is on which card, and how it stands.
+INFO  [alembic.runtime.migration] Running upgrade 0020 -> 0021, Skills an agent can be given, and the scratchpad it writes on.
+INFO  [alembic.runtime.migration] Running upgrade 0021 -> 0022, A reason for the sessions nobody said goodbye for.
+INFO  [alembic.runtime.migration] Running upgrade 0022 -> 0023, More than one person can sign in.
+INFO  [alembic.runtime.migration] Running upgrade 0023 -> 0024, Everyone on a project is something on it, and somebody says what.
+INFO  [alembic.runtime.migration] Running upgrade 0024 -> 0025, A role says what its holders may do, and the admin says what that is.
+INFO  [alembic.runtime.migration] Running upgrade 0025 -> 0026, Access that knows which column, which upload, and which goal.
+INFO  [alembic.runtime.migration] Running upgrade 0026 -> 0027, A name on the board that belongs to a machine.
+INFO  [alembic.runtime.migration] Running upgrade 0027 -> 0028, A role's grants, rules and clearance go when the role does.
+INFO  [alembic.runtime.migration] Running upgrade 0028 -> 0029, A blob's size lives on the blob, and nowhere else.
+INFO  [alembic.runtime.migration] Running upgrade 0029 -> 0030, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running upgrade 0030 -> 0031, Every enum column is checked by the database, not only by the ORM.
+→ upgrade head
+→ check for drift between the models and the migrations
+No new upgrade operations detected.
+→ downgrade base
+→ upgrade head again
+
+Migrations match the models and reverse cleanly.

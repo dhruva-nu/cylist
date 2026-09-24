@@ -1,0 +1,220 @@
+
+==== Fresh copy of the seeded 0027 database
+revision: 0027
+
+==== Row counts at 0027
+snapshot at 0027: 249 rows in 27 tables
+
+==== alembic upgrade head
+INFO  [alembic.runtime.migration] Running upgrade 0027 -> 0028, A role's grants, rules and clearance go when the role does.
+INFO  [alembic.runtime.migration] Running upgrade 0028 -> 0029, A blob's size lives on the blob, and nowhere else.
+WARNI [alembic.revision.0029] file_item 01a0d58e-56f2-7669-afa5-d82e2493c384 ('cutover.txt') said 63 bytes; its blob holds 56. Reporting the blob's from now on.
+WARNI [alembic.revision.0029] skill 01a0d58e-56ff-7004-ad86-9a707a4c1965 ('board-tidy.md') said 40 bytes; its blob holds 37. Reporting the blob's from now on.
+INFO  [alembic.runtime.migration] Running upgrade 0029 -> 0030, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running upgrade 0030 -> 0031, Every enum column is checked by the database, not only by the ORM.
+revision: 0031
+snapshot at 0031: 249 rows in 27 tables
+
+==== 0027 -> head, table by table (every row compared on every column)
+table                    0027   0031  differences
+activity                   46     46  -
+agent_note                  2      2  -
+agent_session               5      5  -
+api_token                   6      6  -
+blob                       10     10  columns gone: ['mime']
+board_column                8      8  -
+file_item                  13     13  columns gone: ['size']
+folder                      8      8  -
+goal                        3      3  -
+person                      8      8  -
+project                     3      3  -
+project_member             12     12  -
+project_permission         36     36  -
+project_role                6      6  -
+role_clearance              2      2  -
+role_column_rule            2      2  -
+skill                       3      3  columns gone: ['size']
+task                       15     15  -
+task_checklist_item         7      7  -
+task_column_due_date        0      0  -
+task_comment               10     10  -
+task_template               1      1  -
+task_waiting_on             5      5  -
+template_stage              2      2  -
+vault_node                 17     17  -
+vault_secret               14     14  -
+vault_tree                  5      5  -
+
+3 difference(s)
+
+==== Schema of the touched tables, 0027 -> head
+1,25c1,38
+<         tbl         |                         name                          |                                                                            def                                                                            
+< --------------------+-------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+<  blob               | mime                                                  | character varying NOT NULL
+<  blob               | size                                                  | bigint NOT NULL
+<  file_item          | mime                                                  | character varying NULL
+<  file_item          | size                                                  | bigint NULL
+<  project_permission | fk_project_permission_project_id_role_id_project_role | FOREIGN KEY (project_id, role_id) REFERENCES project_role(project_id, id) DEFERRABLE INITIALLY DEFERRED
+<  project_permission | ix_project_permission_project_id_permission           | CREATE UNIQUE INDEX ix_project_permission_project_id_permission ON public.project_permission USING btree (project_id, permission) WHERE (role_id IS NULL)
+<  project_permission | ix_project_permission_role_id_permission              | CREATE UNIQUE INDEX ix_project_permission_role_id_permission ON public.project_permission USING btree (role_id, permission) WHERE (role_id IS NOT NULL)
+<  project_permission | pk_project_permission                                 | CREATE UNIQUE INDEX pk_project_permission ON public.project_permission USING btree (id)
+<  role_clearance     | fk_role_clearance_project_id_role_id_project_role     | FOREIGN KEY (project_id, role_id) REFERENCES project_role(project_id, id) DEFERRABLE INITIALLY DEFERRED
+<  role_clearance     | ix_role_clearance_project_id                          | CREATE UNIQUE INDEX ix_role_clearance_project_id ON public.role_clearance USING btree (project_id) WHERE (role_id IS NULL)
+<  role_clearance     | ix_role_clearance_role_id                             | CREATE UNIQUE INDEX ix_role_clearance_role_id ON public.role_clearance USING btree (role_id) WHERE (role_id IS NOT NULL)
+<  role_clearance     | pk_role_clearance                                     | CREATE UNIQUE INDEX pk_role_clearance ON public.role_clearance USING btree (id)
+<  role_column_rule   | fk_role_column_rule_project_id_role_id_project_role   | FOREIGN KEY (project_id, role_id) REFERENCES project_role(project_id, id) DEFERRABLE INITIALLY DEFERRED
+<  role_column_rule   | ix_role_column_rule_project_id_column_id              | CREATE UNIQUE INDEX ix_role_column_rule_project_id_column_id ON public.role_column_rule USING btree (project_id, column_id) WHERE (role_id IS NULL)
+<  role_column_rule   | ix_role_column_rule_role_id_column_id                 | CREATE UNIQUE INDEX ix_role_column_rule_role_id_column_id ON public.role_column_rule USING btree (role_id, column_id) WHERE (role_id IS NOT NULL)
+<  role_column_rule   | pk_role_column_rule                                   | CREATE UNIQUE INDEX pk_role_column_rule ON public.role_column_rule USING btree (id)
+<  skill              | mime                                                  | character varying NOT NULL
+<  skill              | size                                                  | bigint NOT NULL
+<  task               | ix_task_parent_id_sub_number                          | CREATE UNIQUE INDEX ix_task_parent_id_sub_number ON public.task USING btree (parent_id, sub_number)
+<  task               | ix_task_project_id_column_id_position                 | CREATE INDEX ix_task_project_id_column_id_position ON public.task USING btree (project_id, column_id, "position")
+<  task               | ix_task_project_id_number                             | CREATE UNIQUE INDEX ix_task_project_id_number ON public.task USING btree (project_id, number) WHERE (parent_id IS NULL)
+<  task               | pk_task                                               | CREATE UNIQUE INDEX pk_task ON public.task USING btree (id)
+< (22 rows)
+---
+>          tbl         |                         name                          |                                                                                                                                        def                                                                                                                                         
+> ---------------------+-------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+>  activity            | ck_activity_channel                                   | CHECK (((channel)::text = ANY ((ARRAY['web'::character varying, 'api'::character varying])::text[])))
+>  agent_session       | ck_agent_session_agent_session_reason                 | CHECK (((reason)::text = ANY ((ARRAY['turn_ended'::character varying, 'permission'::character varying, 'idle'::character varying, 'question'::character varying, 'moved'::character varying, 'session_ended'::character varying, 'connection_lost'::character varying])::text[])))
+>  agent_session       | ck_agent_session_agent_session_state                  | CHECK (((state)::text = ANY ((ARRAY['working'::character varying, 'waiting'::character varying, 'done'::character varying])::text[])))
+>  api_token           | ck_api_token_token_kind                               | CHECK (((kind)::text = ANY ((ARRAY['session'::character varying, 'api'::character varying])::text[])))
+>  blob                | size                                                  | bigint NOT NULL
+>  file_item           | ck_file_item_item_kind                                | CHECK (((kind)::text = ANY ((ARRAY['file'::character varying, 'link'::character varying])::text[])))
+>  file_item           | ck_file_item_item_source                              | CHECK (((source)::text = ANY ((ARRAY['upload'::character varying, 'sharepoint'::character varying, 'gdrive'::character varying, 'other'::character varying])::text[])))
+>  file_item           | mime                                                  | character varying NULL
+>  goal                | ck_goal_goal_status                                   | CHECK (((status)::text = ANY ((ARRAY['open'::character varying, 'achieved'::character varying, 'dropped'::character varying])::text[])))
+>  person              | ck_person_person_kind                                 | CHECK (((kind)::text = ANY ((ARRAY['team'::character varying, 'client'::character varying])::text[])))
+>  project_permission  | fk_project_permission_project_id_role_id_project_role | FOREIGN KEY (project_id, role_id) REFERENCES project_role(project_id, id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+>  project_permission  | pk_project_permission                                 | CREATE UNIQUE INDEX pk_project_permission ON public.project_permission USING btree (id)
+>  project_permission  | uq_project_permission_project_id_role_id_permission   | CREATE UNIQUE INDEX uq_project_permission_project_id_role_id_permission ON public.project_permission USING btree (project_id, role_id, permission) NULLS NOT DISTINCT
+>  project_permission  | uq_project_permission_project_id_role_id_permission   | UNIQUE NULLS NOT DISTINCT (project_id, role_id, permission)
+>  role_clearance      | fk_role_clearance_project_id_role_id_project_role     | FOREIGN KEY (project_id, role_id) REFERENCES project_role(project_id, id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+>  role_clearance      | pk_role_clearance                                     | CREATE UNIQUE INDEX pk_role_clearance ON public.role_clearance USING btree (id)
+>  role_clearance      | uq_role_clearance_project_id_role_id                  | UNIQUE NULLS NOT DISTINCT (project_id, role_id)
+>  role_clearance      | uq_role_clearance_project_id_role_id                  | CREATE UNIQUE INDEX uq_role_clearance_project_id_role_id ON public.role_clearance USING btree (project_id, role_id) NULLS NOT DISTINCT
+>  role_column_rule    | fk_role_column_rule_project_id_role_id_project_role   | FOREIGN KEY (project_id, role_id) REFERENCES project_role(project_id, id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+>  role_column_rule    | pk_role_column_rule                                   | CREATE UNIQUE INDEX pk_role_column_rule ON public.role_column_rule USING btree (id)
+>  role_column_rule    | uq_role_column_rule_project_id_role_id_column_id      | CREATE UNIQUE INDEX uq_role_column_rule_project_id_role_id_column_id ON public.role_column_rule USING btree (project_id, role_id, column_id) NULLS NOT DISTINCT
+>  role_column_rule    | uq_role_column_rule_project_id_role_id_column_id      | UNIQUE NULLS NOT DISTINCT (project_id, role_id, column_id)
+>  skill               | mime                                                  | character varying NOT NULL
+>  task                | ck_task_task_priority                                 | CHECK (((priority)::text = ANY ((ARRAY['p0'::character varying, 'p1'::character varying, 'p2'::character varying, 'p3'::character varying])::text[])))
+>  task                | ck_task_task_status                                   | CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'hold'::character varying, 'blocked'::character varying, 'cancelled'::character varying])::text[])))
+>  task                | ck_task_task_type                                     | CHECK (((type)::text = ANY ((ARRAY['feature'::character varying, 'bug'::character varying, 'chore'::character varying])::text[])))
+>  task                | ix_task_column_id_position                            | CREATE INDEX ix_task_column_id_position ON public.task USING btree (column_id, "position")
+>  task                | ix_task_goal_id                                       | CREATE INDEX ix_task_goal_id ON public.task USING btree (goal_id) WHERE (goal_id IS NOT NULL)
+>  task                | ix_task_parent_id_sub_number                          | CREATE UNIQUE INDEX ix_task_parent_id_sub_number ON public.task USING btree (parent_id, sub_number)
+>  task                | ix_task_project_id_number                             | CREATE UNIQUE INDEX ix_task_project_id_number ON public.task USING btree (project_id, number)
+>  task                | ix_task_template_id                                   | CREATE INDEX ix_task_template_id ON public.task USING btree (template_id) WHERE (template_id IS NOT NULL)
+>  task                | pk_task                                               | CREATE UNIQUE INDEX pk_task ON public.task USING btree (id)
+>  task_checklist_item | ck_task_checklist_item_checklist_state                | CHECK (((state)::text = ANY ((ARRAY['open'::character varying, 'done'::character varying, 'cancelled'::character varying])::text[])))
+>  task_comment        | ck_task_comment_comment_kind                          | CHECK (((kind)::text = ANY ((ARRAY['comment'::character varying, 'status_change'::character varying])::text[])))
+>  vault_node          | ck_vault_node_vault_node_kind                         | CHECK (((kind)::text = ANY ((ARRAY['branch'::character varying, 'secret'::character varying])::text[])))
+> (35 rows)
+
+==== Sizes the API now reports come from the blob
+        name         | size 
+---------------------+------
+ cutover.md          |   56
+ cutover.txt         |   56
+ skill board-tidy.md |   37
+ skill cutover.md    |   56
+ skill day-report.md |   33
+(5 rows)
+
+
+==== alembic downgrade 0027
+INFO  [alembic.runtime.migration] Running downgrade 0031 -> 0030, Every enum column is checked by the database, not only by the ORM.
+INFO  [alembic.runtime.migration] Running downgrade 0030 -> 0029, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running downgrade 0029 -> 0028, A blob's size lives on the blob, and nowhere else.
+INFO  [alembic.runtime.migration] Running downgrade 0028 -> 0027, A role's grants, rules and clearance go when the role does.
+revision: 0027
+snapshot at 0027: 249 rows in 27 tables
+
+==== 0027 (seeded) -> 0027 (after the round trip)
+table                    0027   0027  differences
+activity                   46     46  -
+agent_note                  2      2  -
+agent_session               5      5  -
+api_token                   6      6  -
+blob                       10     10  mime changed on 1 rows (01a0d58e-5703-7ba3-a17a-f1b6bbb961e7: application/octet-stream->text/markdown)
+board_column                8      8  -
+file_item                  13     13  size changed on 1 rows (cutover.txt: 63->56)
+folder                      8      8  -
+goal                        3      3  -
+person                      8      8  -
+project                     3      3  -
+project_member             12     12  -
+project_permission         36     36  -
+project_role                6      6  -
+role_clearance              2      2  -
+role_column_rule            2      2  -
+skill                       3      3  size changed on 1 rows (board-tidy.md: 40->37)
+task                       15     15  -
+task_checklist_item         7      7  -
+task_column_due_date        0      0  -
+task_comment               10     10  -
+task_template               1      1  -
+task_waiting_on             5      5  -
+template_stage              2      2  -
+vault_node                 17     17  -
+vault_secret               14     14  -
+vault_tree                  5      5  -
+
+3 difference(s)
+
+==== Schema of the touched tables, 0027 (seeded) vs 0027 (after the round trip)
+identical
+
+==== alembic upgrade head, again
+INFO  [alembic.runtime.migration] Running upgrade 0027 -> 0028, A role's grants, rules and clearance go when the role does.
+INFO  [alembic.runtime.migration] Running upgrade 0028 -> 0029, A blob's size lives on the blob, and nowhere else.
+INFO  [alembic.runtime.migration] Running upgrade 0029 -> 0030, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running upgrade 0030 -> 0031, Every enum column is checked by the database, not only by the ORM.
+revision: 0031
+snapshot at 0031: 249 rows in 27 tables
+
+==== head (first time) -> head (second time)
+table                    0031   0031  differences
+activity                   46     46  -
+agent_note                  2      2  -
+agent_session               5      5  -
+api_token                   6      6  -
+blob                       10     10  -
+board_column                8      8  -
+file_item                  13     13  -
+folder                      8      8  -
+goal                        3      3  -
+person                      8      8  -
+project                     3      3  -
+project_member             12     12  -
+project_permission         36     36  -
+project_role                6      6  -
+role_clearance              2      2  -
+role_column_rule            2      2  -
+skill                       3      3  -
+task                       15     15  -
+task_checklist_item         7      7  -
+task_column_due_date        0      0  -
+task_comment               10     10  -
+task_template               1      1  -
+task_waiting_on             5      5  -
+template_stage              2      2  -
+vault_node                 17     17  -
+vault_secret               14     14  -
+vault_tree                  5      5  -
+
+0 difference(s)
+
+==== A value outside an enum stops the upgrade, and nothing is applied
+NOTICE:  database "proof_bad" does not exist, skipping
+INFO  [alembic.runtime.migration] Running upgrade 0027 -> 0028, A role's grants, rules and clearance go when the role does.
+INFO  [alembic.runtime.migration] Running upgrade 0028 -> 0029, A blob's size lives on the blob, and nowhere else.
+INFO  [alembic.runtime.migration] Running upgrade 0029 -> 0030, Indexes shaped like the queries that use them.
+INFO  [alembic.runtime.migration] Running upgrade 0030 -> 0031, Every enum column is checked by the database, not only by the ORM.
+    raise RuntimeError(
+RuntimeError: Refusing to add the enum CHECK constraints: these rows hold a value that is not a member, which the application cannot read either. Correct them by hand, then run the upgrade again. task.status = 'done' on 1 row
+revision after the refusal: 0027
+project_permission unique still the two partial indexes: ix_project_permission_project_id_permission, ix_project_permission_role_id_permission

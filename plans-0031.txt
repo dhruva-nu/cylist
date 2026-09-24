@@ -1,0 +1,54 @@
+--- tasks.resolve(): ATL-41 by project key and number
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Nested Loop (actual rows=1 loops=1)
+   ->  Index Scan using ix_project_key on project (actual rows=1 loops=1)
+         Index Cond: ((key)::text = 'ATL'::text)
+   ->  Index Scan using ix_task_project_id_number on task (actual rows=1 loops=1)
+         Index Cond: ((project_id = project.id) AND (number = 41))
+ Planning Time: 0.395 ms
+ Execution Time: 0.067 ms
+
+--- tasks._ordered(): one column top to bottom (every create, move, renumber)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Index Scan using ix_task_column_id_position on task (actual rows=2 loops=1)
+   Index Cond: (column_id = '01a0d58c-85bc-7e2a-a01e-d3e323c7db12'::uuid)
+ Planning Time: 0.045 ms
+ Execution Time: 0.041 ms
+
+--- goals._progress(): a goal's cards counted by column and status
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ GroupAggregate (actual rows=1 loops=1)
+   Group Key: column_id, status
+   ->  Sort (actual rows=1 loops=1)
+         Sort Key: column_id, status
+         Sort Method: quicksort  Memory: 25kB
+         ->  Index Scan using ix_task_goal_id on task (actual rows=1 loops=1)
+               Index Cond: (goal_id = '01a0d58c-84b7-7dcb-86f7-a2cf5a0ea840'::uuid)
+               Filter: (parent_id IS NULL)
+ Planning Time: 0.100 ms
+ Execution Time: 0.050 ms
+
+--- templates.delete(): is this template still in use
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Index Only Scan using ix_task_template_id on task (actual rows=5000 loops=1)
+         Index Cond: (template_id = '01a0d58e-569a-7d3c-9845-0ff23a1e76fe'::uuid)
+         Heap Fetches: 1
+ Planning Time: 0.029 ms
+ Execution Time: 0.258 ms
+
+--- permissions.grid(): one project's whole permission grid
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on project_permission (actual rows=11 loops=1)
+   Recheck Cond: (project_id = '01a0d58c-849a-725e-9bc3-1d9083f3517b'::uuid)
+   Heap Blocks: exact=1
+   ->  Bitmap Index Scan on uq_project_permission_project_id_role_id_permission (actual rows=11 loops=1)
+         Index Cond: (project_id = '01a0d58c-849a-725e-9bc3-1d9083f3517b'::uuid)
+ Planning Time: 0.149 ms
+ Execution Time: 0.025 ms
+

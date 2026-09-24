@@ -1,0 +1,10 @@
+--- base branch (0027 schema)
+QA before: {'permissions': ['comments', 'tasks'], 'clearance': 'internal'} (and a rule refusing it the Done column)
+PUT  /projects/ATL/members/<Meera P>/role {role: null} -> 200
+DELETE /projects/ATL/roles/QA -> 500 Internal Server Error
+roles now: ['Admin', 'QA', 'Reviewer', 'Everyone else']
+--- the same call on this branch, after the migration
+QA before: {'permissions': ['comments', 'tasks'], 'clearance': 'internal'} (and a rule refusing it the Done column)
+PUT  /projects/ATL/members/<Meera P>/role {role: null} -> 200
+DELETE /projects/ATL/roles/QA -> 204 
+roles now: ['Admin', 'Reviewer', 'Everyone else']
