@@ -31,11 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.models.agent import AgentNote, Skill
-from app.models.person import Person
 from app.models.project import Project
 from app.schemas.agents import NoteCreate, SkillUpdate
-from app.schemas.files import clean_name
 from app.services import blobs
+from app.services.files import ensure_person_exists, filename_of
 from app.storage import BlobStore
 
 
@@ -91,8 +90,8 @@ async def upload_skill(
         UnprocessableRequestError: if the upload has no usable filename, or
             ``added_by`` names nobody in the directory.
     """
-    name = _filename_of(source)
-    await _ensure_person_exists(session, added_by)
+    name = filename_of(source)
+    await ensure_person_exists(session, added_by)
 
     existing = await session.scalar(
         select(Skill).where(Skill.project_id == project.id, Skill.name == name)
@@ -200,7 +199,7 @@ async def add_note(
         UnprocessableRequestError: if ``added_by`` names nobody in the
             directory.
     """
-    await _ensure_person_exists(session, added_by)
+    await ensure_person_exists(session, added_by)
     await _ensure_not_already_noted(session, project, data.body)
     note = AgentNote(
         project_id=project.id,
@@ -266,31 +265,3 @@ async def counts(session: AsyncSession, project: Project) -> Counts:
         select(func.count()).select_from(AgentNote).where(AgentNote.project_id == project.id)
     )
     return Counts(skills=skills or 0, notes=notes or 0)
-
-
-# --- Internals -------------------------------------------------------------
-
-
-def _filename_of(source: UploadFile) -> str:
-    """The name to file a skill under, stripped of any directory part.
-
-    Shares :func:`app.schemas.files.clean_name` with the file tree: the rules
-    for what is a name rather than a path do not differ because the row it
-    lands in is a different table.
-    """
-    candidate = (source.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
-    try:
-        return clean_name(candidate)
-    except ValueError as exc:
-        raise UnprocessableRequestError(
-            "That upload has no usable filename.", details={"filename": source.filename}
-        ) from exc
-
-
-async def _ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
-    if person_id is None:
-        return
-    if await session.get(Person, person_id) is None:
-        raise UnprocessableRequestError(
-            "That person is not in the directory.", details={"person_id": str(person_id)}
-        )

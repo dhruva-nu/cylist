@@ -30,7 +30,6 @@ UPLOADER = {
 UNKNOWN_ID = "00000000-0000-7000-8000-000000000000"
 
 BRIEF = b"%PDF-1.7 the atlas billing brief, restated"
-NUMBERS = b"the quarterly numbers, restated"
 
 
 def content_of(label: str) -> bytes:

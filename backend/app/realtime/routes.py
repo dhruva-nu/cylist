@@ -178,12 +178,7 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
         principal = outcome
 
         await websocket.send_json(protocol.ready(client_session_id, principal.label))
-        link = AgentLink(
-            client_session_id=client_session_id,
-            token_id=principal.token_id,
-            actor_label=principal.label,
-            connected_at=opened,
-        )
+        link = AgentLink(client_session_id=client_session_id)
         hub.register_agent(link)
 
         code, cause = await _serve_agent(websocket, database, principal, client_session_id, link)

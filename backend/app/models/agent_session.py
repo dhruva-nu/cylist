@@ -194,7 +194,3 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     """When a finished session was cleared off the card, by the Dismiss button
     or by a person touching the card in the web UI. A dismissed row is history;
     the board no longer draws it."""
-
-    @property
-    def is_open(self) -> bool:
-        return self.ended_at is None
