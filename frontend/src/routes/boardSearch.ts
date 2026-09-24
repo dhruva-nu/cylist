@@ -101,20 +101,24 @@ export function filterTasks(
   columns: BoardColumn[],
   members: Person[],
 ): Task[] {
-  const matchedColumnIds = parsed.column
-    ? new Set(
-        columns
-          .filter((column) => column.name.toLowerCase().includes(parsed.column!.toLowerCase()))
-          .map((column) => column.id),
-      )
-    : null
-  const matchedAssignees = parsed.assignee
-    ? new Set(
-        members
-          .filter((person) => person.name.toLowerCase().includes(parsed.assignee!.toLowerCase()))
-          .map((person) => person.id),
-      )
-    : null
+  const columnTerm = parsed.column ? parsed.column.toLowerCase() : null
+  const assigneeTerm = parsed.assignee ? parsed.assignee.toLowerCase() : null
+  const matchedColumnIds =
+    columnTerm === null
+      ? null
+      : new Set(
+          columns
+            .filter((column) => column.name.toLowerCase().includes(columnTerm))
+            .map((column) => column.id),
+        )
+  const matchedAssignees =
+    assigneeTerm === null
+      ? null
+      : new Set(
+          members
+            .filter((person) => person.name.toLowerCase().includes(assigneeTerm))
+            .map((person) => person.id),
+        )
   const goal = parsed.goal?.toLowerCase() ?? null
   const freeText = parsed.freeText.map((term) => term.toLowerCase())
 
@@ -208,25 +212,25 @@ export function suggestionsFor(
   if (!match) return []
 
   const [, tag, partial] = match
-  const needle = (partial ?? '').toLowerCase()
+  const typedName = (partial ?? '').toLowerCase()
 
   if (tag?.toLowerCase() === 'col') {
     return columns
-      .filter((column) => column.name.toLowerCase().includes(needle))
+      .filter((column) => column.name.toLowerCase().includes(typedName))
       .map((column) => ({ kind: 'column', value: column.name }))
   }
   if (tag?.toLowerCase() === 'who') {
     return members
-      .filter((person) => person.name.toLowerCase().includes(needle))
+      .filter((person) => person.name.toLowerCase().includes(typedName))
       .map((person) => ({ kind: 'assignee', value: person.name }))
   }
   if (tag?.toLowerCase() === 'goal') {
     const named: Suggestion[] = goals
-      .filter((candidate) => candidate.name.toLowerCase().includes(needle))
+      .filter((candidate) => candidate.name.toLowerCase().includes(typedName))
       .map((candidate) => ({ kind: 'goal', value: candidate.name, colour: candidate.colour }))
     // Offered last rather than first: it is the rarer question, and a list
     // that opens on it would put a word nobody typed above the goals they did.
-    return NO_GOAL.includes(needle) ? [...named, { kind: 'goal', value: NO_GOAL }] : named
+    return NO_GOAL.includes(typedName) ? [...named, { kind: 'goal', value: NO_GOAL }] : named
   }
   return []
 }

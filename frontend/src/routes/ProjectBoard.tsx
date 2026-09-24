@@ -63,7 +63,14 @@ import {
 } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearch } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from 'react'
 import {
   api,
   type AgentPresence,
@@ -1299,6 +1306,26 @@ function SearchBar({
     setHighlighted(0)
   }
 
+  /** The suggestion list's keys: up and down through it, enter to take one, escape to shut it. */
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (!suggestions.length) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setHighlighted((current) => (current + 1) % suggestions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setHighlighted((current) => (current - 1 + suggestions.length) % suggestions.length)
+    } else if (event.key === 'Enter') {
+      const choice = suggestions[highlighted]
+      if (choice) {
+        event.preventDefault()
+        pick(choice)
+      }
+    } else if (event.key === 'Escape') {
+      setDismissed(true)
+    }
+  }
+
   function clear() {
     onChange('')
     // The list is keyed off the token being typed, so emptying the box closes
@@ -1321,24 +1348,7 @@ function SearchBar({
           setDismissed(false)
           setHighlighted(0)
         }}
-        onKeyDown={(event) => {
-          if (!suggestions.length) return
-          if (event.key === 'ArrowDown') {
-            event.preventDefault()
-            setHighlighted((current) => (current + 1) % suggestions.length)
-          } else if (event.key === 'ArrowUp') {
-            event.preventDefault()
-            setHighlighted((current) => (current - 1 + suggestions.length) % suggestions.length)
-          } else if (event.key === 'Enter') {
-            const choice = suggestions[highlighted]
-            if (choice) {
-              event.preventDefault()
-              pick(choice)
-            }
-          } else if (event.key === 'Escape') {
-            setDismissed(true)
-          }
-        }}
+        onKeyDown={onKeyDown}
         placeholder='Search, or tag it: col:"In progress"  who:Aditi  goal:Search  blk:  hld:'
         aria-label="Search tasks"
         aria-autocomplete="list"
