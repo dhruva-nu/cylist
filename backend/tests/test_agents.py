@@ -249,7 +249,6 @@ class TestReplacingASkill:
                 project_id=UUID(uploaded["project_id"]),
                 name="triage.md",
                 blob_id=blob_id,
-                size=1,
                 mime="text/markdown",
             )
         )

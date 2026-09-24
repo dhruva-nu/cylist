@@ -64,11 +64,15 @@ class Blob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     makes a second upload of the same bytes reuse this row."""
 
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    """Bytes. The only place a size is written: the rows that refer to a blob
+    read it from here rather than keeping a copy, because the content cannot
+    change under its own digest and a copy of it can only ever be wrong.
 
-    mime: Mapped[str] = mapped_column(String(255), nullable=False)
-    """The type the first upload of these bytes declared. The content is what
-    is shared, not the label, so each ``file_item`` keeps its own copy of the
-    type it was sent with."""
+    There is no type here. The bytes are what is shared, not the label, so
+    each row that refers to a blob keeps the type *it* was uploaded with — a
+    ``cutover.md`` and a ``cutover.txt`` holding the same bytes are one blob
+    and two types.
+    """
 
     path: Mapped[str] = mapped_column(Text, nullable=False)
     """Location relative to ``DATA_DIR/blobs`` — ``ab/cd/<sha256>``. Recorded
@@ -204,11 +208,9 @@ class FileItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
 
-    size: Mapped[int | None] = mapped_column(BigInteger)
-    """Bytes, copied from the blob so a listing needs no join. Null for links,
-    whose size we cannot know without fetching them."""
-
     mime: Mapped[str | None] = mapped_column(String(255))
+    """The type this upload declared, which is not necessarily the one another
+    upload of the same bytes did — see :attr:`Blob.size`. Null for a link."""
 
     sensitivity: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'internal'")
@@ -234,3 +236,10 @@ class FileItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     uploader's avatar, and fetching them one at a time would be N+1."""
 
     blob: Mapped[Blob | None] = relationship(lazy="joined")
+    """Joined into every load, so :attr:`size` costs no second query."""
+
+    @property
+    def size(self) -> int | None:
+        """Bytes, read off the blob. Null for a link, whose size we cannot know
+        without fetching it."""
+        return self.blob.size if self.blob is not None else None
