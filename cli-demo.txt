@@ -1,0 +1,126 @@
+
+$ cylist skills ls ATL
+NAME             SIZE   DESCRIPTION
+---------------  -----  ------------------------------------------------------------
+board-tidy.md    325B   Nudge the owners of stale in-progress cards on the Atlas bo…
+release-kit.zip  1009B
+sneaky.zip       320B   Looks fine.
+[exit 0]
+
+$ cylist skills pull ATL
+error: Could not pull sneaky.zip.
+SKILL            FOLDER       RESULT
+---------------  -----------  ---------------------------------------------------------------------------------------------------------------------------
+board-tidy.md    board-tidy   installed
+release-kit.zip  release-kit  installed
+sneaky.zip       -            failed: 'sneaky.zip' cannot be installed as a skill: its entry 'sneaky/../../../.bashrc' points outside the skill's folder.
+
+Claude Code loads these from /tmp/demo/atlas-app/.claude/skills.
+That directory is new, so a Claude Code session already running here will not see it; the next one started will. Until then, follow the skill's SKILL.md from there.
+[exit 1]
+
+$ find <repo>/.claude/skills -printf ...   (mode, size, path)
+drwxr-xr-x    100  .claude/skills/board-tidy
+-rw-r--r--    253  .claude/skills/board-tidy/.cylist-skill.json
+-rw-r--r--     78  .claude/skills/board-tidy/.gitignore
+-rw-r--r--    432  .claude/skills/board-tidy/SKILL.md
+drwxr-xr-x    140  .claude/skills/release-kit
+-rw-r--r--    447  .claude/skills/release-kit/.cylist-skill.json
+-rw-r--r--     78  .claude/skills/release-kit/.gitignore
+drwxr-xr-x     60  .claude/skills/release-kit/reference
+-rw-r--r--     78  .claude/skills/release-kit/reference/checklist.md
+drwxr-xr-x     60  .claude/skills/release-kit/scripts
+-rwxr-xr-x     25  .claude/skills/release-kit/scripts/version.sh
+-rw-r--r--    332  .claude/skills/release-kit/SKILL.md
+
+$ cat .claude/skills/board-tidy/SKILL.md
+---
+name: "board-tidy"
+description: "Nudge the owners of stale in-progress cards on the Atlas board."
+---
+
+# Tidying the Atlas board
+
+When asked to tidy the board:
+
+1. List every card in "In progress" whose last activity is older than five days.
+2. For each, add a comment asking the owner whether it is still being worked on.
+3. Never move a card yourself; a person decides that.
+
+Finish by saying how many cards you commented on.
+
+$ head -5 .claude/skills/release-kit/SKILL.md
+---
+name: release-kit
+description: Cut an Atlas release - tag it and write the changelog line. Use when asked to cut or ship a release.
+---
+
+
+$ .claude/skills/release-kit/scripts/version.sh
+2026.10.0
+
+$ git status --short --untracked-files=all
+[exit 0]
+
+$ cylist skills pull ATL
+error: Could not pull sneaky.zip.
+SKILL            FOLDER       RESULT
+---------------  -----------  ---------------------------------------------------------------------------------------------------------------------------
+board-tidy.md    board-tidy   unchanged
+release-kit.zip  release-kit  unchanged
+sneaky.zip       -            failed: 'sneaky.zip' cannot be installed as a skill: its entry 'sneaky/../../../.bashrc' points outside the skill's folder.
+
+Claude Code loads these from /tmp/demo/atlas-app/.claude/skills.
+[exit 1]
+
+# someone edits a pulled skill by hand
+
+$ cylist skills pull ATL release-kit
+error: 1 skill was left alone. Pass --force to replace /tmp/demo/atlas-app/.claude/skills/release-kit.
+SKILL            FOLDER       RESULT
+---------------  -----------  -----------------------------------------------
+release-kit.zip  release-kit  skipped: it has been edited since it was pulled
+[exit 1]
+
+$ cylist skills pull ATL release-kit --force
+SKILL            FOLDER       RESULT
+---------------  -----------  -------
+release-kit.zip  release-kit  updated
+
+Claude Code loads these from /tmp/demo/atlas-app/.claude/skills.
+[exit 0]
+
+# a skill somebody wrote themselves, under a name the board also uses
+
+$ cylist skills pull ATL board-tidy
+error: 1 skill was left alone. Pass --force to replace /tmp/demo/atlas-app/.claude/skills/board-tidy.
+SKILL          FOLDER      RESULT
+-------------  ----------  -----------------------------------------------------------------
+board-tidy.md  board-tidy  skipped: a skill that was not pulled from Cylist is already there
+[exit 1]
+
+$ cat .claude/skills/board-tidy/SKILL.md
+---
+name: board-tidy
+---
+My own way.
+
+# a zip on the board that tries to write outside its folder
+
+$ cylist skills pull ATL sneaky.zip
+error: Could not pull sneaky.zip.
+SKILL       FOLDER  RESULT
+----------  ------  ---------------------------------------------------------------------------------------------------------------------------
+sneaky.zip  -       failed: 'sneaky.zip' cannot be installed as a skill: its entry 'sneaky/../../../.bashrc' points outside the skill's folder.
+[exit 1]
+
+$ ls -a <repo> ; ls -a <repo>/.claude/skills
+.
+..
+.claude
+.git
+src
+.
+..
+board-tidy
+release-kit
