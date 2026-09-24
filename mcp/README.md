@@ -197,7 +197,8 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `list_files` | folders and items, by path |
 | `add_link` | file a URL into a folder |
 | `list_skills` | the skills uploaded for a project's agents |
-| `read_skill` | one skill's own text — the instructions to follow |
+| `read_skill` | one skill's own text — the instructions to follow; a zip is read as its `SKILL.md` |
+| `download_skill` | one skill as the folder Claude Code loads, with the `cylist skills pull` line that installs it |
 | `read_scratchpad` | what agents before you learned about this project — read it first on a card |
 | `note_learned` | leave one line on the scratchpad as you learn it, 280 characters; a repeat is refused |
 | `list_vault` | trees and structure — never a value |

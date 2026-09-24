@@ -8,8 +8,10 @@ uploaded, and by their own id once they exist — a skill keeps its download URL
 
 from __future__ import annotations
 
+import base64
 from uuid import UUID
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,10 +27,17 @@ from app.models.agent import AgentNote, Skill
 from app.models.project import Project
 from app.routers import guards
 from app.routers.projects import resolved_project
-from app.schemas.agents import NoteCreate, NoteRead, SkillRead, SkillUpdate
+from app.schemas.agents import (
+    NoteCreate,
+    NoteRead,
+    SkillFolderFile,
+    SkillFolderRead,
+    SkillRead,
+    SkillUpdate,
+)
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
-from app.services import activity, agents, blobs
+from app.services import activity, agents, blobs, skill_folders
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["agents"])
@@ -99,7 +108,8 @@ async def list_skills(
     """Every skill uploaded to this project, alphabetical.
 
     A skill is a packaged job an agent can be handed. Download one with
-    `/skills/{skill_id}/download`.
+    `/skills/{skill_id}/download`, or as the folder Claude Code loads it from
+    with `/skills/{skill_id}/folder`.
     """
     return [_skill(skill) for skill in await agents.list_skills(session, project)]
 
@@ -232,6 +242,56 @@ async def download_skill(
         store.locate(skill.blob.path),
         media_type=skill.mime or blobs.DEFAULT_MIME,
         filename=skill.name,
+    )
+
+
+@router.get(
+    "/skills/{skill_id}/folder",
+    response_model=SkillFolderRead,
+    summary="Get a skill as the folder Claude Code loads",
+    responses={422: {"description": "The skill cannot be laid out as one — see the message."}},
+)
+async def skill_folder(
+    skill: Skill = Depends(resolved_skill),
+    _: Principal = Depends(require(Scope.READ)),
+    store: BlobStore = Depends(get_blob_store),
+) -> SkillFolderRead:
+    """The skill as the files to write under `.claude/skills/<folder>/`.
+
+    A markdown skill becomes `<folder>/SKILL.md`, with `name` and
+    `description` added to its frontmatter where it has none. A zip is
+    unpacked — through one wrapping directory, if that is where its
+    `SKILL.md` is — and refused if it has no `SKILL.md`, holds a path that
+    leaves the folder, or unpacks to more than a skill should.
+
+    `/download` is still the skill exactly as it was uploaded; this is the
+    same bytes, laid out to be used.
+    """
+    if not await store.exists(skill.blob.path):
+        raise NotFoundError(
+            "This skill's content is missing from the store.", details={"name": skill.name}
+        )
+
+    content = await to_thread.run_sync(store.locate(skill.blob.path).read_bytes)
+    folder = await to_thread.run_sync(skill_folders.unpack, skill.name, skill.description, content)
+    return SkillFolderRead(
+        skill=_skill(skill),
+        folder=folder.name,
+        files=[_folder_file(one) for one in folder.files],
+    )
+
+
+def _folder_file(one: skill_folders.FolderFile) -> SkillFolderFile:
+    try:
+        content, encoding = one.data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        content, encoding = base64.b64encode(one.data).decode("ascii"), "base64"
+    return SkillFolderFile(
+        path=one.path,
+        encoding=encoding,
+        content=content,
+        size=len(one.data),
+        executable=one.executable,
     )
 
 
