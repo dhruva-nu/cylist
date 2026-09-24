@@ -65,12 +65,12 @@ async def store_upload(
     source: UploadFile,
     *,
     max_bytes: int,
-) -> tuple[Blob, int, str]:
+) -> tuple[Blob, str]:
     """Write an upload's bytes and return the blob holding them.
 
-    Returns the blob, its size and the MIME type *this* upload declared —
-    which is not necessarily the blob's own, because the content is what is
-    shared and the label is not.
+    Returns the blob and the MIME type *this* upload declared. The type goes
+    on the row that refers to the blob rather than on the blob, because the
+    content is what is shared and the label is not.
 
     Raises:
         PayloadTooLargeError: if the content exceeds ``max_bytes``. Written
@@ -88,11 +88,11 @@ async def store_upload(
     mime = source.content_type or DEFAULT_MIME
     blob = await session.scalar(select(Blob).where(Blob.sha256 == stored.sha256))
     if blob is None:
-        blob = Blob(sha256=stored.sha256, size=stored.size, mime=mime, path=stored.path)
+        blob = Blob(sha256=stored.sha256, size=stored.size, path=stored.path)
         session.add(blob)
         await session.flush()
 
-    return blob, stored.size, mime
+    return blob, mime
 
 
 async def collect_garbage(session: AsyncSession, store: BlobStore, blob_ids: set[UUID]) -> None:

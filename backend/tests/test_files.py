@@ -966,7 +966,7 @@ class TestTheSchema:
         self, project: AsyncClient, session: AsyncSession
     ) -> None:
         folder_id = UUID(await make_folder(project, "Architecture"))
-        blob = Blob(sha256="0" * 64, size=1, mime="text/plain", path="00/00/" + "0" * 64)
+        blob = Blob(sha256="0" * 64, size=1, path="00/00/" + "0" * 64)
         session.add(blob)
         await session.flush()
 

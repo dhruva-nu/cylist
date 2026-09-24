@@ -298,7 +298,7 @@ async def upload(
     await _ensure_name_is_free(session, folder, name)
     await ensure_person_exists(session, added_by)
 
-    blob, size, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
+    blob, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
 
     return await _add_item(
         session,
@@ -306,9 +306,8 @@ async def upload(
             folder_id=folder.id,
             kind=ItemKind.FILE,
             name=name,
-            blob_id=blob.id,
+            blob=blob,
             source=ItemSource.UPLOAD,
-            size=size,
             mime=mime,
             added_by=added_by,
             sensitivity=(sensitivity or folder.default_sensitivity),

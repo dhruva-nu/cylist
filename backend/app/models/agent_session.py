@@ -88,19 +88,20 @@ class AgentSessionReason(StrEnum):
 
 
 def _enum(python_type: type[StrEnum], name: str) -> Enum:
-    """A VARCHAR of the values, never a native PG enum — see ``models/task.py``.
+    """A VARCHAR of the values plus a CHECK, never a native PG enum — see
+    ``models/task.py``.
 
-    No check constraint comes with it: ``create_constraint`` is left at its
-    default of ``False``, so the members are enforced here and not by the
-    database. What the database does keep is the *width* — the column is a
-    ``VARCHAR`` sized to the longest member — so a new member longer than
-    every existing one still needs a migration to widen it, as
-    ``connection_lost`` did in revision 0022.
+    The CHECK arrived in revision 0031. Before it the members were enforced
+    here alone and the database kept only the *width* — which is why
+    ``connection_lost`` needed revision 0022 to widen the column and nothing
+    else. A new member now needs a migration whatever its length, one that
+    replaces ``ck_agent_session_<name>`` and widens the column if it has to.
     """
     return Enum(
         python_type,
         name=name,
         native_enum=False,
+        create_constraint=True,
         values_callable=lambda enum: [member.value for member in enum],
     )
 

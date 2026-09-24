@@ -31,13 +31,27 @@ do".
 The admin role holds **nothing** in this table and may do everything. Its
 authority is :attr:`~app.models.role.ProjectRole.is_admin`, and rows granting
 it what it already has would be rows somebody could delete.
+
+Two things all three tables share, and share for the same reasons:
+
+* **One row per role and thing, baseline included**, by a single unique
+  constraint over ``(project_id, role_id, …)`` declared ``NULLS NOT DISTINCT``.
+  Without that clause Postgres counts every null ``role_id`` as different from
+  every other, and the baseline rows — exactly the set a double-click on a
+  checkbox would double up — would be free to repeat.
+* **A role's rows go when the role does.** The composite key to
+  ``project_role`` cascades, where ``project_member``'s refuses: a member
+  wearing a role is a reason not to delete it, but a rule *about* a role is
+  not — it has nothing left to be about. A cascade also has none of the
+  ordering trouble a refusal has when a whole project goes, since both paths
+  to the row delete it.
 """
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, ForeignKeyConstraint, Index, String
+from sqlalchemy import Boolean, ForeignKey, ForeignKeyConstraint, String, UniqueConstraint
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
@@ -56,29 +70,13 @@ Named so that the reads which care do not have to explain a bare ``None`` —
 class ProjectPermission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "project_permission"
     __table_args__ = (
-        # A role holds a permission once. Two partial indexes rather than one
-        # unique constraint over all three columns, because Postgres counts
-        # NULLs as distinct: the baseline rows would be free to duplicate
-        # under a plain constraint, and the baseline is exactly the set a
-        # double-click on a checkbox would double up.
-        Index(
-            "ix_project_permission_role_id_permission",
-            "role_id",
-            "permission",
-            unique=True,
-            postgresql_where=sql_text("role_id IS NOT NULL"),
-        ),
-        Index(
-            "ix_project_permission_project_id_permission",
-            "project_id",
-            "permission",
-            unique=True,
-            postgresql_where=sql_text("role_id IS NULL"),
-        ),
-        # The same composite, deferred, NO ACTION key `project_member` carries,
-        # for the same two reasons — see the long note there. A grant must
-        # belong to a role on its own project, and a project being deleted must
-        # not depend on which of two cascades Postgres fires first.
+        # A role holds a permission once, and so does the baseline — see the
+        # module docstring for why NULLS NOT DISTINCT. Leading with the project
+        # is also what the grid is read by.
+        UniqueConstraint("project_id", "role_id", "permission", postgresql_nulls_not_distinct=True),
+        # The composite key `project_member` carries, so a grant belongs to a
+        # role on its own project — but cascading, where that one refuses: see
+        # the module docstring.
         #
         # It is satisfied trivially when `role_id` is NULL, which is what a
         # baseline row wants: MATCH SIMPLE holds a composite key met the moment
@@ -87,7 +85,7 @@ class ProjectPermission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ["project_id", "role_id"],
             ["project_role.project_id", "project_role.id"],
             name="fk_project_permission_project_id_role_id_project_role",
-            ondelete="NO ACTION",
+            ondelete="CASCADE",
             deferrable=True,
             initially="DEFERRED",
         ),
@@ -133,27 +131,14 @@ class RoleColumnRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __tablename__ = "role_column_rule"
     __table_args__ = (
-        Index(
-            "ix_role_column_rule_role_id_column_id",
-            "role_id",
-            "column_id",
-            unique=True,
-            postgresql_where=sql_text("role_id IS NOT NULL"),
-        ),
-        Index(
-            "ix_role_column_rule_project_id_column_id",
-            "project_id",
-            "column_id",
-            unique=True,
-            postgresql_where=sql_text("role_id IS NULL"),
-        ),
-        # The same deferred composite key the rest of this module uses, and
+        UniqueConstraint("project_id", "role_id", "column_id", postgresql_nulls_not_distinct=True),
+        # The same cascading composite key the rest of this module uses, and
         # satisfied trivially by a baseline row — see `ProjectPermission`.
         ForeignKeyConstraint(
             ["project_id", "role_id"],
             ["project_role.project_id", "project_role.id"],
             name="fk_role_column_rule_project_id_role_id_project_role",
-            ondelete="NO ACTION",
+            ondelete="CASCADE",
             deferrable=True,
             initially="DEFERRED",
         ),
@@ -204,23 +189,12 @@ class RoleClearance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __tablename__ = "role_clearance"
     __table_args__ = (
-        Index(
-            "ix_role_clearance_role_id",
-            "role_id",
-            unique=True,
-            postgresql_where=sql_text("role_id IS NOT NULL"),
-        ),
-        Index(
-            "ix_role_clearance_project_id",
-            "project_id",
-            unique=True,
-            postgresql_where=sql_text("role_id IS NULL"),
-        ),
+        UniqueConstraint("project_id", "role_id", postgresql_nulls_not_distinct=True),
         ForeignKeyConstraint(
             ["project_id", "role_id"],
             ["project_role.project_id", "project_role.id"],
             name="fk_role_clearance_project_id_role_id_project_role",
-            ondelete="NO ACTION",
+            ondelete="CASCADE",
             deferrable=True,
             initially="DEFERRED",
         ),

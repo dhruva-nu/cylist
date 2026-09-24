@@ -97,7 +97,7 @@ async def upload_skill(
         select(Skill).where(Skill.project_id == project.id, Skill.name == name)
     )
 
-    blob, size, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
+    blob, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
 
     if existing is not None:
         # The bytes it used to hold may now be unreferenced. Read the old id
@@ -105,8 +105,9 @@ async def upload_skill(
         # the row — the two can be the same blob, and collecting first would
         # delete content the replacement is about to point at.
         previous = existing.blob_id
-        existing.blob_id = blob.id
-        existing.size = size
+        # The relationship rather than the id: the size a response reports is
+        # read off it, and an id alone would leave the old blob attached.
+        existing.blob = blob
         existing.mime = mime
         existing.added_by = added_by
         if description is not None:
@@ -120,8 +121,7 @@ async def upload_skill(
         project_id=project.id,
         name=name,
         description=description,
-        blob_id=blob.id,
-        size=size,
+        blob=blob,
         mime=mime,
         added_by=added_by,
     )
