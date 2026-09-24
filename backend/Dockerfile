@@ -42,6 +42,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
+# The MCP tools served at /mcp are a path dependency, `../mcp` from here. The
+# bind mount below covers /app only, so a change under mcp/ needs a rebuild.
+COPY mcp/ /mcp/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-install-project
 
@@ -64,7 +67,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Dependencies first: this layer is cached until the lockfile changes.
+# Dependencies first: this layer is cached until the lockfile changes — or the
+# MCP package does, since it is one of them: a path dependency, `../mcp` from
+# here, whose tools this process serves at /mcp.
+COPY mcp/ /mcp/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 

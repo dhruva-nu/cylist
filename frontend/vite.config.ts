@@ -28,6 +28,9 @@ export default defineConfig({
         // difference from production to hide.
         ws: true,
       },
+      // The MCP tools, served beside the API rather than under it. Proxied so
+      // the line the Agents page builds from this origin works in development.
+      '/mcp': { target: apiTarget, changeOrigin: false },
     },
   },
   build: {

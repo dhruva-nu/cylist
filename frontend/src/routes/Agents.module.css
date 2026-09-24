@@ -56,6 +56,48 @@
   gap: 8px;
 }
 
+/* --- Connect Claude Code ------------------------------------------------- */
+
+.connect {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+/* Wrapped rather than scrolled: the whole line has to be visible to be
+   checked before it is run, and a phone has no room for a sideways scroll. */
+.line {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.connectActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.connectNote {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.connectNote code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
 /* --- Skills --------------------------------------------------------------- */
 
 .skills {

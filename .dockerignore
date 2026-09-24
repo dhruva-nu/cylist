@@ -19,6 +19,9 @@ frontend/dist
 backend/data
 backups
 
+# The MCP package is installed into the image; its tests are not.
+mcp/tests
+
 **/__pycache__
 **/*.py[cod]
 **/.pytest_cache

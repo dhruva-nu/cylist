@@ -25,6 +25,7 @@ from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
 from app.core.request_log import RequestLogMiddleware
 from app.db import Database
+from app.mcp import mount_mcp
 from app.realtime.hub import Hub
 from app.routers import api_router
 from app.services import agent_reports
@@ -80,7 +81,10 @@ def build_lifespan(settings: Settings) -> Lifespan:
 
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
         try:
-            yield
+            # The MCP tools at /mcp answer nothing until their session
+            # managers are running, and those live for exactly this long.
+            async with app.state.mcp.run():
+                yield
         finally:
             reaper.cancel()
             with suppress(asyncio.CancelledError):
@@ -176,6 +180,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=API_PREFIX)
+    # Before the SPA for the same reason the router is: it claims "/".
+    app.state.mcp = mount_mcp(app)
 
     # Last, because it claims "/": in the production image the built SPA is
     # served from this same process, and in development there is nothing to

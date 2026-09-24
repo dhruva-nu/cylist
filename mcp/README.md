@@ -12,8 +12,32 @@ uv sync
 
 ## Setting it up
 
-One command, from the CLI, which does this and the rest of it — token, Claude
-Code's lifecycle hooks, and registering this server:
+**Hosted — one line, nothing installed.** The Cylist server serves these same
+tools over MCP's streamable HTTP transport at `/mcp` (see
+[`cylist_mcp/hosted.py`](cylist_mcp/hosted.py) and `backend/app/mcp.py`). A
+project's **Agents** page mints a `read,write` token and shows the line with it
+filled in:
+
+```
+claude mcp add --transport http --scope user cylist https://<host>/mcp --header "Authorization: Bearer cyl_…"
+```
+
+`--header` has to come last: it takes any number of values, and anywhere
+earlier it swallows the name and the address as more headers.
+
+Each request runs as its own token. The header is checked with `GET /me` before
+any tool runs, and the tools then call the API with that token, in-process, so
+they can do exactly what the token can do over plain HTTP. `reveal_secret` is
+listed only for a token holding `vault:reveal`. A session cookie is not
+accepted: being signed in to the board in a browser does not let a page drive
+these tools. The server is stateless, so a restart or deploy loses nothing.
+
+Two things differ from running it locally. There is no address failover, since
+the line names the one address. And `day_report` defaults to UTC rather than
+"this machine's" zone, because the machine the server runs on is not yours.
+
+**Local — stdio, through the CLI.** One command from the CLI does this and the
+rest of it: token, Claude Code's lifecycle hooks, and registering this server:
 
 ```
 cylist setup

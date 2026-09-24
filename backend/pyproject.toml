@@ -25,7 +25,14 @@ dependencies = [
     # zones a deployment knows the lockfile's business instead of the base
     # image's. See app/core/timezones.py.
     "tzdata>=2026.3",
+    # The MCP tools, served at /mcp so a machine connects with one `claude mcp
+    # add` line and installs nothing. The same package the stdio server is, from
+    # this repository rather than a registry — see app/mcp.py.
+    "cylist-mcp",
 ]
+
+[tool.uv.sources]
+cylist-mcp = { path = "../mcp" }
 
 [dependency-groups]
 dev = [
