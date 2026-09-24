@@ -205,6 +205,10 @@ cylist people new --name … --kind team --role … --responsibilities …
 cylist files ls ATL [Contracts/2026]
 cylist files get ATL Contracts/2026/msa.pdf [-o FILE]
 
+cylist skills ls ATL
+cylist skills pull [ATL] [NAME …] [--user | --dest DIR] [--force]
+                                       install skills where Claude Code loads them
+
 cylist vault ls ATL [Logins]
 cylist vault reveal ATL Logins/Billing/Stripe [--show | -o FILE]
 cylist vault add ATL Logins/Billing/Twilio [--username …] [--value-stdin]

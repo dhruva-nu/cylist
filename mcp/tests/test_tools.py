@@ -35,6 +35,9 @@ EXPECTED_TOOLS = {
     "list_people",
     "list_files",
     "add_link",
+    "list_skills",
+    "read_skill",
+    "download_skill",
     "list_vault",
     "read_activity",
     "day_report",
@@ -753,3 +756,40 @@ async def test_create_task_can_name_the_goal_it_is_written_under(
     )
     assert not result.is_error
     assert recorder.body("POST", "/tasks")["goal_id"] == fake_api.GOAL_ID
+
+
+# --- Skills ----------------------------------------------------------------
+
+
+async def test_read_skill_returns_a_markdown_skills_text(server: MCPServer) -> None:
+    result = await call(server, "read_skill", project="ATL", name="board-tidy.md")
+    assert not result.is_error
+    assert result.data["content"] == fake_api.TIDY_TEXT
+
+
+async def test_read_skill_reads_a_zip_as_its_skill_md(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """The zip's bytes are no use to a model; the instructions inside it are."""
+    result = await call(server, "read_skill", project="ATL", name="release-kit.zip")
+    assert not result.is_error
+    assert result.data["content"].endswith("Run ./cut.sh\n")
+    assert result.data["files"] == ["SKILL.md", "cut.sh"]
+    assert recorder.count("GET", f"/skills/{fake_api.KIT_ID}/download") == 0
+
+
+async def test_download_skill_gives_the_folder_and_how_to_install_it(server: MCPServer) -> None:
+    result = await call(server, "download_skill", project="ATL", name="release-kit.zip")
+    assert not result.is_error
+    assert result.data["folder"] == "release-kit"
+    assert [one["path"] for one in result.data["files"]] == ["SKILL.md", "cut.sh"]
+    assert result.data["install"] == {
+        "command": "cylist skills pull ATL release-kit.zip",
+        "directory": ".claude/skills/release-kit/",
+    }
+
+
+async def test_download_skill_names_the_skills_there_are(server: MCPServer) -> None:
+    result = await call(server, "download_skill", project="ATL", name="release")
+    assert result.is_error
+    assert "board-tidy.md, release-kit.zip" in result.text

@@ -950,8 +950,10 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "List the skills uploaded for a project's agents — packaged jobs "
             "you can be handed, such as tidying a board or writing a day "
             "report. Returns each one's name, description and size, not its "
-            "content; read_skill fetches that. Worth calling before you "
-            "improvise a procedure that somebody has already written down."
+            "content; read_skill fetches that, and download_skill gives you one "
+            "to install as a Claude Code skill of your own. Worth calling "
+            "before you improvise a procedure that somebody has already "
+            "written down."
         ),
     )
     async def list_skills(
@@ -966,7 +968,9 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         name="read_skill",
         description=(
             "Read one skill's own text, by the name list_skills gave. Skills "
-            "are usually markdown: instructions written for you to follow. "
+            "are usually markdown: instructions written for you to follow. A "
+            "zipped skill is read as its SKILL.md, with the other files it "
+            "carries listed beside it. "
             f"Truncated past {SKILL_MAX_CHARS} characters, which is said in "
             "the result when it happens."
         ),
@@ -976,20 +980,62 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         name: Annotated[str, Field(description="The skill's name, e.g. 'board-tidy.md'.")],
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            skills = await client.get(f"/projects/{project}/skills")
-            match = next((one for one in skills if one.get("name") == name), None)
-            if match is None:
-                available = sorted(str(one.get("name")) for one in skills)
-                raise CylistError(
-                    f"{project} has no skill called {name!r}."
-                    + (f" It has: {', '.join(available)}." if available else " It has none."),
-                    code="not_found",
-                    details={"name": name, "available": available},
+            match = await _find_skill(client, project, name)
+            if not _is_zip(match):
+                text, truncated = await client.get_text(
+                    f"/skills/{match['id']}/download", max_chars=SKILL_MAX_CHARS
                 )
-            text, truncated = await client.get_text(
-                f"/skills/{match['id']}/download", max_chars=SKILL_MAX_CHARS
-            )
-            return {"skill": match, "content": text, "truncated": truncated}
+                return {"skill": match, "content": text, "truncated": truncated}
+
+            # The bytes of a zip are no use to a model. What it wants is the
+            # instructions, which are SKILL.md once the server has unpacked it.
+            folder = await client.get(f"/skills/{match['id']}/folder")
+            files = folder.get("files", [])
+            text = next((one["content"] for one in files if one.get("path") == "SKILL.md"), "")
+            return {
+                "skill": match,
+                "content": text[:SKILL_MAX_CHARS],
+                "truncated": len(text) > SKILL_MAX_CHARS,
+                "files": [one.get("path") for one in files],
+            }
+
+        return await _guard(call)
+
+    @server.tool(
+        name="download_skill",
+        description=(
+            "Get one skill as the folder Claude Code loads skills from, so you "
+            "can install it and use it rather than only read it. Returns the "
+            "folder's name and every file in it — SKILL.md first, a zip "
+            "unpacked, base64 for anything that is not text — and how to "
+            "install it. The simplest way is to run the `command` it gives "
+            "(`cylist skills pull ...`), which writes .claude/skills/<folder>/ "
+            "in the repository you are in and will not overwrite a skill it did "
+            "not write; without the cylist CLI, write each file under that "
+            "directory yourself. A running session picks the skill up within "
+            "seconds if .claude/skills already existed when it started, and "
+            "from the next session otherwise; until then, follow its SKILL.md "
+            "from disk."
+        ),
+    )
+    async def download_skill(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        name: Annotated[
+            str,
+            Field(description="The skill's name as list_skills gave it, e.g. 'cylist.zip'."),
+        ],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            match = await _find_skill(client, project, name)
+            folder = await client.get(f"/skills/{match['id']}/folder")
+            directory = f".claude/skills/{folder.get('folder')}/"
+            return {
+                **folder,
+                "install": {
+                    "command": f"cylist skills pull {project} {match['name']}",
+                    "directory": directory,
+                },
+            }
 
         return await _guard(call)
 
@@ -1125,6 +1171,27 @@ async def _guard(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResul
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
         structured_content=payload,
         is_error=False,
+    )
+
+
+async def _find_skill(client: Api, project: str, name: str) -> dict[str, Any]:
+    """The skill of that name on the project, or an error listing the ones it has."""
+    skills = await client.get(f"/projects/{project}/skills")
+    match = next((one for one in skills if one.get("name") == name), None)
+    if match is None:
+        available = sorted(str(one.get("name")) for one in skills)
+        raise CylistError(
+            f"{project} has no skill called {name!r}."
+            + (f" It has: {', '.join(available)}." if available else " It has none."),
+            code="not_found",
+            details={"name": name, "available": available},
+        )
+    return dict(match)
+
+
+def _is_zip(skill: dict[str, Any]) -> bool:
+    return str(skill.get("name", "")).lower().endswith(".zip") or "zip" in str(
+        skill.get("mime", "")
     )
 
 
