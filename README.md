@@ -180,7 +180,7 @@ may read. Folders and vault trees carry a *default* that new children inherit,
 so "everything in Contracts is restricted" is said once rather than on each
 upload. Something above your clearance is answered **as though it were never
 there**: left out of listings, a 404 by id, a 404 to download, and not counted
-on the project hub. A 403 on `redundancy-list-final.xlsx` would already have
+in the project's summary. A 403 on `redundancy-list-final.xlsx` would already have
 told you the interesting part. A restricted vault branch takes its whole
 subtree with it.
 

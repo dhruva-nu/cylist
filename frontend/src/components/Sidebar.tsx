@@ -1,12 +1,14 @@
 /**
- * The left-hand sidebar: the things you consult while working, rather than
- * the things you navigate to.
+ * The left-hand sidebar: the way around a project, and the things you consult
+ * while working in it.
  *
- * A project's areas are places you go and stay, and they are tabs in the bar
- * above. What lives here is the other kind of thing — a preference to set, a
- * list to glance at, a report to read off — none of which is worth leaving the
- * board for, and all of which used to be a dialog over the top of whatever you
- * were doing.
+ * A project's areas — Goals, Board, People, Agents — are at the top. They used
+ * to be tabs in the bar above; they are here because the sidebar is on screen
+ * in every state, at every width, and the bar's tabs were not — see
+ * `ProjectNav.tsx`. Under them is the other kind of thing — a preference to
+ * set, a list to glance at, a report to read off — none of which is worth
+ * leaving the board for, and all of which used to be a dialog over the top of
+ * whatever you were doing.
  *
  * It is a column of the frame down the left-hand edge rather than a drawer
  * over the page: the page narrows to make room for it, which is the whole
@@ -14,10 +16,10 @@
  *
  * It collapses, and what it collapses to is the reason it is allowed to. Not
  * away — to a rail against the same edge, holding the handle that brings it
- * back and the count of what is due today. So the two objections to a panel
- * that shuts both go: there is no state in which Settings is unreachable, and
- * no state in which three overdue cards are behind something you forgot was
- * there. What the rail buys is the width, which is the one thing a board four
+ * back, the count of what is due today and the project's four areas. So the
+ * objections to a panel that shuts all go: there is no state in which Settings
+ * is unreachable, no state in which three overdue cards are behind something
+ * you forgot was there, and no state in which the way to the board is. What the rail buys is the width, which is the one thing a board four
  * columns wide actually wants back.
  *
  * Collapsed or not is remembered between visits, and it collapses by gliding
@@ -55,6 +57,7 @@ import {
 } from 'react'
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
 import { DayReportPanel } from './DayReport'
+import { ProjectNav } from './ProjectNav'
 import { SidebarSection } from './SidebarSection'
 import { Today, TodayCount } from './Today'
 import styles from './Sidebar.module.css'
@@ -203,6 +206,9 @@ export function Sidebar() {
             can be shut needs it to be — a number nobody can see is a number
             that stops being worth keeping. */}
         <TodayCount />
+        {/* The project's areas, as marks — or as names, once the rail is a
+            strip across a phone. Nothing off a project. */}
+        <ProjectNav rail />
         <span className={styles.railName} aria-hidden="true">
           Sidebar
         </span>
@@ -214,7 +220,10 @@ export function Sidebar() {
         <div className={styles.panelHead}>
           <Handle open onToggle={() => showSidebar(false)} />
         </div>
-        {/* Today's work at the top. It is the one whose answer changes hour to
+        {/* Where you are and where else you can go, first: it is the one thing
+            in the panel you use on every visit rather than now and then. */}
+        <ProjectNav />
+        {/* Today's work next. It is the one whose answer changes hour to
             hour, and its count is the thing worth having in the corner of your
             eye; Settings is the one you set once and leave, so it sits at the
             bottom. */}

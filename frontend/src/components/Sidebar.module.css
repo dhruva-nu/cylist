@@ -99,7 +99,8 @@
 
 /*
  * Collapsed: a rail against the same edge, wide enough for the handle that
- * brings the panel back and the count of what is due today, and nothing else.
+ * brings the panel back, the count of what is due today and the marks of a
+ * project's four areas, and nothing else.
  *
  * Not `display: none` on the panel and not a floating button over the page.
  * A rail is what makes collapsing safe — the frame still has a left-hand
@@ -192,6 +193,13 @@
 
   .railName {
     writing-mode: horizontal-tb;
+  }
+
+  /* In a project the strip carries its four areas, and the word would push
+     the last of them off a phone's edge. Off one it is all the strip has to
+     say for itself, so it stays there. */
+  .rail > nav ~ .railName {
+    display: none;
   }
 }
 
