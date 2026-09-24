@@ -1,8 +1,11 @@
 /* The vault screen: trees down the left, one node's detail on the right. */
 
+/* `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` will not go narrower than
+   the longest unbreakable thing inside it, and a secret named in one long
+   identifier was enough to push the pane — and the page — past a phone's edge. */
 .split {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 20px;
   min-height: 60vh;
 }
@@ -154,38 +157,47 @@
 }
 
 /*
- * The detail pane: a reading column, and whatever else there is beside it.
+ * The detail pane: one column, centred in the pane.
  *
- * Stretching this one with the page was not enough and would have made it
- * worse. What is in here is a name, a path, a note and a list of labelled
- * values, and a masked secret set across 1300px is a line you lose your place
- * in halfway along — the widest thing in the pane is the one that least wants
- * the width. So the reading matter stops at 720px and the room the page gained
- * goes to the child cards, which are a grid and can use it.
+ * What is in here is a name, a path, a note and a list of labelled values,
+ * and a masked secret set across 1300px is a line you lose your place in
+ * halfway along — so the column stops at 720px however wide the pane gets.
  *
- * `align-content: start` because the two columns are different heights and a
- * short one has no business being centred against a tall one.
+ * It used to spend the rest of the pane on the child cards, in a second
+ * column of their own. That read as two things: a heading with its actions
+ * pinned to the left edge and a grid of cards pinned to the right, with the
+ * width between them empty. The cards belong to the heading — they are what
+ * the branch holds — so they go under it, in the same column, and the column
+ * sits in the middle of the pane rather than against one side of it.
  */
 .detail {
-  display: grid;
-  grid-template-columns: minmax(0, 720px) minmax(0, 1fr);
-  gap: 40px;
-  align-content: start;
-  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 24px;
 }
 
+/* The heading, then the actions under it. Beside it, a long name had only
+   what the buttons left over and wrapped a word to a line. */
 .detailHead {
-  display: grid;
-  grid-column: 1;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* A node's name is whatever somebody typed, and one long identifier would
+   otherwise hold the column open past the pane. */
+.detailHead h2 {
+  overflow-wrap: anywhere;
 }
 
 /* Whatever the node itself has to say — the key/value list of a secret, or the
    line explaining an empty branch. Under the heading, in the same column. */
 .reading {
-  grid-column: 1;
   min-width: 0;
 }
 
@@ -209,11 +221,11 @@
   color: var(--ink-2);
 }
 
-/* No top margin of its own any more: the grid above puts 40px between the
-   heading and this, and a margin on top of that was 64px of nothing. */
+/* No top margin of its own: the column's gap already separates it from the
+   heading, and a margin on top of that was space for nothing. */
 .kv {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 120px minmax(0, 1fr);
   gap: 12px 18px;
   align-items: center;
   font-size: 14.5px;
@@ -261,19 +273,19 @@
   overflow-wrap: anywhere;
 }
 
-/* Beside the heading rather than under it. A branch's children are a grid of
-   small cards, which is the one thing in this pane that gets better the more
-   room it has. */
+/* Under the heading. Three across in the full column, and down to one on a
+   phone — `min()` so a pane narrower than 200px still gets a card that fits
+   instead of one that overflows it. */
 .cards {
   display: grid;
-  grid-row: 1;
-  grid-column: 2;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
   gap: 12px;
 }
 
+/* `min-width: 0` so a grid track can be narrower than the name in it, and
+   the name wraps rather than running out of its card. */
 .childCard {
+  min-width: 0;
   gap: 6px;
   padding: 16px;
   border: 1px solid var(--line);
@@ -283,6 +295,7 @@
 
 .childCard b {
   font-family: var(--font-ui);
+  overflow-wrap: anywhere;
 }
 
 .childKind {
@@ -345,23 +358,8 @@
   color: var(--brand-ink);
 }
 
-/* Below this the pane is not wide enough to be two columns of anything: 720px
-   of reading plus a 40px gutter leaves the cards a strip too narrow to hold
-   one. They go back under the heading, and the reading column takes the pane. */
-@media (max-width: 1500px) {
-  .detail {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .cards {
-    grid-row: auto;
-    grid-column: 1;
-    margin-top: 22px;
-  }
-}
-
 @media (max-width: 860px) {
   .split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }

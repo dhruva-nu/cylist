@@ -1,4 +1,8 @@
-/** The frame every screen sits in: wordmark, project tabs and breadcrumbs. */
+/**
+ * The frame every screen sits in: the sidebar, and beside it the wordmark and
+ * breadcrumbs over the page. A project's areas are in the sidebar — see
+ * `ProjectNav.tsx` — rather than tabs in the bar.
+ */
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -41,7 +45,6 @@ function usePageWidth(): string | undefined {
   if (matchRoute({ to: '/p/$projectKey/board' })) return styles.pageBoard
   if (matchRoute({ to: '/' })) return styles.pageGallery
   if (
-    matchRoute({ to: '/p/$projectKey' }) ||
     matchRoute({ to: '/p/$projectKey/agents' }) ||
     matchRoute({ to: '/p/$projectKey/people' }) ||
     matchRoute({ to: '/p/$projectKey/roles' }) ||
@@ -65,9 +68,9 @@ export function Shell() {
   return (
     <>
       {/*
-        The whole sidebar and eight more tab stops sit between the top of the
-        page and the content — the panel's handle and its sections, then the
-        wordmark, six tabs and the breadcrumb. Tabbing past all of that on
+        The whole sidebar and a few more tab stops sit between the top of the
+        page and the content — the panel's handle, a project's areas and the
+        sections under them, then the wordmark and the breadcrumb. Tabbing past all of that on
         every navigation is the sort of thing that makes a keyboard unusable,
         so there is a way over it. It matters more now than it did with the
         panel on the other side, where it came after the content rather than
@@ -94,7 +97,6 @@ export function Shell() {
               <Link to="/" className={styles.brand}>
                 <span className={styles.mark}>C</span> Cylist
               </Link>
-              <ProjectTabs />
               <div className={styles.right}>
                 <You />
               </div>
@@ -126,52 +128,6 @@ function You() {
     <Avatar name={person.name} colour={person.colour} />
   ) : (
     <Avatar name="You" colour={OWNER_COLOUR} />
-  )
-}
-
-/** Tabs across a project's areas. Hidden outside a project. */
-function ProjectTabs() {
-  const matchRoute = useMatchRoute()
-  const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  if (!match) return <div />
-
-  const { projectKey } = match
-
-  return (
-    <nav className={styles.nav}>
-      <Link to="/p/$projectKey" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Overview
-      </Link>
-      <Link to="/p/$projectKey/board" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Board
-      </Link>
-      <Link to="/p/$projectKey/goals" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Goals
-      </Link>
-      <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Files
-      </Link>
-      <Link to="/p/$projectKey/vault" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Vault
-      </Link>
-      <Link
-        to="/p/$projectKey/people"
-        params={{ projectKey }}
-        activeProps={{ className: 'active' }}
-      >
-        People
-      </Link>
-      <Link to="/p/$projectKey/roles" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Roles
-      </Link>
-      <Link
-        to="/p/$projectKey/agents"
-        params={{ projectKey }}
-        activeProps={{ className: 'active' }}
-      >
-        Agents
-      </Link>
-    </nav>
   )
 }
 
@@ -241,10 +197,12 @@ function ProjectName({ projectKey }: { projectKey: string }) {
   return <b>{project.data?.name ?? projectKey}</b>
 }
 
+/** The project's name, as the way to its board: there is no overview page to
+ * send it to any more, and the board is what a project's address opens. */
 function ProjectCrumbLink({ projectKey }: { projectKey: string }) {
   const project = useProjectName(projectKey)
   return (
-    <Link to="/p/$projectKey" params={{ projectKey }}>
+    <Link to="/p/$projectKey/board" params={{ projectKey }}>
       {project.data?.name ?? projectKey}
     </Link>
   )

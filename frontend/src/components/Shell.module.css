@@ -164,31 +164,6 @@
   align-items: center;
 }
 
-.nav {
-  display: flex;
-  gap: 6px;
-}
-
-.nav a {
-  padding: 7px 14px;
-  border-radius: var(--radius-control);
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;
-}
-
-.nav a:hover {
-  background: var(--paper);
-}
-
-.nav a.active {
-  background: var(--paper);
-  color: var(--ink);
-  box-shadow: var(--shadow);
-}
-
 .crumbs {
   display: flex;
   gap: 8px;
@@ -358,10 +333,4 @@
   gap: 8px;
   justify-content: center;
   margin-top: 8px;
-}
-
-@media (max-width: 720px) {
-  .nav {
-    display: none;
-  }
 }

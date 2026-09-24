@@ -253,6 +253,12 @@ A prompt that merely mentions `ATL-41` never binds — "don't touch ATL-41"
 would otherwise put you on it. An unbound session makes no requests at all, so
 the sessions you run on other projects never appear on any board.
 
+Either way, the session is told what it is on before it starts: fetch the card,
+read the project's scratchpad, and write to it with `note_learned` as it learns
+something the next agent would otherwise have to work out again. `/work` says
+so in the command it expands to; `cylist work`, and a `/clear` or a compaction
+that keeps the binding, get the same brief from the `SessionStart` hook.
+
 `cylist hook` is not a command to run yourself. It reads one JSON event from
 stdin, always exits 0, and prints nothing but the JSON Claude Code expects —
 a board that is down, a token that is missing, a malformed event: none of them

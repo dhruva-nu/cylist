@@ -322,6 +322,7 @@ async def list_notes(
     response_model=NoteRead,
     status_code=status.HTTP_201_CREATED,
     summary="Note something learned",
+    responses={409: {"description": "A line saying the same thing is already on the scratchpad."}},
 )
 async def add_note(
     body: NoteCreate,
@@ -335,6 +336,10 @@ async def add_note(
     out again — not for what the code, the board or the README already says.
     Notes are capped at 280 characters, and newlines are folded into spaces:
     one fact, in as few words as carry it.
+
+    A line that says what one already on the scratchpad says — ignoring case,
+    spacing and punctuation — is refused with a 409 naming the line that is
+    there, so read the scratchpad before you add to it.
 
     The note is signed with your credential's own label, so a reader can tell
     an agent's line from a person's.

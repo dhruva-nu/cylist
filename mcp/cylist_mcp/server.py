@@ -45,9 +45,30 @@ SKILL_MAX_CHARS = 40_000
 instructions; anything past this is not one, and filling a context window
 with it would be the wrong failure."""
 
+INSTRUCTIONS_SEEN = 2048
+"""How much of the instructions a client can be relied on to show. Claude Code
+cuts them off at this many characters, so what an agent must do on every card
+goes before it; the tests hold the scratchpad to that."""
+
 INSTRUCTIONS = """\
 Cylist is a project manager: each project has a Kanban board, a people
 directory, files and a vault of credentials.
+
+Every project has a **scratchpad**: one-line notes that agents before you left
+about it, newest first. Keep it as you go, not only when asked:
+
+1. Given a card, call `read_scratchpad` for its project (the key before the
+   dash in `ATL-41`) before you start on the work, and act on what it says.
+2. The moment you find something the next agent would otherwise have to find
+   again — a command that does not work as documented, a constraint nothing
+   states, where a thing actually lives — and it is not already in the code,
+   the README or the scratchpad, write it with `note_learned`. Then, not at
+   the end: a session can stop before it gets there. It belongs on the
+   scratchpad even if you also say it in a comment on the card.
+3. One short, factual sentence per fact. Not a progress log — the board
+   already reports that — and not a repeat: the server refuses a line that
+   says what one already there says. If a line has stopped being true, write
+   the correction.
 
 Two things are worth knowing before you start.
 
@@ -81,12 +102,7 @@ what is still outstanding.
 
 Each project carries what its agents work from. `list_skills` and `read_skill`
 give you the procedures somebody has already written down for this project —
-worth a look before improvising one. `read_scratchpad` is the shorter and more
-important half: one-line notes that agents before you left about this project
-specifically, newest first. Read it before you start on a project you do not
-know, and when you work something out the hard way that is not in the code, the
-board or the README, leave it there with `note_learned`. One sentence. It is
-not a progress log — the board already reports that.
+worth a look before improvising one.
 
 Progress is reported for you. When a session is bound to a card — someone ran
 `cylist work ATL-41`, or typed `/work ATL-41` — the harness's own hooks tell
@@ -218,7 +234,8 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "'agent_session' says whether an agent is on this card right now, and "
             "'agent_sessions' lists each harness session on it with what became "
             "of it — worth reading before you start, so two of you are not on "
-            "the same card without knowing."
+            "the same card without knowing. Before you start work on it, call "
+            "read_scratchpad for its project."
         ),
     )
     async def get_task(
@@ -1044,8 +1061,9 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         description=(
             "Read a project's agent scratchpad: short lines that agents before "
             "you wrote down when they learned something about this project the "
-            "hard way. Newest first. Read it before you start work on a "
-            "project you do not already know."
+            "hard way. Newest first. Call it first whenever you are given a "
+            "card, before you start on the work, and again before note_learned "
+            "so you do not write down what is already there."
         ),
     )
     async def read_scratchpad(
@@ -1065,8 +1083,11 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             f"{NOTE_MAX_CHARS} characters and newlines are folded into "
             "spaces. Write what is not already in the code, the board or the "
             "README: a surprising constraint, a command that does not work "
-            "here, a convention nothing states. Do not use it as a progress "
-            "log; the board already reports that."
+            "here, a convention nothing states. Write it the moment you learn "
+            "it, not at the end of the session. Do not use it as a progress "
+            "log; the board already reports that. A line saying what one "
+            "already on the scratchpad says — ignoring case and punctuation — "
+            "is refused, naming the line that is there."
         ),
     )
     async def note_learned(

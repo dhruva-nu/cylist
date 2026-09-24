@@ -9,7 +9,7 @@ import pytest
 from mcp.server.mcpserver import MCPServer
 
 from cylist_mcp.client import ApiClient
-from cylist_mcp.server import build_server, local_timezone
+from cylist_mcp.server import INSTRUCTIONS_SEEN, build_server, local_timezone
 from tests import fake_api
 from tests.conftest import call
 
@@ -793,3 +793,47 @@ async def test_download_skill_names_the_skills_there_are(server: MCPServer) -> N
     result = await call(server, "download_skill", project="ATL", name="release")
     assert result.is_error
     assert "board-tidy.md, release-kit.zip" in result.text
+
+
+# --- The scratchpad ----------------------------------------------------------
+
+
+async def test_the_instructions_say_to_read_the_scratchpad_first_and_write_as_you_go(
+    server: MCPServer,
+) -> None:
+    """The ask has to be in what every client is sent, not only in a README —
+    and inside the part of it a client actually shows. Claude Code cuts the
+    instructions off at 2048 characters; this paragraph used to start at 2047,
+    which is why agents only kept the scratchpad when somebody reminded them."""
+    seen = " ".join((server.instructions or "")[:INSTRUCTIONS_SEEN].split())
+    assert "call `read_scratchpad` for its project" in seen
+    assert "write it with `note_learned`. Then, not at the end" in seen
+    assert "the server refuses a line that says what one already there says" in seen
+    tools = {tool.name: tool.description or "" for tool in await server.list_tools()}
+    assert "Call it first whenever you are given a card" in tools["read_scratchpad"]
+    assert "the moment you learn it" in tools["note_learned"]
+    assert "read_scratchpad" in tools["get_task"]
+
+
+async def test_a_line_already_on_the_scratchpad_comes_back_as_its_refusal(
+    make_server: Callable[..., MCPServer],
+) -> None:
+    """The model is told which line it repeated, so it can move on rather than rephrase."""
+    server = make_server(
+        overrides={
+            ("POST", "/projects/ATL/agent-notes"): httpx.Response(
+                409,
+                json={
+                    "error": {
+                        "code": "conflict",
+                        "message": "That is already on the scratchpad: 'Run pytest from backend/.'",
+                        "details": {"note_id": "n1", "body": "Run pytest from backend/."},
+                    }
+                },
+            )
+        }
+    )
+    result = await call(server, "note_learned", project="ATL", note="run pytest from backend")
+    assert result.is_error
+    assert result.text.startswith("That is already on the scratchpad")
+    assert result.data["error"]["details"]["body"] == "Run pytest from backend/."

@@ -59,7 +59,7 @@ export function Home() {
           {projects.data.map((project) => (
             <Link
               key={project.id}
-              to="/p/$projectKey"
+              to="/p/$projectKey/board"
               params={{ projectKey: project.key }}
               className={`${cardStyles.card} ${cardStyles.clickable} ${styles.project}`}
             >

@@ -180,7 +180,7 @@ may read. Folders and vault trees carry a *default* that new children inherit,
 so "everything in Contracts is restricted" is said once rather than on each
 upload. Something above your clearance is answered **as though it were never
 there**: left out of listings, a 404 by id, a 404 to download, and not counted
-on the project hub. A 403 on `redundancy-list-final.xlsx` would already have
+in the project's summary. A 403 on `redundancy-list-final.xlsx` would already have
 told you the interesting part. A restricted vault branch takes its whole
 subtree with it.
 
@@ -367,6 +367,10 @@ Each project carries what its agents work from, under its **Agents** tab: skills
 you upload for them to follow, and a scratchpad they write one-line findings back
 onto. `note_learned` is how an agent leaves something it worked out the hard way,
 capped at 280 characters so the next one reads the pad rather than skimming it.
+The MCP instructions and the `/work` command tell an agent to read the pad before
+it starts on a card and to write to it as it learns, not at the end; a line that
+says what one already there says is refused, so the pad stays a list of facts
+rather than a log.
 
 ### Giving an agent the project's skills
 

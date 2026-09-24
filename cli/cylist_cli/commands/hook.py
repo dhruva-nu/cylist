@@ -136,8 +136,38 @@ argument-hint: <TASK-REF | off>
 This session is now bound to Cylist task $ARGUMENTS by the Cylist hook
 (the board shows it as working / waiting / done automatically; you do not
 need to report progress). If $ARGUMENTS is `off`, just acknowledge.
-Otherwise fetch the task with `get_task`, restate it in two lines, and begin.
+Otherwise fetch the task with `get_task`, then `read_scratchpad` for its
+project (the key before the dash) and act on what it says, restate the task
+in two lines, and begin. As you work, whenever you find something the next
+agent would otherwise have to find again, and it is not already in the code,
+the README or the scratchpad, write it with `note_learned` straight away:
+one short, factual sentence, not a progress report.
 """
+
+BRIEFED_STARTS = frozenset({"startup", "clear", "compact"})
+"""The ``SessionStart`` sources that begin with no memory of the card, and so
+are told what it is and to read the scratchpad. ``resume`` is not one: the
+transcript it resumes already holds the brief it was given the first time."""
+
+
+def working_brief(ref: str) -> str:
+    """What a session bound to a card is told at the start, before any prompt.
+
+    The same ask as the ``/work`` command, for the sessions that were bound
+    without one — ``cylist work ATL-41``, or a ``/clear`` that carried the
+    binding across — and would otherwise start on the card without having
+    read what the agents before them learned about its project.
+    """
+    key = ref.split("-", 1)[0]
+    return (
+        f"This session is bound to Cylist task {ref}; the board shows its progress "
+        "automatically. Before you start on it, call get_task for "
+        f"{ref} and read_scratchpad for {key}, and act on what the scratchpad says. "
+        "As you work, whenever you find something the next agent would otherwise "
+        "have to find again, and it is not already in the code, the README or the "
+        f"scratchpad, write it with note_learned for {key} straight away: one short, "
+        "factual sentence, not a progress report."
+    )
 
 
 def register(subparsers: Any) -> None:
@@ -310,6 +340,8 @@ class Hook:
                 self._bind(carried)
         if self.task:
             self._rename()
+            if self.event.get("source") in BRIEFED_STARTS:
+                self._brief()
             self._put("working")
 
     def _on_UserPromptSubmit(self) -> None:  # noqa: N802
@@ -392,12 +424,21 @@ class Hook:
             return
         if self.event.get("session_title") == self.task:
             return
-        self.reply["hookSpecificOutput"] = {
-            "hookEventName": self.name,
-            "sessionTitle": self.task,
-        }
+        self._specific()["sessionTitle"] = self.task
         self.state["title_applied"] = self.task
         _save(self.session_id, self.state)
+
+    def _brief(self) -> None:
+        """Put the card, and the scratchpad, in front of the model."""
+        if self.task:
+            self._specific()["additionalContext"] = working_brief(self.task)
+
+    def _specific(self) -> dict[str, Any]:
+        """The event-specific half of the reply, which a title and a brief share."""
+        specific: dict[str, Any] = self.reply.setdefault(
+            "hookSpecificOutput", {"hookEventName": self.name}
+        )
+        return specific
 
     def _client_name(self) -> str:
         """What to call this session on the card.
