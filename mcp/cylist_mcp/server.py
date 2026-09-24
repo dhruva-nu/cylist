@@ -30,7 +30,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import Field
 
 from cylist_mcp import __version__, resolve
-from cylist_mcp.client import ApiClient
+from cylist_mcp.client import Api
 from cylist_mcp.errors import CylistError
 
 VAULT_REVEAL = "vault:reveal"
@@ -104,8 +104,22 @@ allowed to end on.
 """
 
 
-def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
-    """Wire the tools onto one API client, honouring the token's scopes."""
+def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -> MCPServer:
+    """Wire the tools onto one API client, honouring the token's scopes.
+
+    ``hosted`` is for the copy served over HTTP by the backend itself (see
+    :mod:`cylist_mcp.hosted`). The tools are the same; what changes is that
+    "this machine" is no longer the caller's, so nothing is defaulted from it.
+    """
+    # The day a report is cut by. Beside the caller, this machine's zone is the
+    # right guess; on the server it is the container's, which is an accident of
+    # how the image was built, so the API's own UTC is the more honest default.
+    default_zone: Callable[[], str | None] = (lambda: None) if hosted else local_timezone
+    zone_default_text = (
+        "defaults to UTC, because this server does not run beside you — pass the user's own zone"
+        if hosted
+        else "defaults to this machine's own zone rather than UTC"
+    )
     server = MCPServer(
         name="cylist",
         version=__version__,
@@ -895,8 +909,8 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             "the whole report already worded and ready to paste; prefer quoting "
             "that over rewriting it from the structured fields, so the note reads "
             "the same however it was asked for. A day means midnight to midnight "
-            "in 'timezone', which defaults to this machine's own zone rather than "
-            "UTC. The report is deliberately concise: a card's moves appear as the "
+            f"in 'timezone', which {zone_default_text}. "
+            "The report is deliberately concise: a card's moves appear as the "
             "one move they amounted to, from the column the day started in to the "
             "one it ended in, and a comment's line quotes what was said. An entry "
             "whose channel is 'api' was an agent's work, not the person's."
@@ -912,8 +926,8 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             str | None,
             Field(
                 description=(
-                    "IANA zone the day is cut by, e.g. 'Asia/Kolkata'. Defaults to "
-                    "the zone this machine is set to."
+                    "IANA zone the day is cut by, e.g. 'Asia/Kolkata'. Omit it for "
+                    "the default the tool's description names."
                 )
             ),
         ] = None,
@@ -922,7 +936,7 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
             report = await client.get(
                 f"/projects/{project}/reports/day",
                 date=date,
-                timezone=timezone or local_timezone(),
+                timezone=timezone or default_zone(),
             )
             return {"report": report}
 
@@ -1033,7 +1047,7 @@ def build_server(client: ApiClient, scopes: frozenset[str]) -> MCPServer:
     return server
 
 
-def _register_reveal(server: MCPServer, client: ApiClient) -> None:
+def _register_reveal(server: MCPServer, client: Api) -> None:
     """Add ``reveal_secret``. Only called when the token carries the scope."""
 
     @server.tool(

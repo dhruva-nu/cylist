@@ -176,6 +176,22 @@ Change one of these and the client keeps the old list until its next `cylist
 setup` or `cylist login`. Neither is urgent: an address that has gone away
 costs one connection failure and is stepped over.
 
+### MCP at `/mcp`
+
+The same process serves the MCP tools over streamable HTTP at `/mcp`, beside
+`/api/v1` and on the same funnel. That means one `claude mcp add --transport
+http` line connects a machine anywhere production is reachable, off the tailnet
+included (see [`mcp/README.md`](mcp/README.md)). There is nothing to configure:
+the `mcp/` package is a path dependency, copied into the image by
+`backend/Dockerfile`, and `/mcp` answers only `POST` with a bearer token.
+
+To check it from outside, a missing token should get `401` from Cylist itself,
+not `502` from the proxy:
+
+```bash
+curl -si -X POST https://<host>/mcp | head -1
+```
+
 ### WebSockets through the proxy
 
 Two things hold a socket now: a browser watching a board, and each agent
