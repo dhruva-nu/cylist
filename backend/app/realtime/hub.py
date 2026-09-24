@@ -31,7 +31,6 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -71,10 +70,6 @@ class AgentLink:
     """One agent session holding one socket."""
 
     client_session_id: str
-    token_id: UUID | None
-    actor_label: str
-    connected_at: datetime
-    task_reference: str | None = None
     displaced: asyncio.Event = field(default_factory=asyncio.Event)
     """Set when the same client session connects again somewhere else. The
     handler that sees it closes without ending the database row, because the

@@ -84,6 +84,7 @@ import {
   type Template,
 } from '../api/client'
 import { silentFor, waitingDetail } from '../routes/agentState'
+import { localDate } from './dates'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
@@ -803,17 +804,6 @@ function ReadField({ label, children }: { label: string; children: ReactNode }) 
       <div className={styles.readValue}>{children}</div>
     </div>
   )
-}
-
-/**
- * Parse a plain `YYYY-MM-DD` as a local date.
- *
- * `new Date(iso)` reads it as UTC midnight, which shows as the previous day
- * anywhere west of Greenwich — and a due date off by one is worse than none.
- */
-function localDate(iso: string): Date {
-  const [year = 1970, month = 1, day = 1] = iso.split('-').map(Number)
-  return new Date(year, month - 1, day)
 }
 
 function formatDue(iso: string | null): string {

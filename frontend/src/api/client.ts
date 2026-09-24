@@ -266,29 +266,6 @@ export interface Project {
   member_count: number
 }
 
-export interface ProjectSummary extends Project {
-  team_count: number
-  client_count: number
-  folder_count: number
-  /** Everything in the project's folders — uploads and links alike. */
-  file_count: number
-  task_count: number
-  column_count: number
-  blocked_count: number
-  on_hold_count: number
-  /** Goals on the project, settled ones included. */
-  goal_count: number
-  /** Goals still being worked towards — neither achieved nor dropped. */
-  open_goal_count: number
-  vault_tree_count: number
-  /** Credentials stored across every tree. */
-  vault_secret_count: number
-  /** Skills uploaded for this project's agents. */
-  skill_count: number
-  /** Lines on the agent scratchpad. */
-  agent_note_count: number
-}
-
 export type TaskType = 'feature' | 'bug' | 'chore'
 /** How soon a task needs attention. `p0` is drop everything, `p3` the default. */
 export type TaskPriority = 'p0' | 'p1' | 'p2' | 'p3'
@@ -996,11 +973,6 @@ export interface LinkInput {
   sensitivity?: Sensitivity | null
 }
 
-export interface Health {
-  status: 'ok' | 'degraded'
-  database: 'up' | 'down'
-}
-
 /** A failure the server described in its error envelope. */
 export class ApiError extends Error {
   constructor(
@@ -1065,8 +1037,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 const body = (value: unknown) => JSON.stringify(value)
 
 export const api = {
-  health: () => request<Health>('/health'),
-
   /** What this deployment is, and whether anybody can sign in to it yet. */
   setup: () => request<SetupInfo>('/setup'),
 
@@ -1079,7 +1049,6 @@ export const api = {
    */
   bootstrapSignIn: (password: string) =>
     request<Identity>('/auth/login', { method: 'POST', body: body({ password }) }),
-  signOut: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   me: () => request<Identity>('/me'),
 
   /** Turn an invitation link into an account, and sign in with it. */
@@ -1112,7 +1081,6 @@ export const api = {
 
   listProjects: () => request<Project[]>('/projects'),
   getProject: (ref: string) => request<Project>(`/projects/${ref}`),
-  getProjectSummary: (ref: string) => request<ProjectSummary>(`/projects/${ref}/summary`),
   /**
    * What was done on a project on one day.
    *
@@ -1126,10 +1094,6 @@ export const api = {
     ),
   createProject: (input: ProjectInput) =>
     request<Project>('/projects', { method: 'POST', body: body(input) }),
-  updateProject: (ref: string, input: Partial<ProjectInput>) =>
-    request<Project>(`/projects/${ref}`, { method: 'PATCH', body: body(input) }),
-  archiveProject: (ref: string) =>
-    request<{ ok: boolean }>(`/projects/${ref}`, { method: 'DELETE' }),
 
   listMembers: (ref: string) => request<{ members: Member[] }>(`/projects/${ref}/members`),
   setMembers: (ref: string, personIds: string[]) =>
@@ -1141,11 +1105,6 @@ export const api = {
   listRoles: (ref: string) => request<RoleSummary[]>(`/projects/${ref}/roles`),
   createRole: (ref: string, input: RoleInput) =>
     request<RoleSummary>(`/projects/${ref}/roles`, { method: 'POST', body: body(input) }),
-  updateRole: (ref: string, roleRef: string, input: Partial<RoleInput>) =>
-    request<RoleSummary>(`/projects/${ref}/roles/${roleRef}`, {
-      method: 'PATCH',
-      body: body(input),
-    }),
   deleteRole: (ref: string, roleRef: string) =>
     request<void>(`/projects/${ref}/roles/${roleRef}`, { method: 'DELETE' }),
   /** `role` is a role id or name; null takes their role off. */
@@ -1206,14 +1165,6 @@ export const api = {
       default_sensitivity?: Sensitivity | null
     },
   ) => request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
-  updateFolder: (
-    id: string,
-    input: {
-      name?: string
-      parent_id?: string | null
-      default_sensitivity?: Sensitivity
-    },
-  ) => request<Folder>(`/folders/${id}`, { method: 'PATCH', body: body(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
   /**
@@ -1238,8 +1189,6 @@ export const api = {
   },
   addLink: (folderId: string, input: LinkInput) =>
     request<FileItem>(`/folders/${folderId}/links`, { method: 'POST', body: body(input) }),
-  updateItem: (id: string, input: Partial<LinkInput>) =>
-    request<FileItem>(`/items/${id}`, { method: 'PATCH', body: body(input) }),
   deleteItem: (id: string) => request<{ ok: boolean }>(`/items/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a file's bytes from — used as an anchor's href. */
   downloadUrl: (id: string) => `${API_BASE}/items/${id}/download`,
@@ -1251,8 +1200,6 @@ export const api = {
     if (addedBy) form.append('added_by', addedBy)
     return request<Skill>(`/projects/${ref}/skills`, { method: 'POST', body: form })
   },
-  updateSkill: (id: string, input: { description: string | null }) =>
-    request<Skill>(`/skills/${id}`, { method: 'PATCH', body: body(input) }),
   deleteSkill: (id: string) => request<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a skill's bytes from — used as an anchor's href. */
   skillDownloadUrl: (id: string) => `${API_BASE}/skills/${id}/download`,
@@ -1304,9 +1251,6 @@ export const api = {
    */
   getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
     request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
-  /** The agent sessions on a card: open first, then finished-but-undismissed. */
-  listAgentSessions: (taskRef: string) =>
-    request<AgentSessionRead[]>(`/tasks/${taskRef}/agent-sessions`),
   /** Clear the finished sessions off a card. The ones still running stay. */
   dismissAgentSessions: (taskRef: string) =>
     request<void>(`/tasks/${taskRef}/agent-sessions/dismiss`, { method: 'POST' }),
@@ -1359,7 +1303,6 @@ export const api = {
     request<Person>('/people', { method: 'POST', body: body(input) }),
   updatePerson: (id: string, input: Partial<PersonInput>) =>
     request<Person>(`/people/${id}`, { method: 'PATCH', body: body(input) }),
-  archivePerson: (id: string) => request<{ ok: boolean }>(`/people/${id}`, { method: 'DELETE' }),
 
   listVaultTrees: (ref: string) => request<VaultTree[]>(`/projects/${ref}/vault/trees`),
   createVaultTree: (ref: string, name: string, defaultSensitivity?: Sensitivity | null) =>
@@ -1368,10 +1311,6 @@ export const api = {
       body: body({ name, default_sensitivity: defaultSensitivity ?? null }),
     }),
   getVaultTree: (treeId: string) => request<VaultTreeDetail>(`/vault/trees/${treeId}`),
-  renameVaultTree: (treeId: string, name: string) =>
-    request<VaultTree>(`/vault/trees/${treeId}`, { method: 'PATCH', body: body({ name }) }),
-  deleteVaultTree: (treeId: string) =>
-    request<{ ok: boolean }>(`/vault/trees/${treeId}`, { method: 'DELETE' }),
 
   createVaultNode: (input: VaultNodeInput) =>
     request<VaultNode>('/vault/nodes', { method: 'POST', body: body(input) }),

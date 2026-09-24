@@ -294,9 +294,9 @@ async def upload(
         UnprocessableRequestError: if the upload has no usable filename, or
             ``added_by`` names nobody in the directory.
     """
-    name = _filename_of(source)
+    name = filename_of(source)
     await _ensure_name_is_free(session, folder, name)
-    await _ensure_person_exists(session, added_by)
+    await ensure_person_exists(session, added_by)
 
     blob, size, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
 
@@ -330,7 +330,7 @@ async def add_link(session: AsyncSession, folder: Folder, data: LinkCreate) -> F
             details={"source": data.source.value},
         )
     await _ensure_name_is_free(session, folder, data.name)
-    await _ensure_person_exists(session, data.added_by)
+    await ensure_person_exists(session, data.added_by)
 
     return await _add_item(
         session,
@@ -376,7 +376,7 @@ async def update_item(session: AsyncSession, item: FileItem, data: ItemUpdate) -
             "A link's source is where the document actually lives, so it cannot be `upload`."
         )
     if "added_by" in fields:
-        await _ensure_person_exists(session, fields["added_by"])
+        await ensure_person_exists(session, fields["added_by"])
 
     if fields.get("sensitivity") is not None:
         item.sensitivity = fields["sensitivity"]
@@ -440,11 +440,15 @@ async def counts(
 # --- Internals -------------------------------------------------------------
 
 
-def _filename_of(source: UploadFile) -> str:
+def filename_of(source: UploadFile) -> str:
     """The name to file an upload under, stripped of any directory part.
 
     Browsers send a bare filename, but a directory upload or a hand-rolled
     client can send a path, and ``Downloads/../../etc/passwd`` is not a name.
+
+    A skill upload is named by this too (see :mod:`app.services.agents`): what
+    is a name rather than a path does not differ because the row it lands in is
+    a different table.
     """
     candidate = (source.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
     try:
@@ -482,7 +486,7 @@ async def _ensure_name_is_free(session: AsyncSession, folder: Folder, name: str)
         raise _duplicate_name(name)
 
 
-async def _ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
+async def ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
     if person_id is None:
         return
     if await session.get(Person, person_id) is None:

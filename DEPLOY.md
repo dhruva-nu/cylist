@@ -375,7 +375,7 @@ staging's code.
 wherever being *deployed* is what matters — `Settings.is_deployed`. It issues
 the session cookie `Secure`, because both sit behind `tailscale serve` and are
 reached over HTTPS; and `make seed` refuses to run, because staging holds real
-rows. Only `Settings.is_production` still means production alone.
+rows.
 
 > A `Secure` cookie is dropped by the browser over plain HTTP, and the symptom
 > is a login that returns 200 and then does not stick. Reach staging through

@@ -575,21 +575,6 @@ export function CommentIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/**
- * A list with things ticked off it.
- *
- * Not on a board card, where a set of sub-tasks is drawn as the dots that
- * count them rather than as an icon and a fraction — see `SubtaskDots` on the
- * board. This is the mark for the places that name the list instead.
- */
-export function ChecklistIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Glyph size={size}>
-      <path d="M3 4.6 4.3 5.9 6.6 3.6M3 11 4.3 12.3 6.6 10M8.6 4.8h4.4M8.6 11.2h4.4" />
-    </Glyph>
-  )
-}
-
 /** Jira's four-diamond mark, near enough to be recognised at 14px. */
 function JiraIcon({ size = 14 }: { size?: number }) {
   return (
@@ -656,15 +641,6 @@ export function MailIcon({ size = 14 }: { size?: number }) {
     <Glyph size={size}>
       <rect x="2.4" y="3.6" width="11.2" height="8.8" rx="1.6" />
       <path d="m2.8 4.6 5.2 3.8 5.2-3.8" />
-    </Glyph>
-  )
-}
-
-/** Add one of whatever the control is next to. */
-export function PlusIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Glyph size={size} weight={1.8}>
-      <path d="M8 3.6v8.8M3.6 8h8.8" />
     </Glyph>
   )
 }
