@@ -201,5 +201,3 @@ export function Field({
 export function FieldPair({ children }: { children: ReactNode }) {
   return <div className={styles.pair}>{children}</div>
 }
-
-export const modalStyles = styles

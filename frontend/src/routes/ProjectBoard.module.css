@@ -822,63 +822,6 @@
   line-height: 1.35;
 }
 
-/* What kind of card this is, at the head of it.
-
-   A tinted tile rather than an outlined chip. The type is the one mark that is
-   on every card in the same place, which makes it what the eye actually uses
-   to find a card again in a column — and a hairline box in the row's own ink
-   was not a thing you could find at a glance. The tint carries the meaning and
-   the glyph confirms it, so neither has to do the job alone.
-
-   Square-ish and soft-cornered, not a pill: a pill is what this file uses for
-   something with a word in it, and there is no word in here. */
-.tile {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
-}
-
-.tile_feature {
-  background: var(--ok-soft);
-  color: var(--go);
-}
-
-.tile_bug {
-  background: var(--blocked-soft);
-  color: var(--blocked);
-}
-
-/* Grey stays grey. A chore is the one of the three that is nobody's idea, and
-   giving it a hue of its own would be inventing a fourth thing to learn. */
-.tile_chore {
-  background: var(--line);
-  color: var(--ink-2);
-}
-
-/* Held, blocked or given up: the tile carries the status instead of the type,
-   and takes --paper for its ground because the card behind it is already
-   tinted with the same hue — see .pill, which is paper-backed for the reason. */
-.tile_hold,
-.tile_blocked,
-.tile_cancelled {
-  background: var(--paper);
-}
-
-.tile_hold {
-  color: var(--hold);
-}
-
-.tile_blocked {
-  color: var(--blocked);
-}
-
-.tile_cancelled {
-  color: var(--ink-3);
-}
-
 /* The priority mark. No box by default: three of the four levels are the
    glyph and nothing else, so the one that does get a box is unmistakably the
    one that got it. The 2px of side padding is there only to stop the glyph
