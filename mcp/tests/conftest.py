@@ -34,7 +34,7 @@ Caller = Callable[..., Awaitable[ToolResult]]
 def isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the tests away from the developer's own configuration.
 
-    :func:`cylist_mcp.config.resolve` reads ``~/.config/cylist/config.toml``
+    :func:`cylist_mcp.config.load_settings` reads ``~/.config/cylist/config.toml``
     now, so without this a run on a machine that has done ``cylist setup``
     would find a real token there — and the test that asserts a *missing*
     token is refused would pass or fail depending on whose laptop it ran on.
