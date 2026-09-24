@@ -138,7 +138,7 @@ def _tree_lines(nodes: list[dict[str, Any]], indent: str) -> list[str]:
         if node.get("kind") == "secret":
             secret = node.get("secret") or {}
             username = secret.get("username")
-            label += f"  (secret{f', {username}' if username else ''})"
+            label += f"  (secret, {username})" if username else "  (secret)"
         lines.append(f"{indent}{elbow}{label}")
         children = node.get("children") or []
         if children:
@@ -181,7 +181,8 @@ def _reveal(args: argparse.Namespace, ctx: Context) -> None:
         target = _write_secret(Path(args.output), value)
         output.warn(f"Wrote the secret to {target} (mode 0600). Delete it when you are done.")
         if ctx.as_json:
-            output.emit_json({k: v for k, v in revealed.items() if k != "value"})
+            metadata = {field: content for field, content in revealed.items() if field != "value"}
+            output.emit_json(metadata)
         return
 
     output.warn("Revealed — this value is now in your terminal's scrollback, and in the audit log.")
