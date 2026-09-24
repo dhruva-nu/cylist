@@ -162,16 +162,26 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "task"
     __table_args__ = (
         # Unique over top-level cards alone: a sub-task has no project number,
-        # it borrows its parent's and adds its own to the end.
-        Index(
-            "ix_task_project_id_number",
-            "project_id",
-            "number",
-            unique=True,
-            postgresql_where=sql_text("parent_id IS NULL"),
-        ),
-        Index("ix_task_project_id_column_id_position", "project_id", "column_id", "position"),
+        # it borrows its parent's and adds its own to the end. Not partial,
+        # because it does not need to be — a sub-task's number is NULL (see
+        # `numbered_by_parentage`) and NULLs never collide — and a partial one
+        # is invisible to any lookup that does not repeat its predicate, which
+        # finding ``ATL-41`` by key and number does not.
+        Index("ix_task_project_id_number", "project_id", "number", unique=True),
+        # A column top to bottom: read on every create, move and renumber, and
+        # by the check that refuses to delete a column still holding cards.
+        # The column says which project it is on, so the project is not here.
+        Index("ix_task_column_id_position", "column_id", "position"),
         Index("ix_task_parent_id_sub_number", "parent_id", "sub_number", unique=True),
+        # What a goal's progress and a template's "in use by" are counted
+        # from, and what deleting either has to find. Partial, because most
+        # cards carry neither and an index of NULLs answers nothing.
+        Index("ix_task_goal_id", "goal_id", postgresql_where=sql_text("goal_id IS NOT NULL")),
+        Index(
+            "ix_task_template_id",
+            "template_id",
+            postgresql_where=sql_text("template_id IS NOT NULL"),
+        ),
         # Exactly one of the two numbering schemes applies to any given row, so
         # neither "a top-level card with a sub-number" nor "a sub-task with a
         # project number" can be written at all.
