@@ -5,7 +5,7 @@
  * readable, bookmarkable and matches what the API accepts.
  */
 
-import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
+import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { Shell } from './components/Shell'
 import { Agents } from './routes/Agents'
 import { GoalPage } from './routes/GoalPage'
@@ -13,7 +13,6 @@ import { Home } from './routes/Home'
 import { ProjectBoard } from './routes/ProjectBoard'
 import { ProjectFiles } from './routes/ProjectFiles'
 import { ProjectGoals } from './routes/ProjectGoals'
-import { ProjectHub } from './routes/ProjectHub'
 import { ProjectPeople } from './routes/ProjectPeople'
 import { ProjectRoles } from './routes/ProjectRoles'
 import { ProjectVault } from './routes/ProjectVault'
@@ -26,10 +25,18 @@ const homeRoute = createRoute({
   component: Home,
 })
 
+// A project's own address opens its board. It used to open an overview — a
+// page of cards linking to each area — which the sidebar's list of areas has
+// replaced; the address stays, because it is in bookmarks and in links pasted
+// into chat, and `replace` so Back does not land on a page that only bounces
+// you forward again.
 const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/p/$projectKey',
-  component: ProjectHub,
+  beforeLoad: ({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- how TanStack redirects
+    throw redirect({ to: '/p/$projectKey/board', params, replace: true })
+  },
 })
 
 const projectBoardRoute = createRoute({
