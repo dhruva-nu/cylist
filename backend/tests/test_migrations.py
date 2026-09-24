@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -21,13 +22,14 @@ from typing import Any
 
 import pytest
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import Enum, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from alembic import command
 from app.config import get_settings
+from app.models import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 SCRATCH_DATABASE = "cylist_migration_data"
@@ -1198,3 +1200,482 @@ class TestUndoingTheAgent:
             )
         )
         assert gone.scalar() == 0
+
+
+async def columns_of(connection: AsyncConnection, table: str) -> set[str]:
+    rows = await connection.execute(
+        text("SELECT column_name FROM information_schema.columns WHERE table_name = :table"),
+        {"table": table},
+    )
+    return set(rows.scalars())
+
+
+async def indexes_of(connection: AsyncConnection, table: str) -> set[str]:
+    rows = await connection.execute(
+        text("SELECT indexname FROM pg_indexes WHERE tablename = :table"), {"table": table}
+    )
+    return set(rows.scalars())
+
+
+# --- A role's rules go with it ---------------------------------------------
+
+BEFORE_THE_CASCADE = "0027"
+WITH_THE_CASCADE = "0028"
+
+
+async def seed_a_narrowed_role(connection: AsyncConnection) -> None:
+    """A project whose QA role, and whose baseline, each hold one of everything.
+
+    One grant, one column rule and one clearance apiece: the three tables that
+    point at a role, and the role-less rows beside them that no role's
+    deletion may touch.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 0)"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO board_column (id, project_id, name, description, position)"
+            " SELECT gen_random_uuid(), project.id, 'Done', '', 0 FROM project"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO project_role (id, project_id, name, description, colour, is_admin)"
+            " SELECT gen_random_uuid(), project.id, 'QA', '', '#1D7D46', false FROM project"
+        )
+    )
+    # The role's rows, then the baseline's: the same three with no role.
+    for with_role in (True, False):
+        for statement in (
+            "INSERT INTO project_permission (id, project_id, role_id, permission)"
+            " SELECT gen_random_uuid(), project.id,"
+            " CASE WHEN :with_role THEN (SELECT id FROM project_role) END, 'tasks' FROM project",
+            "INSERT INTO role_column_rule (id, project_id, role_id, column_id, may_enter)"
+            " SELECT gen_random_uuid(), project.id,"
+            " CASE WHEN :with_role THEN (SELECT id FROM project_role) END, board_column.id,"
+            " false FROM project, board_column",
+            "INSERT INTO role_clearance (id, project_id, role_id, level)"
+            " SELECT gen_random_uuid(), project.id,"
+            " CASE WHEN :with_role THEN (SELECT id FROM project_role) END, 'internal'"
+            " FROM project",
+        ):
+            await connection.execute(text(statement), {"with_role": with_role})
+
+
+async def rules_held(connection: AsyncConnection) -> dict[str, tuple[int, int]]:
+    """Per table, how many rows belong to a role and how many to the baseline."""
+    held = {}
+    for table in ("project_permission", "role_column_rule", "role_clearance"):
+        row = await connection.execute(
+            text(
+                f"SELECT count(role_id), count(*) - count(role_id) FROM {table}"  # noqa: S608
+            )
+        )
+        with_role, baseline = row.one()
+        held[table] = (with_role, baseline)
+    return held
+
+
+class TestARolesRulesGoWithIt:
+    async def test_every_row_survives_the_upgrade(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_CASCADE)
+        await seed_a_narrowed_role(connection)
+
+        await migrate(WITH_THE_CASCADE)
+
+        assert await rules_held(connection) == {
+            "project_permission": (1, 1),
+            "role_column_rule": (1, 1),
+            "role_clearance": (1, 1),
+        }
+
+    async def test_deleting_the_role_takes_its_rows_and_leaves_the_baseline(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Before, this was refused at COMMIT by the rule and the clearance —
+        the two tables the service had not remembered to empty first."""
+        await migrate(BEFORE_THE_CASCADE)
+        await seed_a_narrowed_role(connection)
+        await migrate(WITH_THE_CASCADE)
+
+        await connection.execute(text("DELETE FROM project_role WHERE name = 'QA'"))
+
+        assert await rules_held(connection) == {
+            "project_permission": (0, 1),
+            "role_column_rule": (0, 1),
+            "role_clearance": (0, 1),
+        }
+
+    async def test_the_baseline_is_still_held_to_one_row(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """What the pair of partial indexes was for, now said by one
+        constraint with NULLS NOT DISTINCT."""
+        await migrate(BEFORE_THE_CASCADE)
+        await seed_a_narrowed_role(connection)
+        await migrate(WITH_THE_CASCADE)
+
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO role_clearance (id, project_id, role_id, level)"
+                    " SELECT gen_random_uuid(), project.id, NULL, 'public' FROM project"
+                )
+            )
+
+    async def test_the_undo_refuses_the_delete_again(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_CASCADE)
+        await seed_a_narrowed_role(connection)
+        await migrate(WITH_THE_CASCADE)
+
+        await rewind(BEFORE_THE_CASCADE)
+
+        assert "ix_role_clearance_project_id" in await indexes_of(connection, "role_clearance")
+        with pytest.raises(IntegrityError):
+            await connection.execute(text("DELETE FROM project_role WHERE name = 'QA'"))
+
+
+# --- A blob's size lives on the blob ---------------------------------------
+
+BEFORE_ONE_SIZE = "0028"
+WITH_ONE_SIZE = "0029"
+
+CONTENT_SIZE = 56
+
+
+async def seed_shared_bytes(connection: AsyncConnection) -> None:
+    """One blob behind two files and a skill, a link, and a blob nobody holds.
+
+    ``cutover.txt`` says it is seven bytes longer than its blob, which nothing
+    in the application can write and the upgrade still has to decide about.
+    The two files were uploaded a day apart under different types, so "the
+    type the first upload declared" has one answer for the downgrade to find.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 0)"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO folder (id, project_id, parent_id, name)"
+            " SELECT gen_random_uuid(), project.id, NULL, project.name FROM project"
+        )
+    )
+    for digest, mime in (("a" * 64, "application/octet-stream"), ("b" * 64, "text/csv")):
+        await connection.execute(
+            text(
+                "INSERT INTO blob (id, sha256, size, mime, path)"
+                " VALUES (gen_random_uuid(), :sha, :size, :mime, :path)"
+            ),
+            {"sha": digest, "size": CONTENT_SIZE, "mime": mime, "path": f"aa/aa/{digest}"},
+        )
+    for name, size, mime, uploaded in (
+        ("cutover.md", CONTENT_SIZE, "text/markdown", datetime(2026, 9, 1, tzinfo=UTC)),
+        ("cutover.txt", CONTENT_SIZE + 7, "text/plain", datetime(2026, 9, 2, tzinfo=UTC)),
+    ):
+        await connection.execute(
+            text(
+                "INSERT INTO file_item (id, folder_id, kind, name, blob_id, source, size, mime,"
+                " created_at, updated_at)"
+                " SELECT gen_random_uuid(), folder.id, 'file', :name, blob.id, 'upload', :size,"
+                " :mime, :at, :at FROM folder, blob WHERE blob.sha256 = :sha"
+            ),
+            {"name": name, "size": size, "mime": mime, "at": uploaded, "sha": "a" * 64},
+        )
+    await connection.execute(
+        text(
+            "INSERT INTO file_item (id, folder_id, kind, name, url, source)"
+            " SELECT gen_random_uuid(), folder.id, 'link', 'Tax portal',"
+            " 'https://tax.example/atlas', 'other' FROM folder"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO skill (id, project_id, name, blob_id, size, mime)"
+            " SELECT gen_random_uuid(), project.id, 'cutover.md', blob.id, :size,"
+            " 'text/markdown' FROM project, blob WHERE blob.sha256 = :sha"
+        ),
+        {"size": CONTENT_SIZE, "sha": "a" * 64},
+    )
+
+
+async def copied_sizes(connection: AsyncConnection) -> dict[str, int | None]:
+    rows = await connection.execute(
+        text(
+            "SELECT name, size FROM file_item"
+            " UNION ALL SELECT 'skill ' || name, size FROM skill ORDER BY 1"
+        )
+    )
+    return dict(rows.tuples().all())
+
+
+class TestABlobsSizeLivesOnTheBlob:
+    async def test_the_copies_and_the_unread_type_go_and_every_row_stays(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_ONE_SIZE)
+        await seed_shared_bytes(connection)
+
+        await migrate(WITH_ONE_SIZE)
+
+        assert "size" not in await columns_of(connection, "file_item")
+        assert "size" not in await columns_of(connection, "skill")
+        assert "mime" not in await columns_of(connection, "blob")
+        counts = await connection.execute(
+            text(
+                "SELECT (SELECT count(*) FROM blob), (SELECT count(*) FROM file_item),"
+                " (SELECT count(*) FROM skill)"
+            )
+        )
+        assert counts.one() == (2, 3, 1)
+
+    async def test_each_row_keeps_the_type_it_was_uploaded_with(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The type is the one thing about shared bytes that is not shared."""
+        await migrate(BEFORE_ONE_SIZE)
+        await seed_shared_bytes(connection)
+
+        await migrate(WITH_ONE_SIZE)
+
+        rows = await connection.execute(
+            text("SELECT name, mime FROM file_item WHERE kind = 'file' ORDER BY name")
+        )
+        assert rows.tuples().all() == [
+            ("cutover.md", "text/markdown"),
+            ("cutover.txt", "text/plain"),
+        ]
+
+
+class TestUndoingOneSize:
+    async def test_every_copy_comes_back_from_its_blob(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Including the one that had drifted: it returns as the size of the
+        bytes, not as the wrong number it was."""
+        await migrate(BEFORE_ONE_SIZE)
+        await seed_shared_bytes(connection)
+        await migrate(WITH_ONE_SIZE)
+
+        await rewind(BEFORE_ONE_SIZE)
+
+        assert await copied_sizes(connection) == {
+            "Tax portal": None,
+            "cutover.md": CONTENT_SIZE,
+            "cutover.txt": CONTENT_SIZE,
+            "skill cutover.md": CONTENT_SIZE,
+        }
+
+    async def test_a_blob_gets_the_type_of_its_first_upload_back(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """And a blob no row holds any more gets the upload default."""
+        await migrate(BEFORE_ONE_SIZE)
+        await seed_shared_bytes(connection)
+        await migrate(WITH_ONE_SIZE)
+
+        await rewind(BEFORE_ONE_SIZE)
+
+        rows = await connection.execute(text("SELECT left(sha256, 1), mime FROM blob ORDER BY 1"))
+        assert rows.tuples().all() == [("a", "text/markdown"), ("b", "application/octet-stream")]
+
+
+# --- Indexes shaped like the reads -----------------------------------------
+
+BEFORE_THE_INDEXES = "0029"
+WITH_THE_INDEXES = "0030"
+
+
+async def seed_a_card(connection: AsyncConnection) -> None:
+    """ATL-1 in a column, assigned to Aditi — :func:`seed_a_task` for the
+    directory as it has been since 0024 renamed ``role`` to ``title``."""
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 1)"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO person (id, name, kind, title, responsibilities, colour)"
+            " VALUES (gen_random_uuid(), 'Aditi K', 'team', 'Backend engineer', '', '#1D7D46')"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO board_column (id, project_id, name, description, position)"
+            " SELECT gen_random_uuid(), project.id, 'To do', '', 0 FROM project"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO task (id, project_id, number, column_id, position, title,"
+            " description, type, assignee_id, status)"
+            " SELECT gen_random_uuid(), project.id, 1, board_column.id, 0,"
+            " 'Stripe webhook idempotency', 'Dedupe on event id.', 'bug', person.id, 'active'"
+            # By name, because 0027 put the Agent in the directory too.
+            " FROM project, board_column, person WHERE person.name = 'Aditi K'"
+        )
+    )
+
+
+class TestIndexesShapedLikeTheReads:
+    async def test_a_card_number_is_still_unique_on_its_board(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """No longer partial, and no less strict: the cards are still held to
+        one number each, and the sub-tasks — numbered NULL — are not held at
+        all, which is what the predicate used to say."""
+        await migrate(BEFORE_THE_INDEXES)
+        await seed_a_card(connection)
+        await migrate(WITH_THE_INDEXES)
+
+        for sub_number in (1, 2):
+            await connection.execute(
+                text(
+                    "INSERT INTO task (id, project_id, parent_id, sub_number, title, description,"
+                    " type, assignee_id, status)"
+                    " SELECT gen_random_uuid(), task.project_id, task.id, :sub, 'Split', '',"
+                    " 'bug', task.assignee_id, 'active' FROM task WHERE number = 1"
+                ),
+                {"sub": sub_number},
+            )
+        with pytest.raises(IntegrityError):
+            await connection.execute(
+                text(
+                    "INSERT INTO task (id, project_id, number, column_id, position, title,"
+                    " description, type, assignee_id, status)"
+                    " SELECT gen_random_uuid(), project_id, 1, column_id, 1, 'Again', '', 'bug',"
+                    " assignee_id, 'active' FROM task WHERE number = 1"
+                )
+            )
+
+    async def test_the_undo_puts_each_index_back(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_INDEXES)
+        before = await indexes_of(connection, "task")
+        await migrate(WITH_THE_INDEXES)
+        assert await indexes_of(connection, "task") - before == {
+            "ix_task_column_id_position",
+            "ix_task_goal_id",
+            "ix_task_template_id",
+        }
+
+        await rewind(BEFORE_THE_INDEXES)
+
+        assert await indexes_of(connection, "task") == before
+
+
+# --- Enums the database checks ---------------------------------------------
+
+BEFORE_THE_CHECKS = "0030"
+WITH_THE_CHECKS = "0031"
+
+
+class TestEnumsTheDatabaseChecks:
+    async def test_a_stray_value_stops_the_upgrade_and_says_where(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Nothing guessed, nothing half-applied: the rows are named, and the
+        database is left where it was."""
+        await migrate(BEFORE_THE_CHECKS)
+        await seed_a_card(connection)
+        await connection.execute(text("UPDATE task SET status = 'done'"))
+
+        with pytest.raises(RuntimeError, match=r"task\.status = 'done' on 1 row"):
+            await migrate(WITH_THE_CHECKS)
+
+        version = await connection.execute(text("SELECT version_num FROM alembic_version"))
+        assert version.scalar() == BEFORE_THE_CHECKS
+
+    async def test_after_it_a_stray_value_is_refused_where_it_is_written(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_CHECKS)
+        await seed_a_card(connection)
+        await migrate(WITH_THE_CHECKS)
+
+        with pytest.raises(IntegrityError, match="ck_task_task_status"):
+            await connection.execute(text("UPDATE task SET status = 'done'"))
+
+    async def test_every_check_lists_exactly_the_members_the_model_has(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """What autogenerate cannot see. It leaves an enum's CHECK out of the
+        comparison, so a member added to a model without the migration that
+        swaps the CHECK would pass ``migrate-check`` — and then be refused by
+        the database on first write. This is the comparison it skips."""
+        await migrate("head")
+
+        declared = {
+            f"ck_{table.name}_{column.type.name}": set(column.type.enums)
+            for table in Base.metadata.tables.values()
+            for column in table.columns
+            if isinstance(column.type, Enum) and column.type.create_constraint
+        }
+        rows = await connection.execute(
+            text(
+                "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint"
+                " WHERE contype = 'c' AND conname = ANY(:names)"
+            ),
+            {"names": list(declared)},
+        )
+        in_database = {name: set(re.findall(r"'([^']*)'", definition)) for name, definition in rows}
+        assert in_database == declared
+
+    async def test_the_undo_takes_the_checks_off(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_THE_CHECKS)
+        await seed_a_card(connection)
+        await migrate(WITH_THE_CHECKS)
+
+        await rewind(BEFORE_THE_CHECKS)
+
+        await connection.execute(text("UPDATE task SET status = 'done'"))
+        rows = await connection.execute(text("SELECT status FROM task"))
+        assert rows.scalar() == "done"
