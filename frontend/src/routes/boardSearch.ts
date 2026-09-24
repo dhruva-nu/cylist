@@ -2,7 +2,11 @@
  * Parsing and filtering for the board's search box.
  *
  * Free text matches every word against a card's title; `col:`, `who:`,
- * `goal:`, `blk:` and `hld:` narrow by column, assignee, goal, or status.
+ * `goal:`, `blk:` and `hld:` narrow by column, assignee, goal, or status. The
+ * board's own hide — the cards on hold and the cancelled ones, put away
+ * together — is decided here too, because what it does and when it stands
+ * down is the same kind of rule as the rest of this file.
+ *
  * Kept out of `ProjectBoard.tsx` because none of it touches React — it is
  * plain string and array manipulation, easiest to get right (and to change)
  * on its own.
@@ -143,6 +147,39 @@ export function filterTasks(
 function matchesGoal(task: Task, term: string): boolean {
   if (task.goal_name === null) return term === NO_GOAL
   return task.goal_name.toLowerCase().includes(term)
+}
+
+/**
+ * The two statuses the board can be told to put away.
+ *
+ * A card on hold and a cancelled one are the same thing to a board: work that
+ * is not going to move this week. They stay on it — hiding them is a way of
+ * reading the board, not a way of changing what is on it — but a column whose
+ * top half is work that has stopped is a column that gets read past.
+ */
+export const SET_ASIDE_STATUSES: readonly Task['status'][] = ['hold', 'cancelled']
+
+/** Whether a card is one of the two the board can put away. */
+export function isSetAside(task: Task): boolean {
+  return SET_ASIDE_STATUSES.includes(task.status)
+}
+
+/**
+ * Whether the hide is in force, given what else the board is being asked.
+ *
+ * It stands down the moment the reader asks for exactly what it puts away —
+ * the status dropdown set to "On hold" or "Cancelled", or `hld:` typed in the
+ * search box. Both are a question worth an answer, and a board that answered
+ * either with nothing would be one filter quietly overruling another.
+ */
+export function hidesSetAside(
+  on: boolean,
+  status: 'all' | Task['status'],
+  parsed: ParsedSearch,
+): boolean {
+  if (!on) return false
+  if (status !== 'all' && SET_ASIDE_STATUSES.includes(status)) return false
+  return !parsed.hold
 }
 
 /** The token the caret is inside, assuming it sits at the end of the input. */

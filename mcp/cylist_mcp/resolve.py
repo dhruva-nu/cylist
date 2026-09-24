@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from cylist_mcp.client import ApiClient
+from cylist_mcp.client import Api
 from cylist_mcp.errors import CylistError
 
 JsonDict = dict[str, Any]
@@ -64,7 +64,7 @@ def pick(candidates: Sequence[JsonDict], name: str, *, kind: str, where: str) ->
     )
 
 
-async def person_id(client: ApiClient, name: str, *, project_ref: str) -> str:
+async def person_id(client: Api, name: str, *, project_ref: str) -> str:
     """A project member's id, from their name."""
     if is_uuid(name):
         return name
@@ -72,7 +72,7 @@ async def person_id(client: ApiClient, name: str, *, project_ref: str) -> str:
     return str(pick(members, name, kind="person", where=f"{project_ref}'s members")["id"])
 
 
-async def column_id(client: ApiClient, project_ref: str, name: str) -> str:
+async def column_id(client: Api, project_ref: str, name: str) -> str:
     """A board column's id, from its name."""
     if is_uuid(name):
         return name
@@ -80,7 +80,7 @@ async def column_id(client: ApiClient, project_ref: str, name: str) -> str:
     return str(pick(columns, name, kind="column", where=f"{project_ref}'s board")["id"])
 
 
-async def goal_ref(client: ApiClient, project_ref: str, name: str) -> str:
+async def goal_ref(client: Api, project_ref: str, name: str) -> str:
     """A goal's reference, from its name — or from a reference or id, unchanged.
 
     Reference first, because ``ATL-G1`` is what every goal tool hands back and
@@ -98,7 +98,7 @@ async def goal_ref(client: ApiClient, project_ref: str, name: str) -> str:
     return str(pick(goals, name, kind="goal", where=f"{project_ref}'s goals")["reference"])
 
 
-async def folder_id(client: ApiClient, project_ref: str, path: str) -> str:
+async def folder_id(client: Api, project_ref: str, path: str) -> str:
     """Walk ``Contracts/2026`` down the project's folder tree to an id."""
     if is_uuid(path):
         return path
@@ -125,7 +125,7 @@ async def folder_id(client: ApiClient, project_ref: str, path: str) -> str:
     return str(current["id"])
 
 
-async def vault_node(client: ApiClient, project_ref: str, path: str) -> tuple[JsonDict, JsonDict]:
+async def vault_node(client: Api, project_ref: str, path: str) -> tuple[JsonDict, JsonDict]:
     """Resolve ``Logins/Billing/Stripe`` to its tree and node."""
     segments = [segment for segment in path.split("/") if segment]
     if len(segments) < 2:

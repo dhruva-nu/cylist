@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Protocol, Self
 
 import httpx
 
@@ -43,6 +43,24 @@ to spend it.
 
 CONNECT_FAILURES = (httpx.ConnectError, httpx.ConnectTimeout)
 """The failures that mean "nothing was delivered", and so may be retried."""
+
+
+class Api(Protocol):
+    """What a tool needs of a client: the four calls, and nothing about where.
+
+    :class:`ApiClient` is the one that exists on a laptop. The hosted server
+    (:mod:`cylist_mcp.hosted`) hands the tools a stand-in that finds the
+    caller's own client per request, since there one process serves every
+    token at once.
+    """
+
+    async def get(self, path: str, **params: Any) -> Any: ...
+
+    async def get_text(self, path: str, *, max_chars: int) -> tuple[str, bool]: ...
+
+    async def post(self, path: str, body: dict[str, Any] | None = None) -> Any: ...
+
+    async def patch(self, path: str, body: dict[str, Any]) -> Any: ...
 
 
 class ApiClient:

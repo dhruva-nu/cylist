@@ -297,8 +297,23 @@ secrets deserve production's care. DEPLOY.md says what that means.
 
 Everything the web app does is an HTTP call, so two other clients ship with it.
 
-**To let a machine's agents use a board, one line does all of it.** No clone,
-no `make`, and nothing installed outside your home directory:
+**To give Claude Code on any machine the board's tools, one line and nothing
+installed.** The MCP server is served by Cylist itself, at `/mcp`. Open any
+project's **Agents** page, press **Get the line**, and run what it shows on the
+machine:
+
+```bash
+claude mcp add --transport http --scope user cylist https://dnu-home-1.tail222f46.ts.net/mcp --header "Authorization: Bearer cyl_…"
+```
+
+It is the same line in PowerShell. It needs no CLI, no uv and no Python, and
+because production is funnelled it works off the tailnet too. The token is
+`read,write`, acts as whoever pressed the button, and is shown once.
+[`mcp/README.md`](mcp/README.md) has the details.
+
+**To also put that machine's sessions on the board**, which is what the CLI's
+hooks and `/work` do, install the CLI. No clone, no `make`, and nothing
+installed outside your home directory:
 
 ```bash
 # Linux and macOS

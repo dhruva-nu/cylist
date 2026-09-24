@@ -38,6 +38,20 @@ export interface Identity {
   person: Person | null
 }
 
+/**
+ * A freshly minted API token. `token` is the plaintext, and this is the only
+ * response that will ever carry it — see `TokenIssued` in
+ * `app/schemas/tokens.py`.
+ */
+export interface TokenIssued {
+  id: string
+  name: string
+  scopes: string[]
+  created_at: string
+  expires_at: string | null
+  token: string
+}
+
 export interface SetupInfo {
   urls: string[]
   environment: string
@@ -1074,6 +1088,8 @@ export const api = {
       method: 'POST',
       body: body({ token, password }),
     }),
+  createToken: (name: string, scopes: Scope[]) =>
+    request<TokenIssued>('/tokens', { method: 'POST', body: body({ name, scopes }) }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: boolean }>('/auth/password', {
       method: 'POST',
