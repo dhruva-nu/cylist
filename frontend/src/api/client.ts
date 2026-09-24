@@ -1019,10 +1019,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return undefined as T
   }
 
-  const body: unknown = await response.json().catch(() => null)
+  const responseBody: unknown = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const envelope = (body ?? {}) as ErrorEnvelope
+    const envelope = (responseBody ?? {}) as ErrorEnvelope
     throw new ApiError(
       response.status,
       envelope.error?.code ?? 'unknown_error',
@@ -1031,38 +1031,38 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     )
   }
 
-  return body as T
+  return responseBody as T
 }
 
-const body = (value: unknown) => JSON.stringify(value)
+const jsonBody = (value: unknown) => JSON.stringify(value)
 
 export const api = {
   /** What this deployment is, and whether anybody can sign in to it yet. */
   setup: () => request<SetupInfo>('/setup'),
 
   signIn: (email: string, password: string) =>
-    request<Identity>('/auth/login', { method: 'POST', body: body({ email, password }) }),
+    request<Identity>('/auth/login', { method: 'POST', body: jsonBody({ email, password }) }),
   /**
    * The one login that belongs to nobody, for a deployment with no accounts.
    * Refused the moment the first account exists, so the sign-in screen offers
    * it only while `setup().has_accounts` is false.
    */
   bootstrapSignIn: (password: string) =>
-    request<Identity>('/auth/login', { method: 'POST', body: body({ password }) }),
+    request<Identity>('/auth/login', { method: 'POST', body: jsonBody({ password }) }),
   me: () => request<Identity>('/me'),
 
   /** Turn an invitation link into an account, and sign in with it. */
   acceptInvite: (token: string, password: string) =>
     request<Identity>('/auth/accept-invite', {
       method: 'POST',
-      body: body({ token, password }),
+      body: jsonBody({ token, password }),
     }),
   createToken: (name: string, scopes: Scope[]) =>
-    request<TokenIssued>('/tokens', { method: 'POST', body: body({ name, scopes }) }),
+    request<TokenIssued>('/tokens', { method: 'POST', body: jsonBody({ name, scopes }) }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: boolean }>('/auth/password', {
       method: 'POST',
-      body: body({ current_password: currentPassword, new_password: newPassword }),
+      body: jsonBody({ current_password: currentPassword, new_password: newPassword }),
     }),
 
   /** Mint a one-time link letting a team member set their first password. */
@@ -1075,12 +1075,15 @@ export const api = {
    * somebody who already had one it is a reset and their other sessions go.
    */
   setAccount: (id: string, email: string, password: string) =>
-    request<Person>(`/people/${id}/account`, { method: 'PUT', body: body({ email, password }) }),
+    request<Person>(`/people/${id}/account`, {
+      method: 'PUT',
+      body: jsonBody({ email, password }),
+    }),
   withdrawInvite: (id: string) =>
     request<{ ok: boolean }>(`/people/${id}/invite`, { method: 'DELETE' }),
 
   listProjects: () => request<Project[]>('/projects'),
-  getProject: (ref: string) => request<Project>(`/projects/${ref}`),
+  getProject: (projectKey: string) => request<Project>(`/projects/${projectKey}`),
   /**
    * What was done on a project on one day.
    *
@@ -1088,55 +1091,60 @@ export const api = {
    * falls back to UTC, and a change made at 9pm in Kolkata would then land in
    * tomorrow's report.
    */
-  getDayReport: (ref: string, day: string, timezone: string) =>
+  getDayReport: (projectKey: string, day: string, timezone: string) =>
     request<DayReport>(
-      `/projects/${ref}/reports/day?${new URLSearchParams({ date: day, timezone })}`,
+      `/projects/${projectKey}/reports/day?${new URLSearchParams({ date: day, timezone })}`,
     ),
   createProject: (input: ProjectInput) =>
-    request<Project>('/projects', { method: 'POST', body: body(input) }),
+    request<Project>('/projects', { method: 'POST', body: jsonBody(input) }),
 
-  listMembers: (ref: string) => request<{ members: Member[] }>(`/projects/${ref}/members`),
-  setMembers: (ref: string, personIds: string[]) =>
-    request<{ members: Member[] }>(`/projects/${ref}/members`, {
+  listMembers: (projectKey: string) =>
+    request<{ members: Member[] }>(`/projects/${projectKey}/members`),
+  setMembers: (projectKey: string, personIds: string[]) =>
+    request<{ members: Member[] }>(`/projects/${projectKey}/members`, {
       method: 'PUT',
-      body: body({ person_ids: personIds }),
+      body: jsonBody({ person_ids: personIds }),
     }),
 
-  listRoles: (ref: string) => request<RoleSummary[]>(`/projects/${ref}/roles`),
-  createRole: (ref: string, input: RoleInput) =>
-    request<RoleSummary>(`/projects/${ref}/roles`, { method: 'POST', body: body(input) }),
-  deleteRole: (ref: string, roleRef: string) =>
-    request<void>(`/projects/${ref}/roles/${roleRef}`, { method: 'DELETE' }),
+  listRoles: (projectKey: string) => request<RoleSummary[]>(`/projects/${projectKey}/roles`),
+  createRole: (projectKey: string, input: RoleInput) =>
+    request<RoleSummary>(`/projects/${projectKey}/roles`, {
+      method: 'POST',
+      body: jsonBody(input),
+    }),
+  deleteRole: (projectKey: string, roleRef: string) =>
+    request<void>(`/projects/${projectKey}/roles/${roleRef}`, { method: 'DELETE' }),
   /** `role` is a role id or name; null takes their role off. */
-  setMemberRole: (ref: string, personId: string, role: string | null) =>
-    request<Role | null>(`/projects/${ref}/members/${personId}/role`, {
+  setMemberRole: (projectKey: string, personId: string, role: string | null) =>
+    request<Role | null>(`/projects/${projectKey}/members/${personId}/role`, {
       method: 'PUT',
-      body: body({ role }),
+      body: jsonBody({ role }),
     }),
-  getPermissions: (ref: string) => request<ProjectPermissions>(`/projects/${ref}/permissions`),
-  setRolePermissions: (ref: string, roleRef: string, permissions: Permission[]) =>
-    request<RolePermissions>(`/projects/${ref}/roles/${roleRef}/permissions`, {
+  getPermissions: (projectKey: string) =>
+    request<ProjectPermissions>(`/projects/${projectKey}/permissions`),
+  setRolePermissions: (projectKey: string, roleRef: string, permissions: Permission[]) =>
+    request<RolePermissions>(`/projects/${projectKey}/roles/${roleRef}/permissions`, {
       method: 'PUT',
-      body: body({ permissions }),
+      body: jsonBody({ permissions }),
     }),
   /** What somebody here with no role — and anybody not on the project — may do. */
-  setBaselinePermissions: (ref: string, permissions: Permission[]) =>
-    request<RolePermissions>(`/projects/${ref}/permissions/everyone-else`, {
+  setBaselinePermissions: (projectKey: string, permissions: Permission[]) =>
+    request<RolePermissions>(`/projects/${projectKey}/permissions/everyone-else`, {
       method: 'PUT',
-      body: body({ permissions }),
+      body: jsonBody({ permissions }),
     }),
   /**
    * Where on the board a role may work. The whole line every time — a column
    * left out is left unrestricted.
    */
-  setColumnRules: (ref: string, roleId: string | null, columns: ColumnRule[]) =>
+  setColumnRules: (projectKey: string, roleId: string | null, columns: ColumnRule[]) =>
     request<RolePermissions>(
       roleId === null
-        ? `/projects/${ref}/permissions/everyone-else/columns`
-        : `/projects/${ref}/roles/${roleId}/columns`,
+        ? `/projects/${projectKey}/permissions/everyone-else/columns`
+        : `/projects/${projectKey}/roles/${roleId}/columns`,
       {
         method: 'PUT',
-        body: body({
+        body: jsonBody({
           columns: columns.map(({ column_id, may_enter, may_stage }) => ({
             column_id,
             may_enter,
@@ -1146,32 +1154,33 @@ export const api = {
       },
     ),
   /** How sensitive a thing a role may read. */
-  setClearance: (ref: string, roleId: string | null, clearance: Sensitivity) =>
+  setClearance: (projectKey: string, roleId: string | null, clearance: Sensitivity) =>
     request<RolePermissions>(
       roleId === null
-        ? `/projects/${ref}/permissions/everyone-else/clearance`
-        : `/projects/${ref}/roles/${roleId}/clearance`,
-      { method: 'PUT', body: body({ clearance }) },
+        ? `/projects/${projectKey}/permissions/everyone-else/clearance`
+        : `/projects/${projectKey}/roles/${roleId}/clearance`,
+      { method: 'PUT', body: jsonBody({ clearance }) },
     ),
 
   /** The project's root folder, with the whole tree nested inside it. */
-  getTree: (ref: string) => request<FolderNode>(`/projects/${ref}/tree`),
+  getTree: (projectKey: string) => request<FolderNode>(`/projects/${projectKey}/tree`),
   createFolder: (
-    ref: string,
+    projectKey: string,
     input: {
       name: string
       parent_id: string | null
       /** Null inherits the parent folder's, which is usually what is wanted. */
       default_sensitivity?: Sensitivity | null
     },
-  ) => request<Folder>(`/projects/${ref}/folders`, { method: 'POST', body: body(input) }),
+  ) =>
+    request<Folder>(`/projects/${projectKey}/folders`, { method: 'POST', body: jsonBody(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
   /**
    * Every file and link in the project, flat — what a `>` tag is completed
    * from, and what one is recognised against when prose is read back.
    */
-  listProjectItems: (ref: string) => request<FiledItem[]>(`/projects/${ref}/items`),
+  listProjectItems: (projectKey: string) => request<FiledItem[]>(`/projects/${projectKey}/items`),
 
   uploadFile: (
     folderId: string,
@@ -1188,62 +1197,69 @@ export const api = {
     return request<FileItem>(`/folders/${folderId}/upload`, { method: 'POST', body: form })
   },
   addLink: (folderId: string, input: LinkInput) =>
-    request<FileItem>(`/folders/${folderId}/links`, { method: 'POST', body: body(input) }),
+    request<FileItem>(`/folders/${folderId}/links`, { method: 'POST', body: jsonBody(input) }),
   deleteItem: (id: string) => request<{ ok: boolean }>(`/items/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a file's bytes from — used as an anchor's href. */
   downloadUrl: (id: string) => `${API_BASE}/items/${id}/download`,
-  listSkills: (ref: string) => request<Skill[]>(`/projects/${ref}/skills`),
-  uploadSkill: (ref: string, file: File, description?: string, addedBy?: string | null) => {
+  listSkills: (projectKey: string) => request<Skill[]>(`/projects/${projectKey}/skills`),
+  uploadSkill: (projectKey: string, file: File, description?: string, addedBy?: string | null) => {
     const form = new FormData()
     form.append('file', file)
     if (description) form.append('description', description)
     if (addedBy) form.append('added_by', addedBy)
-    return request<Skill>(`/projects/${ref}/skills`, { method: 'POST', body: form })
+    return request<Skill>(`/projects/${projectKey}/skills`, { method: 'POST', body: form })
   },
   deleteSkill: (id: string) => request<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a skill's bytes from — used as an anchor's href. */
   skillDownloadUrl: (id: string) => `${API_BASE}/skills/${id}/download`,
 
-  listAgentNotes: (ref: string) => request<AgentNote[]>(`/projects/${ref}/agent-notes`),
-  addAgentNote: (ref: string, note: string) =>
-    request<AgentNote>(`/projects/${ref}/agent-notes`, {
+  listAgentNotes: (projectKey: string) =>
+    request<AgentNote[]>(`/projects/${projectKey}/agent-notes`),
+  addAgentNote: (projectKey: string, note: string) =>
+    request<AgentNote>(`/projects/${projectKey}/agent-notes`, {
       method: 'POST',
-      body: body({ body: note }),
+      body: jsonBody({ body: note }),
     }),
   deleteAgentNote: (id: string) =>
     request<{ ok: boolean }>(`/agent-notes/${id}`, { method: 'DELETE' }),
 
-  listColumns: (ref: string) => request<Board>(`/projects/${ref}/columns`),
-  createColumn: (ref: string, input: ColumnInput) =>
-    request<BoardColumn>(`/projects/${ref}/columns`, { method: 'POST', body: body(input) }),
+  listColumns: (projectKey: string) => request<Board>(`/projects/${projectKey}/columns`),
+  createColumn: (projectKey: string, input: ColumnInput) =>
+    request<BoardColumn>(`/projects/${projectKey}/columns`, {
+      method: 'POST',
+      body: jsonBody(input),
+    }),
   updateColumn: (id: string, input: Partial<ColumnInput>) =>
-    request<BoardColumn>(`/columns/${id}`, { method: 'PATCH', body: body(input) }),
+    request<BoardColumn>(`/columns/${id}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteColumn: (id: string) => request<{ ok: boolean }>(`/columns/${id}`, { method: 'DELETE' }),
-  reorderColumns: (ref: string, columnIds: string[]) =>
-    request<Board>(`/projects/${ref}/columns/order`, {
+  reorderColumns: (projectKey: string, columnIds: string[]) =>
+    request<Board>(`/projects/${projectKey}/columns/order`, {
       method: 'PUT',
-      body: body({ column_ids: columnIds }),
+      body: jsonBody({ column_ids: columnIds }),
     }),
 
-  listTemplates: (ref: string) => request<Template[]>(`/projects/${ref}/templates`),
-  createTemplate: (ref: string, input: TemplateInput) =>
-    request<Template>(`/projects/${ref}/templates`, { method: 'POST', body: body(input) }),
+  listTemplates: (projectKey: string) => request<Template[]>(`/projects/${projectKey}/templates`),
+  createTemplate: (projectKey: string, input: TemplateInput) =>
+    request<Template>(`/projects/${projectKey}/templates`, {
+      method: 'POST',
+      body: jsonBody(input),
+    }),
   updateTemplate: (id: string, input: Partial<TemplateInput>) =>
-    request<Template>(`/templates/${id}`, { method: 'PATCH', body: body(input) }),
+    request<Template>(`/templates/${id}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteTemplate: (id: string) =>
     request<{ ok: boolean }>(`/templates/${id}`, { method: 'DELETE' }),
 
-  listGoals: (ref: string, openOnly = false) =>
-    request<Goal[]>(`/projects/${ref}/goals${openOnly ? '?open_only=true' : ''}`),
+  listGoals: (projectKey: string, openOnly = false) =>
+    request<Goal[]>(`/projects/${projectKey}/goals${openOnly ? '?open_only=true' : ''}`),
   getGoal: (goalRef: string) => request<GoalDetail>(`/goals/${goalRef}`),
-  createGoal: (ref: string, input: GoalInput) =>
-    request<GoalDetail>(`/projects/${ref}/goals`, { method: 'POST', body: JSON.stringify(input) }),
+  createGoal: (projectKey: string, input: GoalInput) =>
+    request<GoalDetail>(`/projects/${projectKey}/goals`, { method: 'POST', body: jsonBody(input) }),
   updateGoal: (goalRef: string, input: Partial<GoalInput>) =>
-    request<GoalDetail>(`/goals/${goalRef}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    request<GoalDetail>(`/goals/${goalRef}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteGoal: (goalRef: string) =>
     request<{ ok: boolean }>(`/goals/${goalRef}`, { method: 'DELETE' }),
 
-  listTasks: (ref: string) => request<Task[]>(`/projects/${ref}/tasks`),
+  listTasks: (projectKey: string) => request<Task[]>(`/projects/${projectKey}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
   /**
    * One page of what has been done to a card — every edit, move and tick —
@@ -1254,22 +1270,22 @@ export const api = {
   /** Clear the finished sessions off a card. The ones still running stay. */
   dismissAgentSessions: (taskRef: string) =>
     request<void>(`/tasks/${taskRef}/agent-sessions/dismiss`, { method: 'POST' }),
-  createTask: (ref: string, input: TaskInput) =>
-    request<TaskDetail>(`/projects/${ref}/tasks`, { method: 'POST', body: body(input) }),
+  createTask: (projectKey: string, input: TaskInput) =>
+    request<TaskDetail>(`/projects/${projectKey}/tasks`, { method: 'POST', body: jsonBody(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */
   createSubtask: (parentRef: string, input: TaskInput) =>
-    request<TaskDetail>(`/tasks/${parentRef}/subtasks`, { method: 'POST', body: body(input) }),
+    request<TaskDetail>(`/tasks/${parentRef}/subtasks`, { method: 'POST', body: jsonBody(input) }),
   addChecklistItem: (taskRef: string, title: string) =>
     request<ChecklistItem>(`/tasks/${taskRef}/checklist`, {
       method: 'POST',
-      body: body({ title }),
+      body: jsonBody({ title }),
     }),
   updateChecklistItem: (itemId: string, input: { title?: string; state?: ChecklistState }) =>
-    request<ChecklistItem>(`/checklist/${itemId}`, { method: 'PATCH', body: body(input) }),
+    request<ChecklistItem>(`/checklist/${itemId}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteChecklistItem: (itemId: string) =>
     request<{ ok: boolean }>(`/checklist/${itemId}`, { method: 'DELETE' }),
   updateTask: (taskRef: string, input: TaskPatch) =>
-    request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: body(input) }),
+    request<TaskDetail>(`/tasks/${taskRef}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteTask: (taskRef: string) =>
     request<{ ok: boolean }>(`/tasks/${taskRef}`, { method: 'DELETE' }),
   /** `outcome` names a section of the board's last column; left out, a card
@@ -1277,53 +1293,57 @@ export const api = {
   moveTask: (taskRef: string, columnId: string, position: number, outcome?: string | null) =>
     request<TaskDetail>(`/tasks/${taskRef}/move`, {
       method: 'POST',
-      body: body({ column_id: columnId, position, ...(outcome ? { outcome } : {}) }),
+      body: jsonBody({ column_id: columnId, position, ...(outcome ? { outcome } : {}) }),
     }),
   /** Ticks a sub-task off, or puts it back. The only way one is finished:
    * a sub-task is not on the board, so there is no last column to move it to. */
   finishTask: (taskRef: string, finished: boolean) =>
     request<TaskDetail>(`/tasks/${taskRef}/finish`, {
       method: 'POST',
-      body: body({ finished }),
+      body: jsonBody({ finished }),
     }),
   setTaskStatus: (taskRef: string, change: StatusChange) =>
-    request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: body(change) }),
+    request<TaskDetail>(`/tasks/${taskRef}/status`, { method: 'POST', body: jsonBody(change) }),
   /** Moves a task to one of its sub-status stages — backwards as readily as
    * forwards, which is what makes the board's control a slider. */
   setSubStatus: (taskRef: string, index: number) =>
-    request<TaskDetail>(`/tasks/${taskRef}/sub-status`, { method: 'POST', body: body({ index }) }),
+    request<TaskDetail>(`/tasks/${taskRef}/sub-status`, {
+      method: 'POST',
+      body: jsonBody({ index }),
+    }),
   addComment: (taskRef: string, text: string, authorId: string | null) =>
     request<TaskComment>(`/tasks/${taskRef}/comments`, {
       method: 'POST',
-      body: body({ body: text, author_id: authorId }),
+      body: jsonBody({ body: text, author_id: authorId }),
     }),
 
   listPeople: () => request<Person[]>('/people'),
   createPerson: (input: PersonInput) =>
-    request<Person>('/people', { method: 'POST', body: body(input) }),
+    request<Person>('/people', { method: 'POST', body: jsonBody(input) }),
   updatePerson: (id: string, input: Partial<PersonInput>) =>
-    request<Person>(`/people/${id}`, { method: 'PATCH', body: body(input) }),
+    request<Person>(`/people/${id}`, { method: 'PATCH', body: jsonBody(input) }),
 
-  listVaultTrees: (ref: string) => request<VaultTree[]>(`/projects/${ref}/vault/trees`),
-  createVaultTree: (ref: string, name: string, defaultSensitivity?: Sensitivity | null) =>
-    request<VaultTree>(`/projects/${ref}/vault/trees`, {
+  listVaultTrees: (projectKey: string) =>
+    request<VaultTree[]>(`/projects/${projectKey}/vault/trees`),
+  createVaultTree: (projectKey: string, name: string, defaultSensitivity?: Sensitivity | null) =>
+    request<VaultTree>(`/projects/${projectKey}/vault/trees`, {
       method: 'POST',
-      body: body({ name, default_sensitivity: defaultSensitivity ?? null }),
+      body: jsonBody({ name, default_sensitivity: defaultSensitivity ?? null }),
     }),
   getVaultTree: (treeId: string) => request<VaultTreeDetail>(`/vault/trees/${treeId}`),
 
   createVaultNode: (input: VaultNodeInput) =>
-    request<VaultNode>('/vault/nodes', { method: 'POST', body: body(input) }),
+    request<VaultNode>('/vault/nodes', { method: 'POST', body: jsonBody(input) }),
   updateVaultNode: (
     nodeId: string,
     input: { name?: string; secret?: SecretInput; sensitivity?: Sensitivity },
-  ) => request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: body(input) }),
+  ) => request<VaultNode>(`/vault/nodes/${nodeId}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteVaultNode: (nodeId: string) =>
     request<{ ok: boolean }>(`/vault/nodes/${nodeId}`, { method: 'DELETE' }),
   moveVaultNode: (nodeId: string, parentId: string | null, position: number) =>
     request<VaultNode>(`/vault/nodes/${nodeId}/move`, {
       method: 'POST',
-      body: body({ parent_id: parentId, position }),
+      body: jsonBody({ parent_id: parentId, position }),
     }),
 
   /**
