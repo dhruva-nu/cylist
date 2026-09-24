@@ -80,11 +80,11 @@ def fire(
 
 
 def _bind(session_id: str = SESSION, task: str = "ATL-1", **more: Any) -> None:
-    hook._save(session_id, {"task": task, "bound_at": hook._now().isoformat(), **more})
+    hook._save_state(session_id, {"task": task, "bound_at": hook._now().isoformat(), **more})
 
 
 def _state(session_id: str = SESSION) -> dict[str, Any]:
-    return hook._load(session_id)
+    return hook._load_state(session_id)
 
 
 def _put_body(recorder: fake_api.Recorder, task: str = "ATL-1", session: str = SESSION) -> Any:

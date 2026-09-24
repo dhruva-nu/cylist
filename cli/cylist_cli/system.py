@@ -74,7 +74,7 @@ def shell_command(argv: Sequence[str]) -> str:
     in different places, and on Windows one of them has a space in it.
 
     Not what writes the hook into ``settings.json``: that string has to be
-    recognised again by :data:`cylist_cli.commands.hook.OURS` on the next
+    recognised again by :data:`cylist_cli.commands.hook.OUR_HOOK_COMMAND` on the next
     install, so its quoting is that module's to decide.
     """
     if not windows():
