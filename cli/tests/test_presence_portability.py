@@ -374,7 +374,7 @@ class TestTheInstalledCommand:
         """An installer that cannot see its own earlier work adds a second
         copy of the hook on every run, and quoting moved the end of the
         string that the old suffix test was looking at."""
-        assert hook._is_ours(command) is True
+        assert hook._is_our_hook(command) is True
 
     @pytest.mark.parametrize(
         "command",
@@ -386,7 +386,7 @@ class TestTheInstalledCommand:
         ],
     )
     def test_somebody_else_s_hook_is_left_alone(self, command: str) -> None:
-        assert hook._is_ours(command) is False
+        assert hook._is_our_hook(command) is False
 
     def test_a_batch_shim_is_not_handed_to_createprocess(
         self, monkeypatch: pytest.MonkeyPatch

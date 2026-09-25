@@ -87,7 +87,7 @@ async def board_socket(websocket: WebSocket, project_ref: str) -> None:
         await websocket.send_json({"type": "ready"})
 
         with hub.watch(project_id) as watcher:
-            code = await _pump(websocket, watcher)
+            code = await _forward_nudges_until_closed(websocket, watcher)
     except WebSocketDisconnect as exc:
         code = exc.code
     except asyncio.CancelledError:
@@ -107,7 +107,7 @@ async def board_socket(websocket: WebSocket, project_ref: str) -> None:
         reset_request_id(token)
 
 
-async def _pump(websocket: WebSocket, watcher: Watcher) -> int:
+async def _forward_nudges_until_closed(websocket: WebSocket, watcher: Watcher) -> int:
     """Send nudges until the client goes away. Returns the close code.
 
     The socket has to be *read* even though the client never says anything
@@ -258,7 +258,9 @@ async def _serve_agent(
                     await websocket.close(code=1000)
                     return 1000, "bye"
 
-                refusal = await _apply(websocket, database, principal, client_session_id, message)
+                refusal = await _record_report(
+                    websocket, database, principal, client_session_id, message
+                )
                 if refusal is not None:
                     await _refuse(websocket, refusal)
                     return refusal.code, "refused"
@@ -267,7 +269,7 @@ async def _serve_agent(
         return auth.IDLE, "idle"
 
 
-async def _apply(
+async def _record_report(
     websocket: WebSocket,
     database: Database,
     principal: Principal,

@@ -129,9 +129,10 @@ def _opened(key: str) -> ZoneInfo | None:
 def _nearest_to(given: str, tidy: str) -> ZoneInfo:
     """The one key close enough to ``tidy`` to have been meant, or an error."""
     ranked = _ranked(tidy)
-    closest = [key for key, score in ranked if score == ranked[0][1]] if ranked else []
+    best_score = ranked[0][1] if ranked else 0.0
+    closest = [key for key, score in ranked if score == best_score]
 
-    if ranked and ranked[0][1] >= _CLOSE_ENOUGH:
+    if ranked and best_score >= _CLOSE_ENOUGH:
         if len(closest) == 1:
             return ZoneInfo(closest[0])
         raise UnprocessableRequestError(
@@ -160,12 +161,14 @@ def _ranked(tidy: str) -> list[tuple[str, float]]:
     the whole database.
     """
     area, slash, _ = tidy.partition("/")
-    keys = _keys_by_area().get(area.lower()) if slash else None
-    scored = (
-        (key, difflib.SequenceMatcher(None, tidy.lower(), key.lower()).ratio())
-        for key in (keys if keys is not None else _all_keys())
-    )
-    worth = [pair for pair in scored if pair[1] >= _WORTH_MENTIONING]
+    keys_in_area = _keys_by_area().get(area.lower()) if slash else None
+    candidates = keys_in_area if keys_in_area is not None else _all_keys()
+
+    worth: list[tuple[str, float]] = []
+    for key in candidates:
+        score = difflib.SequenceMatcher(None, tidy.lower(), key.lower()).ratio()
+        if score >= _WORTH_MENTIONING:
+            worth.append((key, score))
     # Key as well as score, so a tie ranks by name and the pick is the same
     # every time rather than however the set iterated.
     return sorted(worth, key=lambda pair: (-pair[1], pair[0]))

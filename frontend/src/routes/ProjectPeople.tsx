@@ -33,11 +33,11 @@ import { usePermissions } from './usePermissions'
 export function ProjectPeople() {
   const { projectKey } = useParams({ from: '/p/$projectKey/people' })
   const queryClient = useQueryClient()
-  const [adding, setAdding] = useState(false)
-  const [choosing, setChoosing] = useState(false)
+  const [addingPerson, setAddingPerson] = useState(false)
+  const [choosingFromDirectory, setChoosingFromDirectory] = useState(false)
   const [editing, setEditing] = useState<Person | null>(null)
   const [inviting, setInviting] = useState<Person | null>(null)
-  const [opening, setOpening] = useState<Person | null>(null)
+  const [settingPasswordFor, setSettingPasswordFor] = useState<Person | null>(null)
   const { message, announce } = useAnnouncer()
 
   // Who is looking. Already in the cache — the auth gate asked for it before
@@ -64,18 +64,17 @@ export function ProjectPeople() {
     ])
   }
 
-  const remove = useMutation({
-    mutationFn: (personId: string) => {
-      const going = (members.data?.members ?? []).find((person) => person.id === personId)
-      return api
-        .setMembers(
-          projectKey,
-          (members.data?.members ?? []).filter((p) => p.id !== personId).map((p) => p.id),
-        )
-        .then((result) => {
-          announce(`${going?.name ?? 'That person'} is no longer on this project.`)
-          return result
-        })
+  const removeFromProject = useMutation({
+    mutationFn: async (personId: string) => {
+      const everyone = members.data?.members ?? []
+      const leaving = everyone.find((person) => person.id === personId)
+      const staying = everyone.filter((person) => person.id !== personId)
+      const result = await api.setMembers(
+        projectKey,
+        staying.map((person) => person.id),
+      )
+      announce(`${leaving?.name ?? 'That person'} is no longer on this project.`)
+      return result
     },
     onSuccess: refresh,
   })
@@ -98,10 +97,10 @@ export function ProjectPeople() {
                 lets them say who is on this board. */}
             {maySayWhoIsHere ? (
               <>
-                <Button variant="go" onClick={() => setAdding(true)}>
+                <Button variant="go" onClick={() => setAddingPerson(true)}>
                   + Add a person
                 </Button>
-                <Button onClick={() => setChoosing(true)}>From the directory</Button>
+                <Button onClick={() => setChoosingFromDirectory(true)}>From the directory</Button>
               </>
             ) : null}
             {/* Readable by everybody: a badge nobody can look up is a badge
@@ -117,38 +116,40 @@ export function ProjectPeople() {
         person it is waiting on.
       </PageHead>
 
-      {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
+      {removeFromProject.error ? (
+        <ErrorBanner>{removeFromProject.error.message}</ErrorBanner>
+      ) : null}
       <LiveRegion message={message} />
 
-      <Group
+      <PeopleGroup
         title="Team"
         people={team}
         identity={identity.data}
         mayRemove={maySayWhoIsHere}
         onEdit={setEditing}
         onInvite={setInviting}
-        onOpenAccount={setOpening}
-        onRemove={remove.mutate}
+        onOpenAccount={setSettingPasswordFor}
+        onRemove={removeFromProject.mutate}
       />
-      <Group
+      <PeopleGroup
         title="Clients"
         people={clients}
         identity={identity.data}
         mayRemove={maySayWhoIsHere}
         onEdit={setEditing}
         onInvite={setInviting}
-        onOpenAccount={setOpening}
-        onRemove={remove.mutate}
+        onOpenAccount={setSettingPasswordFor}
+        onRemove={removeFromProject.mutate}
       />
 
-      {adding ? (
+      {addingPerson ? (
         <PersonDialog
           title="Add a person"
           projectKey={projectKey}
           onSaved={(name) => announce(`${name} is now on this project.`)}
           currentMemberIds={members.data.members.map((person) => person.id)}
           onDone={refresh}
-          onClose={() => setAdding(false)}
+          onClose={() => setAddingPerson(false)}
         />
       ) : null}
 
@@ -171,16 +172,16 @@ export function ProjectPeople() {
         />
       ) : null}
 
-      {opening ? (
+      {settingPasswordFor ? (
         <AccountDialog
-          person={opening}
+          person={settingPasswordFor}
           onSaved={(name) => announce(`${name} can sign in now.`)}
           onDone={refresh}
-          onClose={() => setOpening(null)}
+          onClose={() => setSettingPasswordFor(null)}
         />
       ) : null}
 
-      {choosing ? (
+      {choosingFromDirectory ? (
         <DirectoryDialog
           projectKey={projectKey}
           currentMemberIds={members.data.members.map((person) => person.id)}
@@ -190,14 +191,15 @@ export function ProjectPeople() {
             )
           }
           onDone={refresh}
-          onClose={() => setChoosing(false)}
+          onClose={() => setChoosingFromDirectory(false)}
         />
       ) : null}
     </>
   )
 }
 
-function Group({
+/** One kind of person on the project — the team, or the clients — under a heading. */
+function PeopleGroup({
   title,
   people,
   identity,
@@ -227,72 +229,111 @@ function Group({
       ) : (
         <div className={styles.grid}>
           {people.map((person) => (
-            <div key={person.id} className={`${cardStyles.card} ${styles.person}`}>
-              <Avatar name={person.name} colour={person.colour} large />
-              <div className={styles.details}>
-                <div className={styles.nameRow}>
-                  <b>{person.name}</b>
-                  <KindTag kind={person.kind} />
-                  {isMe(person, identity) ? <span className={styles.you}>you</span> : null}
-                  {person.is_agent ? (
-                    <span
-                      className={styles.agent}
-                      title="Cylist's own machine. It is given work like anybody else, and never signs in."
-                    >
-                      agent
-                    </span>
-                  ) : null}
-                  {person.role ? <RoleTag role={person.role} /> : null}
-                  <AccountTag person={person} />
-                </div>
-                <span className={styles.title}>{person.title}</span>
-                <div className={styles.responsibilities}>{person.responsibilities}</div>
-                <div className={styles.contact}>
-                  {person.email ? (
-                    <span className={styles.email}>
-                      <MailIcon />
-                      <span>{person.email}</span>
-                    </span>
-                  ) : null}
-                  <Button variant="ghost" small onClick={() => onEdit(person)}>
-                    Edit
-                  </Button>
-                  {/* Clients are named on the work, not signed in to it,
-                      the agent is a machine and does not sign in at all, and
-                      somebody who already has an account has nothing to
-                      accept — so the button is only offered where it would
-                      do something. */}
-                  {person.kind === 'team' &&
-                  !person.is_agent &&
-                  !person.has_account &&
-                  !person.archived_at ? (
-                    <Button variant="ghost" small onClick={() => onInvite(person)}>
-                      {person.invite_is_pending ? 'Re-invite' : 'Invite'}
-                    </Button>
-                  ) : null}
-                  {/* The other door, offered on the same row and second: an
-                      invitation is the one that leaves the password with
-                      nobody but them, so it reads first. This one is still
-                      here for somebody with no mailbox you can reach, and is
-                      the only way back in for somebody who has lost the
-                      password they already set. */}
-                  {person.kind === 'team' && !person.is_agent && !person.archived_at ? (
-                    <Button variant="ghost" small onClick={() => onOpenAccount(person)}>
-                      {person.has_account ? 'Reset password' : 'Set a password'}
-                    </Button>
-                  ) : null}
-                  {mayRemove ? (
-                    <Button variant="ghost" small danger onClick={() => onRemove(person.id)}>
-                      Remove
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <PersonCard
+              key={person.id}
+              person={person}
+              isYou={isMe(person, identity)}
+              mayRemove={mayRemove}
+              onEdit={() => onEdit(person)}
+              onInvite={() => onInvite(person)}
+              onOpenAccount={() => onOpenAccount(person)}
+              onRemove={() => onRemove(person.id)}
+            />
           ))}
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * Whether an invitation would do anything for this person. Clients are named
+ * on the work, not signed in to it, the agent is a machine and does not sign
+ * in at all, and somebody who already has an account has nothing to accept.
+ */
+function mayBeInvited(person: Person): boolean {
+  return person.kind === 'team' && !person.is_agent && !person.has_account && !person.archived_at
+}
+
+/** Whether a password can be set for this person by hand. */
+function mayHavePasswordSet(person: Person): boolean {
+  return person.kind === 'team' && !person.is_agent && !person.archived_at
+}
+
+/** One person on the project: who they are, how to reach them, and what can be done about them. */
+function PersonCard({
+  person,
+  isYou,
+  mayRemove,
+  onEdit,
+  onInvite,
+  onOpenAccount,
+  onRemove,
+}: {
+  person: Member
+  isYou: boolean
+  mayRemove: boolean
+  onEdit: () => void
+  onInvite: () => void
+  onOpenAccount: () => void
+  onRemove: () => void
+}) {
+  return (
+    <div className={`${cardStyles.card} ${styles.person}`}>
+      <Avatar name={person.name} colour={person.colour} large />
+      <div className={styles.details}>
+        <div className={styles.nameRow}>
+          <b>{person.name}</b>
+          <KindTag kind={person.kind} />
+          {isYou ? <span className={styles.you}>you</span> : null}
+          {person.is_agent ? (
+            <span
+              className={styles.agent}
+              title="Cylist's own machine. It is given work like anybody else, and never signs in."
+            >
+              agent
+            </span>
+          ) : null}
+          {person.role ? <RoleTag role={person.role} /> : null}
+          <AccountTag person={person} />
+        </div>
+        <span className={styles.title}>{person.title}</span>
+        <div className={styles.responsibilities}>{person.responsibilities}</div>
+        <div className={styles.contact}>
+          {person.email ? (
+            <span className={styles.email}>
+              <MailIcon />
+              <span>{person.email}</span>
+            </span>
+          ) : null}
+          <Button variant="ghost" small onClick={onEdit}>
+            Edit
+          </Button>
+          {/* Only offered where it would do something — see `mayBeInvited`. */}
+          {mayBeInvited(person) ? (
+            <Button variant="ghost" small onClick={onInvite}>
+              {person.invite_is_pending ? 'Re-invite' : 'Invite'}
+            </Button>
+          ) : null}
+          {/* The other door, offered on the same row and second: an
+              invitation is the one that leaves the password with
+              nobody but them, so it reads first. This one is still
+              here for somebody with no mailbox you can reach, and is
+              the only way back in for somebody who has lost the
+              password they already set. */}
+          {mayHavePasswordSet(person) ? (
+            <Button variant="ghost" small onClick={onOpenAccount}>
+              {person.has_account ? 'Reset password' : 'Set a password'}
+            </Button>
+          ) : null}
+          {mayRemove ? (
+            <Button variant="ghost" small danger onClick={onRemove}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -75,7 +75,7 @@ class Singleton:
         """Take the lock, or report that somebody else has it."""
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            _take(fd)
+            _lock_exclusively(fd)
         except OSError:
             os.close(fd)
             return False
@@ -85,12 +85,12 @@ class Singleton:
     def release(self) -> None:
         if self._fd is not None:
             with contextlib.suppress(OSError):
-                _drop(self._fd)
+                _unlock(self._fd)
                 os.close(self._fd)
             self._fd = None
 
 
-def _take(fd: int) -> None:
+def _lock_exclusively(fd: int) -> None:
     """Lock the file exclusively, without waiting. ``OSError`` if it is taken."""
     if sys.platform == "win32":
         # One byte at offset zero, on a file that may well be empty: Windows
@@ -101,7 +101,7 @@ def _take(fd: int) -> None:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
-def _drop(fd: int) -> None:
+def _unlock(fd: int) -> None:
     if sys.platform == "win32":
         os.lseek(fd, 0, os.SEEK_SET)
         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
@@ -238,12 +238,13 @@ def running_sessions() -> list[str]:
         return []
     for entry in entries:
         try:
-            body = entry.read_text().strip().splitlines()
+            lines = entry.read_text().strip().splitlines()
         except OSError:
             continue
-        if len(body) < 2:
+        # The pid, then the session it serves: see `write_pid`.
+        if len(lines) < 2:
             continue
-        session = body[1]
+        session = lines[1]
         if is_running(session):
             found.append((entry.stat().st_mtime, session))
     return [session for _, session in sorted(found, reverse=True)]

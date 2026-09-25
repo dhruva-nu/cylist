@@ -131,32 +131,25 @@ function You() {
   )
 }
 
+/**
+ * A project's areas as the breadcrumb names them, checked in this order and
+ * the first match wins.
+ */
+const PROJECT_AREAS = [
+  { name: 'Board', route: { to: '/p/$projectKey/board' } },
+  // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
+  { name: 'Goals', route: { to: '/p/$projectKey/goals', fuzzy: true } },
+  { name: 'Files', route: { to: '/p/$projectKey/files' } },
+  { name: 'Vault', route: { to: '/p/$projectKey/vault' } },
+  { name: 'People', route: { to: '/p/$projectKey/people' } },
+  { name: 'Roles', route: { to: '/p/$projectKey/roles' } },
+  { name: 'Agents', route: { to: '/p/$projectKey/agents' } },
+] as const
+
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  const onAgents = matchRoute({ to: '/p/$projectKey/agents' })
-  const onBoard = matchRoute({ to: '/p/$projectKey/board' })
-  const onFiles = matchRoute({ to: '/p/$projectKey/files' })
-  const onPeople = matchRoute({ to: '/p/$projectKey/people' })
-  const onRoles = matchRoute({ to: '/p/$projectKey/roles' })
-  const onVault = matchRoute({ to: '/p/$projectKey/vault' })
-  // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
-  const onGoals = matchRoute({ to: '/p/$projectKey/goals', fuzzy: true })
-  const area = onBoard
-    ? 'Board'
-    : onGoals
-      ? 'Goals'
-      : onFiles
-        ? 'Files'
-        : onVault
-          ? 'Vault'
-          : onPeople
-            ? 'People'
-            : onRoles
-              ? 'Roles'
-              : onAgents
-                ? 'Agents'
-                : null
+  const area = PROJECT_AREAS.find((candidate) => matchRoute(candidate.route))?.name ?? null
 
   if (!inProject) {
     return (
@@ -185,7 +178,7 @@ function Breadcrumbs() {
   )
 }
 
-function useProjectName(projectKey: string) {
+function useProject(projectKey: string) {
   return useQuery({
     queryKey: ['project', projectKey],
     queryFn: () => api.getProject(projectKey),
@@ -193,14 +186,14 @@ function useProjectName(projectKey: string) {
 }
 
 function ProjectName({ projectKey }: { projectKey: string }) {
-  const project = useProjectName(projectKey)
+  const project = useProject(projectKey)
   return <b>{project.data?.name ?? projectKey}</b>
 }
 
 /** The project's name, as the way to its board: there is no overview page to
  * send it to any more, and the board is what a project's address opens. */
 function ProjectCrumbLink({ projectKey }: { projectKey: string }) {
-  const project = useProjectName(projectKey)
+  const project = useProject(projectKey)
   return (
     <Link to="/p/$projectKey/board" params={{ projectKey }}>
       {project.data?.name ?? projectKey}

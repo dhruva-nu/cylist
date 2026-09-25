@@ -19,7 +19,7 @@ import { api, type Person, type PersonInput, type PersonKind } from '../api/clie
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { Button, ErrorBanner } from './ui'
 
-const EMPTY: PersonInput = {
+const EMPTY_PERSON: PersonInput = {
   name: '',
   kind: 'team',
   title: '',
@@ -54,7 +54,7 @@ export function PersonDialog({
           responsibilities: person.responsibilities,
           email: person.email ?? '',
         }
-      : EMPTY,
+      : EMPTY_PERSON,
   )
 
   const save = useMutation({
@@ -91,7 +91,7 @@ export function PersonDialog({
             disabled={save.isPending || !complete}
             onClick={() => save.mutate(form)}
           >
-            {save.isPending ? 'Saving…' : person ? 'Save' : 'Add person'}
+            {saveButtonLabel(save.isPending, person)}
           </Button>
         </>
       }
@@ -149,4 +149,11 @@ export function PersonDialog({
       </ModalBody>
     </Modal>
   )
+}
+
+/** What the Save button says it will do. */
+function saveButtonLabel(saving: boolean, person: Person | undefined): string {
+  if (saving) return 'Saving…'
+  if (person) return 'Save'
+  return 'Add person'
 }

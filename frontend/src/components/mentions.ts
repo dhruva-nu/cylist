@@ -78,7 +78,7 @@ function isWord(char: string | undefined): boolean {
 }
 
 /** Whether a sigil at this point in the text could be starting a tag at all. */
-function mayStart(sigil: Sigil, before: string | undefined): boolean {
+function canStartTag(sigil: Sigil, before: string | undefined): boolean {
   if (sigil === FILE_SIGIL) return before === undefined || OPENS_A_FILE_TAG.test(before)
   return !isWord(before)
 }
@@ -147,19 +147,19 @@ function tagAt(
 ): MentionRun | null {
   const sigil = text[index]
   if (sigil !== PERSON_SIGIL && sigil !== FILE_SIGIL) return null
-  if (!mayStart(sigil, text[index - 1])) return null
+  if (!canStartTag(sigil, text[index - 1])) return null
 
   if (sigil === PERSON_SIGIL) {
-    const person = found(text, index + 1, people)
+    const person = wholeNameAt(text, index + 1, people)
     return person && { kind: 'mention', text: `${sigil}${person.name}`, person }
   }
 
-  const file = found(text, index + 1, files)
+  const file = wholeNameAt(text, index + 1, files)
   return file && { kind: 'file', text: `${sigil}${file.name}`, file }
 }
 
 /** The first candidate whose whole name sits at `from`, if any. */
-function found<T extends { name: string }>(
+function wholeNameAt<T extends { name: string }>(
   text: string,
   from: number,
   candidates: readonly T[],
@@ -188,15 +188,15 @@ function found<T extends { name: string }>(
  * before, because the caret is inside that word, not inside a tag.
  */
 export function mentionQuery(value: string, caret: number): MentionDraft | null {
-  const floor = Math.max(0, caret - LONGEST_QUERY)
+  const earliest = Math.max(0, caret - LONGEST_QUERY)
 
-  for (let index = caret - 1; index >= floor; index -= 1) {
+  for (let index = caret - 1; index >= earliest; index -= 1) {
     const char = value[index]
     // A tag is one line. Past a newline is a different sentence, not a name
     // still being typed.
     if (char === '\n') return null
     if (char !== PERSON_SIGIL && char !== FILE_SIGIL) continue
-    if (!mayStart(char, value[index - 1])) return null
+    if (!canStartTag(char, value[index - 1])) return null
     return { sigil: char, at: index, query: value.slice(index + 1, caret) }
   }
 

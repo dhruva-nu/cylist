@@ -162,7 +162,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             projects = await client.get("/projects", include_archived=include_archived or None)
             return {"projects": projects}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="get_project",
@@ -182,7 +182,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             board = await client.get(f"/projects/{project}/columns")
             return {"project": summary, "columns": board.get("columns", [])}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Tasks -------------------------------------------------------------
 
@@ -223,7 +223,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 ]
             return {"tasks": tasks, "columns": board.get("columns", [])}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="get_task",
@@ -244,7 +244,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"task": await client.get(f"/tasks/{task}")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="read_task_history",
@@ -271,7 +271,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             history = await client.get(f"/tasks/{task}/history", page=page, per_page=per_page)
             return {"history": history}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="create_task",
@@ -341,7 +341,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["pr_ref"] = pr_ref
             return {"task": await client.post(f"/projects/{project}/tasks", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="create_subtask",
@@ -402,7 +402,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["pr_ref"] = pr_ref
             return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="finish_subtask",
@@ -428,7 +428,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"task": await client.post(f"/tasks/{task}/finish", {"finished": finished})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="add_checklist_item",
@@ -449,7 +449,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"item": await client.post(f"/tasks/{task}/checklist", {"title": title})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_checklist_item",
@@ -484,7 +484,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 )
             return {"item": await client.patch(f"/checklist/{item}", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="move_task",
@@ -530,7 +530,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             moved = await client.post(f"/tasks/{task}/move", body)
             return {"task": moved}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_task_status",
@@ -580,7 +580,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["reason"] = reason
             return {"task": await client.post(f"/tasks/{task}/status", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="add_comment",
@@ -606,7 +606,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 )
             return {"comment": await client.post(f"/tasks/{task}/comments", payload)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Goals -------------------------------------------------------------
 
@@ -635,7 +635,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"goals": goals}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="get_goal",
@@ -656,7 +656,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             reference = await resolve.goal_ref(client, project, goal)
             return {"goal": await client.get(f"/goals/{reference}")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="create_goal",
@@ -701,7 +701,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["colour"] = colour
             return {"goal": await client.post(f"/projects/{project}/goals", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_task_goal",
@@ -729,7 +729,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 goal_id = str((await client.get(f"/goals/{reference}"))["id"])
             return {"task": await client.patch(f"/tasks/{task}", {"goal_id": goal_id})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_goal_status",
@@ -753,7 +753,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             reference = await resolve.goal_ref(client, project, goal)
             return {"goal": await client.patch(f"/goals/{reference}", {"status": status})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- People ------------------------------------------------------------
 
@@ -789,7 +789,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 people = await client.get("/people", kind=kind)
             return {"people": people}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Files -------------------------------------------------------------
 
@@ -822,7 +822,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 "items": listing.get("items", []),
             }
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="add_link",
@@ -857,7 +857,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["added_by"] = await resolve.person_id(client, added_by, project_ref=project)
             return {"item": await client.post(f"/folders/{folder_id}/links", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Vault -------------------------------------------------------------
 
@@ -882,7 +882,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             summary = resolve.pick(list(trees), tree, kind="vault tree", where=project)
             return {"tree": await client.get(f"/vault/trees/{summary['id']}")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Audit -------------------------------------------------------------
 
@@ -913,7 +913,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"activity": entries}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="day_report",
@@ -957,7 +957,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"report": report}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Skills and the scratchpad -----------------------------------------
 
@@ -979,7 +979,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"skills": await client.get(f"/projects/{project}/skills")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="read_skill",
@@ -997,26 +997,26 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         name: Annotated[str, Field(description="The skill's name, e.g. 'board-tidy.md'.")],
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            match = await _find_skill(client, project, name)
-            if not _is_zip(match):
+            skill = await _find_skill(client, project, name)
+            if not _is_zip(skill):
                 text, truncated = await client.get_text(
-                    f"/skills/{match['id']}/download", max_chars=SKILL_MAX_CHARS
+                    f"/skills/{skill['id']}/download", max_chars=SKILL_MAX_CHARS
                 )
-                return {"skill": match, "content": text, "truncated": truncated}
+                return {"skill": skill, "content": text, "truncated": truncated}
 
             # The bytes of a zip are no use to a model. What it wants is the
             # instructions, which are SKILL.md once the server has unpacked it.
-            folder = await client.get(f"/skills/{match['id']}/folder")
+            folder = await client.get(f"/skills/{skill['id']}/folder")
             files = folder.get("files", [])
-            text = next((one["content"] for one in files if one.get("path") == "SKILL.md"), "")
+            text = _skill_md(files)
             return {
-                "skill": match,
+                "skill": skill,
                 "content": text[:SKILL_MAX_CHARS],
                 "truncated": len(text) > SKILL_MAX_CHARS,
-                "files": [one.get("path") for one in files],
+                "files": [entry.get("path") for entry in files],
             }
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="download_skill",
@@ -1043,18 +1043,18 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         ],
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            match = await _find_skill(client, project, name)
-            folder = await client.get(f"/skills/{match['id']}/folder")
+            skill = await _find_skill(client, project, name)
+            folder = await client.get(f"/skills/{skill['id']}/folder")
             directory = f".claude/skills/{folder.get('folder')}/"
             return {
                 **folder,
                 "install": {
-                    "command": f"cylist skills pull {project} {match['name']}",
+                    "command": f"cylist skills pull {project} {skill['name']}",
                     "directory": directory,
                 },
             }
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="read_scratchpad",
@@ -1072,7 +1072,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"notes": await client.get(f"/projects/{project}/agent-notes")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="note_learned",
@@ -1106,7 +1106,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"note": written}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     if VAULT_REVEAL in scopes:
         _register_reveal(server, client)
@@ -1145,7 +1145,7 @@ def _register_reveal(server: MCPServer, client: Api) -> None:
                 )
             return {"secret": await client.post(f"/vault/nodes/{node['id']}/reveal")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
 
 # --- Plumbing --------------------------------------------------------------
@@ -1178,7 +1178,7 @@ def local_timezone() -> str | None:
     return None
 
 
-async def _guard(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResult:
+async def _as_tool_result(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResult:
     """Run a tool body, turning a failure into a result the model can read."""
     try:
         payload = await call()
@@ -1198,22 +1198,31 @@ async def _guard(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResul
 async def _find_skill(client: Api, project: str, name: str) -> dict[str, Any]:
     """The skill of that name on the project, or an error listing the ones it has."""
     skills = await client.get(f"/projects/{project}/skills")
-    match = next((one for one in skills if one.get("name") == name), None)
-    if match is None:
-        available = sorted(str(one.get("name")) for one in skills)
-        raise CylistError(
-            f"{project} has no skill called {name!r}."
-            + (f" It has: {', '.join(available)}." if available else " It has none."),
-            code="not_found",
-            details={"name": name, "available": available},
-        )
-    return dict(match)
+    for skill in skills:
+        if skill.get("name") == name:
+            return dict(skill)
+
+    available = sorted(str(skill.get("name")) for skill in skills)
+    what_it_has = f"It has: {', '.join(available)}." if available else "It has none."
+    raise CylistError(
+        f"{project} has no skill called {name!r}. {what_it_has}",
+        code="not_found",
+        details={"name": name, "available": available},
+    )
 
 
 def _is_zip(skill: dict[str, Any]) -> bool:
-    return str(skill.get("name", "")).lower().endswith(".zip") or "zip" in str(
-        skill.get("mime", "")
-    )
+    named_as_zip = str(skill.get("name", "")).lower().endswith(".zip")
+    typed_as_zip = "zip" in str(skill.get("mime", ""))
+    return named_as_zip or typed_as_zip
+
+
+def _skill_md(files: list[dict[str, Any]]) -> str:
+    """The text of the SKILL.md among an unpacked skill's files, or ``""``."""
+    for entry in files:
+        if entry.get("path") == "SKILL.md":
+            return str(entry["content"])
+    return ""
 
 
 def _project_of(task: dict[str, Any]) -> str:

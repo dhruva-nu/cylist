@@ -16,12 +16,9 @@
 
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, type Person } from '../api/client'
+import { api, MIN_PASSWORD_LENGTH, type Person } from '../api/client'
 import { Field, Modal, ModalBody } from './Modal'
 import { Button, ErrorBanner } from './ui'
-
-/** Mirrors `MIN_PASSWORD_LENGTH` on the server, which is the one that refuses. */
-const MIN_PASSWORD = 12
 
 export function AccountDialog({
   person,
@@ -47,7 +44,7 @@ export function AccountDialog({
     },
   })
 
-  const complete = email.trim().length > 0 && password.length >= MIN_PASSWORD
+  const complete = email.trim().length > 0 && password.length >= MIN_PASSWORD_LENGTH
 
   return (
     <Modal
@@ -57,7 +54,7 @@ export function AccountDialog({
         <>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="go" disabled={!complete || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving…' : resetting ? 'Reset password' : 'Create account'}
+            {saveButtonLabel(save.isPending, resetting)}
           </Button>
         </>
       }
@@ -84,7 +81,7 @@ export function AccountDialog({
         <Field
           label="Password"
           required
-          hint={`At least ${MIN_PASSWORD} characters. Length is what buys you anything here, not punctuation.`}
+          hint={`At least ${MIN_PASSWORD_LENGTH} characters. Length is what buys you anything here, not punctuation.`}
         >
           <input
             type="text"
@@ -96,4 +93,11 @@ export function AccountDialog({
       </ModalBody>
     </Modal>
   )
+}
+
+/** What the Save button says it will do: a reset for somebody who already signs in. */
+function saveButtonLabel(saving: boolean, resetting: boolean): string {
+  if (saving) return 'Saving…'
+  if (resetting) return 'Reset password'
+  return 'Create account'
 }

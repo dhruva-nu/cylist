@@ -222,20 +222,9 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
     # answer the same question for the two kinds of task, and printing an empty
     # Column on a sub-task would read as a column that failed to load.
     if task.get("parent_reference"):
-        placement = ("Finished", str(task.get("finished_at") or "no")[:16].replace("T", " "))
+        placement = ("Finished", _to_the_minute(task.get("finished_at") or "no"))
     else:
-        columns = ctx.client.get(f"/projects/{_project_of(task)}/columns").get("columns", [])
-        placement = (
-            "Column",
-            next(
-                (
-                    str(entry["name"])
-                    for entry in columns
-                    if str(entry["id"]) == str(task["column_id"])
-                ),
-                "",
-            ),
-        )
+        placement = ("Column", _column_name(task, ctx))
 
     output.fields(
         [
@@ -251,6 +240,20 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
         ]
     )
     _render_subtasks(task)
+
+
+def _column_name(task: dict[str, Any], ctx: Context) -> str:
+    """The name of the board column the task is in, or ``""`` if it is not found."""
+    columns = ctx.client.get(f"/projects/{_project_of(task)}/columns").get("columns", [])
+    for column in columns:
+        if str(column["id"]) == str(task["column_id"]):
+            return str(column["name"])
+    return ""
+
+
+def _to_the_minute(timestamp: Any) -> str:
+    """``2026-03-31T14:05:09Z`` as ``2026-03-31 14:05``."""
+    return str(timestamp)[:16].replace("T", " ")
 
 
 _CHECKLIST_MARKS = {"done": "[x]", "cancelled": "[-]", "open": "[ ]"}
@@ -312,7 +315,7 @@ def _render_timeline(comments: list[dict[str, Any]], names: dict[str, str]) -> N
     output.echo("--------")
     for entry in comments:
         author = (entry.get("author") or {}).get("name") or "an agent"
-        when = str(entry.get("created_at", ""))[:16].replace("T", " ")
+        when = _to_the_minute(entry.get("created_at", ""))
         if entry.get("kind") == "status_change":
             meta = entry.get("meta") or {}
             tagged = ", ".join(names.get(person, person) for person in meta.get("tagged", []) or [])
@@ -344,7 +347,7 @@ def _history(args: argparse.Namespace, ctx: Context) -> None:
 
     width = output.terminal_width()
     for entry in entries:
-        when = str(entry.get("occurred_at", ""))[:16].replace("T", " ")
+        when = _to_the_minute(entry.get("occurred_at", ""))
         who = str(entry.get("actor_label", "?"))
         # The channel is spelled out rather than shown as a column: whether an
         # agent or a person did something is the one thing a reader scanning
@@ -354,8 +357,8 @@ def _history(args: argparse.Namespace, ctx: Context) -> None:
         for line in output.wrap(str(entry.get("summary", "")), width - 2, indent="  "):
             output.echo(line)
         for change in entry.get("changes") or []:
-            was = _value(change.get("from"))
-            now = _value(change.get("to"))
+            was = _changed_value(change.get("from"))
+            now = _changed_value(change.get("to"))
             output.echo(f"    {change.get('label')}: {was} -> {now}")
         output.echo()
 
@@ -364,7 +367,7 @@ def _history(args: argparse.Namespace, ctx: Context) -> None:
     output.echo(f"Page {page.get('page')} of {page.get('pages')} — {page.get('total')} entries.")
 
 
-def _value(value: Any) -> str:
+def _changed_value(value: Any) -> str:
     """One changed value, short enough to sit on a line with its twin."""
     if value is None or value == "":
         return "(none)"

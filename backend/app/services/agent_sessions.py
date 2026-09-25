@@ -88,9 +88,39 @@ async def upsert(
         )
 
     now = clock_now()
-    transitions: list[Transition] = []
+    transitions = await _walk_off_other_cards(session, client_session_id, task, now)
 
-    # --- One card at a time: walk off any other card first ------------------
+    row, created = await _find_or_create_row(session, principal, task, client_session_id, data, now)
+    state_before = None if created else row.state
+    was_open = row.ended_at is None
+    if data.client_name is not None:
+        row.client_name = data.client_name
+    row.last_seen_at = now
+    _apply_reported_state(row, data, now)
+
+    reopened = not was_open and row.ended_at is None
+    if created or row.state is not state_before or reopened:
+        row.state_changed_at = now
+        verb = _trail_verb(row.state, fresh=created or not was_open)
+        if verb is not None:
+            transitions.append(Transition(verb, task.id, task.project_id, _trail_payload(row)))
+
+    # Flushed here rather than left to the commit, so a `touch_from_activity`
+    # in the same request — the router records these transitions next — sees
+    # the row it is about to refresh.
+    await session.flush()
+    return Upserted(row=row, transitions=transitions)
+
+
+async def _walk_off_other_cards(
+    session: AsyncSession, client_session_id: str, task: Task, now: datetime
+) -> list[Transition]:
+    """End this client session's open rows on every card but ``task``.
+
+    One card at a time: the session is moving here, so wherever else it was
+    open it has left, with ``reason=moved`` and the card it went to.
+    """
+    transitions: list[Transition] = []
     elsewhere = await session.scalars(
         select(AgentSession).where(
             AgentSession.client_session_id == client_session_id,
@@ -107,39 +137,51 @@ async def upsert(
                     "agent_session.finished",
                     other_task.id,
                     other_task.project_id,
-                    _payload(other, moved_to=task.reference),
+                    _trail_payload(other, moved_to=task.reference),
                 )
             )
+    return transitions
 
-    # --- Find or create --------------------------------------------------------
+
+async def _find_or_create_row(
+    session: AsyncSession,
+    principal: Principal,
+    task: Task,
+    client_session_id: str,
+    data: AgentSessionPut,
+    now: datetime,
+) -> tuple[AgentSession, bool]:
+    """This client session's row on this card, and whether it was just made."""
     row = await session.scalar(
         select(AgentSession).where(
             AgentSession.task_id == task.id,
             AgentSession.client_session_id == client_session_id,
         )
     )
-    created = row is None
-    if row is None:
-        row = AgentSession(
-            task_id=task.id,
-            token_id=principal.token_id,
-            actor_label=principal.label,
-            client_session_id=client_session_id,
-            state=data.state,
-            reason=None,
-            started_at=now,
-            state_changed_at=now,
-            last_seen_at=now,
-        )
-        session.add(row)
+    if row is not None:
+        return row, False
 
-    was = None if created else row.state
-    was_open = row.ended_at is None
-    if data.client_name is not None:
-        row.client_name = data.client_name
-    row.last_seen_at = now
+    row = AgentSession(
+        task_id=task.id,
+        token_id=principal.token_id,
+        actor_label=principal.label,
+        client_session_id=client_session_id,
+        state=data.state,
+        reason=None,
+        started_at=now,
+        state_changed_at=now,
+        last_seen_at=now,
+    )
+    session.add(row)
+    return row, True
 
-    # --- Apply the state -----------------------------------------------------
+
+def _apply_reported_state(row: AgentSession, data: AgentSessionPut, now: datetime) -> None:
+    """Set a row to the state a hook reported.
+
+    ``working`` and ``waiting`` both reopen a finished row and undo its
+    dismissal; ``done`` ends it.
+    """
     if data.state is AgentSessionState.WORKING:
         row.state = AgentSessionState.WORKING
         row.reason = None
@@ -152,19 +194,6 @@ async def upsert(
         row.dismissed_at = None
     else:
         _finish(row, data.reason or AgentSessionReason.SESSION_ENDED, now)
-
-    changed = created or row.state is not was or (not was_open and row.ended_at is None)
-    if changed:
-        row.state_changed_at = now
-        verb = _verb(row.state, fresh=created or not was_open)
-        if verb is not None:
-            transitions.append(Transition(verb, task.id, task.project_id, _payload(row)))
-
-    # Flushed here rather than left to the commit, so a `touch_from_activity`
-    # in the same request — the router records these transitions next — sees
-    # the row it is about to refresh.
-    await session.flush()
-    return Upserted(row=row, transitions=transitions)
 
 
 def _finish(row: AgentSession, reason: AgentSessionReason, now: datetime) -> None:
@@ -201,11 +230,11 @@ def close(
         "agent_session.finished",
         row.task_id,
         project_id,
-        _payload(row, cause=cause),
+        _trail_payload(row, cause=cause),
     )
 
 
-def _verb(state: AgentSessionState, *, fresh: bool) -> str | None:
+def _trail_verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     """Which line the trail gets for a change of state, if any.
 
     Entering ``working`` is worth a line when the session is new or came back
@@ -219,7 +248,7 @@ def _verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     return "agent_session.finished"
 
 
-def _payload(
+def _trail_payload(
     row: AgentSession, *, moved_to: str | None = None, cause: str | None = None
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -241,7 +270,7 @@ async def dismiss(session: AsyncSession, task: Task) -> int:
     still typing, only stop looking at ones that have stopped.
     """
     now = clock_now()
-    result = await session.execute(
+    dismissed = await session.execute(
         update(AgentSession)
         .where(
             AgentSession.task_id == task.id,
@@ -251,7 +280,7 @@ async def dismiss(session: AsyncSession, task: Task) -> int:
         .values(dismissed_at=now)
         .returning(AgentSession.id)
     )
-    return len(result.all())
+    return len(dismissed.all())
 
 
 async def touch_from_activity(

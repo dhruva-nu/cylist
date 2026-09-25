@@ -92,7 +92,7 @@ def event(name: str, **fields: Any) -> dict[str, Any]:
 def bind(task: str = CARD) -> None:
     from cylist_cli.commands import hook
 
-    hook._save(SESSION, {"task": task, "title_applied": task})
+    hook._save_state(SESSION, {"task": task, "title_applied": task})
 
 
 class TestWhenThereIsADaemon:

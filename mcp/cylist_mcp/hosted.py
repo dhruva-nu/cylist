@@ -97,15 +97,13 @@ class HostedMcp:
         self._transport = transport
         self._base_url = base_url
         caller = _Caller()
-        self._managers = {
-            False: _manager(caller, frozenset()),
-            True: _manager(caller, frozenset({VAULT_REVEAL})),
-        }
+        self._without_reveal = _manager(caller, frozenset())
+        self._with_reveal = _manager(caller, frozenset({VAULT_REVEAL}))
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
-            for manager in self._managers.values():
+            for manager in (self._without_reveal, self._with_reveal):
                 await stack.enter_async_context(manager.run())
             yield
 
@@ -122,7 +120,7 @@ class HostedMcp:
             await _refuse(send, 405, "method_not_allowed", "This endpoint takes POST only.")
             return
 
-        token = _bearer(scope)
+        token = _bearer_token(scope)
         if token is None:
             await _refuse(
                 send,
@@ -144,12 +142,12 @@ class HostedMcp:
                 return
 
             scopes = frozenset(str(scope) for scope in identity.get("scopes", []))
-            bound = _caller.set(client)
+            manager = self._with_reveal if VAULT_REVEAL in scopes else self._without_reveal
+            caller_reset = _caller.set(client)
             try:
-                manager = self._managers[VAULT_REVEAL in scopes]
                 await manager.handle_request(scope, receive, send)
             finally:
-                _caller.reset(bound)
+                _caller.reset(caller_reset)
         finally:
             await client.aclose()
 
@@ -167,7 +165,7 @@ def _manager(caller: _Caller, scopes: frozenset[str]) -> StreamableHTTPSessionMa
     return server.session_manager
 
 
-def _bearer(scope: Scope) -> str | None:
+def _bearer_token(scope: Scope) -> str | None:
     for name, value in scope.get("headers", []):
         if name == b"authorization":
             kind, _, token = bytes(value).decode("latin-1").partition(" ")

@@ -72,10 +72,17 @@ function keyOf(line: RolePermissions): string {
   return line.role_id ?? 'everyone-else'
 }
 
+/** The record without this key: a line's held-back edit, let go of. */
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const rest = { ...record }
+  delete rest[key]
+  return rest
+}
+
 export function ProjectRoles() {
   const { projectKey } = useParams({ from: '/p/$projectKey/roles' })
   const queryClient = useQueryClient()
-  const [adding, setAdding] = useState(false)
+  const [addingRole, setAddingRole] = useState(false)
   const { message, announce } = useAnnouncer()
 
   /**
@@ -85,7 +92,7 @@ export function ProjectRoles() {
    * which reads as the click not having registered — and the fix somebody
    * reaches for is to click it again.
    */
-  const [pending, setPending] = useState<Record<string, Permission[]>>({})
+  const [pendingPermissions, setPendingPermissions] = useState<Record<string, Permission[]>>({})
   const [pendingColumns, setPendingColumns] = useState<Record<string, ColumnRule[]>>({})
 
   /**
@@ -96,7 +103,7 @@ export function ProjectRoles() {
    * falls back to it without anything having to notice, and the pane is never
    * about nothing.
    */
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [chosenKey, setChosenKey] = useState<string | null>(null)
 
   const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
   const members = useQuery({
@@ -133,11 +140,7 @@ export function ProjectRoles() {
     // where the server still has it, or the screen keeps claiming a change
     // nobody made.
     onSettled: (_saved, _error, { line }) => {
-      setPending((held) => {
-        const rest = { ...held }
-        delete rest[keyOf(line)]
-        return rest
-      })
+      setPendingPermissions((held) => withoutKey(held, keyOf(line)))
     },
   })
 
@@ -149,11 +152,7 @@ export function ProjectRoles() {
       announce(`${saved.name}: ${summariseColumns(saved)}.`)
     },
     onSettled: (_saved, _error, { line }) => {
-      setPendingColumns((held) => {
-        const rest = { ...held }
-        delete rest[keyOf(line)]
-        return rest
-      })
+      setPendingColumns((held) => withoutKey(held, keyOf(line)))
     },
   })
 
@@ -166,13 +165,13 @@ export function ProjectRoles() {
     },
   })
 
-  const setRole = useMutation({
+  const assignRole = useMutation({
     mutationFn: ({ personId, role }: { personId: string; role: string | null }) =>
       api.setMemberRole(projectKey, personId, role),
     onSuccess: refresh,
   })
 
-  const drop = useMutation({
+  const deleteRole = useMutation({
     mutationFn: (role: RoleSummary) => api.deleteRole(projectKey, role.id),
     onSuccess: async () => {
       await refresh()
@@ -187,8 +186,23 @@ export function ProjectRoles() {
   const amAdmin = grid.data.may_manage
   const catalogue = grid.data.catalogue
   const lines = inOrder(grid.data)
-  const selected = lines.find((line) => keyOf(line) === selectedKey) ?? lines[0]
-  if (selected === undefined) return <EmptyState>This project has no roles.</EmptyState>
+  const selectedLine = lines.find((line) => keyOf(line) === chosenKey) ?? lines[0]
+  if (selectedLine === undefined) return <EmptyState>This project has no roles.</EmptyState>
+  const selectedKey = keyOf(selectedLine)
+  const selectedPermissions = pendingPermissions[selectedKey] ?? selectedLine.permissions
+  const selectedColumnRules = pendingColumns[selectedKey] ?? selectedLine.columns
+
+  const togglePermission = (entry: Permission, on: boolean) => {
+    const next = toggled(selectedPermissions, entry, on)
+    setPendingPermissions((current) => ({ ...current, [selectedKey]: next }))
+    save.mutate({ line: selectedLine, permissions: next })
+  }
+
+  const toggleColumnRule = (columnId: string, field: 'may_enter' | 'may_stage', on: boolean) => {
+    const next = withColumnRule(selectedColumnRules, columnId, field, on)
+    setPendingColumns((current) => ({ ...current, [selectedKey]: next }))
+    saveColumns.mutate({ line: selectedLine, columns: next })
+  }
 
   return (
     <>
@@ -196,7 +210,7 @@ export function ProjectRoles() {
         title="Roles & permissions"
         actions={
           amAdmin ? (
-            <Button variant="go" onClick={() => setAdding(true)}>
+            <Button variant="go" onClick={() => setAddingRole(true)}>
               + Add a role
             </Button>
           ) : null
@@ -209,8 +223,8 @@ export function ProjectRoles() {
       {save.error ? <ErrorBanner>{save.error.message}</ErrorBanner> : null}
       {saveColumns.error ? <ErrorBanner>{saveColumns.error.message}</ErrorBanner> : null}
       {saveClearance.error ? <ErrorBanner>{saveClearance.error.message}</ErrorBanner> : null}
-      {setRole.error ? <ErrorBanner>{setRole.error.message}</ErrorBanner> : null}
-      {drop.error ? <ErrorBanner>{drop.error.message}</ErrorBanner> : null}
+      {assignRole.error ? <ErrorBanner>{assignRole.error.message}</ErrorBanner> : null}
+      {deleteRole.error ? <ErrorBanner>{deleteRole.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
       {!amAdmin ? (
@@ -220,78 +234,80 @@ export function ProjectRoles() {
       ) : null}
 
       <div className={styles.split}>
-        <nav className={styles.list} aria-label="Roles on this project">
-          {lines.map((line) => (
-            <button
-              key={keyOf(line)}
-              type="button"
-              className={`${styles.listRow} ${keyOf(line) === keyOf(selected) ? styles.selected : ''}`}
-              aria-current={keyOf(line) === keyOf(selected)}
-              onClick={() => setSelectedKey(keyOf(line))}
-            >
-              <span className={styles.dot} style={{ background: line.colour }} aria-hidden />
-              <span className={styles.listName}>{line.name}</span>
-              <span className={styles.listCount}>{line.member_count || ''}</span>
-            </button>
-          ))}
-        </nav>
+        <RoleList lines={lines} selectedKey={selectedKey} onSelect={setChosenKey} />
 
         <div className={`${cardStyles.card} ${styles.pane}`}>
           <RoleDetail
-            line={selected}
-            role={(roles.data ?? []).find((candidate) => candidate.id === selected.role_id)}
+            line={selectedLine}
+            role={(roles.data ?? []).find((candidate) => candidate.id === selectedLine.role_id)}
             catalogue={catalogue}
             levels={grid.data.levels}
             members={members.data.members}
             identity={identity.data}
             amAdmin={amAdmin}
-            held={pending[keyOf(selected)] ?? selected.permissions}
-            board={pendingColumns[keyOf(selected)] ?? selected.columns}
+            permissions={selectedPermissions}
+            columnRules={selectedColumnRules}
             busy={{
               permissions: save.isPending,
               columns: saveColumns.isPending,
               clearance: saveClearance.isPending,
-              deleting: drop.isPending,
+              deleting: deleteRole.isPending,
             }}
-            onPermission={(entry, on) => {
-              const next = toggled(pending[keyOf(selected)] ?? selected.permissions, entry, on)
-              setPending((current) => ({ ...current, [keyOf(selected)]: next }))
-              save.mutate({ line: selected, permissions: next })
-            }}
-            onColumn={(columnId, field, on) => {
-              const next = withColumnRule(
-                pendingColumns[keyOf(selected)] ?? selected.columns,
-                columnId,
-                field,
-                on,
-              )
-              setPendingColumns((current) => ({ ...current, [keyOf(selected)]: next }))
-              saveColumns.mutate({ line: selected, columns: next })
-            }}
-            onClearance={(clearance) => saveClearance.mutate({ line: selected, clearance })}
-            onSetRole={(personId, role) => setRole.mutate({ personId, role })}
+            onPermission={togglePermission}
+            onColumn={toggleColumnRule}
+            onClearance={(clearance) => saveClearance.mutate({ line: selectedLine, clearance })}
+            onSetRole={(personId, role) => assignRole.mutate({ personId, role })}
             onDelete={(role) => {
               // Back to the admin line first: the pane is about to be about a
               // role that no longer exists, and falling back silently reads as
               // the delete having done something else.
-              setSelectedKey(null)
-              drop.mutate(role)
+              setChosenKey(null)
+              deleteRole.mutate(role)
             }}
             roles={roles.data ?? []}
           />
         </div>
       </div>
 
-      {adding ? (
+      {addingRole ? (
         <AddRoleDialog
           projectKey={projectKey}
           roles={roles.data ?? []}
           onSaved={announce}
           onDone={refresh}
-          onClose={() => setAdding(false)}
+          onClose={() => setAddingRole(false)}
         />
       ) : null}
     </>
+  )
+}
+
+/** The roles down the left, one button each, with the selected one marked. */
+function RoleList({
+  lines,
+  selectedKey,
+  onSelect,
+}: {
+  lines: RolePermissions[]
+  selectedKey: string
+  onSelect: (key: string) => void
+}) {
+  return (
+    <nav className={styles.list} aria-label="Roles on this project">
+      {lines.map((line) => (
+        <button
+          key={keyOf(line)}
+          type="button"
+          className={`${styles.listRow} ${keyOf(line) === selectedKey ? styles.selected : ''}`}
+          aria-current={keyOf(line) === selectedKey}
+          onClick={() => onSelect(keyOf(line))}
+        >
+          <span className={styles.dot} style={{ background: line.colour }} aria-hidden />
+          <span className={styles.listName}>{line.name}</span>
+          <span className={styles.listCount}>{line.member_count || ''}</span>
+        </button>
+      ))}
+    </nav>
   )
 }
 
@@ -342,8 +358,8 @@ function RoleDetail({
   members,
   identity,
   amAdmin,
-  held,
-  board,
+  permissions,
+  columnRules,
   busy,
   onPermission,
   onColumn,
@@ -360,8 +376,10 @@ function RoleDetail({
   members: Member[]
   identity: Identity | undefined
   amAdmin: boolean
-  held: Permission[]
-  board: ColumnRule[]
+  /** What the role holds, with any tick still on its way to the server. */
+  permissions: Permission[]
+  /** Where on the board it may work, likewise. */
+  columnRules: ColumnRule[]
   busy: { permissions: boolean; columns: boolean; clearance: boolean; deleting: boolean }
   onPermission: (entry: Permission, on: boolean) => void
   onColumn: (columnId: string, field: 'may_enter' | 'may_stage', on: boolean) => void
@@ -370,6 +388,7 @@ function RoleDetail({
   onDelete: (role: RoleSummary) => void
 }) {
   const undeletable = role ? whyUndeletable(role) : null
+  const why = explain(line) ?? role?.description
   const holders = members.filter((person) =>
     isEveryoneElse(line) ? person.role === null : person.role?.id === line.role_id,
   )
@@ -380,9 +399,7 @@ function RoleDetail({
         <div className={styles.detailTitle}>
           <span className={styles.dot} style={{ background: line.colour }} aria-hidden />
           <h2>{line.name}</h2>
-          <span className={styles.count}>
-            {summarise({ ...line, permissions: held }, catalogue)}
-          </span>
+          <span className={styles.count}>{summarise({ ...line, permissions }, catalogue)}</span>
         </div>
         {/* Not drawn on the admin role or the baseline: neither can be deleted,
             and a greyed button explaining that is still a button. */}
@@ -402,9 +419,7 @@ function RoleDetail({
 
       {/* One line, not two: the admin role carries a seeded description that
           says what `explain` says, and printing both reads as a stutter. */}
-      {(explain(line) ?? role?.description) ? (
-        <p className={styles.why}>{explain(line) ?? role?.description}</p>
-      ) : null}
+      {why ? <p className={styles.why}>{why}</p> : null}
 
       <section className={styles.axis}>
         <header>
@@ -436,7 +451,7 @@ function RoleDetail({
               <Tick
                 key={entry.key}
                 entry={entry}
-                on={isFixed(line) || held.includes(entry.key)}
+                on={isFixed(line) || permissions.includes(entry.key)}
                 disabled={!amAdmin || isFixed(line) || busy.permissions}
                 onChange={(on) => onPermission(entry.key, on)}
               />
@@ -449,10 +464,10 @@ function RoleDetail({
             heading that says which permission each is about. */}
         <div className={styles.narrowing}>
           <Workflow
-            board={board}
-            summary={summariseColumns({ ...line, columns: board })}
+            columnRules={columnRules}
+            summary={summariseColumns({ ...line, columns: columnRules })}
             disabled={!amAdmin || isFixed(line) || busy.columns}
-            gated={!isFixed(line) && !held.includes('tasks')}
+            gated={!isFixed(line) && !permissions.includes('tasks')}
             onChange={onColumn}
           />
 
@@ -543,20 +558,20 @@ function Holders({
  * second in one person's hands while everybody does the first.
  */
 function Workflow({
-  board,
+  columnRules,
   summary,
   disabled,
   gated,
   onChange,
 }: {
-  board: ColumnRule[]
+  columnRules: ColumnRule[]
   summary: string
   disabled: boolean
   /** Whether the flat `tasks` permission is off, which makes all of this moot. */
   gated: boolean
   onChange: (columnId: string, field: 'may_enter' | 'may_stage', on: boolean) => void
 }) {
-  if (board.length === 0) return null
+  if (columnRules.length === 0) return null
 
   return (
     <section className={styles.axis}>
@@ -578,7 +593,7 @@ function Workflow({
             </tr>
           </thead>
           <tbody>
-            {board.map((column) => (
+            {columnRules.map((column) => (
               <tr key={column.column_id}>
                 <th scope="row">{column.name}</th>
                 <td>

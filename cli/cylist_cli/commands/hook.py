@@ -294,7 +294,7 @@ def _dispatch(_: argparse.Namespace, ctx: Context) -> None:
         if not isinstance(event, dict):
             _debug("no JSON object on stdin")
             return
-        reply = Hook(ctx, event).handle()
+        reply = Hook(ctx, event).respond()
     except Exception as exc:  # the whole point: never fail the prompt
         _debug(f"{type(exc).__name__}: {exc}")
         return
@@ -315,12 +315,12 @@ class Hook:
         self.event = event
         self.name = str(event.get("hook_event_name") or "")
         self.session_id = str(event.get("session_id") or "")
-        self.state = _load(self.session_id) if self.session_id else {}
+        self.state = _load_state(self.session_id) if self.session_id else {}
         self.reply: dict[str, Any] = {}
 
     # -- Per event ------------------------------------------------------------
 
-    def handle(self) -> dict[str, Any]:
+    def respond(self) -> dict[str, Any]:
         if not self.session_id:
             _debug("event without a session_id")
             return {}
@@ -342,7 +342,7 @@ class Hook:
             self._rename()
             if self.event.get("source") in BRIEFED_STARTS:
                 self._brief()
-            self._put("working")
+            self._report_state("working")
 
     def _on_UserPromptSubmit(self) -> None:  # noqa: N802
         match = WORK_COMMAND.match(str(self.event.get("prompt") or ""))
@@ -350,15 +350,15 @@ class Hook:
             wanted = match.group(1)
             if wanted.lower() == "off":
                 if self.task:
-                    self._end("session_ended")
-                _delete(self.session_id)
+                    self._report_end("session_ended")
+                _delete_state(self.session_id)
                 return
             self._bind(wanted.upper())
             self._rename()
-            self._put("working", bind=True)
+            self._report_state("working", bind=True)
             return
         if self.task:
-            self._put("working")
+            self._report_state("working")
 
     def _on_PostToolUse(self) -> None:  # noqa: N802
         target = self._cylist_write_target()
@@ -367,7 +367,7 @@ class Hook:
             # row. No rename here — PostToolUse cannot set a title; the next
             # prompt will.
             self._bind(target)
-            self._put("working", bind=True)
+            self._report_state("working", bind=True)
             return
         if target and not self.task:
             if not self.state.get("nudged"):
@@ -375,7 +375,7 @@ class Hook:
                     f"Tip: /work {target} shows this session on the board."
                 )
                 self.state["nudged"] = True
-                _save(self.session_id, self.state)
+                _save_state(self.session_id, self.state)
             return
         # Nothing. An ordinary tool call used to cost a PUT once a minute,
         # to prove the process was still alive; the socket proves that by
@@ -384,7 +384,7 @@ class Hook:
 
     def _on_Stop(self) -> None:  # noqa: N802
         if self.task:
-            self._put("waiting", reason="turn_ended")
+            self._report_state("waiting", reason="turn_ended")
 
     def _on_Notification(self) -> None:  # noqa: N802
         if not self.task:
@@ -394,16 +394,16 @@ class Hook:
         if reason is None:
             message = str(self.event.get("message") or "").lower()
             reason = "permission" if "permission" in message else "idle"
-        self._put("waiting", reason=reason)
+        self._report_state("waiting", reason=reason)
 
     def _on_SessionEnd(self) -> None:  # noqa: N802
         if not self.task:
-            _delete(self.session_id)
+            _delete_state(self.session_id)
             return
-        self._end("session_ended")
+        self._report_end("session_ended")
         if self.event.get("reason") == "clear":
             _write_handoff(self.task)
-        _delete(self.session_id)
+        _delete_state(self.session_id)
 
     # -- Pieces -----------------------------------------------------------------
 
@@ -416,7 +416,7 @@ class Hook:
         if self.task != ref:
             self.state["task"] = ref
             self.state["bound_at"] = _now().isoformat()
-        _save(self.session_id, self.state)
+        _save_state(self.session_id, self.state)
 
     def _rename(self) -> None:
         """Ask Claude Code to call the session what the card is called."""
@@ -424,16 +424,16 @@ class Hook:
             return
         if self.event.get("session_title") == self.task:
             return
-        self._specific()["sessionTitle"] = self.task
+        self._hook_specific_output()["sessionTitle"] = self.task
         self.state["title_applied"] = self.task
-        _save(self.session_id, self.state)
+        _save_state(self.session_id, self.state)
 
     def _brief(self) -> None:
         """Put the card, and the scratchpad, in front of the model."""
         if self.task:
-            self._specific()["additionalContext"] = working_brief(self.task)
+            self._hook_specific_output()["additionalContext"] = working_brief(self.task)
 
-    def _specific(self) -> dict[str, Any]:
+    def _hook_specific_output(self) -> dict[str, Any]:
         """The event-specific half of the reply, which a title and a brief share."""
         specific: dict[str, Any] = self.reply.setdefault(
             "hookSpecificOutput", {"hookEventName": self.name}
@@ -466,7 +466,7 @@ class Hook:
         ref = str(arguments.get("task") or "").strip().upper()
         return ref if REFERENCE.match(ref) else None
 
-    def _end(self, reason: str) -> None:
+    def _report_end(self, reason: str) -> None:
         """The session is over. Tell whichever channel is listening.
 
         The daemon is asked first and never started: a session that is
@@ -475,12 +475,12 @@ class Hook:
         """
         if presence.finish(cylist_argv(), self.session_id, reason):
             return
-        # Straight to HTTP, deliberately not back through `_put`: that would
+        # Straight to HTTP, deliberately not back through `_report_state`: that would
         # start a daemon, and a daemon for a session that is ending is a
         # process left behind to time itself out.
         self._http_put("done", reason=reason)
 
-    def _put(self, state: str, *, reason: str | None = None, bind: bool = False) -> None:
+    def _report_state(self, state: str, *, reason: str | None = None, bind: bool = False) -> None:
         """Report to the board, or silently do not.
 
         The daemon first — it is holding a connection already, so this is a
@@ -553,7 +553,7 @@ def _state_path(session_id: str) -> Path:
     return sessions_dir() / f"{safe}.json"
 
 
-def _load(session_id: str) -> dict[str, Any]:
+def _load_state(session_id: str) -> dict[str, Any]:
     try:
         loaded = json.loads(_state_path(session_id).read_text("utf-8"))
     except (OSError, ValueError):
@@ -561,11 +561,11 @@ def _load(session_id: str) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _save(session_id: str, state: dict[str, Any]) -> None:
+def _save_state(session_id: str, state: dict[str, Any]) -> None:
     _write_private(_state_path(session_id), json.dumps(state))
 
 
-def _delete(session_id: str) -> None:
+def _delete_state(session_id: str) -> None:
     _state_path(session_id).unlink(missing_ok=True)
 
 
@@ -669,7 +669,7 @@ def _quote(part: str) -> str:
     return f'"{part}"' if " " in part else part
 
 
-OURS = re.compile(
+OUR_HOOK_COMMAND = re.compile(
     r'^"?(?:.*[\\/])?(?:cylist(?:\.exe)?"?\s|.*-m\s+cylist_cli\s)hook$', re.IGNORECASE
 )
 r"""Any install of this hook, quoted or not, with or without the ``.exe``.
@@ -688,12 +688,29 @@ hook every time it was run on Windows.
 """
 
 
-def _is_ours(command: Any) -> bool:
-    return bool(OURS.match(str(command or "").strip()))
+def _is_our_hook(command: Any) -> bool:
+    return bool(OUR_HOOK_COMMAND.match(str(command or "").strip()))
 
 
-def _entry(command: str) -> dict[str, Any]:
+def _hook_entry(command: str) -> dict[str, Any]:
     return {"type": "command", "command": command, "timeout": HOOK_TIMEOUT_SECONDS}
+
+
+def _our_entries(groups: list[Any]) -> list[dict[str, Any]]:
+    """The entries in one event's hook groups that run this hook.
+
+    Skips anything that is not the shape Claude Code writes rather than
+    failing on it: this is somebody's own settings file, and a stray value in
+    it is theirs to keep.
+    """
+    found: list[dict[str, Any]] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for entry in group.get("hooks", []):
+            if isinstance(entry, dict) and _is_our_hook(entry.get("command")):
+                found.append(entry)
+    return found
 
 
 @dataclass(frozen=True)
@@ -731,22 +748,14 @@ def install_hooks() -> HookInstall:
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             raise _not_a_settings_file(settings_path, f"hooks.{event} is not a list")
-        present = any(
-            _is_ours(entry.get("command"))
-            for group in groups
-            if isinstance(group, dict)
-            for entry in group.get("hooks", [])
-            if isinstance(entry, dict)
-        )
-        if present:
+        ours = _our_entries(groups)
+        if ours:
             # Ours already, possibly from an older install elsewhere on disk:
             # point it at where the binary is now rather than adding a second.
-            for group in groups:
-                for entry in group.get("hooks", []) if isinstance(group, dict) else []:
-                    if isinstance(entry, dict) and _is_ours(entry.get("command")):
-                        entry["command"] = command
+            for entry in ours:
+                entry["command"] = command
             continue
-        fresh: dict[str, Any] = {"hooks": [_entry(command)]}
+        fresh: dict[str, Any] = {"hooks": [_hook_entry(command)]}
         if event == "Notification":
             fresh = {"matcher": NOTIFICATION_MATCHER, **fresh}
         groups.append(fresh)
@@ -803,28 +812,7 @@ def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
     hooks = settings.get("hooks")
     removed: list[str] = []
     if isinstance(hooks, dict):
-        for event in list(hooks):
-            groups = hooks.get(event)
-            if not isinstance(groups, list):
-                continue
-            kept: list[Any] = []
-            for group in groups:
-                if not isinstance(group, dict):
-                    kept.append(group)
-                    continue
-                entries = [
-                    entry
-                    for entry in group.get("hooks", [])
-                    if not (isinstance(entry, dict) and _is_ours(entry.get("command")))
-                ]
-                if len(entries) != len(group.get("hooks", [])):
-                    removed.append(event)
-                if entries:
-                    kept.append({**group, "hooks": entries})
-            if kept:
-                hooks[event] = kept
-            else:
-                del hooks[event]
+        removed = _remove_our_hooks(hooks)
         _write_settings(settings_path, settings)
 
     command_path = claude_config_dir() / "commands" / "work.md"
@@ -858,6 +846,39 @@ def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
         output.echo(f"No Cylist hook in {settings_path}; nothing to remove.")
     if had_command:
         output.echo(f"Removed {command_path}.")
+
+
+def _remove_our_hooks(hooks: dict[str, Any]) -> list[str]:
+    """Take this hook out of every event, in place, and say which events had it.
+
+    Everybody else's entries stay exactly where they were. A group left with
+    no entries goes, and so does an event left with no groups, so that an
+    uninstall leaves the file as it would have been without us.
+    """
+    removed: list[str] = []
+    for event in list(hooks):
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        kept: list[Any] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                kept.append(group)
+                continue
+            entries = [
+                entry
+                for entry in group.get("hooks", [])
+                if not (isinstance(entry, dict) and _is_our_hook(entry.get("command")))
+            ]
+            if len(entries) != len(group.get("hooks", [])):
+                removed.append(event)
+            if entries:
+                kept.append({**group, "hooks": entries})
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+    return removed
 
 
 def _read_settings(path: Path) -> dict[str, Any]:

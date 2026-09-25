@@ -24,7 +24,7 @@ def test_a_missing_token_is_refused_at_startup(monkeypatch: pytest.MonkeyPatch) 
     """Thirty tools that all return 401 would be worse than not starting."""
     monkeypatch.delenv("CYLIST_TOKEN", raising=False)
     with pytest.raises(CylistError) as error:
-        config.resolve()
+        config.load_settings()
     assert "cylist setup" in error.value.message
     assert "CYLIST_TOKEN" in error.value.message
     assert "read,write" in error.value.message
@@ -33,13 +33,13 @@ def test_a_missing_token_is_refused_at_startup(monkeypatch: pytest.MonkeyPatch) 
 def test_the_url_defaults_to_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CYLIST_TOKEN", "cyl_token")
     monkeypatch.delenv("CYLIST_URL", raising=False)
-    assert config.resolve().urls == ("http://localhost:8000",)
+    assert config.load_settings().urls == ("http://localhost:8000",)
 
 
 def test_a_trailing_slash_is_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CYLIST_TOKEN", "cyl_token")
     monkeypatch.setenv("CYLIST_URL", "https://cylist.example.com/")
-    assert config.resolve().url == "https://cylist.example.com"
+    assert config.load_settings().url == "https://cylist.example.com"
 
 
 def test_the_cli_config_file_supplies_the_token_and_every_address(
@@ -54,7 +54,7 @@ def test_the_cli_config_file_supplies_the_token_and_every_address(
         'token = "cyl_from_the_file"\n'
     )
 
-    settings = config.resolve()
+    settings = config.load_settings()
 
     assert settings.token == "cyl_from_the_file"
     assert settings.urls == ("http://localhost:8000", "https://box.tailnet.ts.net")
@@ -70,7 +70,7 @@ def test_the_environment_beats_the_file(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("CYLIST_TOKEN", "cyl_from_the_env")
     monkeypatch.setenv("CYLIST_URL", "https://elsewhere.example.com")
 
-    settings = config.resolve()
+    settings = config.load_settings()
 
     assert settings.token == "cyl_from_the_env"
     assert settings.urls == ("https://elsewhere.example.com",)
@@ -82,7 +82,7 @@ def test_an_unreadable_config_file_is_not_fatal(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.delenv("CYLIST_URL", raising=False)
     _write_config("this is not toml {{{")
 
-    assert config.resolve().urls == ("http://localhost:8000",)
+    assert config.load_settings().urls == ("http://localhost:8000",)
 
 
 async def test_a_second_address_is_tried_when_the_first_will_not_connect() -> None:

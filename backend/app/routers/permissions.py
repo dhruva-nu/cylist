@@ -62,21 +62,21 @@ The baseline is not somebody — it is the absence of anybody having said — an
 a badge in the accent family would read as one more role to hand out."""
 
 
-def _catalogue() -> list[PermissionInfoRead]:
+def _permission_catalogue() -> list[PermissionInfoRead]:
     return [
         PermissionInfoRead(key=entry.key, label=entry.label, summary=entry.summary)
         for entry in CATALOGUE
     ]
 
 
-def _levels() -> list[SensitivityInfoRead]:
+def _sensitivity_levels() -> list[SensitivityInfoRead]:
     return [
         SensitivityInfoRead(key=entry.key, label=entry.label, summary=entry.summary)
         for entry in SENSITIVITY_CATALOGUE
     ]
 
 
-async def _line(
+async def _grid_line(
     session: AsyncSession,
     project: Project,
     *,
@@ -113,7 +113,7 @@ async def _line(
 
 async def _role_line(session: AsyncSession, project: Project, role: ProjectRole) -> RolePermissions:
     counts = await roles.holder_counts(session, project)
-    return await _line(
+    return await _grid_line(
         session,
         project,
         role_id=role.id,
@@ -126,7 +126,7 @@ async def _role_line(session: AsyncSession, project: Project, role: ProjectRole)
 
 async def _baseline_line(session: AsyncSession, project: Project) -> RolePermissions:
     counts = await roles.holder_counts(session, project)
-    return await _line(
+    return await _grid_line(
         session,
         project,
         role_id=EVERYONE_ELSE,
@@ -147,15 +147,18 @@ def _column_line(
     — but a grid is not, and making the client work out which of the board's
     columns were missing and why is how a tick box ends up drawn wrong.
     """
-    return [
-        ColumnRule(
-            column_id=column.id,
-            name=column.name,
-            may_enter=True if unrestricted else rules.get(column.id, (True, True))[0],
-            may_stage=True if unrestricted else rules.get(column.id, (True, True))[1],
+    line: list[ColumnRule] = []
+    for column in board:
+        if unrestricted:
+            may_enter, may_stage = True, True
+        else:
+            may_enter, may_stage = rules.get(column.id, (True, True))
+        line.append(
+            ColumnRule(
+                column_id=column.id, name=column.name, may_enter=may_enter, may_stage=may_stage
+            )
         )
-        for column in board
-    ]
+    return line
 
 
 @router.get(
@@ -180,7 +183,7 @@ async def get_permissions(
     members = len(project.members)
 
     lines = [
-        await _line(
+        await _grid_line(
             session,
             project,
             role_id=role.id,
@@ -192,7 +195,7 @@ async def get_permissions(
         for role in found
     ]
     lines.append(
-        await _line(
+        await _grid_line(
             session,
             project,
             role_id=EVERYONE_ELSE,
@@ -204,8 +207,8 @@ async def get_permissions(
     )
 
     return ProjectPermissions(
-        catalogue=_catalogue(),
-        levels=_levels(),
+        catalogue=_permission_catalogue(),
+        levels=_sensitivity_levels(),
         roles=lines,
         mine=sorted(await permissions.effective(session, project, principal)),
         may_manage=await roles.may_administer(session, project, principal),

@@ -71,12 +71,12 @@ async def list_api_tokens(session: AsyncSession) -> list[ApiToken]:
     admin who cannot do the job the scope exists for. Which person each one
     acts as is on the row.
     """
-    result = await session.scalars(
+    tokens = await session.scalars(
         select(ApiToken)
         .where(ApiToken.kind == TokenKind.API, ApiToken.revoked_at.is_(None))
         .order_by(ApiToken.created_at.desc())
     )
-    return list(result)
+    return list(tokens)
 
 
 async def revoke(session: AsyncSession, token_id: UUID) -> ApiToken:
@@ -110,7 +110,7 @@ async def revoke_for_person(
     if keeping is not None:
         live.append(ApiToken.id != keeping)
 
-    result = await session.execute(
+    revoked = await session.execute(
         sql_update(ApiToken)
         .where(*live)
         .values(revoked_at=now())
@@ -118,7 +118,7 @@ async def revoke_for_person(
         # would have to SELECT first to be able to say how many went.
         .returning(ApiToken.id)
     )
-    return len(result.all())
+    return len(revoked.all())
 
 
 async def revoke_by_digest(session: AsyncSession, digest: str) -> None:

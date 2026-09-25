@@ -21,6 +21,7 @@ from typing import Any
 
 MIN_TERMINAL_WIDTH = 60
 FALLBACK_WIDTH = 100
+KILOBYTE = 1024.0
 
 
 def terminal_width() -> int:
@@ -117,3 +118,21 @@ def truncate(text: str, width: int) -> str:
     if width <= 1:
         return text[:width]
     return text[: width - 1] + "…"
+
+
+def human_size(value: Any) -> str:
+    """A byte count the way a listing shows it: ``512B``, ``1.5KB``, ``3.2GB``.
+
+    Empty when there is no count to show. Lives here rather than in either
+    command because ``files ls`` and ``skills ls`` both print one.
+    """
+    if not isinstance(value, int):
+        return ""
+    size = float(value)
+    if size < KILOBYTE:
+        return f"{size:.0f}B"
+    for unit in ("KB", "MB"):
+        size /= KILOBYTE
+        if size < KILOBYTE:
+            return f"{size:.1f}{unit}"
+    return f"{size / KILOBYTE:.1f}GB"

@@ -11,7 +11,15 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, isMe, type Goal, type GoalInput, type GoalStatus, type Person } from '../api/client'
+import {
+  api,
+  isMe,
+  type Goal,
+  type GoalInput,
+  type GoalStatus,
+  type Identity,
+  type Person,
+} from '../api/client'
 import { GOAL_STATUS_LABELS } from './GoalMarks'
 import { MentionBox } from './Mentions'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
@@ -32,7 +40,7 @@ import styles from './GoalDialog.module.css'
  * fill, so it is free of the AA-for-white-initials debt that set carries, and
  * pushed a good deal louder for it.
  */
-const PALETTE = [
+const GOAL_PALETTE = [
   '#1FAA5C',
   '#2F6FEB',
   '#E8890B',
@@ -43,7 +51,7 @@ const PALETTE = [
   '#0891B2',
 ] as const
 
-const STATUSES: GoalStatus[] = ['open', 'achieved', 'dropped']
+const GOAL_STATUSES: GoalStatus[] = ['open', 'achieved', 'dropped']
 
 export function GoalDialog({
   projectKey,
@@ -69,27 +77,7 @@ export function GoalDialog({
   // the cache the auth gate already filled; a goal started before it lands
   // falls through to the first member, which is what it used to do anyway.
   const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
-  const [form, setForm] = useState<GoalInput>(
-    goal
-      ? {
-          name: goal.name,
-          description: goal.description,
-          colour: goal.colour,
-          target_date: goal.target_date,
-          owner_id: goal.owner.id,
-          status: goal.status,
-        }
-      : {
-          name: '',
-          description: '',
-          // Not pre-picked from the palette: an unchosen colour is filled in
-          // by the server from the name, which is a better guess than the
-          // first swatch and stays stable if the goal is renamed and remade.
-          target_date: null,
-          owner_id:
-            members.find((person) => isMe(person, identity.data))?.id ?? members[0]?.id ?? '',
-        },
-  )
+  const [form, setForm] = useState<GoalInput>(initialGoalFields(goal, members, identity.data))
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   /** For the `>` tag in the description, which is read like a card's. */
   const files = useProjectFiles(projectKey)
@@ -144,7 +132,7 @@ export function GoalDialog({
             disabled={save.isPending || !named || !owned}
             onClick={() => save.mutate(form)}
           >
-            {save.isPending ? 'Saving…' : goal ? 'Save' : 'Start goal'}
+            {saveButtonLabel(save.isPending, goal)}
           </Button>
         </>
       }
@@ -182,24 +170,10 @@ export function GoalDialog({
           label="Colour"
           hint="The rail down the left of every card on this goal. Left unchosen, one is picked from the name."
         >
-          <div className={styles.swatches}>
-            {PALETTE.map((colour) => {
-              const chosen = form.colour?.toUpperCase() === colour
-              return (
-                <button
-                  key={colour}
-                  type="button"
-                  className={`${styles.swatch} ${chosen ? styles.chosen : ''}`}
-                  style={{ background: colour, color: readableInkOn(colour) }}
-                  aria-pressed={chosen}
-                  aria-label={colour}
-                  onClick={() => setForm({ ...form, colour })}
-                >
-                  {chosen ? '✓' : ''}
-                </button>
-              )
-            })}
-          </div>
+          <ColourSwatches
+            chosen={form.colour}
+            onChoose={(colour) => setForm({ ...form, colour })}
+          />
         </Field>
 
         <FieldPair>
@@ -233,7 +207,7 @@ export function GoalDialog({
               value={form.status ?? 'open'}
               onChange={(event) => setForm({ ...form, status: event.target.value as GoalStatus })}
             >
-              {STATUSES.map((status) => (
+              {GOAL_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {GOAL_STATUS_LABELS[status]}
                 </option>
@@ -243,5 +217,72 @@ export function GoalDialog({
         ) : null}
       </ModalBody>
     </Modal>
+  )
+}
+
+/**
+ * What the form opens holding: the goal's own fields, or a new goal's
+ * defaults, owned by whoever `identity` says is looking.
+ */
+function initialGoalFields(
+  goal: Goal | null,
+  members: Person[],
+  identity: Identity | undefined,
+): GoalInput {
+  if (goal) {
+    return {
+      name: goal.name,
+      description: goal.description,
+      colour: goal.colour,
+      target_date: goal.target_date,
+      owner_id: goal.owner.id,
+      status: goal.status,
+    }
+  }
+  return {
+    name: '',
+    description: '',
+    // Not pre-picked from the palette: an unchosen colour is filled in
+    // by the server from the name, which is a better guess than the
+    // first swatch and stays stable if the goal is renamed and remade.
+    target_date: null,
+    owner_id: members.find((person) => isMe(person, identity))?.id ?? members[0]?.id ?? '',
+  }
+}
+
+/** What the Save button says it will do. */
+function saveButtonLabel(saving: boolean, goal: Goal | null): string {
+  if (saving) return 'Saving…'
+  if (goal) return 'Save'
+  return 'Start goal'
+}
+
+/** The eight accents a goal's colour is chosen from, the chosen one ticked. */
+function ColourSwatches({
+  chosen,
+  onChoose,
+}: {
+  chosen: string | null | undefined
+  onChoose: (colour: string) => void
+}) {
+  return (
+    <div className={styles.swatches}>
+      {GOAL_PALETTE.map((colour) => {
+        const isChosen = chosen?.toUpperCase() === colour
+        return (
+          <button
+            key={colour}
+            type="button"
+            className={`${styles.swatch} ${isChosen ? styles.chosen : ''}`}
+            style={{ background: colour, color: readableInkOn(colour) }}
+            aria-pressed={isChosen}
+            aria-label={colour}
+            onClick={() => onChoose(colour)}
+          >
+            {isChosen ? '✓' : ''}
+          </button>
+        )
+      })}
+    </div>
   )
 }

@@ -59,17 +59,17 @@ export function waitingDetail(reason: AgentSessionReason | null): string {
  * one session reads as, and "1 agent working" makes every card sound like a
  * head-count.
  */
-export function agentIndicator(p: AgentPresence | null, now: Date): AgentIndicator | null {
-  if (!p) return null
-  const many = p.count > 1
-  const agents = many ? `${p.count} agents` : 'Agent'
+export function agentIndicator(presence: AgentPresence | null, now: Date): AgentIndicator | null {
+  if (!presence) return null
+  const many = presence.count > 1
+  const agents = many ? `${presence.count} agents` : 'Agent'
 
-  switch (p.state) {
+  switch (presence.state) {
     case 'waiting':
       return {
         className: 'agentWaiting',
         label: many ? `${agents} · one needs you` : 'Agent needs you',
-        detail: waitingDetail(p.reason),
+        detail: waitingDetail(presence.reason),
       }
     case 'working':
       return { className: 'agentWorking', label: `${agents} working` }
@@ -78,11 +78,11 @@ export function agentIndicator(p: AgentPresence | null, now: Date): AgentIndicat
       // means. It wears the dashed border the stale state used to — "the
       // outline of an agent rather than an agent" was always a better
       // description of a lost connection than of a slow one.
-      if (p.reason === 'connection_lost') {
+      if (presence.reason === 'connection_lost') {
         return {
           className: 'agentStale',
           label: many ? `${agents} disconnected` : 'Agent disconnected',
-          detail: `last seen ${silentFor(p.last_seen_at, now)} ago`,
+          detail: `last seen ${silentFor(presence.last_seen_at, now)} ago`,
         }
       }
       return { className: 'agentDone', label: many ? `${agents} finished` : 'Agent finished' }

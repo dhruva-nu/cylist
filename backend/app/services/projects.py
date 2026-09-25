@@ -87,9 +87,9 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
         session.add(ProjectMember(project_id=project.id, person_id=creator_id, role_id=admin.id))
         await session.flush()
 
-    machine = await people.ensure_agent(session)
-    if not machine.is_archived and machine.id != creator_id:
-        session.add(ProjectMember(project_id=project.id, person_id=machine.id))
+    agent = await people.ensure_agent(session)
+    if not agent.is_archived and agent.id != creator_id:
+        session.add(ProjectMember(project_id=project.id, person_id=agent.id))
         await session.flush()
 
     # `members` is only populated by a SELECT, and a just-inserted row has not

@@ -52,7 +52,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from cylist_cli import output
-from cylist_cli.commands.files import _size as size_of
 from cylist_cli.commands.hook import REFERENCE, claude_config_dir
 from cylist_cli.context import Context
 from cylist_cli.errors import ApiError, CylistError
@@ -139,7 +138,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         [
             [
                 output.truncate(str(skill["name"]), NAME_WIDTH),
-                size_of(skill.get("size")),
+                output.human_size(skill.get("size")),
                 output.truncate(str(skill.get("description") or ""), DESCRIPTION_WIDTH),
             ]
             for skill in skills
@@ -175,69 +174,81 @@ def _pull(args: argparse.Namespace, ctx: Context) -> None:
     # Claude Code only watches a skills directory that was there when the
     # session began, so whether this one is new is worth saying.
     new_directory = not destination.is_dir()
-    outcomes: list[Outcome] = []
-    for skill in chosen:
-        # One skill the server cannot lay out — a zip with no SKILL.md — is
-        # reported beside the rest rather than stopping them.
-        try:
-            folder = ctx.client.get(f"/skills/{skill['id']}/folder")
-        except ApiError as exc:
-            outcomes.append(
-                Outcome(str(skill["name"]), "-", "failed", destination, reason=exc.message)
-            )
-            continue
-        outcomes.append(_install(project, folder, destination, force=bool(args.force)))
-
-    failed = [one for one in outcomes if one.result == "failed"]
-    skipped = [one for one in outcomes if one.result == "skipped"]
+    outcomes = [
+        _pull_one(ctx, project, skill, destination, force=bool(args.force)) for skill in chosen
+    ]
     if ctx.as_json:
-        output.emit_json(
-            {
-                "destination": str(destination),
-                "new_directory": new_directory,
-                "skills": [
-                    {
-                        "skill": one.skill,
-                        "folder": one.folder,
-                        "result": one.result,
-                        "path": str(one.path),
-                        "reason": one.reason or None,
-                    }
-                    for one in outcomes
-                ],
-            }
-        )
+        _emit_outcomes(outcomes, destination, new_directory=new_directory)
     else:
-        output.table(
-            ["SKILL", "FOLDER", "RESULT"],
-            [
-                [one.skill, one.folder, f"{one.result}: {one.reason}" if one.reason else one.result]
-                for one in outcomes
-            ],
-        )
-        if len(failed) + len(skipped) < len(outcomes):
-            output.echo()
-            output.echo(f"Claude Code loads these from {destination}.")
-            if new_directory:
-                output.echo(
-                    "That directory is new, so a Claude Code session already running here "
-                    "will not see it; the next one started will. Until then, follow the "
-                    "skill's SKILL.md from there."
-                )
+        _print_outcomes(outcomes, destination, new_directory=new_directory)
+    _fail_unless_all_pulled(outcomes)
 
+
+def _pull_one(
+    ctx: Context, project: str, skill: dict[str, Any], destination: Path, *, force: bool
+) -> Outcome:
+    """Fetch one skill's folder from the server and install it."""
+    # One skill the server cannot lay out — a zip with no SKILL.md — is
+    # reported beside the rest rather than stopping them.
+    try:
+        folder = ctx.client.get(f"/skills/{skill['id']}/folder")
+    except ApiError as exc:
+        return Outcome(str(skill["name"]), "-", "failed", destination, reason=exc.message)
+    return _install(project, folder, destination, force=force)
+
+
+def _emit_outcomes(outcomes: list[Outcome], destination: Path, *, new_directory: bool) -> None:
+    output.emit_json(
+        {
+            "destination": str(destination),
+            "new_directory": new_directory,
+            "skills": [
+                {
+                    "skill": outcome.skill,
+                    "folder": outcome.folder,
+                    "result": outcome.result,
+                    "path": str(outcome.path),
+                    "reason": outcome.reason or None,
+                }
+                for outcome in outcomes
+            ],
+        }
+    )
+
+
+def _print_outcomes(outcomes: list[Outcome], destination: Path, *, new_directory: bool) -> None:
+    rows = []
+    for outcome in outcomes:
+        result = f"{outcome.result}: {outcome.reason}" if outcome.reason else outcome.result
+        rows.append([outcome.skill, outcome.folder, result])
+    output.table(["SKILL", "FOLDER", "RESULT"], rows)
+
+    if all(outcome.result in ("failed", "skipped") for outcome in outcomes):
+        return
+    output.echo()
+    output.echo(f"Claude Code loads these from {destination}.")
+    if new_directory:
+        output.echo(
+            "That directory is new, so a Claude Code session already running here "
+            "will not see it; the next one started will. Until then, follow the "
+            "skill's SKILL.md from there."
+        )
+
+
+def _fail_unless_all_pulled(outcomes: list[Outcome]) -> None:
+    """Exit 1 if any skill was left alone or could not be fetched, naming which."""
+    skipped = [outcome for outcome in outcomes if outcome.result == "skipped"]
+    failed = [outcome for outcome in outcomes if outcome.result == "failed"]
     if skipped:
         noun = "skill was" if len(skipped) == 1 else "skills were"
+        paths = [str(outcome.path) for outcome in skipped]
         raise CylistError(
-            f"{len(skipped)} {noun} left alone. Pass --force to replace "
-            + ", ".join(str(one.path) for one in skipped)
-            + ".",
-            details={"skipped": [str(one.path) for one in skipped]},
+            f"{len(skipped)} {noun} left alone. Pass --force to replace {', '.join(paths)}.",
+            details={"skipped": paths},
         )
     if failed:
-        raise CylistError(
-            "Could not pull " + ", ".join(one.skill for one in failed) + ".",
-            details={"failed": [one.skill for one in failed]},
-        )
+        names = [outcome.skill for outcome in failed]
+        raise CylistError(f"Could not pull {', '.join(names)}.", details={"failed": names})
 
 
 def _project(given: str | None) -> str:
@@ -300,19 +311,20 @@ def _install(project: str, folder: dict[str, Any], destination: Path, *, force: 
             "name Claude Code accepts. Nothing was written."
         )
 
-    files = {_checked_path(skill["name"], one["path"]): one for one in folder["files"]}
-    contents = {path: _decoded(one) for path, one in files.items()}
-    hashes = {path: _sha256(data) for path, data in contents.items()}
+    files = {_checked_path(skill["name"], entry["path"]): entry for entry in folder["files"]}
+    contents = {path: _decoded(entry) for path, entry in files.items()}
+    hashes = {path: _sha256(content) for path, content in contents.items()}
     target = destination / name
     outcome = Outcome(skill=str(skill["name"]), folder=name, result="installed", path=target)
 
     if target.exists() or target.is_symlink():
-        ours = _marker(target)
-        reason = _why_not_ours(target, ours, skill)
+        existing = _read_marker(target)
+        reason = _why_not_ours(target, existing, skill)
         if reason and not force:
-            outcome.result, outcome.reason = "skipped", reason
+            outcome.result = "skipped"
+            outcome.reason = reason
             return outcome
-        if not reason and ours is not None and ours.get("files") == hashes:
+        if not reason and existing is not None and existing.get("files") == hashes:
             outcome.result = "unchanged"
             return outcome
         outcome.result = "updated"
@@ -328,15 +340,15 @@ def _install(project: str, folder: dict[str, Any], destination: Path, *, force: 
     return outcome
 
 
-def _why_not_ours(target: Path, ours: dict[str, Any] | None, skill: dict[str, Any]) -> str:
+def _why_not_ours(target: Path, marker: dict[str, Any] | None, skill: dict[str, Any]) -> str:
     """Why this folder may not be written over, or ``""`` if it may."""
     if target.is_symlink() or not target.is_dir():
         return "something that is not a pulled skill is already there"
-    if ours is None:
+    if marker is None:
         return "a skill that was not pulled from Cylist is already there"
-    if ours.get("skill_id") != skill["id"]:
-        return f"it holds {ours.get('project')}'s {ours.get('name')!r}, not this skill"
-    if _local_files(target) != ours.get("files"):
+    if marker.get("skill_id") != skill["id"]:
+        return f"it holds {marker.get('project')}'s {marker.get('name')!r}, not this skill"
+    if _local_files(target) != marker.get("files"):
         return "it has been edited since it was pulled"
     return ""
 
@@ -356,9 +368,9 @@ def _checked_path(skill: str, raw: str) -> str:
     return raw
 
 
-def _decoded(one: dict[str, Any]) -> bytes:
-    content = str(one.get("content", ""))
-    if one.get("encoding") == "base64":
+def _decoded(entry: dict[str, Any]) -> bytes:
+    content = str(entry.get("content", ""))
+    if entry.get("encoding") == "base64":
         return base64.b64decode(content)
     return content.encode("utf-8")
 
@@ -367,7 +379,7 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _marker(target: Path) -> dict[str, Any] | None:
+def _read_marker(target: Path) -> dict[str, Any] | None:
     try:
         found = json.loads((target / MARKER).read_text("utf-8"))
     except (OSError, ValueError):
@@ -398,11 +410,11 @@ def _write_folder(
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
     try:
-        for path, one in files.items():
+        for path, entry in files.items():
             file = staging.joinpath(*path.split("/"))
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(contents[path])
-            if one.get("executable"):
+            if entry.get("executable"):
                 file.chmod(file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         if GITIGNORE not in files:
             (staging / GITIGNORE).write_text(IGNORE_EVERYTHING, "utf-8")
