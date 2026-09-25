@@ -1,13 +1,63 @@
 /*
- * A project's areas, in the sidebar's two widths and the strip it becomes
- * under 900px. See the note at the top of `ProjectNav.tsx` for which shape
- * shows what.
- *
- * The lit item wears the brand's soft ground, as the theme choice in Settings
- * does: it is the same statement — this one, of these — and one sidebar
- * should not make it two ways.
+ * A project's areas: the bar's four tabs, and the sidebar's full list in its
+ * two widths. See the note at the top of `ProjectNav.tsx` for which shows
+ * what, and where.
  */
 
+/* The bar's tabs. A lifted chip for the one you are on, as they always were. */
+.tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tabs a {
+  padding: 7px 14px;
+  border-radius: var(--radius-control);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tabs a:hover {
+  background: var(--paper);
+}
+
+.tabs a.tabOn {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+/*
+ * Under 720px the wordmark, four tabs and your mark do not fit one row, and
+ * the tabs used to be hidden outright here — which left a phone no way
+ * between a project's areas but the page you were on. They take a row of
+ * their own under the other two instead (the bar wraps; see `.bar` in
+ * Shell.module.css), a little tighter, and scroll sideways rather than
+ * spill if a window is narrower still.
+ */
+@media (max-width: 719px) {
+  .tabs {
+    order: 1;
+    flex-basis: 100%;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .tabs a {
+    padding: 6px 11px;
+    font-size: 13px;
+  }
+}
+
+/*
+ * The sidebar's list. The lit item wears the brand's soft ground, as the theme
+ * choice in Settings does: it is the same statement — this one, of these —
+ * and one sidebar should not make it two ways.
+ */
 .areas {
   display: flex;
   flex-direction: column;
@@ -61,29 +111,6 @@
   padding: 8px 10px;
 }
 
-/* Files and Vault, said small. Links in the ink of the text around them,
-   underlined, because a line of prose with two words in it that go somewhere
-   is what this is — not two more rows. */
-.also {
-  margin: 10px 10px 0;
-  color: var(--ink-3);
-  font-size: 13px;
-}
-
-.also a {
-  color: var(--ink-2);
-  font-weight: 600;
-  text-underline-offset: 2px;
-}
-
-.also a:hover {
-  color: var(--ink);
-}
-
-.also a.alsoOn {
-  color: var(--brand-ink);
-}
-
 /* Collapsed: the marks alone, one under another down the rail, each a square
    the size of the handle above them so the column reads as one set of
    controls. The names stay in the markup for a screen reader and are what
@@ -109,35 +136,12 @@
   white-space: nowrap;
 }
 
-/*
- * Stacked, the rail is a strip across the top, and a strip has the room for
- * the names and not for names and marks both — four short words and the
- * handle and the count fit a 390px phone; four words and four marks do not.
- * So the names come back and the marks go.
- */
+/* Stacked, the rail is a strip across the top of a phone. Seven areas do not
+   fit across it, and the bar's four tabs sit in their own row just below — so
+   the strip goes back to its handle and its count, and the whole list is the
+   open panel's. */
 @media (max-width: 899px) {
-  .rail .areas {
-    flex-direction: row;
-    gap: 2px;
-  }
-
-  .rail .area {
-    width: auto;
-    height: 30px;
-    padding: 0 9px;
-    font-size: 13px;
-  }
-
-  .rail .icon {
+  .rail {
     display: none;
-  }
-
-  .rail .name {
-    position: static;
-    overflow: visible;
-    clip-path: none;
-    width: auto;
-    height: auto;
-    margin: 0;
   }
 }

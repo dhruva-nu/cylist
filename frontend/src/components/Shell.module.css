@@ -131,6 +131,15 @@
   padding: 16px 24px 8px;
 }
 
+/* Under 720px the project's tabs take a row of their own beneath the wordmark
+   and your mark — see `.tabs` in ProjectNav.module.css. */
+@media (max-width: 719px) {
+  .bar {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+}
+
 .brand {
   display: flex;
   gap: 10px;

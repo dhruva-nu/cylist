@@ -1,13 +1,14 @@
 /**
- * The frame every screen sits in: the sidebar, and beside it the wordmark and
- * breadcrumbs over the page. A project's areas are in the sidebar — see
- * `ProjectNav.tsx` — rather than tabs in the bar.
+ * The frame every screen sits in: the sidebar, and beside it the wordmark,
+ * the project's tabs and breadcrumbs over the page. The bar's tabs are four of
+ * a project's areas and the sidebar lists all of them — see `ProjectNav.tsx`.
  */
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode } from 'react'
 import { api } from '../api/client'
+import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
 import { Avatar } from './ui'
 import styles from './Shell.module.css'
@@ -70,11 +71,11 @@ export function Shell() {
       {/*
         The whole sidebar and a few more tab stops sit between the top of the
         page and the content — the panel's handle, a project's areas and the
-        sections under them, then the wordmark and the breadcrumb. Tabbing past all of that on
-        every navigation is the sort of thing that makes a keyboard unusable,
-        so there is a way over it. It matters more now than it did with the
-        panel on the other side, where it came after the content rather than
-        before it.
+        sections under them, then the wordmark, four tabs and the breadcrumb.
+        Tabbing past all of that on every navigation is the sort of thing that
+        makes a keyboard unusable, so there is a way over it. It matters more
+        now than it did with the panel on the other side, where it came after
+        the content rather than before it.
       */}
       <a href="#content" className={styles.skip}>
         Skip to content
@@ -97,6 +98,7 @@ export function Shell() {
               <Link to="/" className={styles.brand}>
                 <span className={styles.mark}>C</span> Cylist
               </Link>
+              <ProjectTabs />
               <div className={styles.right}>
                 <You />
               </div>

@@ -1,33 +1,27 @@
 /**
- * A project's areas, in the sidebar: Goals, Board, People and Agents.
+ * A project's areas, and the two places they are listed.
  *
- * They used to be eight tabs across the bar — Overview, Board, Goals, Files,
- * Vault, People, Roles, Agents — and the bar hid all eight under 720px, which
- * left a phone with the overview's cards as the only way between them. Four is
- * what somebody working a project actually moves between. The rest keep their
- * pages and lose their tabs:
+ * The bar carries four tabs — Goals, Board, People, Agents — which are what
+ * somebody working a project moves between all day. The sidebar carries every
+ * area: those four, and Roles, Files and Vault, which are places you go to
+ * fetch or settle something rather than places you work. So the bar stays a
+ * short row across the top of the page, and nothing is reachable only by
+ * typing its address.
  *
- * - Overview is gone. It was a page of links to the other areas, and a column
- *   of links down the edge of every screen is that page without the detour.
- *   Its address sends you to the board — see `router.tsx`.
- * - Roles is reached from People, which already links to it; while you are on
- *   it, People is the item lit, because that is where you came from.
- * - Files and Vault are a line under the four in the open panel. They hold
- *   real documents and real credentials, so they cannot be allowed to become
- *   pages you can only reach by typing their address — but they are places
- *   you fetch something from rather than places you work, and a line of small
- *   type says that without dressing them up as two more areas.
+ * Overview is in neither. It was a page of cards linking to the other areas,
+ * and a list of them down the edge of every screen is that page without the
+ * detour; its address sends you to the board — see `router.tsx`.
  *
- * Drawn in two shapes, because the sidebar is. Open, it is a column of rows
- * with a mark and a name each. Collapsed to its rail it is the marks alone
- * down a 46px column, named by their tooltips and to a screen reader — and
- * under 900px, where the rail is a strip across the top instead, it is the
- * names alone, because a strip has the width for four short words and not
- * for four words and four marks. Either way the four are on screen whatever
- * state the sidebar is in, which is what a panel that can be shut owes the
- * one thing in it you cannot do without.
+ * The sidebar list is drawn in two shapes, because the sidebar is. Open, it is
+ * a column of rows with a mark and a name each. Collapsed to its rail it is
+ * the marks alone down a 46px column, named by their tooltips and to a screen
+ * reader. Under 900px, where the rail is a strip across the top instead, it
+ * draws nothing: seven names do not fit across a phone, and the four you use
+ * most are in the bar's own row directly beneath it — see `.tabs` in the
+ * stylesheet. The other three are one press of the handle away.
  *
- * Off a project there is nothing to navigate between, and it draws nothing.
+ * Off a project there is nothing to navigate between, and neither draws
+ * anything.
  */
 
 import { Link, useMatchRoute } from '@tanstack/react-router'
@@ -56,6 +50,12 @@ const ICONS = {
       <path d="M15.5 14.5A4.5 4.5 0 0 1 21 19" />
     </svg>
   ),
+  roles: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M12 3 5 6v5c0 4.4 3 8.3 7 10 4-1.7 7-5.6 7-10V6z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  ),
   agents: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <rect x="4" y="7" width="16" height="12" rx="3" />
@@ -64,38 +64,77 @@ const ICONS = {
       <circle cx="14.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   ),
+  files: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  ),
+  vault: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <rect x="4" y="10" width="16" height="10" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      <circle cx="12" cy="15" r="1.3" />
+    </svg>
+  ),
 }
 
 /**
- * The four, in this order. Goals first because it is the widest view of the
- * project — what the work is for — and the board, people and agents are what
- * the work is, who is doing it and what is helping them.
+ * Every area, in the order the sidebar lists them. `inBar` marks the four the
+ * bar carries too, in the same order, so the two lists never disagree about
+ * which comes first.
  */
 const AREAS = [
-  { to: '/p/$projectKey/goals', name: 'Goals', icon: ICONS.goals },
-  { to: '/p/$projectKey/board', name: 'Board', icon: ICONS.board },
-  { to: '/p/$projectKey/people', name: 'People', icon: ICONS.people },
-  { to: '/p/$projectKey/agents', name: 'Agents', icon: ICONS.agents },
+  { to: '/p/$projectKey/goals', name: 'Goals', icon: ICONS.goals, inBar: true },
+  { to: '/p/$projectKey/board', name: 'Board', icon: ICONS.board, inBar: true },
+  { to: '/p/$projectKey/people', name: 'People', icon: ICONS.people, inBar: true },
+  { to: '/p/$projectKey/roles', name: 'Roles', icon: ICONS.roles, inBar: false },
+  { to: '/p/$projectKey/agents', name: 'Agents', icon: ICONS.agents, inBar: true },
+  { to: '/p/$projectKey/files', name: 'Files', icon: ICONS.files, inBar: false },
+  { to: '/p/$projectKey/vault', name: 'Vault', icon: ICONS.vault, inBar: false },
 ] as const
 
-export function ProjectNav({ rail = false }: { rail?: boolean }) {
+/** The project the address is in, or null off a project. */
+function useProjectKey(): string | null {
   const matchRoute = useMatchRoute()
   const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  if (!match) return null
+  return match ? match.projectKey : null
+}
 
-  const { projectKey } = match
-  // Roles has no item of its own, and is reached from People's heading.
-  const onRoles = Boolean(matchRoute({ to: '/p/$projectKey/roles' }))
+/** The bar's four tabs. */
+export function ProjectTabs() {
+  const projectKey = useProjectKey()
+  if (projectKey === null) return null
 
   return (
-    <nav className={rail ? styles.rail : styles.panel} aria-label="Project">
+    <nav className={styles.tabs} aria-label="Project">
+      {AREAS.filter((area) => area.inBar).map((area) => (
+        <Link
+          key={area.to}
+          to={area.to}
+          params={{ projectKey }}
+          activeProps={{ className: styles.tabOn }}
+        >
+          {area.name}
+        </Link>
+      ))}
+    </nav>
+  )
+}
+
+/** Every area, as the sidebar lists them: rows in the panel, marks on the rail. */
+export function ProjectNav({ rail = false }: { rail?: boolean }) {
+  const projectKey = useProjectKey()
+  if (projectKey === null) return null
+
+  return (
+    <nav className={rail ? styles.rail : styles.panel} aria-label="Project areas">
       <ul className={styles.areas}>
         {AREAS.map((area) => (
           <li key={area.to}>
             <Link
               to={area.to}
               params={{ projectKey }}
-              className={`${styles.area} ${area.name === 'People' && onRoles ? styles.on : ''}`}
+              className={styles.area}
               activeProps={{ className: styles.on }}
               title={rail ? area.name : undefined}
             >
@@ -105,26 +144,6 @@ export function ProjectNav({ rail = false }: { rail?: boolean }) {
           </li>
         ))}
       </ul>
-      {rail ? null : (
-        <p className={styles.also}>
-          Also here:{' '}
-          <Link
-            to="/p/$projectKey/files"
-            params={{ projectKey }}
-            activeProps={{ className: styles.alsoOn }}
-          >
-            Files
-          </Link>{' '}
-          ·{' '}
-          <Link
-            to="/p/$projectKey/vault"
-            params={{ projectKey }}
-            activeProps={{ className: styles.alsoOn }}
-          >
-            Vault
-          </Link>
-        </p>
-      )}
     </nav>
   )
 }
