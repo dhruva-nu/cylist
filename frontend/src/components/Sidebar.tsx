@@ -2,10 +2,9 @@
  * The left-hand sidebar: the way around a project, and the things you consult
  * while working in it.
  *
- * A project's areas — Goals, Board, People, Agents — are at the top. They used
- * to be tabs in the bar above; they are here because the sidebar is on screen
- * in every state, at every width, and the bar's tabs were not — see
- * `ProjectNav.tsx`. Under them is the other kind of thing — a preference to
+ * Every one of a project's areas is at the top — the four the bar carries as
+ * tabs, and Roles, Files and Vault, which it does not; see `ProjectNav.tsx`.
+ * Under them is the other kind of thing — a preference to
  * set, a list to glance at, a report to read off — none of which is worth
  * leaving the board for, and all of which used to be a dialog over the top of
  * whatever you were doing.
@@ -16,7 +15,7 @@
  *
  * It collapses, and what it collapses to is the reason it is allowed to. Not
  * away — to a rail against the same edge, holding the handle that brings it
- * back, the count of what is due today and the project's four areas. So the
+ * back, the count of what is due today and the marks of a project's areas. So the
  * objections to a panel that shuts all go: there is no state in which Settings
  * is unreachable, no state in which three overdue cards are behind something
  * you forgot was there, and no state in which the way to the board is. What
@@ -207,8 +206,9 @@ export function Sidebar() {
             can be shut needs it to be — a number nobody can see is a number
             that stops being worth keeping. */}
         <TodayCount />
-        {/* The project's areas, as marks — or as names, once the rail is a
-            strip across a phone. Nothing off a project. */}
+        {/* The project's areas, as marks. Nothing off a project, and nothing
+            once the rail is a strip across a phone, where the bar's tabs sit
+            just below it. */}
         <ProjectNav rail />
         <span className={styles.railName} aria-hidden="true">
           Sidebar
