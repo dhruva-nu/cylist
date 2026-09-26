@@ -358,6 +358,86 @@ KIT_FOLDER = {
 }
 
 
+MCP_TOPIC_ID = "0192f3c4-000c-7000-8000-000000000001"
+GOALS_TOPIC_ID = "0192f3c4-000c-7000-8000-000000000002"
+LEARNED_ID = "0192f3c4-000d-7000-8000-000000000001"
+TOOLS_DOC_ID = "0192f3c4-000d-7000-8000-000000000002"
+
+
+def _listing(doc_id: str, topic_id: str, title: str) -> dict[str, Any]:
+    return {
+        "id": doc_id,
+        "topic_id": topic_id,
+        "title": title,
+        "position": 0,
+        "author": None,
+        "created_at": "2026-09-26T09:00:00Z",
+        "updated_at": "2026-09-26T09:00:00Z",
+    }
+
+
+DOC_TREE = {
+    "sections": [
+        {
+            "section": "product",
+            "label": "Product",
+            "topics": [
+                {
+                    "id": GOALS_TOPIC_ID,
+                    "project_id": PROJECT_ID,
+                    "section": "product",
+                    "name": "Goals",
+                    "position": 0,
+                    "doc_count": 1,
+                    "docs": [_listing(TOOLS_DOC_ID, GOALS_TOPIC_ID, "learned.md")],
+                }
+            ],
+        },
+        {
+            "section": "engineering",
+            "label": "Engineering",
+            "topics": [
+                {
+                    "id": MCP_TOPIC_ID,
+                    "project_id": PROJECT_ID,
+                    "section": "engineering",
+                    "name": "MCP",
+                    "position": 0,
+                    "doc_count": 1,
+                    "docs": [_listing(LEARNED_ID, MCP_TOPIC_ID, "learned.md")],
+                }
+            ],
+        },
+    ],
+    "doc_count": 2,
+}
+
+LEARNED_DOC = {
+    **_listing(LEARNED_ID, MCP_TOPIC_ID, "learned.md"),
+    "project_id": PROJECT_ID,
+    "section": "engineering",
+    "topic_name": "MCP",
+    "body": "- Claude Code shows 2048 characters of the instructions.",
+}
+
+TASK_DOCS = {
+    "task_reference": "ATL-2",
+    "ranked_by": "jev",
+    "threshold": 0.5,
+    "reason": None,
+    "docs": [
+        {
+            **_listing(LEARNED_ID, MCP_TOPIC_ID, "learned.md"),
+            "section": "engineering",
+            "topic_name": "MCP",
+            "summary": "Claude Code shows 2048 characters of the instructions.",
+            "probability": 0.82,
+        }
+    ],
+    "doc_count": 2,
+}
+
+
 def identity(scopes: list[str]) -> dict[str, Any]:
     return {
         "token_id": "0192f3c4-000a-7000-8000-000000000001",
@@ -444,6 +524,26 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
     if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "PATCH":
         body = json.loads(request.content)
         return httpx.Response(200, json={**GOAL, **body, "tasks": []})
+
+    if path == "/projects/ATL/docs" and method == "GET":
+        return httpx.Response(200, json=DOC_TREE)
+    if path in {"/projects/ATL/docs", f"/projects/{PROJECT_ID}/docs"} and method == "POST":
+        body = json.loads(request.content)
+        return httpx.Response(
+            201,
+            json={
+                "doc": {**LEARNED_DOC, "title": body["title"], "body": body["body"]},
+                "created": True,
+                "filed_by": "caller" if body.get("topic_id") else "jev",
+                "confidence": None if body.get("topic_id") else 0.9,
+            },
+        )
+    if path == f"/docs/{LEARNED_ID}" and method == "GET":
+        return httpx.Response(200, json=LEARNED_DOC)
+    if path == f"/docs/{LEARNED_ID}" and method == "PATCH":
+        return httpx.Response(200, json={**LEARNED_DOC, **json.loads(request.content)})
+    if path in {"/tasks/ATL-2/docs", f"/tasks/{TASK_ID}/docs"}:
+        return httpx.Response(200, json=TASK_DOCS)
 
     if path.endswith("/tasks") and method == "GET":
         return httpx.Response(200, json=[TASK])

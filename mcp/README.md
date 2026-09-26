@@ -178,7 +178,7 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `list_projects` | every project, with keys and counts |
 | `get_project` | one project's numbers **and its board's columns** |
 | `list_tasks` | the cards on a board, filterable by status or assignee |
-| `get_task` | one card with its whole timeline |
+| `get_task` | one card with its whole timeline, and the docs its work needs, ranked by jev |
 | `read_task_history` | what has been *done* to one card, and by whom — paged |
 | `create_task` | add a card to the first column |
 | `create_subtask` | split a card into owned work of its own, `ATL-41-2` |
@@ -199,8 +199,9 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `list_skills` | the skills uploaded for a project's agents |
 | `read_skill` | one skill's own text — the instructions to follow; a zip is read as its `SKILL.md` |
 | `download_skill` | one skill as the folder Claude Code loads, with the `cylist skills pull` line that installs it |
-| `read_scratchpad` | what agents before you learned about this project — read it first on a card |
-| `note_learned` | leave one line on the scratchpad as you learn it, 280 characters; a repeat is refused |
+| `list_docs` | a project's docs as their tree: section → topic → doc, without bodies |
+| `read_doc` | one doc's markdown, by id or by path (`Engineering / MCP / learned.md`) |
+| `write_doc` | write a doc, edit one, or add a `- ` line to a topic's `learned.md` with `append`; leave `topic` out and it is filed for you, or refused with the topics to pick |
 | `list_vault` | trees and structure — never a value |
 | `read_activity` | the audit feed |
 | `day_report` | what was done on a project on one day, with a paste-ready note |

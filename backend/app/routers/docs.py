@@ -1,7 +1,10 @@
 """Docs: a project's markdown, filed as section → topic → doc.
 
 The tree is one request — `GET /projects/{ref}/docs` — and carries no bodies;
-a doc's markdown is read with `GET /docs/{id}`. Topics and docs are addressed
+a doc's markdown is read with `GET /docs/{id}`. Two routes are for agents:
+`GET /tasks/{ref}/docs` is the docs a card needs, as jev ranks them, and
+`POST /projects/{ref}/docs` writes a doc with jev choosing its topic when the
+writer does not. Topics and docs are addressed
 by id: neither has a reference of its own, because neither is something people
 read out to each other the way they do `ATL-41`.
 """
@@ -11,18 +14,21 @@ from __future__ import annotations
 from collections import defaultdict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.config import Settings, app_settings
 from app.db import SessionDependency
 from app.models.doc import SECTION_ORDER, Doc, DocTopic
 from app.models.project import Project
+from app.models.task import Task
 from app.routers import guards
 from app.routers.projects import resolved_project
+from app.routers.tasks import resolved_task
 from app.schemas.common import Acknowledged
 from app.schemas.docs import (
     DocCreate,
@@ -37,9 +43,14 @@ from app.schemas.docs import (
     DocTopicWithDocs,
     DocTree,
     DocUpdate,
+    DocWrite,
+    DocWritten,
+    RelevantDoc,
+    TaskDocs,
 )
 from app.schemas.people import PersonRead
 from app.services import activity, docs
+from app.services.doc_judge import DocJudge
 
 router = APIRouter(tags=["docs"])
 
@@ -56,6 +67,12 @@ async def resolved_doc(
     session: AsyncSession = SessionDependency,
 ) -> Doc:
     return await docs.get_doc(session, doc_id)
+
+
+def doc_judge(request: Request) -> DocJudge | None:
+    """The app's jev judge, or None when this deployment has no key."""
+    judge: DocJudge | None = request.app.state.doc_judge
+    return judge
 
 
 WRITE_DOCS = guards.on_project(Permission.DOCS)
@@ -160,6 +177,117 @@ async def get_tree(
     """Both sections — Product, then Engineering — each with its topics in
     order and each topic with its docs in order. Bodies are left out."""
     return await _tree(session, project)
+
+
+# --- What agents read and write -----------------------------------------------
+
+
+@router.get(
+    "/tasks/{task_ref}/docs",
+    response_model=TaskDocs,
+    summary="Get the docs a card needs",
+)
+async def task_docs(
+    task: Task = Depends(resolved_task),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+    settings: Settings = Depends(app_settings),
+    judge: DocJudge | None = Depends(doc_judge),
+) -> TaskDocs:
+    """The project's docs that work on this card needs, most likely first.
+
+    jev reads the card — its title, description and checklist — and says, for
+    each doc on the project, how likely it is that the work needs it. Those at
+    or past the threshold are listed, each with its probability and its
+    opening paragraph; read the ones that bear on the work with
+    `GET /docs/{id}`.
+
+    When jev cannot be asked, `ranked_by` is `none`, `reason` says why, and
+    every doc on the project is listed in tree order instead.
+    """
+    relevance = await docs.relevant_to(
+        session, task, judge, threshold=settings.doc_relevance_threshold
+    )
+    return TaskDocs(
+        task_reference=task.reference,
+        ranked_by=relevance.ranked_by,
+        threshold=settings.doc_relevance_threshold if relevance.ranked_by == "jev" else None,
+        reason=relevance.reason,
+        docs=[
+            RelevantDoc(
+                **_listing(entry.doc).model_dump(),
+                section=entry.topic.section,
+                topic_name=entry.topic.name,
+                summary=entry.summary,
+                probability=entry.probability,
+            )
+            for entry in relevance.docs
+        ],
+        doc_count=relevance.doc_count,
+    )
+
+
+@router.post(
+    "/projects/{project_ref}/docs",
+    response_model=DocWritten,
+    status_code=status.HTTP_201_CREATED,
+    summary="Write a doc, filed by jev when no topic is named",
+    responses={
+        200: {"description": "`append` added to a doc of that title already in the topic."},
+        409: {"description": "The topic already has a doc of that title, and `append` is off."},
+        422: {
+            "description": "The project has no topics, or the topic could not be chosen "
+            "(`topic_unclear`, with every topic to choose from, ranked when jev was asked)."
+        },
+    },
+)
+async def write_doc(
+    body: DocWrite,
+    response: Response,
+    project: Project = Depends(resolved_project),
+    principal: Principal = Depends(WRITE_DOCS),
+    session: AsyncSession = SessionDependency,
+    settings: Settings = Depends(app_settings),
+    judge: DocJudge | None = Depends(doc_judge),
+) -> DocWritten:
+    """Write a doc onto the project.
+
+    Name `topic_id` to file it there. Leave it out and it is filed for you:
+    under the project's only topic if it has one, otherwise where jev says —
+    provided jev is confident. When it is not, or cannot be asked, nothing is
+    written and the 422 lists every topic, ranked when jev had an opinion, so
+    the writer can name one. Topics are never created here.
+
+    A title the topic already holds is refused unless `append` is set, which
+    adds `body` to the end of that doc — how an agent adds a line to a topic's
+    `learned.md`.
+    """
+    written = await docs.write(
+        session,
+        project,
+        body,
+        judge,
+        confidence=settings.doc_filing_confidence,
+        author_id=principal.person_id,
+    )
+    if not written.created:
+        response.status_code = status.HTTP_200_OK
+    await _record(
+        session,
+        principal,
+        "doc.created" if written.created else "doc.appended",
+        entity_type="doc",
+        entity_id=written.doc.id,
+        project_id=project.id,
+        title=written.doc.title,
+        filed_by=written.filed_by,
+    )
+    return DocWritten(
+        doc=await _doc_read(session, written.doc),
+        created=written.created,
+        filed_by=written.filed_by,
+        confidence=written.confidence,
+    )
 
 
 # --- Topics -------------------------------------------------------------------

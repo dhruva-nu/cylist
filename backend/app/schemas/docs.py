@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field, field_validator
@@ -143,3 +144,67 @@ class DocTree(Schema):
 
     sections: list[DocSectionTree]
     doc_count: int
+
+
+# --- What agents read and write ------------------------------------------------
+
+
+class RelevantDoc(DocListing):
+    """A doc handed to whoever is working a card: where it is filed, what it
+    opens with, and how likely jev thinks the card needs it."""
+
+    section: DocSection
+    topic_name: str
+    summary: str = Field(description="The doc's opening paragraph, as one line.")
+    probability: float | None = Field(
+        description="jev's probability that work on the card needs this doc. Null when jev "
+        "was not asked — see `ranked_by`."
+    )
+
+
+class TaskDocs(Schema):
+    """The docs a card needs, as an agent is handed them when it binds to it."""
+
+    task_reference: str
+    ranked_by: Literal["jev", "none"] = Field(
+        description="`jev` when jev ranked the docs and only those past `threshold` are "
+        "listed, most likely first. `none` when it could not be asked — `reason` says "
+        "why — and every doc on the project is listed in tree order instead."
+    )
+    threshold: float | None = Field(description="The cut jev's probabilities were held to.")
+    reason: str | None = Field(description="Why jev was not asked, when it was not.")
+    docs: list[RelevantDoc]
+    doc_count: int = Field(description="Docs on the project, listed or not.")
+
+
+class DocWrite(Schema):
+    """Write a doc onto a project, naming its topic or leaving jev to file it."""
+
+    title: str = Field(min_length=1, max_length=TITLE_MAX_LENGTH)
+    body: str = Field(default="", max_length=BODY_MAX_LENGTH, description="Markdown.")
+    topic_id: UUID | None = Field(
+        default=None,
+        description="The topic to file it under. Leave it out and jev chooses from the "
+        "project's topics; when it is not confident the write is refused with its ranking, "
+        "so the writer can name one.",
+    )
+    append: bool = Field(
+        default=False,
+        description="When the topic already holds a doc of this title, add `body` to the end "
+        "of it rather than refusing. How a line goes onto a topic's `learned.md`.",
+    )
+
+    @field_validator("title")
+    @classmethod
+    def _strip_title(cls, value: str) -> str:
+        return _stripped(value)
+
+
+class DocWritten(Schema):
+    doc: DocRead
+    created: bool = Field(description="False when `append` added to a doc already there.")
+    filed_by: Literal["caller", "jev", "only_topic"] = Field(
+        description="Who chose the topic: the writer, jev, or nobody because the project "
+        "has only one."
+    )
+    confidence: float | None = Field(description="jev's confidence, when jev chose.")

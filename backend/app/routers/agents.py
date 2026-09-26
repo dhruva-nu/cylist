@@ -1,9 +1,7 @@
-"""What a project's agents work from: its skills, and its scratchpad.
+"""What a project's agents work from: its skills.
 
-One router over two features, for the same reason the files router covers three
-prefixes: skills are addressed under their project when they are listed and
-uploaded, and by their own id once they exist — a skill keeps its download URL
-— so splitting by prefix would scatter one screen across two modules.
+Skills are addressed under their project when they are listed and uploaded,
+and by their own id once they exist — a skill keeps its download URL.
 """
 
 from __future__ import annotations
@@ -23,13 +21,11 @@ from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.core.errors import NotFoundError
 from app.db import SessionDependency
-from app.models.agent import AgentNote, Skill
+from app.models.agent import Skill
 from app.models.project import Project
 from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.agents import (
-    NoteCreate,
-    NoteRead,
     SkillFolderFile,
     SkillFolderRead,
     SkillRead,
@@ -51,14 +47,6 @@ async def resolved_skill(
     return await agents.get_skill(session, skill_id)
 
 
-async def resolved_note(
-    note_id: UUID,
-    session: AsyncSession = SessionDependency,
-) -> AgentNote:
-    """Turn the path segment into a note, 404-ing if nothing matches."""
-    return await agents.get_note(session, note_id)
-
-
 def _skill_read(skill: Skill) -> SkillRead:
     person = skill.added_by_person
     return SkillRead(
@@ -73,26 +61,13 @@ def _skill_read(skill: Skill) -> SkillRead:
     )
 
 
-def _note_read(note: AgentNote) -> NoteRead:
-    person = note.added_by_person
-    return NoteRead(
-        id=note.id,
-        project_id=note.project_id,
-        body=note.body,
-        author_label=note.author_label,
-        added_by=PersonRead.model_validate(person) if person is not None else None,
-        created_at=note.created_at,
-    )
-
-
 # --- Skills ----------------------------------------------------------------
 
 
 WRITE_AGENT_KIT = guards.on_project(Permission.AGENTS)
-"""What this project's agents work from — its skills and its learned notes."""
+"""What this project's agents work from — its skills."""
 
 WRITE_THIS_SKILL = guards.for_entity(Permission.AGENTS, resolved_skill)
-WRITE_THIS_NOTE = guards.for_entity(Permission.AGENTS, resolved_note)
 
 
 @router.get(
@@ -293,96 +268,3 @@ def _folder_file(folder_file: skill_folders.FolderFile) -> SkillFolderFile:
         size=len(folder_file.data),
         executable=folder_file.executable,
     )
-
-
-# --- The scratchpad --------------------------------------------------------
-
-
-@router.get(
-    "/projects/{project_ref}/agent-notes",
-    response_model=list[NoteRead],
-    summary="Read a project's agent scratchpad",
-)
-async def list_notes(
-    project: Project = Depends(resolved_project),
-    _: Principal = Depends(require(Scope.READ)),
-    session: AsyncSession = SessionDependency,
-) -> list[NoteRead]:
-    """The scratchpad, newest first.
-
-    Short lines an agent wrote when it learned something about this project
-    that it would otherwise have to work out again. Read this before starting
-    work here.
-    """
-    return [_note_read(note) for note in await agents.list_notes(session, project)]
-
-
-@router.post(
-    "/projects/{project_ref}/agent-notes",
-    response_model=NoteRead,
-    status_code=status.HTTP_201_CREATED,
-    summary="Note something learned",
-    responses={409: {"description": "A line saying the same thing is already on the scratchpad."}},
-)
-async def add_note(
-    body: NoteCreate,
-    project: Project = Depends(resolved_project),
-    principal: Principal = Depends(WRITE_AGENT_KIT),
-    session: AsyncSession = SessionDependency,
-) -> NoteRead:
-    """Write one line onto the project's scratchpad.
-
-    For something you had to work out and the next agent would have to work
-    out again — not for what the code, the board or the README already says.
-    Notes are capped at 280 characters, and newlines are folded into spaces:
-    one fact, in as few words as carry it.
-
-    A line that says what one already on the scratchpad says — ignoring case,
-    spacing and punctuation — is refused with a 409 naming the line that is
-    there, so read the scratchpad before you add to it.
-
-    The note is signed with your credential's own label, so a reader can tell
-    an agent's line from a person's.
-    """
-    note = await agents.add_note(
-        session,
-        project,
-        body,
-        author_label=principal.label,
-        added_by=None,
-    )
-    await activity.record(
-        session,
-        principal,
-        "agent_note.added",
-        entity_type="agent_note",
-        entity_id=note.id,
-        project_id=project.id,
-        payload={"body": note.body},
-    )
-    return _note_read(note)
-
-
-@router.delete(
-    "/agent-notes/{note_id}",
-    response_model=Acknowledged,
-    summary="Rub a line off the scratchpad",
-)
-async def delete_note(
-    note: AgentNote = Depends(resolved_note),
-    principal: Principal = Depends(WRITE_THIS_NOTE),
-    session: AsyncSession = SessionDependency,
-) -> Acknowledged:
-    """Delete a note, because what it says has stopped being true."""
-    body, project_id = note.body, note.project_id
-    await agents.delete_note(session, note)
-    await activity.record(
-        session,
-        principal,
-        "agent_note.deleted",
-        entity_type="agent_note",
-        entity_id=note.id,
-        project_id=project_id,
-        payload={"body": body},
-    )
-    return Acknowledged()

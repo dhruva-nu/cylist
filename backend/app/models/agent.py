@@ -1,14 +1,9 @@
-"""What an agent works from on a project: its skills, and its scratchpad.
+"""What an agent works from on a project: its skills.
 
-Two tables, because they are written by different hands and read at different
-times:
-
-* ``skill`` is a file somebody uploads — a packaged job an agent can be handed.
-  It reuses :class:`~app.models.file.Blob` for the bytes, so a skill and a file
-  with the same content cost one copy on disk.
-* ``agent_note`` is the scratchpad: one short line an agent writes when it
-  learns something about this project that it would otherwise have to work out
-  again next time.
+``skill`` is a file somebody uploads — a packaged job an agent can be handed.
+It reuses :class:`~app.models.file.Blob` for the bytes, so a skill and a file
+with the same content cost one copy on disk. What an agent learns goes the
+other way, into the project's docs — see :mod:`app.models.doc`.
 
 A skill is not filed in the project's folder tree. It could have been — the
 tree already holds uploads — but a skill is not a document about the project,
@@ -20,7 +15,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text
+from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,16 +24,6 @@ from app.models.file import Blob
 from app.models.person import Person
 
 NAME_MAX_LENGTH = 255
-
-NOTE_MAX_LENGTH = 280
-"""The longest a scratchpad line may be.
-
-A cap in the schema rather than a note in the documentation, because "very
-minimal words" is the whole point of the scratchpad: a page of prose an agent
-appended is a page nobody reads, and the next agent along has to read all of
-it before it can start. Enforced in the database so that neither the HTTP API
-nor the MCP server is the only thing standing between a model and an essay.
-"""
 
 
 class Skill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -95,48 +80,3 @@ class Skill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     def size(self) -> int:
         """Bytes, read off the blob."""
         return self.blob.size
-
-
-class AgentNote(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """One line on the project's scratchpad.
-
-    Append-only in spirit: a note is written when something is learned and
-    deleted when it stops being true. There is no edit, because a note that has
-    been rewritten is a different thing learned and its own timestamp is part
-    of what it says.
-    """
-
-    __tablename__ = "agent_note"
-    __table_args__ = (
-        CheckConstraint(
-            f"char_length(btrim(body)) BETWEEN 1 AND {NOTE_MAX_LENGTH}",
-            name="body_is_short_and_not_blank",
-        ),
-        # Newest first, per project — the only way this table is ever read.
-        Index("ix_agent_note_project_id_created_at", "project_id", "created_at"),
-    )
-
-    project_id: Mapped[UUID] = mapped_column(
-        postgresql.UUID(as_uuid=True),
-        ForeignKey("project.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    body: Mapped[str] = mapped_column(String(NOTE_MAX_LENGTH), nullable=False)
-    """What was learned, in a line."""
-
-    author_label: Mapped[str] = mapped_column(String(120), nullable=False)
-    """The name on the credential that wrote it — a token's label, or the owner
-    for a browser session. Not a person id: the thing that learns something is
-    the agent, and an agent is a token rather than somebody in the directory.
-    Recorded as text so a revoked token leaves its notes legible."""
-
-    added_by: Mapped[UUID | None] = mapped_column(
-        postgresql.UUID(as_uuid=True),
-        ForeignKey("person.id", ondelete="SET NULL"),
-    )
-    """Set when a person wrote the note themselves, which the scratchpad allows
-    — reading it is most of its value, and correcting it by hand should not
-    mean pretending to be an agent."""
-
-    added_by_person: Mapped[Person | None] = relationship(lazy="selectin")
