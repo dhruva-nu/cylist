@@ -934,23 +934,6 @@ export interface Skill {
   created_at: string
 }
 
-/** One line on a project's agent scratchpad. */
-export interface AgentNote {
-  id: string
-  project_id: string
-  body: string
-  /**
-   * The credential that wrote it — a token's label, or the owner for a
-   * browser session. What tells an agent's line from a person's.
-   */
-  author_label: string
-  added_by: Person | null
-  created_at: string
-}
-
-/** The scratchpad's cap, mirrored from the server so the box can count down. */
-export const NOTE_MAX_LENGTH = 280
-
 export type ItemKind = 'file' | 'link'
 export type ItemSource = 'upload' | 'sharepoint' | 'gdrive' | 'other'
 
@@ -1292,16 +1275,6 @@ export const api = {
   deleteSkill: (id: string) => request<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a skill's bytes from — used as an anchor's href. */
   skillDownloadUrl: (id: string) => `${API_BASE}/skills/${id}/download`,
-
-  listAgentNotes: (projectKey: string) =>
-    request<AgentNote[]>(`/projects/${projectKey}/agent-notes`),
-  addAgentNote: (projectKey: string, note: string) =>
-    request<AgentNote>(`/projects/${projectKey}/agent-notes`, {
-      method: 'POST',
-      body: jsonBody({ body: note }),
-    }),
-  deleteAgentNote: (id: string) =>
-    request<{ ok: boolean }>(`/agent-notes/${id}`, { method: 'DELETE' }),
 
   listColumns: (projectKey: string) => request<Board>(`/projects/${projectKey}/columns`),
   createColumn: (projectKey: string, input: ColumnInput) =>

@@ -38,6 +38,9 @@ EXPECTED_TOOLS = {
     "list_skills",
     "read_skill",
     "download_skill",
+    "list_docs",
+    "read_doc",
+    "write_doc",
     "list_vault",
     "read_activity",
     "day_report",
@@ -795,45 +798,214 @@ async def test_download_skill_names_the_skills_there_are(server: MCPServer) -> N
     assert "board-tidy.md, release-kit.zip" in result.text
 
 
-# --- The scratchpad ----------------------------------------------------------
+# --- Docs --------------------------------------------------------------------
 
 
-async def test_the_instructions_say_to_read_the_scratchpad_first_and_write_as_you_go(
+async def test_the_instructions_say_to_read_the_docs_first_and_write_as_you_go(
     server: MCPServer,
 ) -> None:
     """The ask has to be in what every client is sent, not only in a README —
     and inside the part of it a client actually shows. Claude Code cuts the
-    instructions off at 2048 characters; this paragraph used to start at 2047,
-    which is why agents only kept the scratchpad when somebody reminded them."""
+    instructions off at 2048 characters; the scratchpad's paragraph once
+    started at 2047, which is why agents only kept it when reminded."""
     seen = " ".join((server.instructions or "")[:INSTRUCTIONS_SEEN].split())
-    assert "call `read_scratchpad` for its project" in seen
-    assert "write it with `note_learned`. Then, not at the end" in seen
-    assert "the server refuses a line that says what one already there says" in seen
+    assert "`get_task` hands you the docs the work needs" in seen
+    assert "`read_doc` the ones that bear on the work before you start" in seen
+    assert "title `learned.md`, `append` true and one `- ` line. Then, not at the end" in seen
+    assert "topics are made by people, never agents" in seen
     tools = {tool.name: tool.description or "" for tool in await server.list_tools()}
-    assert "Call it first whenever you are given a card" in tools["read_scratchpad"]
-    assert "the moment you learn it" in tools["note_learned"]
-    assert "read_scratchpad" in tools["get_task"]
+    assert "read_scratchpad" not in tools and "note_learned" not in tools
+    assert "read_doc before you start" in tools["get_task"]
+    assert "the moment you learn it" in tools["write_doc"]
 
 
-async def test_a_line_already_on_the_scratchpad_comes_back_as_its_refusal(
+async def test_get_task_hands_over_the_docs_the_card_needs(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "get_task", task="ATL-2")
+
+    assert not result.is_error
+    assert result.data["docs"]["docs"][0]["probability"] == 0.82
+    assert recorder.count("GET", "/tasks/ATL-2/docs") == 1
+
+
+async def test_get_task_can_leave_the_docs_out(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "get_task", task="ATL-2", include_docs=False)
+
+    assert "docs" not in result.data
+    assert recorder.count("GET", "/tasks/ATL-2/docs") == 0
+
+
+async def test_a_card_is_still_handed_over_when_its_docs_fail(
     make_server: Callable[..., MCPServer],
 ) -> None:
-    """The model is told which line it repeated, so it can move on rather than rephrase."""
     server = make_server(
         overrides={
-            ("POST", "/projects/ATL/agent-notes"): httpx.Response(
-                409,
+            ("GET", "/tasks/ATL-2/docs"): httpx.Response(
+                500, json={"error": {"code": "internal_error", "message": "boom", "details": {}}}
+            )
+        }
+    )
+
+    result = await call(server, "get_task", task="ATL-2")
+
+    assert not result.is_error
+    assert result.data["task"]["reference"] == "ATL-2"
+    assert "error" in result.data["docs"]
+
+
+async def test_list_docs_returns_the_tree(server: MCPServer) -> None:
+    result = await call(server, "list_docs", project="ATL")
+
+    assert not result.is_error
+    assert [part["label"] for part in result.data["docs"]["sections"]] == [
+        "Product",
+        "Engineering",
+    ]
+
+
+async def test_read_doc_by_path(server: MCPServer, recorder: fake_api.Recorder) -> None:
+    result = await call(server, "read_doc", doc="Engineering / MCP / learned.md", project="ATL")
+
+    assert not result.is_error
+    assert result.data["doc"]["topic_name"] == "MCP"
+    assert result.data["truncated"] is False
+    assert recorder.count("GET", f"/docs/{fake_api.LEARNED_ID}") == 1
+
+
+async def test_read_doc_by_a_title_two_topics_share_is_ambiguous(server: MCPServer) -> None:
+    result = await call(server, "read_doc", doc="learned.md", project="ATL")
+
+    assert result.is_error
+    assert "Engineering / MCP / learned.md" in result.text
+    assert "Product / Goals / learned.md" in result.text
+
+
+async def test_read_doc_by_path_needs_the_project(server: MCPServer) -> None:
+    result = await call(server, "read_doc", doc="MCP / learned.md")
+
+    assert result.is_error
+    assert "name the project" in result.text
+
+
+async def test_write_doc_names_the_topic_by_its_section_and_name(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "write_doc",
+        project="ATL",
+        title="learned.md",
+        body="- A fact.",
+        topic="Engineering / MCP",
+        append=True,
+    )
+
+    assert not result.is_error, result.text
+    assert recorder.body("POST", "/projects/ATL/docs") == {
+        "title": "learned.md",
+        "body": "- A fact.",
+        "append": True,
+        "topic_id": fake_api.MCP_TOPIC_ID,
+    }
+
+
+async def test_write_doc_without_a_topic_leaves_it_to_the_server(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "write_doc", project="ATL", title="Retries", body="Three days.")
+
+    assert not result.is_error
+    assert result.data["filed_by"] == "jev"
+    assert "topic_id" not in recorder.body("POST", "/projects/ATL/docs")
+
+
+async def test_write_doc_refuses_a_topic_that_is_not_there(server: MCPServer) -> None:
+    """Agents cannot make topics, and are told so rather than left to try."""
+    result = await call(server, "write_doc", project="ATL", title="T", body="B", topic="Deployment")
+
+    assert result.is_error
+    assert "Topics are made by people, not agents" in result.text
+    assert "Engineering / MCP" in result.text
+
+
+async def test_an_unsure_filing_lists_the_topics_in_the_message(
+    make_server: Callable[..., MCPServer],
+) -> None:
+    server = make_server(
+        overrides={
+            ("POST", "/projects/ATL/docs"): httpx.Response(
+                422,
                 json={
                     "error": {
-                        "code": "conflict",
-                        "message": "That is already on the scratchpad: 'Run pytest from backend/.'",
-                        "details": {"note_id": "n1", "body": "Run pytest from backend/."},
+                        "code": "topic_unclear",
+                        "message": "jev is not sure where this belongs (confidence 0.41), "
+                        "so name a topic. Its ranking is attached.",
+                        "details": {
+                            "topics": [
+                                {
+                                    "id": "t1",
+                                    "section": "Engineering",
+                                    "name": "MCP",
+                                    "probability": 0.41,
+                                },
+                                {
+                                    "id": "t2",
+                                    "section": "Product",
+                                    "name": "Goals",
+                                    "probability": 0.3,
+                                },
+                            ]
+                        },
                     }
                 },
             )
         }
     )
-    result = await call(server, "note_learned", project="ATL", note="run pytest from backend")
+
+    result = await call(server, "write_doc", project="ATL", title="Retries", body="…")
+
     assert result.is_error
-    assert result.text.startswith("That is already on the scratchpad")
-    assert result.data["error"]["details"]["body"] == "Run pytest from backend/."
+    assert "Topics: Engineering / MCP (0.41); Product / Goals (0.30)" in result.text
+    assert result.data["error"]["code"] == "topic_unclear"
+
+
+async def test_write_doc_appends_to_a_named_doc_through_the_server(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "write_doc",
+        project="ATL",
+        doc=fake_api.LEARNED_ID,
+        body="- Another fact.",
+        append=True,
+    )
+
+    assert not result.is_error, result.text
+    assert recorder.body("POST", f"/projects/{fake_api.PROJECT_ID}/docs") == {
+        "title": "learned.md",
+        "topic_id": fake_api.MCP_TOPIC_ID,
+        "body": "- Another fact.",
+        "append": True,
+    }
+
+
+async def test_write_doc_replaces_a_named_docs_body(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server, "write_doc", project="ATL", doc="MCP / learned.md", body="- Rewritten."
+    )
+
+    assert not result.is_error, result.text
+    assert recorder.body("PATCH", f"/docs/{fake_api.LEARNED_ID}") == {"body": "- Rewritten."}
+
+
+async def test_write_doc_needs_a_title_or_a_doc(server: MCPServer) -> None:
+    result = await call(server, "write_doc", project="ATL", body="Orphan.")
+
+    assert result.is_error
+    assert "Give the doc a title" in result.text

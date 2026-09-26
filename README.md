@@ -363,14 +363,18 @@ Leave `--assignee` off and the card is yours: a card goes to whoever wrote it
 unless it names somebody else, and `Agent` is the name to give it when the work
 is for a machine.
 
-Each project carries what its agents work from, under its **Agents** tab: skills
-you upload for them to follow, and a scratchpad they write one-line findings back
-onto. `note_learned` is how an agent leaves something it worked out the hard way,
-capped at 280 characters so the next one reads the pad rather than skimming it.
-The MCP instructions and the `/work` command tell an agent to read the pad before
-it starts on a card and to write to it as it learns, not at the end; a line that
-says what one already there says is refused, so the pad stays a list of facts
-rather than a log.
+Each project carries what its agents work from. Under its **Agents** tab, skills
+you upload for them to follow. Under its **Docs** tab, the project's markdown —
+section → topic → doc — which agents read and write over MCP with `list_docs`,
+`read_doc` and `write_doc`. `get_task` hands an agent the docs its card needs,
+ranked by [jev](https://api.typesafe.ai) (TypeSafe's System One model): one
+yes/no question per doc about the card, the likely ones listed with their
+probabilities. What an agent works out the hard way goes onto the `learned.md`
+of the topic it belongs to, one `- ` line at a time, as it learns it — the MCP
+instructions and the `/work` command both say so. A doc written without a topic
+is filed by jev when it is confident and refused with the topics to choose from
+when it is not; agents never create topics. Without `JEV_API_KEY` on the server
+an agent is handed every doc and names its topics itself.
 
 ### Giving an agent the project's skills
 

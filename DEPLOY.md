@@ -62,7 +62,8 @@ overwrite them:
 
 ```
 ~/cylist-prod/
-  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY
+  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
+                 JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   backups/       the dumps deploy.sh leaves behind
 ```
@@ -76,6 +77,11 @@ Both files are `chmod 600`. Everything that is not actually secret —
 > out of the backups, so keep a copy somewhere you can recover it.
 
 Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
+`JEV_API_KEY` is TypeSafe's, for jev (see backend/.env.example); without it the
+server still runs, and agents are handed every doc rather than the ranked few.
+Set it before deploying 0033, too: that migration asks jev which topic each old
+scratchpad note belongs under, and without a key files them all under
+*Engineering → Agents*.
 
 ### The runner
 
@@ -405,7 +411,8 @@ decrypt, which is the trade.
 
 ```
 ~/cylist-staging/
-  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY
+  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
+                 JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   backups/       the dumps staging deploys leave behind
 ```
@@ -472,7 +479,8 @@ production without touching what `"dev"` means anywhere else.
 
 ```
 ~/cylist-dev/
-  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY
+  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
+                 JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   backups/       the dumps dev deploys leave behind
 ```

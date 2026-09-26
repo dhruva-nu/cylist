@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Request
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -112,6 +112,32 @@ class Settings(BaseSettings):
     """
 
     vault_key: str = ""
+
+    # --- Jev ----------------------------------------------------------------
+    # TypeSafe's System One model, asked which docs a card needs and where a
+    # new doc belongs — see app/services/doc_judge.py. Here rather than in the
+    # MCP server, so the key lives in one place and every client gets the same
+    # answer.
+    jev_api_key: str = Field(
+        default="", validation_alias=AliasChoices("CYLIST_JEV_API_KEY", "JEV_API_KEY")
+    )
+    """Read as ``JEV_API_KEY``, the name the SDK itself uses, as well as the
+    prefixed one. Empty means jev is not asked at all: an agent is handed the
+    whole doc tree, and a doc written without a topic is refused with the
+    topics to choose from — the same answers as when jev is down."""
+
+    jev_model: str = "jev-latest"
+
+    jev_timeout_seconds: float = Field(default=10.0, gt=0)
+    """Per attempt. Short, because a relevance check sits in front of an agent
+    reading its card, and the whole tree is a better answer than a long wait."""
+
+    doc_relevance_threshold: float = Field(default=0.5, ge=0, le=1)
+    """How likely jev must think a card needs a doc before it is listed."""
+
+    doc_filing_confidence: float = Field(default=0.6, ge=0, le=1)
+    """How sure jev must be of a topic before a doc is filed under it unasked.
+    Below this the writer is asked to pick, with jev's ranking to pick from."""
 
     # --- HTTP -------------------------------------------------------------
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])

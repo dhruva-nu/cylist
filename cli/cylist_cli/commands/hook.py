@@ -136,17 +136,18 @@ argument-hint: <TASK-REF | off>
 This session is now bound to Cylist task $ARGUMENTS by the Cylist hook
 (the board shows it as working / waiting / done automatically; you do not
 need to report progress). If $ARGUMENTS is `off`, just acknowledge.
-Otherwise fetch the task with `get_task`, then `read_scratchpad` for its
-project (the key before the dash) and act on what it says, restate the task
-in two lines, and begin. As you work, whenever you find something the next
-agent would otherwise have to find again, and it is not already in the code,
-the README or the scratchpad, write it with `note_learned` straight away:
-one short, factual sentence, not a progress report.
+Otherwise fetch the task with `get_task`, which lists the project's docs the
+card needs; `read_doc` the ones that bear on the work and act on what they
+say, restate the task in two lines, and begin. As you work, whenever you find
+something the next agent would otherwise have to find again, and it is not
+already in the code, the README or the docs, add it straight away with
+`write_doc` — title `learned.md`, `append` true, one `- ` line: a short,
+factual sentence, not a progress report.
 """
 
 BRIEFED_STARTS = frozenset({"startup", "clear", "compact"})
 """The ``SessionStart`` sources that begin with no memory of the card, and so
-are told what it is and to read the scratchpad. ``resume`` is not one: the
+are told what it is and to read its docs. ``resume`` is not one: the
 transcript it resumes already holds the brief it was given the first time."""
 
 
@@ -161,12 +162,13 @@ def working_brief(ref: str) -> str:
     key = ref.split("-", 1)[0]
     return (
         f"This session is bound to Cylist task {ref}; the board shows its progress "
-        "automatically. Before you start on it, call get_task for "
-        f"{ref} and read_scratchpad for {key}, and act on what the scratchpad says. "
-        "As you work, whenever you find something the next agent would otherwise "
-        "have to find again, and it is not already in the code, the README or the "
-        f"scratchpad, write it with note_learned for {key} straight away: one short, "
-        "factual sentence, not a progress report."
+        f"automatically. Before you start on it, call get_task for {ref}, which "
+        "lists the project's docs the card needs, and read_doc the ones that bear "
+        "on the work; act on what they say. As you work, whenever you find "
+        "something the next agent would otherwise have to find again, and it is "
+        "not already in the code, the README or the docs, add it straight away with "
+        f"write_doc for {key} — title learned.md, append true, one '- ' line: a "
+        "short, factual sentence, not a progress report."
     )
 
 
@@ -429,7 +431,7 @@ class Hook:
         _save_state(self.session_id, self.state)
 
     def _brief(self) -> None:
-        """Put the card, and the scratchpad, in front of the model."""
+        """Put the card, and its docs, in front of the model."""
         if self.task:
             self._hook_specific_output()["additionalContext"] = working_brief(self.task)
 

@@ -1,4 +1,4 @@
-"""Skills an agent can be given, and the scratchpad it writes on."""
+"""Skills an agent can be given."""
 
 from __future__ import annotations
 
@@ -16,8 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db import Database
-from app.models import AgentNote, Blob, Skill
-from app.models.agent import NOTE_MAX_LENGTH
+from app.models import Blob, Skill
 from tests.conftest import client_for, sign_in
 from tests.test_skill_folders import zipped
 
@@ -396,133 +395,16 @@ class TestASkillAsAFolder:
         assert (await project.get(f"/skills/{UNKNOWN_ID}/folder")).status_code == 404
 
 
-class TestTheScratchpad:
-    async def test_writes_a_line(self, project: AsyncClient) -> None:
-        response = await project.post(
-            "/projects/ATL/agent-notes",
-            json={"body": "Staging deploys skip migrations when two branches share a revision."},
-        )
-
-        assert response.status_code == 201
-        body = response.json()
-        assert body["body"].startswith("Staging deploys skip migrations")
-        assert body["author_label"], "a note says who wrote it"
-
-    async def test_reads_newest_first(self, project: AsyncClient) -> None:
-        for line in ("learned first", "learned second", "learned third"):
-            await project.post("/projects/ATL/agent-notes", json={"body": line})
-
-        listing = (await project.get("/projects/ATL/agent-notes")).json()
-
-        assert [note["body"] for note in listing] == [
-            "learned third",
-            "learned second",
-            "learned first",
-        ]
-
-    async def test_folds_a_wrapped_note_onto_one_line(self, project: AsyncClient) -> None:
-        response = await project.post(
-            "/projects/ATL/agent-notes",
-            json={"body": "  the board\nrefuses a hold\n\nwithout a reason  "},
-        )
-
-        assert response.json()["body"] == "the board refuses a hold without a reason"
-
-    async def test_refuses_an_essay(self, project: AsyncClient) -> None:
-        response = await project.post(
-            "/projects/ATL/agent-notes", json={"body": "x" * (NOTE_MAX_LENGTH + 1)}
-        )
-
-        assert response.status_code == 422
-
-    async def test_refuses_a_blank_note(self, project: AsyncClient) -> None:
-        response = await project.post("/projects/ATL/agent-notes", json={"body": "   \n  "})
-
-        assert response.status_code == 422
-
-    async def test_the_database_refuses_a_blank_note_too(
-        self, project: AsyncClient, session: AsyncSession
-    ) -> None:
-        """The cap is a check constraint, so no client is the only thing enforcing it."""
-        project_id = UUID((await project.get("/projects/ATL")).json()["id"])
-
-        session.add(AgentNote(project_id=project_id, body="   ", author_label="owner"))
-
-        with pytest.raises(IntegrityError):
-            await session.flush()
-        await session.rollback()
-
-    async def test_refuses_a_line_already_on_it(self, project: AsyncClient) -> None:
-        first = (
-            await project.post(
-                "/projects/ATL/agent-notes", json={"body": "Run `uv run pytest` from backend/."}
-            )
-        ).json()
-
-        response = await project.post(
-            "/projects/ATL/agent-notes", json={"body": "run uv run pytest  from Backend"}
-        )
-
-        assert response.status_code == 409
-        error = response.json()["error"]
-        assert error["details"]["note_id"] == first["id"], "it names the line that is there"
-        assert len((await project.get("/projects/ATL/agent-notes")).json()) == 1
-
-    async def test_a_different_fact_is_not_a_duplicate(self, project: AsyncClient) -> None:
-        await project.post("/projects/ATL/agent-notes", json={"body": "Run pytest from backend/."})
-
-        response = await project.post(
-            "/projects/ATL/agent-notes", json={"body": "Run vitest from frontend/."}
-        )
-
-        assert response.status_code == 201
-
-    async def test_the_same_line_may_be_on_two_projects(self, project: AsyncClient) -> None:
-        await project.post("/projects", json=HERMES)
-        await project.post("/projects/ATL/agent-notes", json={"body": "Deploys run on Fridays."})
-
-        response = await project.post(
-            "/projects/HRM/agent-notes", json={"body": "Deploys run on Fridays."}
-        )
-
-        assert response.status_code == 201
-
-    async def test_a_line_rubbed_off_may_be_written_again(self, project: AsyncClient) -> None:
-        note = (await project.post("/projects/ATL/agent-notes", json={"body": "true again"})).json()
-        await project.delete(f"/agent-notes/{note['id']}")
-
-        response = await project.post("/projects/ATL/agent-notes", json={"body": "true again"})
-
-        assert response.status_code == 201
-
-    async def test_rubs_a_line_off(self, project: AsyncClient) -> None:
-        note = (
-            await project.post("/projects/ATL/agent-notes", json={"body": "no longer true"})
-        ).json()
-
-        assert (await project.delete(f"/agent-notes/{note['id']}")).status_code == 200
-
-        assert (await project.get("/projects/ATL/agent-notes")).json() == []
-
-    async def test_a_scratchpad_belongs_to_its_project(self, project: AsyncClient) -> None:
-        await project.post("/projects", json=HERMES)
-        await project.post("/projects/ATL/agent-notes", json={"body": "an atlas fact"})
-
-        assert (await project.get("/projects/HRM/agent-notes")).json() == []
-
-
 class TestTheHubCounts:
-    async def test_reports_skills_and_notes(self, project: AsyncClient) -> None:
+    async def test_reports_skills(self, project: AsyncClient) -> None:
         await upload(project, "triage.md", content_of("counted"))
-        await project.post("/projects/ATL/agent-notes", json={"body": "a counted fact"})
 
         summary = (await project.get("/projects/ATL/summary")).json()
 
         assert summary["skill_count"] == 1
-        assert summary["agent_note_count"] == 1
+        assert "agent_note_count" not in summary, "the scratchpad is retired"
 
     async def test_reports_nothing_on_an_empty_project(self, project: AsyncClient) -> None:
         summary = (await project.get("/projects/ATL/summary")).json()
 
         assert summary["skill_count"] == 0
-        assert summary["agent_note_count"] == 0

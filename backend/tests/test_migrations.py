@@ -1790,3 +1790,181 @@ class TestDocsFiledBySectionAndTopic:
             text("SELECT count(*) FROM pg_tables WHERE tablename IN ('doc', 'doc_topic')")
         )
         assert tables.scalar() == 0
+
+
+# --- 0033: the scratchpad's notes become learned.md docs ---------------------
+
+WITH_SCRATCHPAD = "0032"
+WITHOUT_SCRATCHPAD = "0033"
+
+
+@pytest.fixture
+def no_jev(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No key configured, whatever the machine running the tests has."""
+    monkeypatch.setenv("JEV_API_KEY", "")
+    monkeypatch.setenv("CYLIST_JEV_API_KEY", "")
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def fake_jev(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """A key, and jev's client answering "Engineering / MCP" to every note.
+
+    Patched on the class, since the migration builds its own client in the
+    thread Alembic runs in. Returns the states it was asked about.
+    """
+    from jev import ChoiceAnswer, Result, Usage
+
+    monkeypatch.setenv("JEV_API_KEY", "test-key")
+    monkeypatch.setenv("CYLIST_JEV_API_KEY", "test-key")
+    get_settings.cache_clear()
+    asked: list[Any] = []
+
+    def ask(self: Any, state: Any, *questions: Any, model: Any = None) -> Result:
+        (question,) = questions
+        asked.append((state, question.labels()))
+        probabilities = dict.fromkeys(question.labels(), 0.0)
+        probabilities["Engineering / MCP"] = 1.0
+        return Result(
+            {"topic": ChoiceAnswer("Engineering / MCP", probabilities, 0.9)}, Usage(1), "jev"
+        )
+
+    monkeypatch.setattr("jev.Jev.ask", ask)
+    return asked
+
+
+async def _a_project(connection: AsyncConnection, key: str) -> str:
+    row = await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), :key, :key, '', '#1D7D46', 0) RETURNING id"
+        ),
+        {"key": key},
+    )
+    return str(row.scalar_one())
+
+
+async def _a_note(connection: AsyncConnection, project_id: str, body: str, when: datetime) -> None:
+    await connection.execute(
+        text(
+            "INSERT INTO agent_note (id, project_id, body, author_label, created_at)"
+            " VALUES (gen_random_uuid(), :project, :body, 'claude-code prod', :when)"
+        ),
+        {"project": project_id, "body": body, "when": when},
+    )
+
+
+async def _learned(connection: AsyncConnection) -> list[tuple[str, str, str, str]]:
+    rows = await connection.execute(
+        text(
+            "SELECT project.key, doc_topic.section, doc_topic.name, doc.body FROM doc"
+            " JOIN doc_topic ON doc_topic.id = doc.topic_id"
+            " JOIN project ON project.id = doc.project_id"
+            " WHERE doc.title = 'learned.md' ORDER BY project.key, doc_topic.name"
+        )
+    )
+    return [tuple(row) for row in rows]
+
+
+class TestRetiringTheScratchpad:
+    async def test_jev_files_each_note_into_its_topics_learned_md(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        fake_jev: list[Any],
+    ) -> None:
+        await migrate("0031")
+        cylist = await _a_project(connection, "CYLIST")
+        await migrate(WITH_SCRATCHPAD)  # seeds CYLIST's eight topics
+        await _a_note(connection, cylist, "Later fact.", datetime(2026, 9, 25, tzinfo=UTC))
+        await _a_note(connection, cylist, "Earlier fact.", datetime(2026, 9, 24, tzinfo=UTC))
+
+        await migrate(WITHOUT_SCRATCHPAD)
+
+        assert await _learned(connection) == [
+            (
+                "CYLIST",
+                "engineering",
+                "MCP",
+                "- Earlier fact. — claude-code prod, 2026-09-24\n"
+                "- Later fact. — claude-code prod, 2026-09-25",
+            )
+        ]
+        state, labels = fake_jev[0]
+        assert state == {"doc": {"title": "learned.md", "body": "Earlier fact."}}
+        assert "Engineering / MCP" in labels and "Product / Goals" in labels
+
+    async def test_adds_to_a_learned_md_already_there(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        fake_jev: list[Any],
+    ) -> None:
+        await migrate("0031")
+        cylist = await _a_project(connection, "CYLIST")
+        await migrate(WITH_SCRATCHPAD)
+        await connection.execute(
+            text(
+                "INSERT INTO doc (id, project_id, topic_id, title, body, position)"
+                " SELECT gen_random_uuid(), project_id, id, 'learned.md', '- Already here.', 0"
+                " FROM doc_topic WHERE name = 'MCP'"
+            )
+        )
+        await _a_note(connection, cylist, "New fact.", datetime(2026, 9, 24, tzinfo=UTC))
+
+        await migrate(WITHOUT_SCRATCHPAD)
+
+        ((*_, body),) = await _learned(connection)
+        assert body == "- Already here.\n- New fact. — claude-code prod, 2026-09-24"
+
+    async def test_without_jev_the_notes_go_to_an_agents_topic(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        no_jev: None,
+    ) -> None:
+        await migrate("0031")
+        cylist = await _a_project(connection, "CYLIST")
+        await migrate(WITH_SCRATCHPAD)
+        bare = await _a_project(connection, "ATL")  # no topics at all
+        await _a_note(connection, cylist, "A fact.", datetime(2026, 9, 24, tzinfo=UTC))
+        await _a_note(connection, bare, "Another.", datetime(2026, 9, 24, tzinfo=UTC))
+
+        await migrate(WITHOUT_SCRATCHPAD)
+
+        assert [(key, section, name) for key, section, name, _ in await _learned(connection)] == [
+            ("ATL", "engineering", "Agents"),
+            ("CYLIST", "engineering", "Agents"),
+        ]
+        position = await connection.execute(
+            text(
+                "SELECT doc_topic.position FROM doc_topic JOIN project"
+                " ON project.id = doc_topic.project_id"
+                " WHERE project.key = 'CYLIST' AND doc_topic.name = 'Agents'"
+            )
+        )
+        assert position.scalar_one() == 5, "at the bottom of Engineering's five"
+
+    async def test_drops_the_table_and_the_undo_brings_it_back_empty(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+        no_jev: None,
+    ) -> None:
+        await migrate("0031")
+        cylist = await _a_project(connection, "CYLIST")
+        await migrate(WITH_SCRATCHPAD)
+        await _a_note(connection, cylist, "A fact.", datetime(2026, 9, 24, tzinfo=UTC))
+
+        await migrate(WITHOUT_SCRATCHPAD)
+        gone = await connection.execute(
+            text("SELECT count(*) FROM pg_tables WHERE tablename = 'agent_note'")
+        )
+        assert gone.scalar() == 0
+
+        await rewind(WITH_SCRATCHPAD)
+
+        notes = await connection.execute(text("SELECT count(*) FROM agent_note"))
+        assert notes.scalar() == 0
+        assert len(await _learned(connection)) == 1, "the filed notes stay where they went"

@@ -172,7 +172,6 @@ async def get_summary(
         vault_tree_count=stored.trees,
         vault_secret_count=stored.secrets,
         skill_count=agent_material.skills,
-        agent_note_count=agent_material.notes,
     )
 
 
