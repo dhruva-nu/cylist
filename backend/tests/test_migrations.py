@@ -1679,3 +1679,114 @@ class TestEnumsTheDatabaseChecks:
         await connection.execute(text("UPDATE task SET status = 'done'"))
         rows = await connection.execute(text("SELECT status FROM task"))
         assert rows.scalar() == "done"
+
+
+# --- Docs filed by section and topic ---------------------------------------
+
+BEFORE_DOCS = "0031"
+WITH_DOCS = "0032"
+
+
+async def _permissions_of(connection: AsyncConnection, role: str | None) -> set[str]:
+    if role is None:
+        rows = await connection.execute(
+            text("SELECT permission FROM project_permission WHERE role_id IS NULL")
+        )
+    else:
+        rows = await connection.execute(
+            text(
+                "SELECT permission FROM project_permission"
+                " JOIN project_role ON project_role.id = project_permission.role_id"
+                " WHERE project_role.name = :name"
+            ),
+            {"name": role},
+        )
+    return set(rows.scalars())
+
+
+async def _grant(connection: AsyncConnection, role: str | None, *permissions: str) -> None:
+    for permission in permissions:
+        await connection.execute(
+            text(
+                "INSERT INTO project_permission (id, project_id, role_id, permission)"
+                " SELECT gen_random_uuid(), project.id,"
+                "  (SELECT id FROM project_role WHERE name = :role), :permission"
+                " FROM project WHERE project.key = 'ATL'"
+            ),
+            {"role": role, "permission": permission},
+        )
+
+
+class TestDocsFiledBySectionAndTopic:
+    async def test_whoever_could_change_files_can_write_docs(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """A new word in a grant-shaped vocabulary must not lock out everybody
+        who was doing the nearest thing to it the day before."""
+        await migrate(BEFORE_DOCS)
+        await seed_a_board_with_roles(connection)
+        await _grant(connection, "Reviewer", "tasks", "files")
+        await _grant(connection, "QA", "comments")
+        await _grant(connection, None, "files")
+
+        await migrate(WITH_DOCS)
+
+        assert await _permissions_of(connection, "Reviewer") == {"tasks", "files", "docs"}
+        assert await _permissions_of(connection, "QA") == {"comments"}
+        assert await _permissions_of(connection, None) == {"files", "docs"}
+
+    async def test_cylist_starts_with_its_topics_and_nobody_else_does(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_DOCS)
+        for key in ("CYLIST", "ATL"):
+            await connection.execute(
+                text(
+                    "INSERT INTO project (id, key, name, description, colour, task_counter)"
+                    " VALUES (gen_random_uuid(), :key, :key, '', '#1D7D46', 0)"
+                ),
+                {"key": key},
+            )
+
+        await migrate(WITH_DOCS)
+
+        rows = await connection.execute(
+            text(
+                "SELECT project.key, doc_topic.section, doc_topic.name FROM doc_topic"
+                " JOIN project ON project.id = doc_topic.project_id"
+                " ORDER BY project.key, doc_topic.section, doc_topic.position"
+            )
+        )
+        assert [tuple(row) for row in rows] == [
+            ("CYLIST", "engineering", "MCP"),
+            ("CYLIST", "engineering", "CLI"),
+            ("CYLIST", "engineering", "APIs"),
+            ("CYLIST", "engineering", "FE"),
+            ("CYLIST", "engineering", "DB schema"),
+            ("CYLIST", "product", "Goals"),
+            ("CYLIST", "product", "Tasks"),
+            ("CYLIST", "product", "Agent docs"),
+        ]
+
+    async def test_the_undo_takes_the_tables_and_the_grant_away(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(BEFORE_DOCS)
+        await seed_a_board_with_roles(connection)
+        await _grant(connection, None, "files")
+        await migrate(WITH_DOCS)
+
+        await rewind(BEFORE_DOCS)
+
+        assert await _permissions_of(connection, None) == {"files"}
+        tables = await connection.execute(
+            text("SELECT count(*) FROM pg_tables WHERE tablename IN ('doc', 'doc_topic')")
+        )
+        assert tables.scalar() == 0

@@ -14,6 +14,7 @@ from app.routers import (
     agents,
     auth,
     columns,
+    docs,
     files,
     goals,
     health,
@@ -54,6 +55,7 @@ api_router.include_router(goals.router)
 # After `tasks` too, for the same `resolved_task` every task path shares.
 api_router.include_router(agent_sessions.router)
 api_router.include_router(files.router)
+api_router.include_router(docs.router)
 # After `files`, whose blob store and `clean_name` a skill upload shares.
 api_router.include_router(agents.router)
 api_router.include_router(activity.router)

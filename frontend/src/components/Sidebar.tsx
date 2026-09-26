@@ -2,7 +2,7 @@
  * The left-hand sidebar: the way around a project, and the things you consult
  * while working in it.
  *
- * Every one of a project's areas is at the top — the four the bar carries as
+ * Every one of a project's areas is at the top — the five the bar carries as
  * tabs, and Roles, Files and Vault, which it does not; see `ProjectNav.tsx`.
  * Under them is the other kind of thing — a preference to
  * set, a list to glance at, a report to read off — none of which is worth

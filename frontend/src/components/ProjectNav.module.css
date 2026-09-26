@@ -1,5 +1,5 @@
 /*
- * A project's areas: the bar's four tabs, and the sidebar's full list in its
+ * A project's areas: the bar's five tabs, and the sidebar's full list in its
  * two widths. See the note at the top of `ProjectNav.tsx` for which shows
  * what, and where.
  */
@@ -32,7 +32,7 @@
 }
 
 /*
- * Under 720px the wordmark, four tabs and your mark do not fit one row, and
+ * Under 720px the wordmark, five tabs and your mark do not fit one row, and
  * the tabs used to be hidden outright here — which left a phone no way
  * between a project's areas but the page you were on. They take a row of
  * their own under the other two instead (the bar wraps; see `.bar` in
@@ -137,7 +137,7 @@
 }
 
 /* Stacked, the rail is a strip across the top of a phone. Seven areas do not
-   fit across it, and the bar's four tabs sit in their own row just below — so
+   fit across it, and the bar's five tabs sit in their own row just below — so
    the strip goes back to its handle and its count, and the whole list is the
    open panel's. */
 @media (max-width: 899px) {
