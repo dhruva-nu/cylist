@@ -161,6 +161,22 @@
   font-size: 12.5px;
 }
 
+/* Connecting Claude Code: the name box takes the spare width, the button sits
+   beside it. */
+.compose {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.compose input {
+  flex: 1;
+  min-width: 0;
+}
+
 .confirm {
   display: flex;
   gap: 8px;
