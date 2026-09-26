@@ -1,0 +1,137 @@
+/*
+ * Prose, as a doc is read. Body type for the words and the UI face for the
+ * headings, as every other page draws the two; a measure of about seventy
+ * characters, because a doc is reading matter even on a roomy page.
+ */
+
+.prose {
+  max-width: 72ch;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15.5px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  margin: 1.6em 0 0.5em;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  line-height: 1.25;
+}
+
+.prose h1 {
+  font-size: 26px;
+}
+
+.prose h2 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 20px;
+}
+
+.prose h3 {
+  font-size: 17px;
+}
+
+.prose h4 {
+  font-size: 15px;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre,
+.prose table {
+  margin: 0 0 1em;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.5em;
+}
+
+.prose li + li {
+  margin-top: 0.25em;
+}
+
+/* GFM task lists: the checkbox sits where the bullet was. */
+.prose li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.3em;
+}
+
+.prose a {
+  color: var(--link);
+}
+
+.prose blockquote {
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--line-2);
+  color: var(--ink-2);
+}
+
+.prose code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.prose pre {
+  overflow-x: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2);
+  line-height: 1.5;
+}
+
+.prose pre code {
+  padding: 0;
+  background: none;
+  font-size: 13px;
+}
+
+/* A wide table scrolls inside itself rather than pushing the page sideways. */
+.prose table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.prose th,
+.prose td {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.prose th {
+  background: var(--paper-2);
+  font-family: var(--font-ui);
+}
+
+.prose hr {
+  margin: 1.8em 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.prose img {
+  max-width: 100%;
+}

@@ -10,6 +10,7 @@ import { Shell } from './components/Shell'
 import { Agents } from './routes/Agents'
 import { GoalPage } from './routes/GoalPage'
 import { Home } from './routes/Home'
+import { ProjectDocs } from './routes/ProjectDocs'
 import { ProjectBoard } from './routes/ProjectBoard'
 import { ProjectFiles } from './routes/ProjectFiles'
 import { ProjectGoals } from './routes/ProjectGoals'
@@ -71,6 +72,17 @@ const projectFilesRoute = createRoute({
   component: ProjectFiles,
 })
 
+// `?doc=` so a doc can be linked to — pasted into a card or a chat — and open
+// on the doc rather than on the tree it is somewhere in. Anything else in the
+// query string is dropped, as the board drops it.
+const projectDocsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/p/$projectKey/docs',
+  component: ProjectDocs,
+  validateSearch: (search: Record<string, unknown>): { doc?: string } =>
+    typeof search.doc === 'string' && search.doc ? { doc: search.doc } : {},
+})
+
 const projectPeopleRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/p/$projectKey/people',
@@ -107,6 +119,7 @@ const routeTree = rootRoute.addChildren([
   projectGoalsRoute,
   goalRoute,
   projectFilesRoute,
+  projectDocsRoute,
   projectVaultRoute,
   projectPeopleRoute,
   projectRolesRoute,

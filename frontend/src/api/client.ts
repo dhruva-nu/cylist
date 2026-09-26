@@ -162,6 +162,7 @@ export type Permission =
   | 'goal_owner'
   | 'board'
   | 'files'
+  | 'docs'
   | 'vault'
   | 'vault_reveal'
   | 'people'
@@ -296,6 +297,60 @@ export interface GoalProgress {
   blocked: number
   /** Open cards deliberately paused. */
   on_hold: number
+}
+
+/** One of the two headings every project's docs are filed under. Fixed. */
+export type DocSection = 'product' | 'engineering'
+
+/** A doc as the tree lists it — everything but its markdown. */
+export interface DocListing {
+  id: string
+  topic_id: string
+  title: string
+  position: number
+  /** Who wrote it first, most often an agent. Null when nobody in the directory did. */
+  author: Person | null
+  created_at: string
+  updated_at: string
+}
+
+/** One doc, its markdown included, and where it is filed. */
+export interface Doc extends DocListing {
+  project_id: string
+  section: DocSection
+  topic_name: string
+  body: string
+}
+
+export interface DocTopic {
+  id: string
+  project_id: string
+  section: DocSection
+  name: string
+  position: number
+  doc_count: number
+}
+
+export interface DocTopicWithDocs extends DocTopic {
+  docs: DocListing[]
+}
+
+/**
+ * A project's docs as the Docs page draws them: both sections, always, in the
+ * same order, each with its topics and their docs. No bodies.
+ */
+export interface DocTree {
+  sections: { section: DocSection; label: string; topics: DocTopicWithDocs[] }[]
+  doc_count: number
+}
+
+export interface DocUpdate {
+  title?: string
+  body?: string
+  /** Move the doc to this topic, on the same project. */
+  topic_id?: string
+  /** Where in its topic, from the top. The bottom when a move leaves it out. */
+  position?: number
 }
 
 /**
@@ -879,23 +934,6 @@ export interface Skill {
   created_at: string
 }
 
-/** One line on a project's agent scratchpad. */
-export interface AgentNote {
-  id: string
-  project_id: string
-  body: string
-  /**
-   * The credential that wrote it — a token's label, or the owner for a
-   * browser session. What tells an agent's line from a person's.
-   */
-  author_label: string
-  added_by: Person | null
-  created_at: string
-}
-
-/** The scratchpad's cap, mirrored from the server so the box can count down. */
-export const NOTE_MAX_LENGTH = 280
-
 export type ItemKind = 'file' | 'link'
 export type ItemSource = 'upload' | 'sharepoint' | 'gdrive' | 'other'
 
@@ -1201,6 +1239,31 @@ export const api = {
   deleteItem: (id: string) => request<{ ok: boolean }>(`/items/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a file's bytes from — used as an anchor's href. */
   downloadUrl: (id: string) => `${API_BASE}/items/${id}/download`,
+  getDocTree: (projectKey: string) => request<DocTree>(`/projects/${projectKey}/docs`),
+  createDocTopic: (projectKey: string, section: DocSection, name: string) =>
+    request<DocTopic>(`/projects/${projectKey}/doc-topics`, {
+      method: 'POST',
+      body: jsonBody({ section, name }),
+    }),
+  renameDocTopic: (topicId: string, name: string) =>
+    request<DocTopic>(`/doc-topics/${topicId}`, { method: 'PATCH', body: jsonBody({ name }) }),
+  deleteDocTopic: (topicId: string) =>
+    request<{ ok: boolean }>(`/doc-topics/${topicId}`, { method: 'DELETE' }),
+  reorderDocTopics: (projectKey: string, section: DocSection, topicIds: string[]) =>
+    request<DocTopic[]>(`/projects/${projectKey}/doc-topics/order`, {
+      method: 'PUT',
+      body: jsonBody({ section, topic_ids: topicIds }),
+    }),
+  getDoc: (docId: string) => request<Doc>(`/docs/${docId}`),
+  createDoc: (topicId: string, title: string, body: string) =>
+    request<Doc>(`/doc-topics/${topicId}/docs`, {
+      method: 'POST',
+      body: jsonBody({ title, body }),
+    }),
+  updateDoc: (docId: string, input: DocUpdate) =>
+    request<Doc>(`/docs/${docId}`, { method: 'PATCH', body: jsonBody(input) }),
+  deleteDoc: (docId: string) => request<{ ok: boolean }>(`/docs/${docId}`, { method: 'DELETE' }),
+
   listSkills: (projectKey: string) => request<Skill[]>(`/projects/${projectKey}/skills`),
   uploadSkill: (projectKey: string, file: File, description?: string, addedBy?: string | null) => {
     const form = new FormData()
@@ -1212,16 +1275,6 @@ export const api = {
   deleteSkill: (id: string) => request<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a skill's bytes from — used as an anchor's href. */
   skillDownloadUrl: (id: string) => `${API_BASE}/skills/${id}/download`,
-
-  listAgentNotes: (projectKey: string) =>
-    request<AgentNote[]>(`/projects/${projectKey}/agent-notes`),
-  addAgentNote: (projectKey: string, note: string) =>
-    request<AgentNote>(`/projects/${projectKey}/agent-notes`, {
-      method: 'POST',
-      body: jsonBody({ body: note }),
-    }),
-  deleteAgentNote: (id: string) =>
-    request<{ ok: boolean }>(`/agent-notes/${id}`, { method: 'DELETE' }),
 
   listColumns: (projectKey: string) => request<Board>(`/projects/${projectKey}/columns`),
   createColumn: (projectKey: string, input: ColumnInput) =>

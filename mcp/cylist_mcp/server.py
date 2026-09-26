@@ -35,40 +35,45 @@ from cylist_mcp.errors import CylistError
 
 VAULT_REVEAL = "vault:reveal"
 
-NOTE_MAX_CHARS = 280
-"""The scratchpad's own cap, restated here so the tool description can say it.
-The server enforces it; a model that knows the number in advance writes one
-sentence rather than a paragraph and a 422."""
-
 SKILL_MAX_CHARS = 40_000
 """How much of a skill `read_skill` will return. A skill is a page of
 instructions; anything past this is not one, and filling a context window
 with it would be the wrong failure."""
 
+DOC_MAX_CHARS = 40_000
+"""How much of a doc `read_doc` will return, for the same reason as a skill."""
+
+LEARNED = "learned.md"
+"""The doc in each topic that agents add what they learn to, one line at a time."""
+
 INSTRUCTIONS_SEEN = 2048
 """How much of the instructions a client can be relied on to show. Claude Code
 cuts them off at this many characters, so what an agent must do on every card
-goes before it; the tests hold the scratchpad to that."""
+goes before it; the tests hold the docs paragraph to that."""
 
 INSTRUCTIONS = """\
 Cylist is a project manager: each project has a Kanban board, a people
 directory, files and a vault of credentials.
 
-Every project has a **scratchpad**: one-line notes that agents before you left
-about it, newest first. Keep it as you go, not only when asked:
+Every project has **docs**: markdown filed as section (Product,
+Engineering) → topic → doc, much of it written by agents before you. Keep
+them as you go, not only when asked:
 
-1. Given a card, call `read_scratchpad` for its project (the key before the
-   dash in `ATL-41`) before you start on the work, and act on what it says.
+1. Given a card, `get_task` hands you the docs the work needs beside it,
+   ranked by how likely each is to matter — or every doc, when they could not
+   be ranked. `read_doc` the ones that bear on the work before you start, and
+   act on what they say. `list_docs` is the whole tree.
 2. The moment you find something the next agent would otherwise have to find
    again — a command that does not work as documented, a constraint nothing
    states, where a thing actually lives — and it is not already in the code,
-   the README or the scratchpad, write it with `note_learned`. Then, not at
-   the end: a session can stop before it gets there. It belongs on the
-   scratchpad even if you also say it in a comment on the card.
-3. One short, factual sentence per fact. Not a progress log — the board
-   already reports that — and not a repeat: the server refuses a line that
-   says what one already there says. If a line has stopped being true, write
-   the correction.
+   the README or the docs, add it to a topic's `learned.md`: `write_doc` with
+   title `learned.md`, `append` true and one `- ` line. Then, not at the end:
+   a session can stop before it gets there. It belongs in the docs even if
+   you also say it in a comment on the card.
+3. One short, factual line per fact. Not a progress log — the board already
+   reports that. Leave `topic` out and the doc is filed for you, or refused
+   with the topics to choose from; topics are made by people, never agents.
+   If a line has stopped being true, write the correction.
 
 Two things are worth knowing before you start.
 
@@ -234,15 +239,35 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "'agent_session' says whether an agent is on this card right now, and "
             "'agent_sessions' lists each harness session on it with what became "
             "of it — worth reading before you start, so two of you are not on "
-            "the same card without knowing. Before you start work on it, call "
-            "read_scratchpad for its project."
+            "the same card without knowing. 'docs' is the project's docs the "
+            "work on this card needs, most likely first, each with its "
+            "probability and opening line — read the ones that bear on the "
+            "work with read_doc before you start. When they could not be "
+            "ranked, 'ranked_by' is 'none' and every doc is listed instead."
         ),
     )
     async def get_task(
         task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
+        include_docs: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Also rank the project's docs for this card. Default true; "
+                    "turn it off when you only need the card's fields again."
+                )
+            ),
+        ] = True,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            return {"task": await client.get(f"/tasks/{task}")}
+            found: dict[str, Any] = {"task": await client.get(f"/tasks/{task}")}
+            if include_docs:
+                # A card is still worth having without its docs, so a failure
+                # here is said beside it rather than instead of it.
+                try:
+                    found["docs"] = await client.get(f"/tasks/{task}/docs")
+                except CylistError as exc:
+                    found["docs"] = {"error": exc.message}
+            return found
 
         return await _as_tool_result(call)
 
@@ -959,7 +984,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
 
         return await _as_tool_result(call)
 
-    # --- Skills and the scratchpad -----------------------------------------
+    # --- Skills ------------------------------------------------------------
 
     @server.tool(
         name="list_skills",
@@ -1056,55 +1081,133 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
 
         return await _as_tool_result(call)
 
+    # --- Docs --------------------------------------------------------------
+
     @server.tool(
-        name="read_scratchpad",
+        name="list_docs",
         description=(
-            "Read a project's agent scratchpad: short lines that agents before "
-            "you wrote down when they learned something about this project the "
-            "hard way. Newest first. Call it first whenever you are given a "
-            "card, before you start on the work, and again before note_learned "
-            "so you do not write down what is already there."
+            "List a project's docs as the tree they are filed in: both "
+            "sections, Product then Engineering, each with its topics in order "
+            "and each topic with its docs in order — titles, ids and authors, "
+            "not bodies; read_doc fetches one. get_task already hands you the "
+            "docs a card needs; this is for looking further, or for finding "
+            "the topic a doc of yours belongs under."
         ),
     )
-    async def read_scratchpad(
+    async def list_docs(
         project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            return {"notes": await client.get(f"/projects/{project}/agent-notes")}
+            return {"docs": await client.get(f"/projects/{project}/docs")}
 
         return await _as_tool_result(call)
 
     @server.tool(
-        name="note_learned",
+        name="read_doc",
         description=(
-            "Write one line onto a project's agent scratchpad, for something "
-            "you worked out that the next agent would otherwise have to work "
-            "out again. Keep it to a sentence — the cap is "
-            f"{NOTE_MAX_CHARS} characters and newlines are folded into "
-            "spaces. Write what is not already in the code, the board or the "
-            "README: a surprising constraint, a command that does not work "
-            "here, a convention nothing states. Write it the moment you learn "
-            "it, not at the end of the session. Do not use it as a progress "
-            "log; the board already reports that. A line saying what one "
-            "already on the scratchpad says — ignoring case and punctuation — "
-            "is refused, naming the line that is there."
+            "Read one doc's markdown, with the section and topic it is filed "
+            "under. Name it by the id get_task or list_docs gave, or by its "
+            "path with the project: 'Engineering / MCP / learned.md', or "
+            "'MCP / learned.md', or just the title when only one doc has it. "
+            f"Truncated past {DOC_MAX_CHARS} characters, which is said in the "
+            "result when it happens."
         ),
     )
-    async def note_learned(
-        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
-        note: Annotated[
+    async def read_doc(
+        doc: Annotated[
             str,
-            Field(
-                description="What you learned, in one sentence.",
-                max_length=NOTE_MAX_CHARS,
-            ),
+            Field(description="The doc's id, or its path: 'Engineering / MCP / learned.md'."),
         ],
+        project: Annotated[
+            str | None,
+            Field(description="Project key such as 'ATL'. Needed when `doc` is a path."),
+        ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            written = await client.post(
-                f"/projects/{project}/agent-notes", {"body": " ".join(note.split())}
-            )
-            return {"note": written}
+            doc_id = await resolve.doc_id(client, project, doc)
+            found = dict(await client.get(f"/docs/{doc_id}"))
+            body = str(found.get("body", ""))
+            found["body"] = body[:DOC_MAX_CHARS]
+            return {"doc": found, "truncated": len(body) > DOC_MAX_CHARS}
+
+        return await _as_tool_result(call)
+
+    @server.tool(
+        name="write_doc",
+        description=(
+            "Write markdown into a project's docs. Three ways:\n"
+            f"- Something you learned: title '{LEARNED}', append true, and one "
+            "'- ' line as the body. It goes onto the end of that topic's "
+            f"{LEARNED}, which is made if the topic has none. Do this the "
+            "moment you learn it, not at the end of the session.\n"
+            "- A new doc: a title and a body. Name `topic` if you know it "
+            "('Engineering / MCP'); leave it out and it is filed for you. "
+            "When the filer is not confident, nothing is written and the "
+            "result lists the topics, most likely first — call again naming "
+            "one. You cannot create topics; people do.\n"
+            "- An edit: `doc` names one already there, by id or path; the body "
+            "you send replaces its body, or with append is added to the end.\n"
+            "A title the topic already holds is refused unless append is set, "
+            "so an existing doc is never overwritten by accident."
+        ),
+    )
+    async def write_doc(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        body: Annotated[str, Field(description="Markdown.")],
+        title: Annotated[
+            str | None,
+            Field(
+                description=(
+                    f"The doc's title — '{LEARNED}' for something learned. "
+                    "Needed unless `doc` names one to edit; with `doc`, a new "
+                    "title renames it."
+                )
+            ),
+        ] = None,
+        topic: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Where to file a new doc: 'Engineering / MCP', or a topic's "
+                    "name or id. Leave it out to have it filed for you."
+                )
+            ),
+        ] = None,
+        doc: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "An existing doc to edit, by id or path "
+                    "('Engineering / MCP / learned.md'). Leave it out to write "
+                    "by title."
+                )
+            ),
+        ] = None,
+        append: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Add `body` to the end of the doc rather than replacing or "
+                    f"refusing. Always true for a line on {LEARNED}."
+                )
+            ),
+        ] = False,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            if doc is not None:
+                return await _edit_doc(client, project, doc, title=title, body=body, append=append)
+            if not title:
+                raise CylistError(
+                    "Give the doc a title, or name the doc to edit with `doc`.",
+                    code="validation_failed",
+                )
+            request: dict[str, Any] = {"title": title, "body": body, "append": append}
+            if topic is not None:
+                request["topic_id"] = await resolve.doc_topic_id(client, project, topic)
+            try:
+                return dict(await client.post(f"/projects/{project}/docs", request))
+            except CylistError as exc:
+                raise _with_topics_listed(exc) from exc
 
         return await _as_tool_result(call)
 
@@ -1208,6 +1311,52 @@ async def _find_skill(client: Api, project: str, name: str) -> dict[str, Any]:
         f"{project} has no skill called {name!r}. {what_it_has}",
         code="not_found",
         details={"name": name, "available": available},
+    )
+
+
+async def _edit_doc(
+    client: Api, project: str, ref: str, *, title: str | None, body: str, append: bool
+) -> dict[str, Any]:
+    """Replace or add to the body of a doc that is already there."""
+    doc_id = await resolve.doc_id(client, project, ref)
+    if not append:
+        change: dict[str, Any] = {"body": body}
+        if title:
+            change["title"] = title
+        return {"doc": await client.patch(f"/docs/{doc_id}", change), "created": False}
+
+    # Appending goes through the write route, which joins the two bodies on the
+    # server — so a line added by another agent a moment ago is not lost.
+    current = await client.get(f"/docs/{doc_id}")
+    written = await client.post(
+        f"/projects/{current['project_id']}/docs",
+        {"title": current["title"], "topic_id": current["topic_id"], "body": body, "append": True},
+    )
+    return dict(written)
+
+
+def _with_topics_listed(exc: CylistError) -> CylistError:
+    """A topic refusal with the topics written into its message.
+
+    The server lists them in the error's details, but the message is what a
+    model reads first, and a refusal that says "name a topic" without saying
+    which ones there are costs it a list_docs to recover from.
+    """
+    topics = exc.details.get("topics")
+    if exc.code != "topic_unclear" or not isinstance(topics, list) or not topics:
+        return exc
+
+    def entry(topic: dict[str, Any]) -> str:
+        label = f"{topic.get('section')} / {topic.get('name')}"
+        probability = topic.get("probability")
+        return f"{label} ({probability:.2f})" if isinstance(probability, float) else label
+
+    listed = "; ".join(entry(topic) for topic in topics)
+    return CylistError(
+        f"{exc.message} Topics: {listed}. Call write_doc again with `topic` set to one.",
+        code=exc.code,
+        status_code=exc.status_code,
+        details=exc.details,
     )
 
 

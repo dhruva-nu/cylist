@@ -29,10 +29,16 @@ dependencies = [
     # add` line and installs nothing. The same package the stdio server is, from
     # this repository rather than a registry — see app/mcp.py.
     "cylist-mcp",
+    # TypeSafe's Jev System One client, which decides which docs a card needs
+    # and where a new doc is filed — see app/services/doc_judge.py. Vendored
+    # rather than fetched: the SDK is not on a registry (the `jev` on PyPI is
+    # a different package), and the image is built from this repository alone.
+    "jev",
 ]
 
 [tool.uv.sources]
 cylist-mcp = { path = "../mcp" }
+jev = { path = "../vendor/jev-sdk" }
 
 [dependency-groups]
 dev = [

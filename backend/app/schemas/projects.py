@@ -101,13 +101,12 @@ class ProjectSummary(ProjectRead):
         description="Everything in the project's folders — uploads and links alike."
     )
 
+    doc_count: int = Field(description="Docs across both sections and every topic.")
+
     vault_tree_count: int
     vault_secret_count: int = Field(description="Credentials stored across every tree.")
 
     skill_count: int = Field(description="Skills uploaded for this project's agents.")
-    agent_note_count: int = Field(
-        description="Lines on the agent scratchpad — what has been learned about this project."
-    )
 
 
 class MembershipUpdate(Schema):

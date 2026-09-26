@@ -44,7 +44,9 @@ WORKDIR /app
 
 # The MCP tools served at /mcp are a path dependency, `../mcp` from here. The
 # bind mount below covers /app only, so a change under mcp/ needs a rebuild.
+# The jev SDK is vendored beside it, `../vendor/jev-sdk`, for the same reason.
 COPY mcp/ /mcp/
+COPY vendor/jev-sdk/ /vendor/jev-sdk/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-install-project
 
@@ -69,8 +71,9 @@ WORKDIR /app
 
 # Dependencies first: this layer is cached until the lockfile changes — or the
 # MCP package does, since it is one of them: a path dependency, `../mcp` from
-# here, whose tools this process serves at /mcp.
+# here, whose tools this process serves at /mcp. So is the vendored jev SDK.
 COPY mcp/ /mcp/
+COPY vendor/jev-sdk/ /vendor/jev-sdk/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 

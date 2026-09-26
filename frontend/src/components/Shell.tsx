@@ -1,6 +1,6 @@
 /**
  * The frame every screen sits in: the sidebar, and beside it the wordmark,
- * the project's tabs and breadcrumbs over the page. The bar's tabs are four of
+ * the project's tabs and breadcrumbs over the page. The bar's tabs are five of
  * a project's areas and the sidebar lists all of them — see `ProjectNav.tsx`.
  */
 
@@ -50,6 +50,7 @@ function usePageWidth(): string | undefined {
     matchRoute({ to: '/p/$projectKey/people' }) ||
     matchRoute({ to: '/p/$projectKey/roles' }) ||
     matchRoute({ to: '/p/$projectKey/files' }) ||
+    matchRoute({ to: '/p/$projectKey/docs' }) ||
     matchRoute({ to: '/p/$projectKey/goals' }) ||
     matchRoute({ to: '/p/$projectKey/goals/$goalRef' }) ||
     matchRoute({ to: '/p/$projectKey/vault' })
@@ -141,6 +142,7 @@ const PROJECT_AREAS = [
   { name: 'Board', route: { to: '/p/$projectKey/board' } },
   // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
   { name: 'Goals', route: { to: '/p/$projectKey/goals', fuzzy: true } },
+  { name: 'Docs', route: { to: '/p/$projectKey/docs' } },
   { name: 'Files', route: { to: '/p/$projectKey/files' } },
   { name: 'Vault', route: { to: '/p/$projectKey/vault' } },
   { name: 'People', route: { to: '/p/$projectKey/people' } },

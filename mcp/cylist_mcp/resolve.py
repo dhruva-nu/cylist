@@ -149,3 +149,73 @@ async def vault_node(client: Api, project_ref: str, path: str) -> tuple[JsonDict
         level = children if isinstance(children, list) else []
 
     return tree, node
+
+
+def doc_topics(tree: JsonDict) -> list[JsonDict]:
+    """Every topic in a docs tree, named as ``Engineering / MCP``.
+
+    Named by section as well as by topic, because a name is unique only within
+    its section: "Tasks" can be a Product topic and an Engineering one.
+    """
+    return [
+        {**topic, "name": f"{part['label']} / {topic['name']}", "topic_name": topic["name"]}
+        for part in tree.get("sections", [])
+        for topic in part.get("topics", [])
+    ]
+
+
+async def doc_topic_id(client: Api, project_ref: str, name: str) -> str:
+    """A doc topic's id, from ``Engineering / MCP``, from ``MCP``, or from its id."""
+    if is_uuid(name):
+        return name
+    topics = doc_topics(await client.get(f"/projects/{project_ref}/docs"))
+    try:
+        return str(pick(topics, name, kind="doc topic", where=f"{project_ref}'s docs")["id"])
+    except CylistError as exc:
+        if exc.code != "not_found":
+            raise
+        raise CylistError(
+            f"{exc.message} Topics are made by people, not agents: file the doc under one "
+            "of these, or leave the topic out and it is filed for you.",
+            code=exc.code,
+            details=exc.details,
+        ) from exc
+
+
+async def doc_id(client: Api, project_ref: str | None, ref: str) -> str:
+    """A doc's id, from its id or its path: ``Engineering / MCP / learned.md``.
+
+    The topic may be left off — ``learned.md`` alone — when the title names one
+    doc on the project; the section may be too, ``MCP / learned.md``.
+    """
+    if is_uuid(ref):
+        return ref
+    if not project_ref:
+        raise CylistError(
+            f"{ref!r} is not a doc id, so name the project it is on as well.",
+            code="validation_failed",
+        )
+
+    tree = await client.get(f"/projects/{project_ref}/docs")
+    topic_path, _, title = ref.rpartition("/")
+    title, topic_path = title.strip(), topic_path.strip()
+    topics = doc_topics(tree)
+    if topic_path:
+        chosen = pick(topics, topic_path, kind="doc topic", where=f"{project_ref}'s docs")
+        topics = [chosen]
+    docs = [
+        {**doc, "name": doc["title"], "path": f"{topic['name']} / {doc['title']}"}
+        for topic in topics
+        for doc in topic.get("docs", [])
+    ]
+    where = topics[0]["name"] if topic_path else f"{project_ref}'s docs"
+    found = [doc for doc in docs if doc["title"].casefold() == title.casefold()]
+    if len(found) > 1:
+        paths = sorted(doc["path"] for doc in found)
+        raise CylistError(
+            f"{title!r} is the title of more than one doc: {', '.join(paths)}. "
+            "Call again with its topic, e.g. 'Engineering / MCP / learned.md', or its id.",
+            code="ambiguous",
+            details={"candidates": paths},
+        )
+    return str(pick(docs, title, kind="doc", where=where)["id"])

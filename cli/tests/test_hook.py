@@ -166,7 +166,7 @@ def test_session_start_binds_from_the_environment(
     assert _state()["task"] == "ATL-1"
 
 
-def test_a_session_started_on_a_card_is_told_to_read_the_scratchpad(
+def test_a_session_started_on_a_card_is_told_to_read_its_docs(
     fire: Fire, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("CYLIST_TASK", "ATL-1")
@@ -176,8 +176,9 @@ def test_a_session_started_on_a_card_is_told_to_read_the_scratchpad(
     reply = json.loads(out)["hookSpecificOutput"]
     assert reply["hookEventName"] == "SessionStart"
     assert reply["additionalContext"] == hook.working_brief("ATL-1")
-    assert "read_scratchpad for ATL" in reply["additionalContext"]
-    assert "note_learned for ATL" in reply["additionalContext"]
+    assert "get_task for ATL-" in reply["additionalContext"]
+    assert "write_doc for ATL" in reply["additionalContext"]
+    assert "scratchpad" not in reply["additionalContext"]
 
 
 def test_a_compacted_session_is_briefed_again(fire: Fire) -> None:
@@ -519,7 +520,7 @@ def test_install_writes_every_event_and_the_work_command(
     command = (tmp_path / "claude" / "commands" / "work.md").read_text()
     assert command.startswith("---\ndescription: Bind this session")
     assert "$ARGUMENTS" in command
-    assert "read_scratchpad" in command and "note_learned" in command
+    assert "read_doc" in command and "write_doc" in command and "learned.md" in command
     assert "Open a new Claude Code session" in result.out
 
 

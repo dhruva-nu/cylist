@@ -29,6 +29,7 @@ from app.mcp import mount_mcp
 from app.realtime.hub import Hub
 from app.routers import api_router
 from app.services import agent_reports
+from app.services.doc_judge import judge_for
 from app.spa import mount_spa
 
 API_PREFIX = "/api/v1"
@@ -158,6 +159,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # reachable from a route whether or not startup ran. The background work
     # that uses it does live in the lifespan, where it belongs.
     app.state.hub = Hub()
+
+    # Asked which docs a card needs and where a doc belongs. None without a
+    # key, which every caller treats as jev being unavailable. Here for the
+    # hub's reason: a test replaces it with a fake on an app it built.
+    app.state.doc_judge = judge_for(settings)
 
     # Read by GET /health/metrics. Set on app.state, not module-level, so each
     # app built by the test suite starts its own counters.

@@ -1,5 +1,5 @@
 /**
- * What an agent works from on a project: its skills, and its scratchpad.
+ * What an agent works from on a project: its skills.
  *
  * Cylist is meant to be driven by an agent as readily as by a person — the
  * MCP server and the CLI already expose the whole surface — but an agent
@@ -12,10 +12,11 @@
  * rather than refused, because the name is the skill and uploading it again
  * means you have a newer version of it.
  *
- * **The scratchpad** is the other direction: short lines an agent writes when
- * it works something out that the next agent would otherwise work out again.
- * Capped at 280 characters by the server, which is the point rather than a
- * limitation — see `NOTE_MAX_LENGTH`.
+ * What an agent learns goes the other way, into the project's **Docs**: a line
+ * on the `learned.md` of whichever topic it belongs to. That used to be a
+ * scratchpad on this page; it moved so that what agents learn sits beside
+ * everything else written about the project, and is handed to the next agent
+ * with the rest of the docs its card needs.
  *
  * A project's screen rather than the platform's, because that is where an
  * agent's authority is decided: a token is scoped per project, so what an
@@ -23,20 +24,12 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from '@tanstack/react-router'
+import { Link, useParams } from '@tanstack/react-router'
 import { useRef, useState, type ReactNode } from 'react'
-import {
-  NOTE_MAX_LENGTH,
-  api,
-  type AgentNote,
-  type Person,
-  type Skill,
-  type TokenIssued,
-} from '../api/client'
+import { api, type Skill, type TokenIssued } from '../api/client'
 import { formatSize, formatStamp } from '../components/format'
 import { PageHead } from '../components/Shell'
 import {
-  Avatar,
   Button,
   EmptyState,
   ErrorBanner,
@@ -56,13 +49,16 @@ export function Agents() {
     <>
       <PageHead title="Agents">
         What an agent works from on this project. <b>Skills</b> are the procedures you have written
-        down for it; the <b>scratchpad</b> is where it writes back what it learned.
+        down for it. What it learns, it writes back into the project's{' '}
+        <Link to="/p/$projectKey/docs" params={{ projectKey }} className={styles.docsLink}>
+          Docs
+        </Link>{' '}
+        — a line on the <code>learned.md</code> of the topic it belongs to.
       </PageHead>
 
       <LiveRegion message={message} />
       <Connect announce={announce} />
       <Skills projectKey={projectKey} announce={announce} />
-      <Scratchpad projectKey={projectKey} announce={announce} />
     </>
   )
 }
@@ -373,155 +369,4 @@ function SkillRow({
 function fileTypeMark(name: string): string {
   const extension = name.includes('.') ? (name.split('.').pop() ?? '') : ''
   return extension ? extension.slice(0, 4).toUpperCase() : 'FILE'
-}
-
-function Scratchpad({
-  projectKey,
-  announce,
-}: {
-  projectKey: string
-  announce: (message: string) => void
-}) {
-  const queryClient = useQueryClient()
-  const [draft, setDraft] = useState('')
-  const [problem, setProblem] = useState<string | null>(null)
-
-  const notes = useQuery({
-    queryKey: ['agent-notes', projectKey],
-    queryFn: () => api.listAgentNotes(projectKey),
-  })
-
-  async function refresh() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['agent-notes', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
-    ])
-  }
-
-  const addNote = useMutation({
-    mutationFn: (body: string) => api.addAgentNote(projectKey, body),
-    onMutate: () => setProblem(null),
-    onSuccess: async () => {
-      setDraft('')
-      await refresh()
-      announce('Noted on the scratchpad.')
-    },
-    onError: (error: Error) => setProblem(error.message),
-  })
-
-  const rubOffNote = useMutation({
-    mutationFn: (id: string) => api.deleteAgentNote(id),
-    onSuccess: async () => {
-      await refresh()
-      announce('Note rubbed off.')
-    },
-    onError: (error: Error) => setProblem(error.message),
-  })
-
-  const trimmed = draft.trim()
-  const charactersLeft = NOTE_MAX_LENGTH - draft.length
-
-  return (
-    <Section
-      title="Agent's scratchpad"
-      blurb="One line each, newest first — what an agent learned about this project that it would otherwise have to work out again. Agents write here over MCP with note_learned; you can add and remove lines yourself."
-      count={notes.data?.length}
-    >
-      {problem ? <ErrorBanner>{problem}</ErrorBanner> : null}
-      {notes.error ? <ErrorBanner>{notes.error.message}</ErrorBanner> : null}
-
-      <form
-        className={`${cardStyles.card} ${styles.compose}`}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (trimmed) addNote.mutate(trimmed)
-        }}
-      >
-        <label className="visually-hidden" htmlFor="new-note">
-          Something learned
-        </label>
-        <input
-          id="new-note"
-          value={draft}
-          maxLength={NOTE_MAX_LENGTH}
-          placeholder="Something you had to work out — in a sentence."
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        {/* Only once it is close enough to matter: a counter that is always on
-            reads as a limit you are working against rather than a cap you
-            will not meet. */}
-        <span className={`${styles.left} ${charactersLeft < 0 ? styles.leftOver : ''}`}>
-          {charactersLeft <= 60 ? charactersLeft : ''}
-        </span>
-        <Button variant="go" type="submit" disabled={!trimmed || addNote.isPending}>
-          {addNote.isPending ? 'Noting…' : 'Note it'}
-        </Button>
-      </form>
-
-      {notes.isPending ? <EmptyState>Loading the scratchpad…</EmptyState> : null}
-
-      {notes.data?.length === 0 ? (
-        <EmptyState>
-          Nothing learned here yet.
-          <br />
-          An agent adds a line when it works something out; so can you.
-        </EmptyState>
-      ) : null}
-
-      {notes.data?.length ? (
-        <ol className={styles.notes}>
-          {notes.data.map((note) => (
-            <NoteRow
-              key={note.id}
-              note={note}
-              busy={rubOffNote.isPending}
-              onDelete={() => rubOffNote.mutate(note.id)}
-            />
-          ))}
-        </ol>
-      ) : null}
-    </Section>
-  )
-}
-
-function NoteRow({
-  note,
-  busy,
-  onDelete,
-}: {
-  note: AgentNote
-  busy: boolean
-  onDelete: () => void
-}) {
-  const person: Person | null = note.added_by
-
-  return (
-    <li className={styles.note}>
-      <p className={styles.noteBody}>{note.body}</p>
-      <div className={styles.noteMeta}>
-        {person ? (
-          <Avatar name={person.name} colour={person.colour} small />
-        ) : (
-          <span className={styles.botMark} aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="4" y="7" width="16" height="12" rx="3" />
-              <path d="M12 7V4" />
-              <circle cx="9.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
-              <circle cx="14.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
-            </svg>
-          </span>
-        )}
-        <span className={styles.noteWho}>{person ? person.name : note.author_label}</span>
-        <span className={styles.noteWhen}>{formatStamp(note.created_at)}</span>
-        <button
-          className={styles.rub}
-          disabled={busy}
-          onClick={onDelete}
-          title="Rub this line off — it has stopped being true"
-        >
-          ×
-        </button>
-      </div>
-    </li>
-  )
 }
