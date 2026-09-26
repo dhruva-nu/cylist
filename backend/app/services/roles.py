@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -288,12 +287,9 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
             details={"holder_person_ids": [str(person.id) for person in wearing]},
         )
 
-    # Before the role itself: a grant points at its role through the same
-    # deferred, NO ACTION key `project_member` uses, which would refuse this at
-    # COMMIT — a long way from here, and unable to say what it was refusing
-    # about.
-    await session.execute(sql_delete(ProjectPermission).where(ProjectPermission.role_id == role.id))
-
+    # Its grants, column rules and clearance go with it, by the cascade on
+    # their key to the role — see `app.models.permission`. Whoever wears it is
+    # the one thing that has to be dealt with first, and that was refused above.
     await session.delete(role)
     await session.flush()
 

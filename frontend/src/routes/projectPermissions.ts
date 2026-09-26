@@ -106,8 +106,16 @@ export function explain(line: RolePermissions): string | null {
  * edited would be a grid nobody could work down.
  */
 export function inOrder(grid: ProjectPermissions): RolePermissions[] {
-  const rank = (line: RolePermissions) => (line.is_admin ? 0 : isEveryoneElse(line) ? 2 : 1)
-  return [...grid.roles].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+  return [...grid.roles].sort(
+    (a, b) => drawingRank(a) - drawingRank(b) || a.name.localeCompare(b.name),
+  )
+}
+
+/** Where a line falls in `inOrder`: the admin role first, the baseline last. */
+function drawingRank(line: RolePermissions): number {
+  if (line.is_admin) return 0
+  if (isEveryoneElse(line)) return 2
+  return 1
 }
 
 /**

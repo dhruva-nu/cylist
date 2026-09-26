@@ -8,8 +8,10 @@ uploaded, and by their own id once they exist — a skill keeps its download URL
 
 from __future__ import annotations
 
+import base64
 from uuid import UUID
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,10 +27,17 @@ from app.models.agent import AgentNote, Skill
 from app.models.project import Project
 from app.routers import guards
 from app.routers.projects import resolved_project
-from app.schemas.agents import NoteCreate, NoteRead, SkillRead, SkillUpdate
+from app.schemas.agents import (
+    NoteCreate,
+    NoteRead,
+    SkillFolderFile,
+    SkillFolderRead,
+    SkillRead,
+    SkillUpdate,
+)
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
-from app.services import activity, agents, blobs
+from app.services import activity, agents, blobs, skill_folders
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["agents"])
@@ -50,7 +59,7 @@ async def resolved_note(
     return await agents.get_note(session, note_id)
 
 
-def _skill(skill: Skill) -> SkillRead:
+def _skill_read(skill: Skill) -> SkillRead:
     person = skill.added_by_person
     return SkillRead(
         id=skill.id,
@@ -64,7 +73,7 @@ def _skill(skill: Skill) -> SkillRead:
     )
 
 
-def _note(note: AgentNote) -> NoteRead:
+def _note_read(note: AgentNote) -> NoteRead:
     person = note.added_by_person
     return NoteRead(
         id=note.id,
@@ -99,9 +108,10 @@ async def list_skills(
     """Every skill uploaded to this project, alphabetical.
 
     A skill is a packaged job an agent can be handed. Download one with
-    `/skills/{skill_id}/download`.
+    `/skills/{skill_id}/download`, or as the folder Claude Code loads it from
+    with `/skills/{skill_id}/folder`.
     """
-    return [_skill(skill) for skill in await agents.list_skills(session, project)]
+    return [_skill_read(skill) for skill in await agents.list_skills(session, project)]
 
 
 @router.post(
@@ -156,7 +166,7 @@ async def upload_skill(
         project_id=project.id,
         payload={"name": skill.name, "size": skill.size},
     )
-    return _skill(skill)
+    return _skill_read(skill)
 
 
 @router.get("/skills/{skill_id}", response_model=SkillRead, summary="Get a skill")
@@ -165,7 +175,7 @@ async def get_skill(
     _: Principal = Depends(require(Scope.READ)),
 ) -> SkillRead:
     """One skill's details, without its content."""
-    return _skill(skill)
+    return _skill_read(skill)
 
 
 @router.patch("/skills/{skill_id}", response_model=SkillRead, summary="Describe a skill")
@@ -186,7 +196,7 @@ async def update_skill(
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True))},
     )
-    return _skill(updated)
+    return _skill_read(updated)
 
 
 @router.delete("/skills/{skill_id}", response_model=Acknowledged, summary="Delete a skill")
@@ -235,6 +245,56 @@ async def download_skill(
     )
 
 
+@router.get(
+    "/skills/{skill_id}/folder",
+    response_model=SkillFolderRead,
+    summary="Get a skill as the folder Claude Code loads",
+    responses={422: {"description": "The skill cannot be laid out as one — see the message."}},
+)
+async def skill_folder(
+    skill: Skill = Depends(resolved_skill),
+    _: Principal = Depends(require(Scope.READ)),
+    store: BlobStore = Depends(get_blob_store),
+) -> SkillFolderRead:
+    """The skill as the files to write under `.claude/skills/<folder>/`.
+
+    A markdown skill becomes `<folder>/SKILL.md`, with `name` and
+    `description` added to its frontmatter where it has none. A zip is
+    unpacked — through one wrapping directory, if that is where its
+    `SKILL.md` is — and refused if it has no `SKILL.md`, holds a path that
+    leaves the folder, or unpacks to more than a skill should.
+
+    `/download` is still the skill exactly as it was uploaded; this is the
+    same bytes, laid out to be used.
+    """
+    if not await store.exists(skill.blob.path):
+        raise NotFoundError(
+            "This skill's content is missing from the store.", details={"name": skill.name}
+        )
+
+    content = await to_thread.run_sync(store.locate(skill.blob.path).read_bytes)
+    folder = await to_thread.run_sync(skill_folders.unpack, skill.name, skill.description, content)
+    return SkillFolderRead(
+        skill=_skill_read(skill),
+        folder=folder.name,
+        files=[_folder_file(folder_file) for folder_file in folder.files],
+    )
+
+
+def _folder_file(folder_file: skill_folders.FolderFile) -> SkillFolderFile:
+    try:
+        content, encoding = folder_file.data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        content, encoding = base64.b64encode(folder_file.data).decode("ascii"), "base64"
+    return SkillFolderFile(
+        path=folder_file.path,
+        encoding=encoding,
+        content=content,
+        size=len(folder_file.data),
+        executable=folder_file.executable,
+    )
+
+
 # --- The scratchpad --------------------------------------------------------
 
 
@@ -254,7 +314,7 @@ async def list_notes(
     that it would otherwise have to work out again. Read this before starting
     work here.
     """
-    return [_note(note) for note in await agents.list_notes(session, project)]
+    return [_note_read(note) for note in await agents.list_notes(session, project)]
 
 
 @router.post(
@@ -262,6 +322,7 @@ async def list_notes(
     response_model=NoteRead,
     status_code=status.HTTP_201_CREATED,
     summary="Note something learned",
+    responses={409: {"description": "A line saying the same thing is already on the scratchpad."}},
 )
 async def add_note(
     body: NoteCreate,
@@ -275,6 +336,10 @@ async def add_note(
     out again — not for what the code, the board or the README already says.
     Notes are capped at 280 characters, and newlines are folded into spaces:
     one fact, in as few words as carry it.
+
+    A line that says what one already on the scratchpad says — ignoring case,
+    spacing and punctuation — is refused with a 409 naming the line that is
+    there, so read the scratchpad before you add to it.
 
     The note is signed with your credential's own label, so a reader can tell
     an agent's line from a person's.
@@ -295,7 +360,7 @@ async def add_note(
         project_id=project.id,
         payload={"body": note.body},
     )
-    return _note(note)
+    return _note_read(note)
 
 
 @router.delete(

@@ -180,7 +180,7 @@ may read. Folders and vault trees carry a *default* that new children inherit,
 so "everything in Contracts is restricted" is said once rather than on each
 upload. Something above your clearance is answered **as though it were never
 there**: left out of listings, a 404 by id, a 404 to download, and not counted
-on the project hub. A 403 on `redundancy-list-final.xlsx` would already have
+in the project's summary. A 403 on `redundancy-list-final.xlsx` would already have
 told you the interesting part. A restricted vault branch takes its whole
 subtree with it.
 
@@ -367,6 +367,44 @@ Each project carries what its agents work from, under its **Agents** tab: skills
 you upload for them to follow, and a scratchpad they write one-line findings back
 onto. `note_learned` is how an agent leaves something it worked out the hard way,
 capped at 280 characters so the next one reads the pad rather than skimming it.
+The MCP instructions and the `/work` command tell an agent to read the pad before
+it starts on a card and to write to it as it learns, not at the end; a line that
+says what one already there says is refused, so the pad stays a list of facts
+rather than a log.
+
+### Giving an agent the project's skills
+
+`read_skill` lets an agent read one skill. To have them *installed* — where
+Claude Code loads them as skills of its own, `/board-tidy` and all — pull them
+into the repository the agent works in:
+
+```bash
+cylist skills ls ATL                  # what the project has
+cylist skills pull ATL                # every skill, into <repo>/.claude/skills/
+cylist skills pull ATL board-tidy.md  # just one; inside `cylist work ATL-41` the key can be left out
+cylist skills pull ATL --user         # into ~/.claude/skills/, for every repo on this machine
+```
+
+A markdown skill becomes `.claude/skills/<name>/SKILL.md`, with the `name` and
+`description` frontmatter Claude Code decides relevance by filled in from the
+upload where the file has none. A zip is unpacked as the folder it is — through
+one wrapping directory, as zipping a folder produces — and must have a
+`SKILL.md` at its root; scripts inside keep their executable bit. A session
+that is already running picks a pulled skill up within a few seconds — but only
+if its `.claude/skills` existed when the session started, because Claude Code
+watches the directories it found and no others. The first pull into a
+repository therefore loads from the next session, and says so; every pull after
+it is picked up live. The server does the unpacking
+(`GET /skills/{id}/folder`), refusing a zip entry that climbs out of the folder,
+a symlink, or an archive that unpacks past 20 MB.
+
+A pulled folder carries a `.cylist-skill.json` recording what was written, and a
+`.gitignore` of `*` so the copy is never committed by accident — the board keeps
+the original. Pulling again updates what it wrote before; a folder it did not
+write, or one edited since, is left alone and reported, and `--force` replaces
+it. An agent connected through MCP has `download_skill`, which returns the same
+folder and the `cylist skills pull` line to install it — or the files to write
+itself where the CLI is not installed.
 
 The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
 It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an

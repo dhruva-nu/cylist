@@ -18,7 +18,7 @@ import asyncio
 import sys
 
 from cylist_mcp.client import ApiClient
-from cylist_mcp.config import resolve
+from cylist_mcp.config import load_settings
 from cylist_mcp.errors import CylistError
 from cylist_mcp.server import build_server
 
@@ -31,7 +31,7 @@ async def scopes_of(client: ApiClient) -> frozenset[str]:
 
 
 async def serve() -> None:
-    settings = resolve()
+    settings = load_settings()
     client = ApiClient(settings.urls, settings.token)
     try:
         scopes = await scopes_of(client)

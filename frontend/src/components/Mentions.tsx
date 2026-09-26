@@ -13,7 +13,14 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 
 import type { FiledItem, Person } from '../api/client'
-import { FILE_SIGIL, applyMention, matchingFiles, matchingMembers, mentionQuery } from './mentions'
+import {
+  FILE_SIGIL,
+  applyMention,
+  matchingFiles,
+  matchingMembers,
+  mentionQuery,
+  type MentionDraft,
+} from './mentions'
 import styles from './Mentions.module.css'
 import { Avatar } from './ui'
 
@@ -95,21 +102,7 @@ export function MentionBox({
   const [dismissed, setDismissed] = useState(false)
 
   const draft = dismissed ? null : mentionQuery(value, caret)
-  const matches: Suggestion[] = !draft
-    ? []
-    : draft.sigil === FILE_SIGIL
-      ? matchingFiles(draft.query, files ?? []).map((file) => ({
-          id: file.id,
-          name: file.name,
-          mark: <FileGlyph link={file.kind === 'link'} />,
-          note: whereItSits(file),
-        }))
-      : matchingMembers(draft.query, members).map((person) => ({
-          id: person.id,
-          name: person.name,
-          mark: <Avatar name={person.name} colour={person.colour} />,
-          note: person.title,
-        }))
+  const matches = draft ? suggestionsFor(draft, members, files ?? []) : []
 
   function pick(suggestion: Suggestion) {
     if (!draft) return
@@ -217,6 +210,28 @@ export function MentionBox({
       ) : null}
     </div>
   )
+}
+
+/** The rows to offer for the tag being typed: files after a `>`, people after an `@`. */
+function suggestionsFor(
+  draft: MentionDraft,
+  members: Person[],
+  files: readonly FiledItem[],
+): Suggestion[] {
+  if (draft.sigil === FILE_SIGIL) {
+    return matchingFiles(draft.query, files).map((file) => ({
+      id: file.id,
+      name: file.name,
+      mark: <FileGlyph link={file.kind === 'link'} />,
+      note: whereItSits(file),
+    }))
+  }
+  return matchingMembers(draft.query, members).map((person) => ({
+    id: person.id,
+    name: person.name,
+    mark: <Avatar name={person.name} colour={person.colour} />,
+    note: person.title,
+  }))
 }
 
 /**

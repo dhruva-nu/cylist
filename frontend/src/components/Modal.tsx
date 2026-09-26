@@ -61,7 +61,7 @@ export function Modal({
 }) {
   const panel = useRef<HTMLDivElement>(null)
   const opener = useRef<Element | null>(null)
-  const me = useRef(Symbol('dialog'))
+  const stackToken = useRef(Symbol('dialog'))
 
   /**
    * Opening and closing: the stack, the page's scroll, and where focus goes.
@@ -74,22 +74,22 @@ export function Modal({
    * its own effect for exactly that reason.
    */
   useEffect(() => {
-    const token = me.current
+    const token = stackToken.current
     stack.push(token)
 
     opener.current = document.activeElement
     const { overflow } = document.body.style
     document.body.style.overflow = 'hidden'
 
-    const open = panel.current
+    const dialog = panel.current
     // The panel itself as a last resort: a dialog with nothing to focus would
     // otherwise leave focus on the page behind it, where Tab has nothing to
     // come back to.
-    if (open) (tabbableIn(open)[0] ?? open).focus()
+    if (dialog) (tabbableIn(dialog)[0] ?? dialog).focus()
 
     return () => {
-      const at = stack.lastIndexOf(token)
-      if (at !== -1) stack.splice(at, 1)
+      const position = stack.lastIndexOf(token)
+      if (position !== -1) stack.splice(position, 1)
       // An outer dialog set this to `hidden` before this one did, so what is
       // put back here is `hidden` too, and the page stays still until the last
       // dialog goes.
@@ -99,8 +99,8 @@ export function Modal({
   }, [])
 
   useEffect(() => {
-    const token = me.current
-    const open = panel.current
+    const token = stackToken.current
+    const dialog = panel.current
 
     function onKeyDown(event: KeyboardEvent) {
       // Only the innermost dialog answers. Anything further out is behind this
@@ -112,26 +112,26 @@ export function Modal({
         onClose()
         return
       }
-      if (event.key !== 'Tab' || open === null) return
+      if (event.key !== 'Tab' || dialog === null) return
 
       // Tab is trapped rather than merely discouraged. `aria-modal` hides the
       // rest of the page from assistive technology but does nothing for the
       // keyboard, so without this Tab walks out into a page the user cannot
       // see and cannot get back from.
-      const stops = tabbableIn(open)
+      const stops = tabbableIn(dialog)
       const first = stops.at(0)
       const last = stops.at(-1)
       if (first === undefined || last === undefined) {
         event.preventDefault()
-        open.focus()
+        dialog.focus()
         return
       }
 
       const active = document.activeElement
-      if (event.shiftKey && (active === first || !open.contains(active))) {
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
         event.preventDefault()
         last.focus()
-      } else if (!event.shiftKey && (active === last || !open.contains(active))) {
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
         event.preventDefault()
         first.focus()
       }
@@ -201,5 +201,3 @@ export function Field({
 export function FieldPair({ children }: { children: ReactNode }) {
   return <div className={styles.pair}>{children}</div>
 }
-
-export const modalStyles = styles

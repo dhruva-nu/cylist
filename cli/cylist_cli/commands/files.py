@@ -12,7 +12,6 @@ from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
 
 NAME_WIDTH = 40
-KILOBYTE = 1024.0
 
 
 def register(subparsers: Any) -> None:
@@ -73,7 +72,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         [
             str(item["kind"]),
             output.truncate(str(item["name"]), NAME_WIDTH),
-            _size(item.get("size")),
+            output.human_size(item.get("size")),
             str(item.get("url") or item.get("source") or ""),
         ]
         for item in listing.get("items", [])
@@ -81,19 +80,8 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
     output.table(["KIND", "NAME", "SIZE", "SOURCE"], rows, empty="This folder is empty.")
 
 
-def _size(value: Any) -> str:
-    if not isinstance(value, int):
-        return ""
-    size = float(value)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < KILOBYTE or unit == "GB":
-            return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
-        size /= KILOBYTE
-    return f"{size:.1f}GB"
-
-
 def _get(args: argparse.Namespace, ctx: Context) -> None:
-    item = resolve.item(ctx.client, args.project, args.path)
+    item = resolve.file_item(ctx.client, args.project, args.path)
 
     if item.get("kind") == "link":
         raise CylistError(

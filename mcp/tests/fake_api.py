@@ -311,6 +311,53 @@ ACTIVITY = [
 ]
 
 
+TIDY_ID = "0192f3c4-000b-7000-8000-000000000001"
+KIT_ID = "0192f3c4-000b-7000-8000-000000000002"
+TIDY_TEXT = "---\nname: board-tidy\n---\n\nMove stale cards back to triage.\n"
+SKILLS = [
+    {
+        "id": TIDY_ID,
+        "project_id": PROJECT_ID,
+        "name": "board-tidy.md",
+        "description": "Move stale cards back to triage.",
+        "size": len(TIDY_TEXT),
+        "mime": "text/markdown",
+        "added_by": None,
+        "created_at": "2026-02-01T09:00:00Z",
+    },
+    {
+        "id": KIT_ID,
+        "project_id": PROJECT_ID,
+        "name": "release-kit.zip",
+        "description": "Cut a release.",
+        "size": 2048,
+        "mime": "application/zip",
+        "added_by": None,
+        "created_at": "2026-02-01T09:00:00Z",
+    },
+]
+KIT_FOLDER = {
+    "skill": SKILLS[1],
+    "folder": "release-kit",
+    "files": [
+        {
+            "path": "SKILL.md",
+            "encoding": "utf-8",
+            "content": "---\nname: release-kit\n---\nRun ./cut.sh\n",
+            "size": 39,
+            "executable": False,
+        },
+        {
+            "path": "cut.sh",
+            "encoding": "utf-8",
+            "content": "#!/bin/sh\ngit tag\n",
+            "size": 18,
+            "executable": True,
+        },
+    ],
+}
+
+
 def identity(scopes: list[str]) -> dict[str, Any]:
     return {
         "token_id": "0192f3c4-000a-7000-8000-000000000001",
@@ -510,6 +557,15 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
                 "revealed_at": "2026-02-10T09:00:00Z",
             },
         )
+
+    if path == "/projects/ATL/skills":
+        return httpx.Response(200, json=SKILLS)
+    if path == f"/skills/{TIDY_ID}/download":
+        return httpx.Response(200, text=TIDY_TEXT)
+    if path == f"/skills/{KIT_ID}/download":
+        return httpx.Response(200, content=b"PK\x03\x04\x00\xff binary")
+    if path == f"/skills/{KIT_ID}/folder":
+        return httpx.Response(200, json=KIT_FOLDER)
 
     if path == "/activity":
         return httpx.Response(200, json=ACTIVITY)

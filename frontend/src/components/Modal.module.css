@@ -42,10 +42,6 @@
   background: var(--paper-2);
 }
 
-.spacer {
-  margin-right: auto;
-}
-
 .field {
   display: flex;
   flex-direction: column;

@@ -36,7 +36,7 @@ async def resolved_column(
     return await columns.get(session, column_id)
 
 
-def _read(column: BoardColumn, task_count: int) -> ColumnRead:
+def _column_read(column: BoardColumn, task_count: int) -> ColumnRead:
     return ColumnRead(
         id=column.id,
         project_id=column.project_id,
@@ -48,10 +48,10 @@ def _read(column: BoardColumn, task_count: int) -> ColumnRead:
     )
 
 
-async def _board(session: AsyncSession, project: Project) -> Board:
+async def _board_read(session: AsyncSession, project: Project) -> Board:
     found = await columns.list_for_project(session, project)
     counts = await columns.task_counts(session, project.id)
-    return Board(columns=[_read(column, counts.get(column.id, 0)) for column in found])
+    return Board(columns=[_column_read(column, counts.get(column.id, 0)) for column in found])
 
 
 SHAPE_BOARD = guards.on_project(Permission.BOARD)
@@ -72,7 +72,7 @@ async def list_columns(
     session: AsyncSession = SessionDependency,
 ) -> Board:
     """The board, left to right, with how many cards each column holds."""
-    return await _board(session, project)
+    return await _board_read(session, project)
 
 
 @router.post(
@@ -103,7 +103,7 @@ async def create_column(
         project_id=project.id,
         payload={"name": column.name, "position": column.position},
     )
-    return _read(column, 0)
+    return _column_read(column, 0)
 
 
 @router.put(
@@ -133,7 +133,7 @@ async def reorder_columns(
         project_id=project.id,
         payload={"column_ids": [str(column_id) for column_id in body.column_ids]},
     )
-    return await _board(session, project)
+    return await _board_read(session, project)
 
 
 @router.patch("/columns/{column_id}", response_model=ColumnRead, summary="Rename a column")
@@ -155,7 +155,7 @@ async def update_column(
         payload={"fields": sorted(body.model_dump(exclude_unset=True))},
     )
     counts = await columns.task_counts(session, updated.project_id)
-    return _read(updated, counts.get(updated.id, 0))
+    return _column_read(updated, counts.get(updated.id, 0))
 
 
 @router.delete(

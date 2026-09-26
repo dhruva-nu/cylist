@@ -145,13 +145,13 @@ def _demand_private(path: Path) -> None:
     under the user's profile is ACL-ed to that user, and a directory outside
     it would be a deliberate choice by whoever set ``XDG_RUNTIME_DIR``.
     """
-    info = path.lstat()
-    if not stat.S_ISDIR(info.st_mode):
+    attributes = path.lstat()
+    if not stat.S_ISDIR(attributes.st_mode):
         raise OSError(f"{path} is not a directory")
     if sys.platform != "win32":
-        if info.st_uid != os.getuid():
+        if attributes.st_uid != os.getuid():
             raise OSError(f"{path} belongs to another user")
-        if info.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        if attributes.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             # Tighten rather than refuse: a umask that made it group-readable
             # is a mistake to correct, not an attack to abort on.
             path.chmod(DIR_MODE)
@@ -258,8 +258,10 @@ def _read_endpoint(session_id: str) -> tuple[int, str]:
         published = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError) as exc:
         raise OSError(f"no endpoint at {path}") from exc
-    port = published.get("port") if isinstance(published, dict) else None
-    secret = published.get("secret") if isinstance(published, dict) else None
+    if not isinstance(published, dict):
+        raise OSError(f"{path} is not an endpoint file")
+    port = published.get("port")
+    secret = published.get("secret")
     if not isinstance(port, int) or not isinstance(secret, str):
         raise OSError(f"{path} is not an endpoint file")
     return port, secret

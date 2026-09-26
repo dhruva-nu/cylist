@@ -205,6 +205,10 @@ cylist people new --name … --kind team --role … --responsibilities …
 cylist files ls ATL [Contracts/2026]
 cylist files get ATL Contracts/2026/msa.pdf [-o FILE]
 
+cylist skills ls ATL
+cylist skills pull [ATL] [NAME …] [--user | --dest DIR] [--force]
+                                       install skills where Claude Code loads them
+
 cylist vault ls ATL [Logins]
 cylist vault reveal ATL Logins/Billing/Stripe [--show | -o FILE]
 cylist vault add ATL Logins/Billing/Twilio [--username …] [--value-stdin]
@@ -248,6 +252,12 @@ cylist work ATL-41       start a session on a card
 A prompt that merely mentions `ATL-41` never binds — "don't touch ATL-41"
 would otherwise put you on it. An unbound session makes no requests at all, so
 the sessions you run on other projects never appear on any board.
+
+Either way, the session is told what it is on before it starts: fetch the card,
+read the project's scratchpad, and write to it with `note_learned` as it learns
+something the next agent would otherwise have to work out again. `/work` says
+so in the command it expands to; `cylist work`, and a `/clear` or a compaction
+that keeps the binding, get the same brief from the `SessionStart` hook.
 
 `cylist hook` is not a command to run yourself. It reads one JSON event from
 stdin, always exits 0, and prints nothing but the JSON Claude Code expects —

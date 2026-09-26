@@ -635,8 +635,9 @@ class TestBothGatesStillStand:
 
 class TestDeletingARole:
     async def test_its_grants_go_with_it(self, signed_in: AsyncClient) -> None:
-        """Otherwise the deferred key refuses the delete at COMMIT, a long way
-        from anything that could explain it."""
+        """By the cascade on their key to the role, rather than by the service
+        remembering to — see `TestARoleTakesItsRestrictionsWithIt` in
+        test_access.py for the two tables it once forgot."""
         await signed_in.post("/projects", json=ATLAS)
         await signed_in.post("/projects/ATL/roles", json={"name": "QA"})
         await _allow(signed_in, "QA", Permission.TASKS)

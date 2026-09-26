@@ -210,10 +210,6 @@ class Settings(BaseSettings):
             return "<unparseable database url>"
 
     @property
-    def is_production(self) -> bool:
-        return self.environment == "prod"
-
-    @property
     def is_deployed(self) -> bool:
         """Whether this is a deployed stack rather than someone's machine.
 
@@ -221,9 +217,7 @@ class Settings(BaseSettings):
         how they are run: all three are one container behind ``tailscale
         serve``, reached over HTTPS, holding rows someone would miss. The
         decisions that turn on that — issuing the session cookie ``Secure``,
-        refusing to seed fictional data over the top — belong here rather than
-        on :attr:`is_production`, which stays a question about which stack this
-        is.
+        refusing to seed fictional data over the top — belong here.
 
         ``"dev"`` stays out of this set on purpose: it is the default for
         someone's own machine, where neither of those protections should apply.

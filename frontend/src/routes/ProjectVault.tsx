@@ -54,6 +54,11 @@ function FolderIcon() {
   )
 }
 
+/** The list with this id added, or taken out if it was already there. */
+function toggleId(list: string[], id: string): string[] {
+  return list.includes(id) ? list.filter((other) => other !== id) : [...list, id]
+}
+
 /** Where a new node would go: under a tree's root, or under a branch. */
 interface Destination {
   treeId: string
@@ -71,7 +76,7 @@ export function ProjectVault() {
   const [openNodes, setOpenNodes] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [namingTree, setNamingTree] = useState(false)
-  const [adding, setAdding] = useState<Destination | null>(null)
+  const [addingAt, setAddingAt] = useState<Destination | null>(null)
   const [editing, setEditing] = useState<VaultNode | null>(null)
   const [moving, setMoving] = useState<VaultNode | null>(null)
 
@@ -80,7 +85,7 @@ export function ProjectVault() {
     queryFn: () => api.listVaultTrees(projectKey),
   })
 
-  const details = useQuery({
+  const treeDetails = useQuery({
     queryKey: ['vault-tree-details', projectKey, (trees.data ?? []).map((t) => t.id).join(',')],
     queryFn: () => Promise.all((trees.data ?? []).map((tree) => api.getVaultTree(tree.id))),
     enabled: trees.data !== undefined,
@@ -101,7 +106,7 @@ export function ProjectVault() {
     ])
   }
 
-  const remove = useMutation({
+  const deleteNode = useMutation({
     // The node rather than its id, so the announcement can name what has gone.
     mutationFn: (node: VaultNode) => api.deleteVaultNode(node.id),
     onSuccess: async (_deleted, node) => {
@@ -111,20 +116,16 @@ export function ProjectVault() {
     },
   })
 
-  if (trees.isPending || details.isPending) return <EmptyState>Loading the vault…</EmptyState>
+  if (trees.isPending || treeDetails.isPending) return <EmptyState>Loading the vault…</EmptyState>
   if (trees.error) return <ErrorBanner>{trees.error.message}</ErrorBanner>
-  if (details.error) return <ErrorBanner>{details.error.message}</ErrorBanner>
+  if (treeDetails.error) return <ErrorBanner>{treeDetails.error.message}</ErrorBanner>
 
-  const loaded = details.data
-  const selected = selectedId ? findNode(loaded, selectedId) : null
-
-  function toggle(list: string[], id: string): string[] {
-    return list.includes(id) ? list.filter((other) => other !== id) : [...list, id]
-  }
+  const detailedTrees = treeDetails.data
+  const selected = selectedId ? findNode(detailedTrees, selectedId) : null
 
   function select(node: VaultNode) {
     setSelectedId(node.id)
-    if (node.kind === 'branch') setOpenNodes((current) => toggle(current, node.id))
+    if (node.kind === 'branch') setOpenNodes((current) => toggleId(current, node.id))
   }
 
   /** Expand or collapse one branch. The arrow keys need to say which, where a
@@ -154,9 +155,9 @@ export function ProjectVault() {
 
       <LiveRegion message={message} />
 
-      {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
+      {deleteNode.error ? <ErrorBanner>{deleteNode.error.message}</ErrorBanner> : null}
 
-      {loaded.length === 0 ? (
+      {detailedTrees.length === 0 ? (
         <EmptyState>
           No trees yet. Start one — “Logins”, “Certificates &amp; keys”, whatever this project
           needs.
@@ -164,43 +165,20 @@ export function ProjectVault() {
       ) : (
         <div className={styles.split}>
           <div className={styles.trees}>
-            {loaded.map((tree) => (
-              <div key={tree.id} className={styles.tree}>
-                <button
-                  type="button"
-                  className={styles.treeHead}
-                  onClick={() => setOpenTrees((current) => toggle(current, tree.id))}
-                  aria-expanded={openTrees.includes(tree.id)}
-                >
-                  <b>{tree.name}</b>
-                  <span className={styles.treeCount}>
-                    {tree.node_count} {tree.node_count === 1 ? 'node' : 'nodes'}{' '}
-                    {openTrees.includes(tree.id) ? '▾' : '▸'}
-                  </span>
-                </button>
-                {openTrees.includes(tree.id) ? (
-                  <div className={styles.branchList}>
-                    <TreeNav
-                      tree={tree}
-                      selectedId={selectedId}
-                      openNodes={openNodes}
-                      onSelect={select}
-                      onSetOpen={setBranchOpen}
-                    />
-                    {/* Outside the tree on purpose: role="tree" may only hold
-                        treeitems, and this is an action, not a node. */}
-                    {may('vault') ? (
-                      <button
-                        type="button"
-                        className={`${styles.node} ${styles.add}`}
-                        onClick={() => setAdding({ treeId: tree.id, parentId: null })}
-                      >
-                        <span className={styles.caret} aria-hidden="true" />+ Add a node
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
+            {detailedTrees.map((tree) => (
+              <TreeSection
+                key={tree.id}
+                tree={tree}
+                open={openTrees.includes(tree.id)}
+                onToggleOpen={() => setOpenTrees((current) => toggleId(current, tree.id))}
+                selectedId={selectedId}
+                openNodes={openNodes}
+                onSelect={select}
+                onSetBranchOpen={setBranchOpen}
+                onAddNode={
+                  may('vault') ? () => setAddingAt({ treeId: tree.id, parentId: null }) : null
+                }
+              />
             ))}
           </div>
 
@@ -211,27 +189,17 @@ export function ProjectVault() {
                 path={selected.path}
                 announce={announce}
                 onAdd={(kind) =>
-                  setAdding({ treeId: selected.node.tree_id, parentId: selected.node.id, kind })
+                  setAddingAt({ treeId: selected.node.tree_id, parentId: selected.node.id, kind })
                 }
                 onSelect={select}
                 mayChange={may('vault')}
                 mayReveal={may('vault_reveal')}
                 onEdit={() => setEditing(selected.node)}
                 onMove={() => setMoving(selected.node)}
-                onDelete={() => remove.mutate(selected.node)}
+                onDelete={() => deleteNode.mutate(selected.node)}
               />
             ) : (
-              <div className={styles.blank}>
-                <div>
-                  <LockIcon />
-                  <br />
-                  Select a node to see what is inside.
-                  <br />
-                  <span className={styles.hint}>
-                    Branches hold more nodes; secrets hold a login, key or link.
-                  </span>
-                </div>
-              </div>
+              <NothingSelected />
             )}
           </div>
         </div>
@@ -248,10 +216,10 @@ export function ProjectVault() {
         />
       ) : null}
 
-      {adding ? (
+      {addingAt ? (
         <NodeDialog
           projectKey={projectKey}
-          destination={adding}
+          destination={addingAt}
           onCreated={(created) => {
             setOpenTrees((current) =>
               current.includes(created.tree_id) ? current : [...current, created.tree_id],
@@ -263,7 +231,7 @@ export function ProjectVault() {
             await refresh()
             announce(`Added ${name}.`)
           }}
-          onClose={() => setAdding(null)}
+          onClose={() => setAddingAt(null)}
         />
       ) : null}
 
@@ -283,7 +251,7 @@ export function ProjectVault() {
       {moving ? (
         <MoveDialog
           node={moving}
-          tree={loaded.find((tree) => tree.id === moving.tree_id)}
+          tree={detailedTrees.find((tree) => tree.id === moving.tree_id)}
           onDone={async (name) => {
             await refresh()
             announce(`Moved ${name}.`)
@@ -292,6 +260,77 @@ export function ProjectVault() {
         />
       ) : null}
     </>
+  )
+}
+
+/**
+ * One tree in the left-hand rail: its heading, which opens and closes it, and
+ * — while it is open — its nodes and the button that adds one.
+ */
+function TreeSection({
+  tree,
+  open,
+  onToggleOpen,
+  selectedId,
+  openNodes,
+  onSelect,
+  onSetBranchOpen,
+  onAddNode,
+}: {
+  tree: VaultTreeDetail
+  open: boolean
+  onToggleOpen: () => void
+  selectedId: string | null
+  openNodes: string[]
+  onSelect: (node: VaultNode) => void
+  onSetBranchOpen: (nodeId: string, open: boolean) => void
+  /** Null where the reader's role does not allow changing the vault. */
+  onAddNode: (() => void) | null
+}) {
+  return (
+    <div className={styles.tree}>
+      <button type="button" className={styles.treeHead} onClick={onToggleOpen} aria-expanded={open}>
+        <b>{tree.name}</b>
+        <span className={styles.treeCount}>
+          {tree.node_count} {tree.node_count === 1 ? 'node' : 'nodes'} {open ? '▾' : '▸'}
+        </span>
+      </button>
+      {open ? (
+        <div className={styles.branchList}>
+          <TreeNav
+            tree={tree}
+            selectedId={selectedId}
+            openNodes={openNodes}
+            onSelect={onSelect}
+            onSetOpen={onSetBranchOpen}
+          />
+          {/* Outside the tree on purpose: role="tree" may only hold
+              treeitems, and this is an action, not a node. */}
+          {onAddNode ? (
+            <button type="button" className={`${styles.node} ${styles.add}`} onClick={onAddNode}>
+              <span className={styles.caret} aria-hidden="true" />+ Add a node
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** The right-hand pane before anything has been picked from a tree. */
+function NothingSelected() {
+  return (
+    <div className={styles.blank}>
+      <div>
+        <LockIcon />
+        <br />
+        Select a node to see what is inside.
+        <br />
+        <span className={styles.hint}>
+          Branches hold more nodes; secrets hold a login, key or link.
+        </span>
+      </div>
+    </div>
   )
 }
 
@@ -626,13 +665,15 @@ function SecretDetail({
 
   /** Copying the secret reveals it, so it goes through the same logged
    * endpoint — taking a credential to the clipboard is reading it. */
+  async function textToCopy(what: 'username' | 'secret'): Promise<string> {
+    if (what === 'username') return node.secret?.username ?? ''
+    if (revealed !== null) return revealed
+    return (await api.revealSecret(node.id)).value
+  }
+
   const copy = useMutation({
     mutationFn: async (what: 'username' | 'secret') => {
-      const text =
-        what === 'username'
-          ? (node.secret?.username ?? '')
-          : (revealed ?? (await api.revealSecret(node.id)).value)
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(await textToCopy(what))
       return what
     },
     onSuccess: (what) => {
@@ -702,7 +743,7 @@ function SecretDetail({
           {mayReveal ? (
             <>
               <Button variant="ghost" small disabled={reveal.isPending} onClick={toggleReveal}>
-                {revealed ? 'Hide' : reveal.isPending ? 'Revealing…' : 'Reveal'}
+                {revealButtonLabel(revealed, reveal.isPending)}
               </Button>
               <Button
                 variant="ghost"
@@ -744,6 +785,13 @@ function SecretDetail({
       </div>
     </>
   )
+}
+
+/** What the reveal button says: put it away, wait for it, or ask for it. */
+function revealButtonLabel(revealed: string | null, revealing: boolean): string {
+  if (revealed) return 'Hide'
+  if (revealing) return 'Revealing…'
+  return 'Reveal'
 }
 
 function TreeDialog({
@@ -815,6 +863,13 @@ const KINDS: { value: VaultNodeKind; label: string }[] = [
   { value: 'secret', label: 'Secret' },
 ]
 
+/** Which way an arrow key moves through a radio group: forward, back, or not at all. */
+function arrowStep(key: string): number {
+  if (key === 'ArrowRight' || key === 'ArrowDown') return 1
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return -1
+  return 0
+}
+
 /**
  * Branch or secret, as a radio group rather than as two buttons.
  *
@@ -832,12 +887,7 @@ function KindPicker({
   const group = useRef<HTMLDivElement>(null)
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const step =
-      event.key === 'ArrowRight' || event.key === 'ArrowDown'
-        ? 1
-        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-          ? -1
-          : 0
+    const step = arrowStep(event.key)
     if (step === 0) return
     event.preventDefault()
 
@@ -922,12 +972,7 @@ function NodeDialog({
 
   const save = useMutation({
     mutationFn: async () => {
-      const secret: SecretInput = {
-        username: form.username.trim() || null,
-        url: form.url.trim() || null,
-        notes: form.notes,
-        ...(form.value ? { value: form.value } : {}),
-      }
+      const secret = secretInputFrom(form)
       if (node) {
         await api.updateVaultNode(node.id, {
           name: name.trim(),
@@ -958,13 +1003,13 @@ function NodeDialog({
 
   return (
     <Modal
-      title={editing ? 'Edit entry' : kind === 'secret' ? 'New secret' : 'New node'}
+      title={nodeDialogTitle(editing, kind)}
       onClose={onClose}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="go" disabled={save.isPending || !complete} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving…' : editing ? 'Save' : 'Add'}
+            {saveButtonLabel(save.isPending, editing)}
           </Button>
         </>
       }
@@ -1004,47 +1049,85 @@ function NodeDialog({
         </Field>
 
         {kind === 'secret' ? (
-          <>
-            <FieldPair>
-              <Field label="Username">
-                <input
-                  value={form.username}
-                  onChange={(event) => setForm({ ...form, username: event.target.value })}
-                />
-              </Field>
-              <Field label="URL">
-                <input
-                  value={form.url}
-                  onChange={(event) => setForm({ ...form, url: event.target.value })}
-                />
-              </Field>
-            </FieldPair>
-            <Field
-              label="Password / key"
-              required={!editing}
-              hint={
-                editing
-                  ? 'Leave blank to keep the stored credential. It is never shown here.'
-                  : 'Encrypted before it is stored; only Reveal brings it back.'
-              }
-            >
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={form.value}
-                onChange={(event) => setForm({ ...form, value: event.target.value })}
-              />
-            </Field>
-            <Field label="Notes">
-              <textarea
-                value={form.notes}
-                onChange={(event) => setForm({ ...form, notes: event.target.value })}
-              />
-            </Field>
-          </>
+          <SecretFields form={form} editing={editing} onChange={setForm} />
         ) : null}
       </ModalBody>
     </Modal>
+  )
+}
+
+/** The secret's own fields, in the shape the API takes them: blanks sent as nulls. */
+function secretInputFrom(form: SecretForm): SecretInput {
+  return {
+    username: form.username.trim() || null,
+    url: form.url.trim() || null,
+    notes: form.notes,
+    ...(form.value ? { value: form.value } : {}),
+  }
+}
+
+function nodeDialogTitle(editing: boolean, kind: VaultNodeKind): string {
+  if (editing) return 'Edit entry'
+  return kind === 'secret' ? 'New secret' : 'New node'
+}
+
+function saveButtonLabel(saving: boolean, editing: boolean): string {
+  if (saving) return 'Saving…'
+  return editing ? 'Save' : 'Add'
+}
+
+/**
+ * The fields only a secret has: who it logs in as, where, the credential
+ * itself, and notes.
+ */
+function SecretFields({
+  form,
+  editing,
+  onChange,
+}: {
+  form: SecretForm
+  editing: boolean
+  onChange: (form: SecretForm) => void
+}) {
+  return (
+    <>
+      <FieldPair>
+        <Field label="Username">
+          <input
+            value={form.username}
+            onChange={(event) => onChange({ ...form, username: event.target.value })}
+          />
+        </Field>
+        <Field label="URL">
+          <input
+            value={form.url}
+            onChange={(event) => onChange({ ...form, url: event.target.value })}
+          />
+        </Field>
+      </FieldPair>
+      <Field
+        label="Password / key"
+        required={!editing}
+        hint={
+          editing
+            ? 'Leave blank to keep the stored credential. It is never shown here.'
+            : 'Encrypted before it is stored; only Reveal brings it back.'
+        }
+      >
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={form.value}
+          onChange={(event) => onChange({ ...form, value: event.target.value })}
+        />
+      </Field>
+      <Field label="Notes">
+        <textarea
+          value={form.notes}
+          onChange={(event) => onChange({ ...form, notes: event.target.value })}
+        />
+      </Field>
+    </>
   )
 }
 

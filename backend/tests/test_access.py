@@ -784,3 +784,44 @@ class TestTheCountsAgreeWithTheListings:
         theirs = (await other_client.get("/projects/ATL/summary")).json()
 
         assert theirs["vault_secret_count"] == 1
+
+
+class TestARoleTakesItsRestrictionsWithIt:
+    """A rule about a role has nothing left to be about once the role is gone.
+
+    These rows used to point at their role through a key that refused, so
+    deleting a role anybody had narrowed failed at COMMIT — a 500, well after
+    the service had decided the delete was fine.
+    """
+
+    async def test_deleting_a_role_with_a_column_rule(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.post("/projects/ATL/roles", json={"name": "QA"})
+        await _restrict_columns(signed_in, "QA", {"Done": (False, True)})
+
+        deleted = await signed_in.delete("/projects/ATL/roles/QA")
+
+        assert deleted.status_code == 204, deleted.text
+        grid = (await signed_in.get("/projects/ATL/permissions")).json()
+        assert [line["name"] for line in grid["roles"]] == ["Admin", "Everyone else"]
+
+    async def test_deleting_a_role_with_a_clearance(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.post("/projects/ATL/roles", json={"name": "QA"})
+        await _set_clearance(signed_in, "QA", "internal")
+
+        deleted = await signed_in.delete("/projects/ATL/roles/QA")
+
+        assert deleted.status_code == 204, deleted.text
+
+    async def test_and_the_baseline_keeps_its_own(self, signed_in: AsyncClient) -> None:
+        """The cascade follows the role. Everyone else's rows have none, so no
+        role's deletion reaches them."""
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.post("/projects/ATL/roles", json={"name": "QA"})
+        await _set_clearance(signed_in, "QA", "internal")
+        await _set_clearance(signed_in, None, "public")
+
+        await signed_in.delete("/projects/ATL/roles/QA")
+
+        assert (await _line(signed_in, "Everyone else"))["clearance"] == "public"

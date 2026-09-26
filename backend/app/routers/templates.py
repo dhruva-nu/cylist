@@ -38,7 +38,7 @@ async def resolved_template(
     return await templates.get_template(session, template_id)
 
 
-def _template(template: TaskTemplate, task_count: int) -> TemplateRead:
+def _template_read(template: TaskTemplate, task_count: int) -> TemplateRead:
     stages = sorted(template.stages, key=lambda stage: stage.column.position)
     return TemplateRead(
         id=template.id,
@@ -60,9 +60,9 @@ def _template(template: TaskTemplate, task_count: int) -> TemplateRead:
     )
 
 
-async def _one_template(session: AsyncSession, template: TaskTemplate) -> TemplateRead:
+async def _counted_template_read(session: AsyncSession, template: TaskTemplate) -> TemplateRead:
     counts = await templates.template_task_counts(session, template.project_id)
-    return _template(template, counts.get(template.id, 0))
+    return _template_read(template, counts.get(template.id, 0))
 
 
 SHAPE_BOARD = guards.on_project(Permission.BOARD)
@@ -132,7 +132,7 @@ async def list_templates(
     """
     found = await templates.list_templates(session, project)
     counts = await templates.template_task_counts(session, project.id)
-    return [_template(template, counts.get(template.id, 0)) for template in found]
+    return [_template_read(template, counts.get(template.id, 0)) for template in found]
 
 
 @router.post(
@@ -163,7 +163,7 @@ async def create_template(
         project_id=project.id,
         payload={"name": template.name, "stage_count": len(template.stages)},
     )
-    return await _one_template(session, template)
+    return await _counted_template_read(session, template)
 
 
 @router.patch(
@@ -197,7 +197,7 @@ async def update_template(
         project_id=updated.project_id,
         payload={"name": updated.name, "fields": sorted(body.model_dump(exclude_unset=True))},
     )
-    return await _one_template(session, updated)
+    return await _counted_template_read(session, updated)
 
 
 @router.delete(

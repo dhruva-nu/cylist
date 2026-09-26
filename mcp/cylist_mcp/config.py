@@ -59,7 +59,7 @@ class Settings:
         return self.urls[0]
 
 
-def resolve() -> Settings:
+def load_settings() -> Settings:
     """Read the token and the addresses, failing loudly without a token.
 
     Failing at startup is deliberate: a server that starts without a token

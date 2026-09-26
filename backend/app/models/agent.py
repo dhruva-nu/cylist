@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -75,10 +75,10 @@ class Skill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """RESTRICT rather than CASCADE, as for a file item: the bytes are shared,
     so they may only go once nothing refers to them."""
 
-    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    """Copied from the blob so a listing needs no join."""
-
     mime: Mapped[str] = mapped_column(String(255), nullable=False)
+    """The type this upload declared. Kept on the skill rather than the blob,
+    for the reason a file item keeps its own — see
+    :attr:`~app.models.file.Blob.size`."""
 
     added_by: Mapped[UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True),
@@ -89,6 +89,12 @@ class Skill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     added_by_person: Mapped[Person | None] = relationship(lazy="selectin")
 
     blob: Mapped[Blob] = relationship(lazy="joined")
+    """Joined into every load, so :attr:`size` costs no second query."""
+
+    @property
+    def size(self) -> int:
+        """Bytes, read off the blob."""
+        return self.blob.size
 
 
 class AgentNote(Base, UUIDPrimaryKeyMixin, TimestampMixin):

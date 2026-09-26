@@ -209,12 +209,9 @@ def _loop(
     first = events.get()
     if isinstance(first, m.HookEnd):
         return
-    machine = _initial(session_id, first)
-    state.task = machine.task
+    reducer = _Reducer(_initial(session_id, first), state)
 
     socket: Any = None
-    last = _clock()
-    retry_at = 0.0
 
     # Every address the server answers on, tried in turn. A daemon outlives
     # the network it was started on: a laptop that suspends on the tailnet and
@@ -227,7 +224,7 @@ def _loop(
         # Nothing to say until we know which card, and a socket opened
         # without one would report on the empty reference and be closed for
         # it. Wait instead; the next hook event says where.
-        if socket is None and machine.task and _clock() >= retry_at:
+        if socket is None and reducer.machine.task and _clock() >= reducer.retry_at:
             base_url = addresses[attempt % len(addresses)]
             try:
                 # Re-read the token every attempt, so a fresh `cylist setup`
@@ -236,40 +233,21 @@ def _loop(
             except Exception as exc:
                 attempt += 1
                 logger.info("Connect to %s failed: %s", base_url, exc)
-                machine, actions = _advance(machine, m.LinkDown(), last)
-                last = _clock()
-                retry_at = last + _delay(actions)
-                state.link = machine.link.value
-                if _finished(actions):
+                if reducer.link_lost():
                     return
                 continue
             endpoints.remember(base_url)
-            machine, actions = _advance(machine, m.LinkUp(), last)
-            last = _clock()
-            state.link = machine.link.value
-            if not _perform(socket, actions):
-                _drop(socket)
+            if not _perform(socket, reducer.feed(m.LinkUp())):
+                _close(socket)
                 socket = None
                 continue
 
-        try:
-            event: m.Event = events.get(timeout=TICK)
-        except queue.Empty:
-            event = m.Tick()
-
-        machine, actions = _advance(machine, event, last)
-        last = _clock()
-        state.task = machine.task
-        state.link = machine.link.value
+        actions = reducer.feed(_next_event(events))
 
         if socket is not None and not _perform(socket, actions):
-            _drop(socket)
+            _close(socket)
             socket = None
-            machine, more = _advance(machine, m.LinkDown(), last)
-            last = _clock()
-            retry_at = last + _delay(more)
-            state.link = machine.link.value
-            if _finished(more):
+            if reducer.link_lost():
                 return
             continue
 
@@ -278,14 +256,49 @@ def _loop(
             return
 
         if socket is not None and _dropped(socket):
-            _drop(socket)
+            _close(socket)
             socket = None
-            machine, more = _advance(machine, m.LinkDown(), last)
-            last = _clock()
-            retry_at = last + _delay(more)
-            state.link = machine.link.value
-            if _finished(more):
+            if reducer.link_lost():
                 return
+
+
+class _Reducer:
+    """The machine, the clock it is stepped by, and when to try connecting next.
+
+    Every step has to do the same three things — measure the time since the
+    last one, keep the new machine, and let the IPC thread see where it now
+    stands — so they are done here once rather than at every place the loop
+    steps it.
+    """
+
+    def __init__(self, machine: m.Machine, state: _Shared) -> None:
+        self.machine = machine
+        self.retry_at = 0.0
+        self._state = state
+        self._last = _clock()
+        state.task = machine.task
+
+    def feed(self, event: m.Event) -> list[m.Action]:
+        """Step the machine by one event, and return what it says to do."""
+        self.machine, actions = m.step(self.machine, event, _clock() - self._last)
+        self._last = _clock()
+        self._state.task = self.machine.task
+        self._state.link = self.machine.link.value
+        return actions
+
+    def link_lost(self) -> bool:
+        """Tell the machine the socket is gone. True if it says to give up."""
+        actions = self.feed(m.LinkDown())
+        self.retry_at = self._last + _delay(actions)
+        return _finished(actions)
+
+
+def _next_event(events: queue.Queue[m.Event]) -> m.Event:
+    """What the hooks said next, or a tick if they said nothing for a second."""
+    try:
+        return events.get(timeout=TICK)
+    except queue.Empty:
+        return m.Tick()
 
 
 def _initial(session_id: str, first: m.Event) -> m.Machine:
@@ -301,10 +314,6 @@ def _initial(session_id: str, first: m.Event) -> m.Machine:
             reason=first.reason,
         )
     return m.Machine(session=session_id, task="", client_name="")
-
-
-def _advance(machine: m.Machine, event: m.Event, last: float) -> tuple[m.Machine, list[m.Action]]:
-    return m.step(machine, event, _clock() - last)
 
 
 def _perform(socket: Any, actions: list[m.Action]) -> bool:
@@ -339,11 +348,6 @@ def _dropped(socket: Any) -> bool:
     except Exception:
         return True
     return False
-
-
-def _drop(socket: Any) -> None:
-    """Let go of a socket that is no longer any use."""
-    _close(socket)
 
 
 def _close(socket: Any) -> None:

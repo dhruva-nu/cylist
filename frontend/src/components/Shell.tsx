@@ -1,9 +1,14 @@
-/** The frame every screen sits in: wordmark, project tabs and breadcrumbs. */
+/**
+ * The frame every screen sits in: the sidebar, and beside it the wordmark,
+ * the project's tabs and breadcrumbs over the page. The bar's tabs are four of
+ * a project's areas and the sidebar lists all of them — see `ProjectNav.tsx`.
+ */
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode } from 'react'
 import { api } from '../api/client'
+import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
 import { Avatar } from './ui'
 import styles from './Shell.module.css'
@@ -41,7 +46,6 @@ function usePageWidth(): string | undefined {
   if (matchRoute({ to: '/p/$projectKey/board' })) return styles.pageBoard
   if (matchRoute({ to: '/' })) return styles.pageGallery
   if (
-    matchRoute({ to: '/p/$projectKey' }) ||
     matchRoute({ to: '/p/$projectKey/agents' }) ||
     matchRoute({ to: '/p/$projectKey/people' }) ||
     matchRoute({ to: '/p/$projectKey/roles' }) ||
@@ -65,13 +69,13 @@ export function Shell() {
   return (
     <>
       {/*
-        The whole sidebar and eight more tab stops sit between the top of the
-        page and the content — the panel's handle and its sections, then the
-        wordmark, six tabs and the breadcrumb. Tabbing past all of that on
-        every navigation is the sort of thing that makes a keyboard unusable,
-        so there is a way over it. It matters more now than it did with the
-        panel on the other side, where it came after the content rather than
-        before it.
+        The whole sidebar and a few more tab stops sit between the top of the
+        page and the content — the panel's handle, a project's areas and the
+        sections under them, then the wordmark, four tabs and the breadcrumb.
+        Tabbing past all of that on every navigation is the sort of thing that
+        makes a keyboard unusable, so there is a way over it. It matters more
+        now than it did with the panel on the other side, where it came after
+        the content rather than before it.
       */}
       <a href="#content" className={styles.skip}>
         Skip to content
@@ -129,78 +133,25 @@ function You() {
   )
 }
 
-/** Tabs across a project's areas. Hidden outside a project. */
-function ProjectTabs() {
-  const matchRoute = useMatchRoute()
-  const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  if (!match) return <div />
-
-  const { projectKey } = match
-
-  return (
-    <nav className={styles.nav}>
-      <Link to="/p/$projectKey" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Overview
-      </Link>
-      <Link to="/p/$projectKey/board" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Board
-      </Link>
-      <Link to="/p/$projectKey/goals" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Goals
-      </Link>
-      <Link to="/p/$projectKey/files" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Files
-      </Link>
-      <Link to="/p/$projectKey/vault" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Vault
-      </Link>
-      <Link
-        to="/p/$projectKey/people"
-        params={{ projectKey }}
-        activeProps={{ className: 'active' }}
-      >
-        People
-      </Link>
-      <Link to="/p/$projectKey/roles" params={{ projectKey }} activeProps={{ className: 'active' }}>
-        Roles
-      </Link>
-      <Link
-        to="/p/$projectKey/agents"
-        params={{ projectKey }}
-        activeProps={{ className: 'active' }}
-      >
-        Agents
-      </Link>
-    </nav>
-  )
-}
+/**
+ * A project's areas as the breadcrumb names them, checked in this order and
+ * the first match wins.
+ */
+const PROJECT_AREAS = [
+  { name: 'Board', route: { to: '/p/$projectKey/board' } },
+  // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
+  { name: 'Goals', route: { to: '/p/$projectKey/goals', fuzzy: true } },
+  { name: 'Files', route: { to: '/p/$projectKey/files' } },
+  { name: 'Vault', route: { to: '/p/$projectKey/vault' } },
+  { name: 'People', route: { to: '/p/$projectKey/people' } },
+  { name: 'Roles', route: { to: '/p/$projectKey/roles' } },
+  { name: 'Agents', route: { to: '/p/$projectKey/agents' } },
+] as const
 
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  const onAgents = matchRoute({ to: '/p/$projectKey/agents' })
-  const onBoard = matchRoute({ to: '/p/$projectKey/board' })
-  const onFiles = matchRoute({ to: '/p/$projectKey/files' })
-  const onPeople = matchRoute({ to: '/p/$projectKey/people' })
-  const onRoles = matchRoute({ to: '/p/$projectKey/roles' })
-  const onVault = matchRoute({ to: '/p/$projectKey/vault' })
-  // Fuzzy, so a goal's own page is still under Goals rather than nowhere.
-  const onGoals = matchRoute({ to: '/p/$projectKey/goals', fuzzy: true })
-  const area = onBoard
-    ? 'Board'
-    : onGoals
-      ? 'Goals'
-      : onFiles
-        ? 'Files'
-        : onVault
-          ? 'Vault'
-          : onPeople
-            ? 'People'
-            : onRoles
-              ? 'Roles'
-              : onAgents
-                ? 'Agents'
-                : null
+  const area = PROJECT_AREAS.find((candidate) => matchRoute(candidate.route))?.name ?? null
 
   if (!inProject) {
     return (
@@ -229,7 +180,7 @@ function Breadcrumbs() {
   )
 }
 
-function useProjectName(projectKey: string) {
+function useProject(projectKey: string) {
   return useQuery({
     queryKey: ['project', projectKey],
     queryFn: () => api.getProject(projectKey),
@@ -237,14 +188,16 @@ function useProjectName(projectKey: string) {
 }
 
 function ProjectName({ projectKey }: { projectKey: string }) {
-  const project = useProjectName(projectKey)
+  const project = useProject(projectKey)
   return <b>{project.data?.name ?? projectKey}</b>
 }
 
+/** The project's name, as the way to its board: there is no overview page to
+ * send it to any more, and the board is what a project's address opens. */
 function ProjectCrumbLink({ projectKey }: { projectKey: string }) {
-  const project = useProjectName(projectKey)
+  const project = useProject(projectKey)
   return (
-    <Link to="/p/$projectKey" params={{ projectKey }}>
+    <Link to="/p/$projectKey/board" params={{ projectKey }}>
       {project.data?.name ?? projectKey}
     </Link>
   )

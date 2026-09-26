@@ -68,6 +68,7 @@ class Activity(Base, UUIDPrimaryKeyMixin):
             Channel,
             name="channel",
             native_enum=False,
+            create_constraint=True,
             values_callable=lambda enum: [member.value for member in enum],
         ),
         nullable=False,
