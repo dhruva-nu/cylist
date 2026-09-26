@@ -80,11 +80,11 @@ def fire(
 
 
 def _bind(session_id: str = SESSION, task: str = "ATL-1", **more: Any) -> None:
-    hook._save(session_id, {"task": task, "bound_at": hook._now().isoformat(), **more})
+    hook._save_state(session_id, {"task": task, "bound_at": hook._now().isoformat(), **more})
 
 
 def _state(session_id: str = SESSION) -> dict[str, Any]:
-    return hook._load(session_id)
+    return hook._load_state(session_id)
 
 
 def _put_body(recorder: fake_api.Recorder, task: str = "ATL-1", session: str = SESSION) -> Any:
@@ -161,9 +161,35 @@ def test_session_start_binds_from_the_environment(
 
     _, out, _ = fire(_event("SessionStart", source="startup"))
 
-    assert out.strip() == _title("SessionStart", "ATL-1")
+    assert json.loads(out)["hookSpecificOutput"]["sessionTitle"] == "ATL-1"
     assert _put_body(recorder)["state"] == "working"
     assert _state()["task"] == "ATL-1"
+
+
+def test_a_session_started_on_a_card_is_told_to_read_the_scratchpad(
+    fire: Fire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CYLIST_TASK", "ATL-1")
+
+    _, out, _ = fire(_event("SessionStart", source="startup"))
+
+    reply = json.loads(out)["hookSpecificOutput"]
+    assert reply["hookEventName"] == "SessionStart"
+    assert reply["additionalContext"] == hook.working_brief("ATL-1")
+    assert "read_scratchpad for ATL" in reply["additionalContext"]
+    assert "note_learned for ATL" in reply["additionalContext"]
+
+
+def test_a_compacted_session_is_briefed_again(fire: Fire) -> None:
+    """Compaction is where the first brief is most likely to have been lost."""
+    _bind(title_applied="ATL-1")
+
+    _, out, _ = fire(_event("SessionStart", source="compact", session_title="ATL-1"))
+
+    assert json.loads(out)["hookSpecificOutput"] == {
+        "hookEventName": "SessionStart",
+        "additionalContext": hook.working_brief("ATL-1"),
+    }
 
 
 def test_session_start_keeps_a_resumed_binding(fire: Fire, recorder: fake_api.Recorder) -> None:
@@ -493,6 +519,7 @@ def test_install_writes_every_event_and_the_work_command(
     command = (tmp_path / "claude" / "commands" / "work.md").read_text()
     assert command.startswith("---\ndescription: Bind this session")
     assert "$ARGUMENTS" in command
+    assert "read_scratchpad" in command and "note_learned" in command
     assert "Open a new Claude Code session" in result.out
 
 

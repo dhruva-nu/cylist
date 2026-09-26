@@ -211,7 +211,7 @@ function Skills({
   const queryClient = useQueryClient()
   const may = usePermissions(projectKey)
   const [problem, setProblem] = useState<string | null>(null)
-  const picker = useRef<HTMLInputElement>(null)
+  const filePicker = useRef<HTMLInputElement>(null)
 
   const skills = useQuery({
     queryKey: ['skills', projectKey],
@@ -233,9 +233,9 @@ function Skills({
     mutationFn: async (files: File[]) => {
       const replaced: string[] = []
       for (const file of files) {
-        const before = skills.data?.some((skill) => skill.name === file.name) ?? false
+        const alreadyThere = skills.data?.some((skill) => skill.name === file.name) ?? false
         await api.uploadSkill(projectKey, file)
-        if (before) replaced.push(file.name)
+        if (alreadyThere) replaced.push(file.name)
       }
       return { count: files.length, replaced }
     },
@@ -252,7 +252,7 @@ function Skills({
     onError: (error: Error) => setProblem(error.message),
   })
 
-  const remove = useMutation({
+  const deleteSkill = useMutation({
     mutationFn: ({ id }: { id: string; name: string }) => api.deleteSkill(id),
     onSuccess: async (_gone, { name }) => {
       await refresh()
@@ -272,7 +272,7 @@ function Skills({
             {/* The real input, driven by the button beside it: a bare file
                 input cannot be styled to match anything else on the page. */}
             <input
-              ref={picker}
+              ref={filePicker}
               type="file"
               multiple
               className="visually-hidden"
@@ -287,7 +287,7 @@ function Skills({
             <Button
               variant="go"
               disabled={upload.isPending}
-              onClick={() => picker.current?.click()}
+              onClick={() => filePicker.current?.click()}
             >
               {upload.isPending ? 'Uploading…' : '+ Upload a skill'}
             </Button>
@@ -314,8 +314,8 @@ function Skills({
             <SkillRow
               key={skill.id}
               skill={skill}
-              busy={remove.isPending}
-              onDelete={() => remove.mutate({ id: skill.id, name: skill.name })}
+              busy={deleteSkill.isPending}
+              onDelete={() => deleteSkill.mutate({ id: skill.id, name: skill.name })}
             />
           ))}
         </div>
@@ -338,7 +338,7 @@ function SkillRow({
   return (
     <div className={`${cardStyles.card} ${styles.skill}`}>
       <span className={styles.skillMark} aria-hidden="true">
-        {extensionOf(skill.name)}
+        {fileTypeMark(skill.name)}
       </span>
       <div className={styles.skillText}>
         <a className={styles.skillName} href={api.skillDownloadUrl(skill.id)} download={skill.name}>
@@ -370,7 +370,7 @@ function SkillRow({
 }
 
 /** The four-or-fewer characters that stand in for a file's type. */
-function extensionOf(name: string): string {
+function fileTypeMark(name: string): string {
   const extension = name.includes('.') ? (name.split('.').pop() ?? '') : ''
   return extension ? extension.slice(0, 4).toUpperCase() : 'FILE'
 }
@@ -398,7 +398,7 @@ function Scratchpad({
     ])
   }
 
-  const add = useMutation({
+  const addNote = useMutation({
     mutationFn: (body: string) => api.addAgentNote(projectKey, body),
     onMutate: () => setProblem(null),
     onSuccess: async () => {
@@ -409,7 +409,7 @@ function Scratchpad({
     onError: (error: Error) => setProblem(error.message),
   })
 
-  const remove = useMutation({
+  const rubOffNote = useMutation({
     mutationFn: (id: string) => api.deleteAgentNote(id),
     onSuccess: async () => {
       await refresh()
@@ -419,7 +419,7 @@ function Scratchpad({
   })
 
   const trimmed = draft.trim()
-  const left = NOTE_MAX_LENGTH - draft.length
+  const charactersLeft = NOTE_MAX_LENGTH - draft.length
 
   return (
     <Section
@@ -434,7 +434,7 @@ function Scratchpad({
         className={`${cardStyles.card} ${styles.compose}`}
         onSubmit={(event) => {
           event.preventDefault()
-          if (trimmed) add.mutate(trimmed)
+          if (trimmed) addNote.mutate(trimmed)
         }}
       >
         <label className="visually-hidden" htmlFor="new-note">
@@ -450,11 +450,11 @@ function Scratchpad({
         {/* Only once it is close enough to matter: a counter that is always on
             reads as a limit you are working against rather than a cap you
             will not meet. */}
-        <span className={`${styles.left} ${left < 0 ? styles.leftOver : ''}`}>
-          {left <= 60 ? left : ''}
+        <span className={`${styles.left} ${charactersLeft < 0 ? styles.leftOver : ''}`}>
+          {charactersLeft <= 60 ? charactersLeft : ''}
         </span>
-        <Button variant="go" type="submit" disabled={!trimmed || add.isPending}>
-          {add.isPending ? 'Noting…' : 'Note it'}
+        <Button variant="go" type="submit" disabled={!trimmed || addNote.isPending}>
+          {addNote.isPending ? 'Noting…' : 'Note it'}
         </Button>
       </form>
 
@@ -474,8 +474,8 @@ function Scratchpad({
             <NoteRow
               key={note.id}
               note={note}
-              busy={remove.isPending}
-              onDelete={() => remove.mutate(note.id)}
+              busy={rubOffNote.isPending}
+              onDelete={() => rubOffNote.mutate(note.id)}
             />
           ))}
         </ol>

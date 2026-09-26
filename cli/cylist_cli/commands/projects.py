@@ -142,9 +142,8 @@ def _members(args: argparse.Namespace, ctx: Context) -> None:
             person = resolve.pick(directory, name, kind="person", where="the people directory")
             by_id[str(person["id"])] = person
 
-    updated = ctx.client.put(f"/projects/{args.project}/members", {"person_ids": list(by_id)}).get(
-        "members", []
-    )
+    replaced = ctx.client.put(f"/projects/{args.project}/members", {"person_ids": list(by_id)})
+    updated = replaced.get("members", [])
 
     if ctx.as_json:
         output.emit_json({"members": updated})

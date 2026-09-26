@@ -102,6 +102,7 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             PersonKind,
             name="person_kind",
             native_enum=False,
+            create_constraint=True,
             values_callable=lambda enum: [member.value for member in enum],
         ),
         nullable=False,

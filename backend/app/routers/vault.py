@@ -90,7 +90,7 @@ async def _project_of_node(session: AsyncSession, node: VaultNode) -> UUID:
     return tree.project_id
 
 
-def _within(nodes: list[VaultNode], allowed: frozenset[Sensitivity]) -> list[VaultNode]:
+def _cleared_nodes(nodes: list[VaultNode], allowed: frozenset[Sensitivity]) -> list[VaultNode]:
     """Drop the nodes this caller is not cleared for, and their subtrees.
 
     A branch above the clearance takes everything under it, whatever those
@@ -206,7 +206,7 @@ async def create_tree(
         project_id=project.id,
         payload={"name": tree.name},
     )
-    return await _sized(session, tree)
+    return await _counted_tree_read(session, tree)
 
 
 @router.get(
@@ -229,11 +229,11 @@ async def get_tree(
     header over a filtered tree agrees with the rows under it.
     """
     allowed = await permissions.visible_levels_for(session, tree.project_id, principal)
-    nodes = _within(await vault.nodes_in_tree(session, tree.id), allowed)
+    nodes = _cleared_nodes(await vault.nodes_in_tree(session, tree.id), allowed)
     size = vault.TreeSize(nodes=len(nodes), secrets=sum(1 for node in nodes if node.is_secret))
     return VaultTreeDetail(
         **_tree_read(tree, size).model_dump(),
-        nodes=_nest(nodes, parent_id=None),
+        nodes=_nested_nodes(nodes, parent_id=None),
     )
 
 
@@ -259,7 +259,7 @@ async def update_tree(
         project_id=updated.project_id,
         payload={"name": updated.name, "fields": sorted(body.model_dump(exclude_unset=True))},
     )
-    return await _sized(session, updated)
+    return await _counted_tree_read(session, updated)
 
 
 @router.delete("/trees/{tree_id}", response_model=Acknowledged, summary="Delete a vault tree")
@@ -334,8 +334,8 @@ async def get_node(
     allowed = await permissions.visible_levels_for(
         session, await _project_of_node(session, node), principal
     )
-    nodes = _within(await vault.nodes_in_tree(session, node.tree_id), allowed)
-    return _node_read(node, children=_nest(nodes, parent_id=node.id))
+    nodes = _cleared_nodes(await vault.nodes_in_tree(session, node.tree_id), allowed)
+    return _node_read(node, children=_nested_nodes(nodes, parent_id=node.id))
 
 
 @router.patch(
@@ -490,7 +490,7 @@ def _tree_read(tree: VaultTree, size: vault.TreeSize) -> VaultTreeRead:
     )
 
 
-async def _sized(session: AsyncSession, tree: VaultTree) -> VaultTreeRead:
+async def _counted_tree_read(session: AsyncSession, tree: VaultTree) -> VaultTreeRead:
     """One tree with its counts, for the endpoints that return exactly one."""
     sizes = await vault.tree_sizes(session, [tree.id])
     return _tree_read(tree, sizes[tree.id])
@@ -512,7 +512,7 @@ def _node_read(node: VaultNode, *, children: list[VaultNodeRead] | None = None) 
     )
 
 
-def _nest(nodes: list[VaultNode], *, parent_id: UUID | None) -> list[VaultNodeRead]:
+def _nested_nodes(nodes: list[VaultNode], *, parent_id: UUID | None) -> list[VaultNodeRead]:
     """Turn a flat, ordered node list into the nesting the client draws.
 
     Done in one pass over an index rather than a query per level, so the depth

@@ -62,8 +62,9 @@ export function Today() {
   const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
   const projectKey = match ? match.projectKey : null
 
-  const [listing, setListing] = useState(false)
-  const [reading, setReading] = useState<string | null>(null)
+  const [showingList, setShowingList] = useState(false)
+  /** The card opened over the list, by reference. */
+  const [openCardRef, setOpenCardRef] = useState<string | null>(null)
 
   return (
     /* The count rides on the strip. It is the reason to glance at the sidebar
@@ -71,27 +72,27 @@ export function Today() {
        asked for. */
     <SidebarAction
       name="Today"
-      note={<Count projectKey={projectKey} />}
+      note={<DueCount projectKey={projectKey} />}
       disabled={projectKey === null}
       title={projectKey === null ? 'Open a project to see what is due on it today' : undefined}
-      onOpen={() => setListing(true)}
+      onOpen={() => setShowingList(true)}
     >
-      {listing && projectKey !== null ? (
+      {showingList && projectKey !== null ? (
         <TodayDialog
           projectKey={projectKey}
-          onOpenCard={setReading}
-          onClose={() => setListing(false)}
+          onOpenCard={setOpenCardRef}
+          onClose={() => setShowingList(false)}
         />
       ) : null}
 
       {/* A sibling of the list rather than a child of it, so the card comes
           out on top by being second and closing it leaves the list alone. */}
-      {reading !== null && projectKey !== null ? (
+      {openCardRef !== null && projectKey !== null ? (
         <OpenCard
           projectKey={projectKey}
-          reference={reading}
-          onOpen={setReading}
-          onClose={() => setReading(null)}
+          reference={openCardRef}
+          onOpen={setOpenCardRef}
+          onClose={() => setOpenCardRef(null)}
         />
       ) : null}
     </SidebarAction>
@@ -110,7 +111,7 @@ function TodayDialog({
   return (
     <Modal title="Today" onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       <ModalBody>
-        <List projectKey={projectKey} onOpen={onOpenCard} />
+        <TodayList projectKey={projectKey} onOpen={onOpenCard} />
       </ModalBody>
     </Modal>
   )
@@ -153,7 +154,7 @@ export function TodayCount() {
   const matchRoute = useMatchRoute()
   const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
 
-  return <Count projectKey={match ? match.projectKey : null} />
+  return <DueCount projectKey={match ? match.projectKey : null} />
 }
 
 /**
@@ -165,7 +166,7 @@ export function TodayCount() {
  * button is not on screen either. Overdue turns it red, because that is the
  * part that changes what you do next.
  */
-function Count({ projectKey }: { projectKey: string | null }) {
+function DueCount({ projectKey }: { projectKey: string | null }) {
   const work = useTodaysWork(projectKey)
   if (!work) return null
 
@@ -183,7 +184,13 @@ function Count({ projectKey }: { projectKey: string | null }) {
   )
 }
 
-function List({ projectKey, onOpen }: { projectKey: string; onOpen: (reference: string) => void }) {
+function TodayList({
+  projectKey,
+  onOpen,
+}: {
+  projectKey: string
+  onOpen: (reference: string) => void
+}) {
   const work = useTodaysWork(projectKey)
 
   if (!work) return <p className={styles.aside}>Reading the board…</p>
@@ -195,24 +202,24 @@ function List({ projectKey, onOpen }: { projectKey: string; onOpen: (reference: 
   return (
     <div className={styles.groups}>
       {work.overdue.length ? (
-        <Group name="Overdue" late>
+        <TodayGroup name="Overdue" late>
           {work.overdue.map((task) => (
-            <Row key={task.id} task={task} onOpen={onOpen} late />
+            <TodayRow key={task.id} task={task} onOpen={onOpen} late />
           ))}
-        </Group>
+        </TodayGroup>
       ) : null}
       {work.due.length ? (
-        <Group name={`Due today · ${formatDue(localToday())}`}>
+        <TodayGroup name={`Due today · ${formatDue(localToday())}`}>
           {work.due.map((task) => (
-            <Row key={task.id} task={task} onOpen={onOpen} />
+            <TodayRow key={task.id} task={task} onOpen={onOpen} />
           ))}
-        </Group>
+        </TodayGroup>
       ) : null}
     </div>
   )
 }
 
-function Group({
+function TodayGroup({
   name,
   late = false,
   children,
@@ -242,7 +249,7 @@ function Group({
  * a link inside one navigates the page behind it and leaves the dialog
  * standing over a screen that has moved on.
  */
-function Row({
+function TodayRow({
   task,
   onOpen,
   late = false,

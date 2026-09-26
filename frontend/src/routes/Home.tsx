@@ -3,7 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
-import { ApiError, MIN_PASSWORD_LENGTH, api, type Person, type ProjectInput } from '../api/client'
+import {
+  ApiError,
+  MIN_PASSWORD_LENGTH,
+  api,
+  type Person,
+  type Project,
+  type ProjectInput,
+} from '../api/client'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PersonDialog } from '../components/PersonDialog'
 import { PageHead } from '../components/Shell'
@@ -57,27 +64,7 @@ export function Home() {
       {projects.data?.length ? (
         <div className={styles.grid}>
           {projects.data.map((project) => (
-            <Link
-              key={project.id}
-              to="/p/$projectKey"
-              params={{ projectKey: project.key }}
-              className={`${cardStyles.card} ${cardStyles.clickable} ${styles.project}`}
-            >
-              <span
-                className={styles.mark}
-                style={{ background: project.colour, color: readableInkOn(project.colour) }}
-              >
-                {project.key[0]}
-              </span>
-              <h3>{project.name}</h3>
-              <p>{project.description || 'No description yet.'}</p>
-              <div className={styles.meta}>
-                <span>{project.key}</span>
-                <span>
-                  {project.member_count} {project.member_count === 1 ? 'person' : 'people'}
-                </span>
-              </div>
-            </Link>
+            <ProjectCard key={project.id} project={project} />
           ))}
           <button className={styles.new} onClick={() => setCreating(true)}>
             + New project
@@ -92,6 +79,32 @@ export function Home() {
         />
       ) : null}
     </>
+  )
+}
+
+/** One project on the grid, opening onto its board. */
+function ProjectCard({ project }: { project: Project }) {
+  return (
+    <Link
+      to="/p/$projectKey/board"
+      params={{ projectKey: project.key }}
+      className={`${cardStyles.card} ${cardStyles.clickable} ${styles.project}`}
+    >
+      <span
+        className={styles.mark}
+        style={{ background: project.colour, color: readableInkOn(project.colour) }}
+      >
+        {project.key[0]}
+      </span>
+      <h3>{project.name}</h3>
+      <p>{project.description || 'No description yet.'}</p>
+      <div className={styles.meta}>
+        <span>{project.key}</span>
+        <span>
+          {project.member_count} {project.member_count === 1 ? 'person' : 'people'}
+        </span>
+      </div>
+    </Link>
   )
 }
 
@@ -157,18 +170,18 @@ function MeCard({ onSaved }: { onSaved: (message: string) => void }) {
         </button>
       )}
 
-      {editing ? (
-        me ? (
-          <PersonDialog
-            title="This is me"
-            person={me}
-            onSaved={(name) => onSaved(`${name} saved.`)}
-            onDone={refresh}
-            onClose={() => setEditing(false)}
-          />
-        ) : (
-          <FirstAccountDialog onDone={refresh} onClose={() => setEditing(false)} />
-        )
+      {editing && me ? (
+        <PersonDialog
+          title="This is me"
+          person={me}
+          onSaved={(name) => onSaved(`${name} saved.`)}
+          onDone={refresh}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
+
+      {editing && !me ? (
+        <FirstAccountDialog onDone={refresh} onClose={() => setEditing(false)} />
       ) : null}
 
       {changingPassword ? (
@@ -277,7 +290,7 @@ function FirstAccountDialog({
 }) {
   const [form, setForm] = useState({ name: '', title: '', email: '', password: '' })
 
-  const open = useMutation({
+  const openAccount = useMutation({
     mutationFn: async () => {
       const person = await api.createPerson({
         name: form.name.trim(),
@@ -310,14 +323,18 @@ function FirstAccountDialog({
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="go" disabled={open.isPending || !ready} onClick={() => open.mutate()}>
-            {open.isPending ? 'Opening…' : 'Open account'}
+          <Button
+            variant="go"
+            disabled={openAccount.isPending || !ready}
+            onClick={() => openAccount.mutate()}
+          >
+            {openAccount.isPending ? 'Opening…' : 'Open account'}
           </Button>
         </>
       }
     >
       <ModalBody>
-        {open.error ? <ErrorBanner>{open.error.message}</ErrorBanner> : null}
+        {openAccount.error ? <ErrorBanner>{openAccount.error.message}</ErrorBanner> : null}
         <Field label="Name" required>
           <input
             value={form.name}

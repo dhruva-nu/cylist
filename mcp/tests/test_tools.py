@@ -9,7 +9,7 @@ import pytest
 from mcp.server.mcpserver import MCPServer
 
 from cylist_mcp.client import ApiClient
-from cylist_mcp.server import build_server, local_timezone
+from cylist_mcp.server import INSTRUCTIONS_SEEN, build_server, local_timezone
 from tests import fake_api
 from tests.conftest import call
 
@@ -35,6 +35,9 @@ EXPECTED_TOOLS = {
     "list_people",
     "list_files",
     "add_link",
+    "list_skills",
+    "read_skill",
+    "download_skill",
     "list_vault",
     "read_activity",
     "day_report",
@@ -753,3 +756,84 @@ async def test_create_task_can_name_the_goal_it_is_written_under(
     )
     assert not result.is_error
     assert recorder.body("POST", "/tasks")["goal_id"] == fake_api.GOAL_ID
+
+
+# --- Skills ----------------------------------------------------------------
+
+
+async def test_read_skill_returns_a_markdown_skills_text(server: MCPServer) -> None:
+    result = await call(server, "read_skill", project="ATL", name="board-tidy.md")
+    assert not result.is_error
+    assert result.data["content"] == fake_api.TIDY_TEXT
+
+
+async def test_read_skill_reads_a_zip_as_its_skill_md(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """The zip's bytes are no use to a model; the instructions inside it are."""
+    result = await call(server, "read_skill", project="ATL", name="release-kit.zip")
+    assert not result.is_error
+    assert result.data["content"].endswith("Run ./cut.sh\n")
+    assert result.data["files"] == ["SKILL.md", "cut.sh"]
+    assert recorder.count("GET", f"/skills/{fake_api.KIT_ID}/download") == 0
+
+
+async def test_download_skill_gives_the_folder_and_how_to_install_it(server: MCPServer) -> None:
+    result = await call(server, "download_skill", project="ATL", name="release-kit.zip")
+    assert not result.is_error
+    assert result.data["folder"] == "release-kit"
+    assert [one["path"] for one in result.data["files"]] == ["SKILL.md", "cut.sh"]
+    assert result.data["install"] == {
+        "command": "cylist skills pull ATL release-kit.zip",
+        "directory": ".claude/skills/release-kit/",
+    }
+
+
+async def test_download_skill_names_the_skills_there_are(server: MCPServer) -> None:
+    result = await call(server, "download_skill", project="ATL", name="release")
+    assert result.is_error
+    assert "board-tidy.md, release-kit.zip" in result.text
+
+
+# --- The scratchpad ----------------------------------------------------------
+
+
+async def test_the_instructions_say_to_read_the_scratchpad_first_and_write_as_you_go(
+    server: MCPServer,
+) -> None:
+    """The ask has to be in what every client is sent, not only in a README —
+    and inside the part of it a client actually shows. Claude Code cuts the
+    instructions off at 2048 characters; this paragraph used to start at 2047,
+    which is why agents only kept the scratchpad when somebody reminded them."""
+    seen = " ".join((server.instructions or "")[:INSTRUCTIONS_SEEN].split())
+    assert "call `read_scratchpad` for its project" in seen
+    assert "write it with `note_learned`. Then, not at the end" in seen
+    assert "the server refuses a line that says what one already there says" in seen
+    tools = {tool.name: tool.description or "" for tool in await server.list_tools()}
+    assert "Call it first whenever you are given a card" in tools["read_scratchpad"]
+    assert "the moment you learn it" in tools["note_learned"]
+    assert "read_scratchpad" in tools["get_task"]
+
+
+async def test_a_line_already_on_the_scratchpad_comes_back_as_its_refusal(
+    make_server: Callable[..., MCPServer],
+) -> None:
+    """The model is told which line it repeated, so it can move on rather than rephrase."""
+    server = make_server(
+        overrides={
+            ("POST", "/projects/ATL/agent-notes"): httpx.Response(
+                409,
+                json={
+                    "error": {
+                        "code": "conflict",
+                        "message": "That is already on the scratchpad: 'Run pytest from backend/.'",
+                        "details": {"note_id": "n1", "body": "Run pytest from backend/."},
+                    }
+                },
+            )
+        }
+    )
+    result = await call(server, "note_learned", project="ATL", note="run pytest from backend")
+    assert result.is_error
+    assert result.text.startswith("That is already on the scratchpad")
+    assert result.data["error"]["details"]["body"] == "Run pytest from backend/."

@@ -197,10 +197,6 @@ class FileSpec:
     mime: str = "application/octet-stream"
 
     @property
-    def is_link(self) -> bool:
-        return self.url is not None
-
-    @property
     def placeholder(self) -> bytes:
         """Content for an upload, which says what it is standing in for."""
         return (

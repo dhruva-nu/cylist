@@ -56,7 +56,6 @@ CONNECT_FAILURES = (httpx.ConnectError, httpx.ConnectTimeout)
 """The failures that mean "nothing was delivered", and so may be retried."""
 
 JsonDict = dict[str, Any]
-JsonList = list[JsonDict]
 
 
 class Client:
@@ -131,9 +130,6 @@ class Client:
 
     def put(self, path: str, body: JsonDict) -> Any:
         return self._send("PUT", path, json=body)
-
-    def delete(self, path: str) -> Any:
-        return self._send("DELETE", path)
 
     def stream(self, path: str) -> Iterator[bytes]:
         """Download a response body in chunks, without holding it in memory.

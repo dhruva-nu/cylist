@@ -131,6 +131,15 @@
   padding: 16px 24px 8px;
 }
 
+/* Under 720px the project's tabs take a row of their own beneath the wordmark
+   and your mark — see `.tabs` in ProjectNav.module.css. */
+@media (max-width: 719px) {
+  .bar {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+}
+
 .brand {
   display: flex;
   gap: 10px;
@@ -162,31 +171,6 @@
   display: flex;
   gap: 12px;
   align-items: center;
-}
-
-.nav {
-  display: flex;
-  gap: 6px;
-}
-
-.nav a {
-  padding: 7px 14px;
-  border-radius: var(--radius-control);
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;
-}
-
-.nav a:hover {
-  background: var(--paper);
-}
-
-.nav a.active {
-  background: var(--paper);
-  color: var(--ink);
-  box-shadow: var(--shadow);
 }
 
 .crumbs {
@@ -358,10 +342,4 @@
   gap: 8px;
   justify-content: center;
   margin-top: 8px;
-}
-
-@media (max-width: 720px) {
-  .nav {
-    display: none;
-  }
 }

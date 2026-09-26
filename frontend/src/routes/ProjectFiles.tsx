@@ -22,10 +22,12 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type MutableRefObject,
 } from 'react'
 import {
   api,
   type FileItem,
+  type Folder,
   type FolderNode,
   type ItemSource,
   type LinkInput,
@@ -153,32 +155,19 @@ function visibleRows(root: FolderNode, expanded: Set<string>): TreeRow[] {
   return rows
 }
 
-export function ProjectFiles() {
-  const { projectKey } = useParams({ from: '/p/$projectKey/files' })
-  const may = usePermissions(projectKey)
-  const queryClient = useQueryClient()
-
+/**
+ * Which folder is selected, which row has focus, and which are open — the
+ * tree's whole state, and the keyboard model that walks it.
+ */
+function useFolderTree(root: FolderNode | null) {
   const [selected, setSelected] = useState<string | null>(null)
   const [focused, setFocused] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [dialog, setDialog] = useState<'upload' | 'link' | 'folder' | null>(null)
-  const [problem, setProblem] = useState<string | null>(null)
-  const { message, announce } = useAnnouncer()
 
   // Moving focus is the point of arrow keys, and React cannot do it from a
   // render, so the rows have to be reachable as DOM nodes.
   const nodeRefs = useRef(new Map<string, HTMLDivElement>())
 
-  const project = useQuery({
-    queryKey: ['project', projectKey],
-    queryFn: () => api.getProject(projectKey),
-  })
-  const tree = useQuery({
-    queryKey: ['folder-tree', projectKey],
-    queryFn: () => api.getTree(projectKey),
-  })
-
-  const root = tree.data ?? null
   const selectedId = chosenWithin(root, selected)
   const focusedId = chosenWithin(root, focused ?? selected)
   const rows = root === null ? [] : visibleRows(root, expanded)
@@ -191,79 +180,7 @@ export function ProjectFiles() {
     setExpanded((current) => (current.has(rootId) ? current : new Set(current).add(rootId)))
   }, [rootId])
 
-  const contents = useQuery({
-    queryKey: ['folder-children', selectedId],
-    queryFn: () => api.getFolderChildren(selectedId as string),
-    enabled: selectedId !== null,
-  })
-
-  async function refresh() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['folder-tree', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['folder-children'] }),
-      queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
-      // What the `>` tag in a description or a comment is completed from: a
-      // file uploaded here is taggable in the next thing anybody writes.
-      queryClient.invalidateQueries({ queryKey: projectFilesKey(projectKey) }),
-    ])
-  }
-
-  const here = contents.data?.folder.name ?? project.data?.name ?? projectKey
-
-  const upload = useMutation({
-    mutationFn: async ({
-      files,
-      addedBy,
-      level,
-    }: {
-      files: File[]
-      addedBy: string | null
-      level: Sensitivity | null
-    }) => {
-      if (selectedId === null) throw new Error('The folder tree has not finished loading.')
-      // One at a time: two uploads of the same name in one folder race for it,
-      // and the loser's 409 is clearer when it is the only thing that failed.
-      for (const file of files) await api.uploadFile(selectedId, file, addedBy, level)
-      return files.length
-    },
-    onMutate: () => setProblem(null),
-    onSuccess: async (count) => {
-      await refresh()
-      announce(`${count} ${count === 1 ? 'file' : 'files'} uploaded to ${here}.`)
-    },
-    onError: (error: Error) => setProblem(error.message),
-  })
-
-  const removeItem = useMutation({
-    mutationFn: ({ id }: { id: string; name: string }) => api.deleteItem(id),
-    onSuccess: async (_deleted, { name }) => {
-      await refresh()
-      announce(`${name} deleted.`)
-    },
-    onError: (error: Error) => setProblem(error.message),
-  })
-
-  const removeFolder = useMutation({
-    mutationFn: ({ id }: { id: string; name: string }) => api.deleteFolder(id),
-    onSuccess: async (_deleted, { name }) => {
-      await refresh()
-      announce(`Folder ${name} deleted.`)
-    },
-    onError: (error: Error) => setProblem(error.message),
-  })
-
-  // Deleting takes the content off the server's disk, and nothing here undoes
-  // it — the one place in Cylist where a stray click really does lose data.
-  function confirmDelete(what: string, remove: () => void) {
-    if (window.confirm(`Delete ${what}? This cannot be undone.`)) remove()
-  }
-
-  async function added(what: string) {
-    await refresh()
-    announce(`${what} added to ${here}.`)
-  }
-
-  function setOpen(folderId: string, shouldOpen: boolean) {
+  function setFolderOpen(folderId: string, shouldOpen: boolean) {
     setExpanded((current) => {
       const next = new Set(current)
       if (shouldOpen) next.add(folderId)
@@ -272,7 +189,7 @@ export function ProjectFiles() {
     })
   }
 
-  function open(folderId: string) {
+  function selectFolder(folderId: string) {
     setExpanded((current) => {
       const next = new Set(current)
       // Selecting a folder opens it; choosing the open one again closes it.
@@ -320,12 +237,12 @@ export function ProjectFiles() {
         break
       case 'ArrowRight':
         // An open folder's first child is the very next row, by construction.
-        if (branching && !isOpen) setOpen(node.id, true)
+        if (branching && !isOpen) setFolderOpen(node.id, true)
         else if (branching) step(index + 1)
         else return
         break
       case 'ArrowLeft':
-        if (branching && isOpen) setOpen(node.id, false)
+        if (branching && isOpen) setFolderOpen(node.id, false)
         else if (parentId !== null) focusNode(parentId)
         else return
         break
@@ -337,7 +254,7 @@ export function ProjectFiles() {
         break
       case 'Enter':
       case ' ':
-        open(node.id)
+        selectFolder(node.id)
         break
       default:
         return
@@ -345,8 +262,111 @@ export function ProjectFiles() {
     event.preventDefault()
   }
 
-  const folders = contents.data?.folders ?? []
-  const items = contents.data?.items ?? []
+  return {
+    selectedId,
+    focusedId,
+    rows,
+    expanded,
+    nodeRefs,
+    selectFolder,
+    setFocused,
+    onTreeKeyDown,
+  }
+}
+
+export function ProjectFiles() {
+  const { projectKey } = useParams({ from: '/p/$projectKey/files' })
+  const may = usePermissions(projectKey)
+  const queryClient = useQueryClient()
+
+  const [dialog, setDialog] = useState<'upload' | 'link' | 'folder' | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const { message, announce } = useAnnouncer()
+
+  const project = useQuery({
+    queryKey: ['project', projectKey],
+    queryFn: () => api.getProject(projectKey),
+  })
+  const tree = useQuery({
+    queryKey: ['folder-tree', projectKey],
+    queryFn: () => api.getTree(projectKey),
+  })
+
+  const folderTree = useFolderTree(tree.data ?? null)
+  const { selectedId, selectFolder } = folderTree
+
+  const contents = useQuery({
+    queryKey: ['folder-children', selectedId],
+    queryFn: () => api.getFolderChildren(selectedId as string),
+    enabled: selectedId !== null,
+  })
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['folder-tree', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: ['folder-children'] }),
+      queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
+      // What the `>` tag in a description or a comment is completed from: a
+      // file uploaded here is taggable in the next thing anybody writes.
+      queryClient.invalidateQueries({ queryKey: projectFilesKey(projectKey) }),
+    ])
+  }
+
+  const folderName = contents.data?.folder.name ?? project.data?.name ?? projectKey
+
+  const upload = useMutation({
+    mutationFn: async ({
+      files,
+      addedBy,
+      level,
+    }: {
+      files: File[]
+      addedBy: string | null
+      level: Sensitivity | null
+    }) => {
+      if (selectedId === null) throw new Error('The folder tree has not finished loading.')
+      // One at a time: two uploads of the same name in one folder race for it,
+      // and the loser's 409 is clearer when it is the only thing that failed.
+      for (const file of files) await api.uploadFile(selectedId, file, addedBy, level)
+      return files.length
+    },
+    onMutate: () => setProblem(null),
+    onSuccess: async (count) => {
+      await refresh()
+      announce(`${count} ${count === 1 ? 'file' : 'files'} uploaded to ${folderName}.`)
+    },
+    onError: (error: Error) => setProblem(error.message),
+  })
+
+  const deleteItem = useMutation({
+    mutationFn: ({ id }: { id: string; name: string }) => api.deleteItem(id),
+    onSuccess: async (_deleted, { name }) => {
+      await refresh()
+      announce(`${name} deleted.`)
+    },
+    onError: (error: Error) => setProblem(error.message),
+  })
+
+  const deleteFolder = useMutation({
+    mutationFn: ({ id }: { id: string; name: string }) => api.deleteFolder(id),
+    onSuccess: async (_deleted, { name }) => {
+      await refresh()
+      announce(`Folder ${name} deleted.`)
+    },
+    onError: (error: Error) => setProblem(error.message),
+  })
+
+  // Deleting takes the content off the server's disk, and nothing here undoes
+  // it — the one place in Cylist where a stray click really does lose data.
+  function confirmDelete(what: string, remove: () => void) {
+    if (window.confirm(`Delete ${what}? This cannot be undone.`)) remove()
+  }
+
+  async function announceAdded(what: string) {
+    await refresh()
+    announce(`${what} added to ${folderName}.`)
+  }
+
   const crumbs = contents.data?.path.map((crumb) => crumb.name) ?? [
     project.data?.name ?? projectKey,
   ]
@@ -390,118 +410,53 @@ export function ProjectFiles() {
       <div className={styles.split}>
         <div className={styles.pane}>
           <div className={styles.paneHead}>Folders</div>
-          <div className={styles.tree} role="tree" aria-label="Folders" onKeyDown={onTreeKeyDown}>
-            {rows.map(({ node, level, position, siblings }) => (
-              <div
-                key={node.id}
-                ref={(element) => {
-                  if (element) nodeRefs.current.set(node.id, element)
-                  else nodeRefs.current.delete(node.id)
-                }}
-                role="treeitem"
-                aria-level={level}
-                aria-posinset={position}
-                aria-setsize={siblings}
-                aria-selected={selectedId === node.id}
-                aria-expanded={node.children.length ? expanded.has(node.id) : undefined}
-                tabIndex={focusedId === node.id ? 0 : -1}
-                className={[
-                  styles.node,
-                  selectedId === node.id && styles.on,
-                  expanded.has(node.id) && styles.open,
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                // Depth is drawn rather than nested: a flat list of rows is
-                // what the arrow keys walk, and aria-level carries the shape.
-                style={{ paddingLeft: 10 + (level - 1) * 16 }}
-                onClick={() => open(node.id)}
-                onFocus={() => setFocused(node.id)}
-              >
-                <span className={styles.caret} aria-hidden="true">
-                  {node.children.length ? '▶' : ''}
-                </span>
-                {FOLDER_ICON}
-                <span>{node.name}</span>
-              </div>
-            ))}
-          </div>
+          <FolderTree
+            rows={folderTree.rows}
+            selectedId={selectedId}
+            focusedId={folderTree.focusedId}
+            expanded={folderTree.expanded}
+            nodeRefs={folderTree.nodeRefs}
+            onSelect={selectFolder}
+            onFocus={folderTree.setFocused}
+            onKeyDown={folderTree.onTreeKeyDown}
+          />
           <DropZone
-            here={here}
+            folderName={folderName}
             busy={upload.isPending}
             onFiles={(files) => upload.mutate({ files, addedBy: null, level: null })}
           />
         </div>
 
-        <div className={styles.pane}>
-          <div className={styles.paneHead}>
-            <span className={styles.crumbs}>{crumbs.join(' / ')}</span>
-            <span className={styles.tally}>
-              {folders.length} folders · {items.length} files
-            </span>
-          </div>
-          <div className={styles.scroll}>
-            {folders.length + items.length === 0 ? (
-              <div className={styles.blank}>
-                This folder is empty.
-                <span className={styles.hint}>Upload a file, add a link, or make a folder.</span>
-              </div>
-            ) : (
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Source</th>
-                    <th>Size</th>
-                    <th>Added by</th>
-                    <th>Date</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {folders.map((folder) => (
-                    <FolderRow
-                      key={folder.id}
-                      id={folder.id}
-                      name={folder.name}
-                      onOpen={open}
-                      onDelete={
-                        may('files')
-                          ? () =>
-                              confirmDelete(`"${folder.name}" and everything in it`, () =>
-                                removeFolder.mutate({ id: folder.id, name: folder.name }),
-                              )
-                          : null
-                      }
-                    />
-                  ))}
-                  {items.map((item) => (
-                    <ItemRow
-                      key={item.id}
-                      item={item}
-                      onDelete={
-                        may('files')
-                          ? () =>
-                              confirmDelete(`"${item.name}"`, () =>
-                                removeItem.mutate({ id: item.id, name: item.name }),
-                              )
-                          : null
-                      }
-                    />
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+        <FolderContents
+          crumbs={crumbs}
+          folders={contents.data?.folders ?? []}
+          items={contents.data?.items ?? []}
+          onOpenFolder={selectFolder}
+          onDeleteFolder={
+            may('files')
+              ? (folder) =>
+                  confirmDelete(`"${folder.name}" and everything in it`, () =>
+                    deleteFolder.mutate({ id: folder.id, name: folder.name }),
+                  )
+              : null
+          }
+          onDeleteItem={
+            may('files')
+              ? (item) =>
+                  confirmDelete(`"${item.name}"`, () =>
+                    deleteItem.mutate({ id: item.id, name: item.name }),
+                  )
+              : null
+          }
+        />
       </div>
 
       {dialog === 'folder' && selectedId !== null ? (
         <NewFolderDialog
           projectKey={projectKey}
           parentId={selectedId}
-          parentName={here}
-          onDone={added}
+          parentName={folderName}
+          onDone={announceAdded}
           onClose={() => setDialog(null)}
         />
       ) : null}
@@ -509,7 +464,7 @@ export function ProjectFiles() {
       {dialog === 'upload' && selectedId !== null ? (
         <UploadDialog
           projectKey={projectKey}
-          folderName={here}
+          folderName={folderName}
           busy={upload.isPending}
           onUpload={(files, addedBy, level) => upload.mutate({ files, addedBy, level })}
           onClose={() => setDialog(null)}
@@ -520,7 +475,7 @@ export function ProjectFiles() {
         <LinkDialog
           projectKey={projectKey}
           folderId={selectedId}
-          onDone={added}
+          onDone={announceAdded}
           onClose={() => setDialog(null)}
         />
       ) : null}
@@ -528,13 +483,145 @@ export function ProjectFiles() {
   )
 }
 
+/** The folder tree as the left-hand pane draws it: one flat list of rows. */
+function FolderTree({
+  rows,
+  selectedId,
+  focusedId,
+  expanded,
+  nodeRefs,
+  onSelect,
+  onFocus,
+  onKeyDown,
+}: {
+  rows: TreeRow[]
+  selectedId: string | null
+  focusedId: string | null
+  expanded: Set<string>
+  nodeRefs: MutableRefObject<Map<string, HTMLDivElement>>
+  onSelect: (folderId: string) => void
+  onFocus: (folderId: string) => void
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
+}) {
+  return (
+    <div className={styles.tree} role="tree" aria-label="Folders" onKeyDown={onKeyDown}>
+      {rows.map(({ node, level, position, siblings }) => (
+        <div
+          key={node.id}
+          ref={(element) => {
+            if (element) nodeRefs.current.set(node.id, element)
+            else nodeRefs.current.delete(node.id)
+          }}
+          role="treeitem"
+          aria-level={level}
+          aria-posinset={position}
+          aria-setsize={siblings}
+          aria-selected={selectedId === node.id}
+          aria-expanded={node.children.length ? expanded.has(node.id) : undefined}
+          tabIndex={focusedId === node.id ? 0 : -1}
+          className={[
+            styles.node,
+            selectedId === node.id && styles.on,
+            expanded.has(node.id) && styles.open,
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          // Depth is drawn rather than nested: a flat list of rows is
+          // what the arrow keys walk, and aria-level carries the shape.
+          style={{ paddingLeft: 10 + (level - 1) * 16 }}
+          onClick={() => onSelect(node.id)}
+          onFocus={() => onFocus(node.id)}
+        >
+          <span className={styles.caret} aria-hidden="true">
+            {node.children.length ? '▶' : ''}
+          </span>
+          {FOLDER_ICON}
+          <span>{node.name}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The right-hand pane: where the selected folder sits, and what is in it.
+ *
+ * The delete handlers are null where the reader's role does not allow files,
+ * which takes the button off every row rather than leaving one that refuses.
+ */
+function FolderContents({
+  crumbs,
+  folders,
+  items,
+  onOpenFolder,
+  onDeleteFolder,
+  onDeleteItem,
+}: {
+  crumbs: string[]
+  folders: Folder[]
+  items: FileItem[]
+  onOpenFolder: (folderId: string) => void
+  onDeleteFolder: ((folder: Folder) => void) | null
+  onDeleteItem: ((item: FileItem) => void) | null
+}) {
+  return (
+    <div className={styles.pane}>
+      <div className={styles.paneHead}>
+        <span className={styles.crumbs}>{crumbs.join(' / ')}</span>
+        <span className={styles.tally}>
+          {folders.length} folders · {items.length} files
+        </span>
+      </div>
+      <div className={styles.scroll}>
+        {folders.length + items.length === 0 ? (
+          <div className={styles.blank}>
+            This folder is empty.
+            <span className={styles.hint}>Upload a file, add a link, or make a folder.</span>
+          </div>
+        ) : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Source</th>
+                <th>Size</th>
+                <th>Added by</th>
+                <th>Date</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {folders.map((folder) => (
+                <FolderRow
+                  key={folder.id}
+                  id={folder.id}
+                  name={folder.name}
+                  onOpen={onOpenFolder}
+                  onDelete={onDeleteFolder ? () => onDeleteFolder(folder) : null}
+                />
+              ))}
+              {items.map((item) => (
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  onDelete={onDeleteItem ? () => onDeleteItem(item) : null}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** The folder pane doubles as a drop target, as the mock promises it does. */
 function DropZone({
-  here,
+  folderName,
   busy,
   onFiles,
 }: {
-  here: string
+  folderName: string
   busy: boolean
   onFiles: (files: File[]) => void
 }) {
@@ -561,7 +648,7 @@ function DropZone({
         'Uploading…'
       ) : (
         <>
-          Drop files here to upload into <b>{here}</b>
+          Drop files here to upload into <b>{folderName}</b>
         </>
       )}
     </div>
@@ -776,7 +863,7 @@ function UploadDialog({
   onUpload: (files: File[], addedBy: string | null, level: Sensitivity | null) => void
   onClose: () => void
 }) {
-  const [chosen, setChosen] = useState<File[]>([])
+  const [chosenFiles, setChosenFiles] = useState<File[]>([])
   const [addedBy, setAddedBy] = useState('')
   const [level, setLevel] = useState<Sensitivity | ''>('')
   const members = useMembers(projectKey)
@@ -790,13 +877,13 @@ function UploadDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="go"
-            disabled={busy || chosen.length === 0}
+            disabled={busy || chosenFiles.length === 0}
             onClick={() => {
-              onUpload(chosen, addedBy || null, level || null)
+              onUpload(chosenFiles, addedBy || null, level || null)
               onClose()
             }}
           >
-            {busy ? 'Uploading…' : `Upload ${chosen.length || ''}`.trim()}
+            {busy ? 'Uploading…' : `Upload ${chosenFiles.length || ''}`.trim()}
           </Button>
         </>
       }
@@ -806,7 +893,7 @@ function UploadDialog({
           <input
             type="file"
             multiple
-            onChange={(event) => setChosen(Array.from(event.target.files ?? []))}
+            onChange={(event) => setChosenFiles(Array.from(event.target.files ?? []))}
           />
         </Field>
         <Field label="Added by" hint="Optional — an API token is not a person.">

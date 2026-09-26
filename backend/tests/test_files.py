@@ -30,7 +30,6 @@ UPLOADER = {
 UNKNOWN_ID = "00000000-0000-7000-8000-000000000000"
 
 BRIEF = b"%PDF-1.7 the atlas billing brief, restated"
-NUMBERS = b"the quarterly numbers, restated"
 
 
 def content_of(label: str) -> bytes:
@@ -967,7 +966,7 @@ class TestTheSchema:
         self, project: AsyncClient, session: AsyncSession
     ) -> None:
         folder_id = UUID(await make_folder(project, "Architecture"))
-        blob = Blob(sha256="0" * 64, size=1, mime="text/plain", path="00/00/" + "0" * 64)
+        blob = Blob(sha256="0" * 64, size=1, path="00/00/" + "0" * 64)
         session.add(blob)
         await session.flush()
 

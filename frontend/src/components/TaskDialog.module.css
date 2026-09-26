@@ -798,10 +798,6 @@
   text-decoration: none;
 }
 
-.goalLink:hover .chipName {
-  text-decoration: underline;
-}
-
 .goalRef {
   color: var(--ink-3);
   font-family: var(--font-mono);

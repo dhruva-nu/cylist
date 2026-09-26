@@ -257,39 +257,9 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
         parent = payload.get("parent")
         return f"Split out of {parent}." if parent else "Created as a sub-task."
     if entry.verb == "task.updated":
-        if changes:
-            return f"Changed the {_listed(str(change['label']) for change in changes)}."
-        # Entries written before old and new values were recorded still name
-        # the fields a save touched. Older ones than that say only that a save
-        # happened, which is worth more than a gap in the record.
-        fields = payload.get("fields") or []
-        return f"Changed the {_listed(str(field) for field in fields)}." if fields else "Updated."
+        return _describe_update(payload, changes)
     if entry.verb == "task.moved":
-        column = next((change for change in changes if change["field"] == "column"), None)
-        # A move into the board's last column finishes the card and a move out
-        # of it reopens one, and either is the part of the sentence worth
-        # reading — "Moved from Done to In progress." is where it went, not
-        # what it now is.
-        settled = next((change for change in changes if change["field"] == "finished"), None)
-        # Where the last column is divided into sections, which of them the card
-        # ended in — the answer to "how", which the column alone stopped being
-        # able to give the moment there was more than one way off the board.
-        landed = next((change for change in changes if change["field"] == "outcome"), None)
-        ended_as = landed["to"] if landed is not None else None
-        if settled is None:
-            ending = f" Ended as {ended_as}." if ended_as else ""
-        elif settled["to"] == "open":
-            ending = " Reopened."
-        else:
-            ending = f" Finished as {ended_as}." if ended_as else " Finished."
-
-        if column is not None:
-            return moved(column["from"], column["to"]) + ending
-        # A card dragged between two sections of the column it was already in
-        # has not moved, so the sentence is the ending on its own.
-        if landed is not None:
-            return ending.strip()
-        return moved(None, (columns or {}).get(str(payload.get("column_id")))) + ending
+        return _describe_move(payload, changes, columns)
     if entry.verb == "task.finished":
         # Worded as the sub-task's own line, because that is the card whose
         # history it is written to. The parent it belongs to is named on every
@@ -320,6 +290,64 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     # An entry this function has not been taught about is still worth showing:
     # a history with a gap in it is worse than one worded a little stiffly.
     return entry.verb.split(".")[-1].replace("_", " ").capitalize() + "."
+
+
+def _describe_update(payload: Mapping[str, Any], changes: list[dict[str, Any]]) -> str:
+    """The sentence for a save to a card's fields: which of them it changed."""
+    if changes:
+        return f"Changed the {_listed(str(change['label']) for change in changes)}."
+    # Entries written before old and new values were recorded still name the
+    # fields a save touched. Older ones than that say only that a save
+    # happened, which is worth more than a gap in the record.
+    fields = payload.get("fields") or []
+    if not fields:
+        return "Updated."
+    return f"Changed the {_listed(str(field) for field in fields)}."
+
+
+def _describe_move(
+    payload: Mapping[str, Any],
+    changes: list[dict[str, Any]],
+    columns: Mapping[str, str] | None,
+) -> str:
+    """The sentence for a card moving: where it went, and how it ended if it did."""
+    column_change = _change_to(changes, "column")
+    outcome_change = _change_to(changes, "outcome")
+    ending = _move_ending(_change_to(changes, "finished"), outcome_change)
+
+    if column_change is not None:
+        return moved(column_change["from"], column_change["to"]) + ending
+    # A card dragged between two sections of the column it was already in has
+    # not moved, so the sentence is the ending on its own.
+    if outcome_change is not None:
+        return ending.strip()
+    return moved(None, (columns or {}).get(str(payload.get("column_id")))) + ending
+
+
+def _move_ending(
+    finished_change: dict[str, Any] | None, outcome_change: dict[str, Any] | None
+) -> str:
+    """What a move did to whether the card is done, as the end of its sentence.
+
+    A move into the board's last column finishes the card and a move out of it
+    reopens one, and either is the part of the sentence worth reading — "Moved
+    from Done to In progress." is where it went, not what it now is.
+
+    Where the last column is divided into sections, which of them the card
+    ended in is the answer to "how", which the column alone stopped being able
+    to give the moment there was more than one way off the board.
+    """
+    ended_as = outcome_change["to"] if outcome_change is not None else None
+    if finished_change is None:
+        return f" Ended as {ended_as}." if ended_as else ""
+    if finished_change["to"] == "open":
+        return " Reopened."
+    return f" Finished as {ended_as}." if ended_as else " Finished."
+
+
+def _change_to(changes: list[dict[str, Any]], field: str) -> dict[str, Any] | None:
+    """The one entry in a list of changes about ``field``, if there is one."""
+    return next((change for change in changes if change["field"] == field), None)
 
 
 _STATUS_WORDS = {
@@ -370,7 +398,7 @@ _AGENT_WAITING = {
 _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     # --- The project itself -------------------------------------------------
     "project.created": lambda p: f"Started the project {p.get('name') or p.get('key')}.",
-    "project.updated": lambda p: f"Changed the project's {_fields(p)}.",
+    "project.updated": lambda p: f"Changed the project's {_worded_fields(p)}.",
     "project.archived": lambda p: "Archived the project.",
     "project.members_changed": lambda p: (
         f"Set the project's membership to {p.get('member_count', 0)} "
@@ -381,7 +409,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "role.updated": lambda p: (
         f"Renamed the role {_quoted(p.get('was'))} to {_quoted(p.get('name'))}."
         if p.get("was")
-        else f"Changed the role {_quoted(p.get('name'))}'s {_fields(p)}."
+        else f"Changed the role {_quoted(p.get('name'))}'s {_worded_fields(p)}."
     ),
     "role.deleted": lambda p: f"Deleted the role {_quoted(p.get('name'))}.",
     "member.role_set": lambda p: (
@@ -391,7 +419,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     ),
     # --- The board's columns ------------------------------------------------
     "column.created": lambda p: f"Added the column {_quoted(p.get('name'))}.",
-    "column.updated": lambda p: f"Changed a column's {_fields(p)}.",
+    "column.updated": lambda p: f"Changed a column's {_worded_fields(p)}.",
     "column.deleted": lambda p: f"Deleted the column {_quoted(p.get('name'))}.",
     "column.reordered": lambda p: "Reordered the board's columns.",
     # --- Task templates -------------------------------------------------------
@@ -403,11 +431,13 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "template.deleted": lambda p: f"Deleted the task template {_quoted(p.get('name'))}.",
     # --- Files --------------------------------------------------------------
     "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
-    "folder.updated": lambda p: f"Changed the folder {_quoted(p.get('name'))}'s {_fields(p)}.",
+    "folder.updated": lambda p: (
+        f"Changed the folder {_quoted(p.get('name'))}'s {_worded_fields(p)}."
+    ),
     "folder.deleted": lambda p: f"Deleted the folder {_quoted(p.get('name'))}.",
     "file.uploaded": lambda p: f"Uploaded {_quoted(p.get('name'))}.",
     "link.added": lambda p: f"Linked {_quoted(p.get('name'))} from {_worded(p.get('source'))}.",
-    "item.updated": lambda p: f"Changed {_quoted(p.get('name'))}'s {_fields(p)}.",
+    "item.updated": lambda p: f"Changed {_quoted(p.get('name'))}'s {_worded_fields(p)}.",
     "item.deleted": lambda p: f"Deleted {_quoted(p.get('name'))}.",
     # --- The vault. Names and structure only; never a value -----------------
     "vault.tree_created": lambda p: f"Created the vault tree {_quoted(p.get('name'))}.",
@@ -426,7 +456,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     ),
     # --- The directory, tokens, and coming in through the front door --------
     "person.added": lambda p: f"Added {p.get('name')} as a {_worded(p.get('kind'))}.",
-    "person.updated": lambda p: f"Changed a person's {_fields(p)}.",
+    "person.updated": lambda p: f"Changed a person's {_worded_fields(p)}.",
     "person.archived": lambda p: f"Archived {p.get('name')}.",
     "token.issued": lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
     "token.revoked": lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
@@ -449,7 +479,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
 }
 
 
-def _fields(payload: dict[str, Any]) -> str:
+def _worded_fields(payload: dict[str, Any]) -> str:
     """The field names an entry recorded, worded: ``due_date`` reads as due date.
 
     Only the older ``fields`` shape needs this. Anything writing ``changes``

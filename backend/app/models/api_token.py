@@ -51,6 +51,7 @@ class ApiToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             TokenKind,
             name="token_kind",
             native_enum=False,  # a VARCHAR + CHECK, so adding a value needs no ALTER TYPE
+            create_constraint=True,
             values_callable=lambda enum: [member.value for member in enum],
         ),
         nullable=False,

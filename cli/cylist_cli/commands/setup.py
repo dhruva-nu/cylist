@@ -299,7 +299,7 @@ class Credential:
     the case on a re-run, and the reason a re-run needs no password."""
 
 
-def _credential(args: argparse.Namespace, ctx: Context, server: Server) -> Credential:
+def _agent_credential(args: argparse.Namespace, ctx: Context, server: Server) -> Credential:
     """Reuse the configured token if it is usable, otherwise mint one."""
     existing = ctx.config.token
     if existing:
@@ -342,11 +342,11 @@ def _mint(args: argparse.Namespace, ctx: Context, server: Server) -> Credential:
     narrower. The token that outlives it is yours: it names you, so the board
     says which person's agent did what.
     """
-    credentials = _credentials(args, server)
+    login = _login_body(args, server)
     name = _token_name()
 
     with ctx.build_client(None, server.url) as client:
-        client.post("/auth/login", credentials)
+        client.post("/auth/login", login)
         try:
             issued = client.post("/tokens", {"name": name, "scopes": list(server.agent_scopes)})
         finally:
@@ -376,7 +376,7 @@ def _drop_session(client: Any) -> None:
         return
 
 
-def _credentials(args: argparse.Namespace, server: Server) -> dict[str, str]:
+def _login_body(args: argparse.Namespace, server: Server) -> dict[str, str]:
     """What to post to ``/auth/login``: an email and a password, or just one.
 
     The email is left out only where there is nobody to be — a deployment with
@@ -673,7 +673,7 @@ _runner: Runner = _run
 
 def _setup(args: argparse.Namespace, ctx: Context) -> None:
     server = _discover(ctx)
-    credential = _credential(args, ctx, server)
+    credential = _agent_credential(args, ctx, server)
     path = configuration.save(server.url, credential.token, urls=server.urls)
 
     hooks = None if args.no_hooks else hook.install_hooks()

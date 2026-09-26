@@ -474,7 +474,7 @@ def _is_descendant(everything: dict[UUID, VaultNode], node: VaultNode, ancestor_
     return False
 
 
-def _under(parent_id: UUID | None) -> ColumnElement[bool]:
+def _is_child_of(parent_id: UUID | None) -> ColumnElement[bool]:
     """Match one parent's children, where "no parent" means the top level.
 
     Spelled out rather than left to ``== parent_id``, which would render
@@ -494,7 +494,7 @@ async def _siblings(
 ) -> list[VaultNode]:
     statement = (
         select(VaultNode)
-        .where(VaultNode.tree_id == tree_id, _under(parent_id))
+        .where(VaultNode.tree_id == tree_id, _is_child_of(parent_id))
         .order_by(VaultNode.position, VaultNode.created_at)
     )
     if excluding is not None:

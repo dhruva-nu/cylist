@@ -1,12 +1,13 @@
 /**
- * The left-hand sidebar: the things you consult while working, rather than
- * the things you navigate to.
+ * The left-hand sidebar: the way around a project, and the things you consult
+ * while working in it.
  *
- * A project's areas are places you go and stay, and they are tabs in the bar
- * above. What lives here is the other kind of thing — a preference to set, a
- * list to glance at, a report to read off — none of which is worth leaving the
- * board for, and all of which used to be a dialog over the top of whatever you
- * were doing.
+ * Every one of a project's areas is at the top — the four the bar carries as
+ * tabs, and Roles, Files and Vault, which it does not; see `ProjectNav.tsx`.
+ * Under them is the other kind of thing — a preference to
+ * set, a list to glance at, a report to read off — none of which is worth
+ * leaving the board for, and all of which used to be a dialog over the top of
+ * whatever you were doing.
  *
  * It is a column of the frame down the left-hand edge rather than a drawer
  * over the page: the page narrows to make room for it, which is the whole
@@ -14,11 +15,12 @@
  *
  * It collapses, and what it collapses to is the reason it is allowed to. Not
  * away — to a rail against the same edge, holding the handle that brings it
- * back and the count of what is due today. So the two objections to a panel
- * that shuts both go: there is no state in which Settings is unreachable, and
- * no state in which three overdue cards are behind something you forgot was
- * there. What the rail buys is the width, which is the one thing a board four
- * columns wide actually wants back.
+ * back, the count of what is due today and the marks of a project's areas. So the
+ * objections to a panel that shuts all go: there is no state in which Settings
+ * is unreachable, no state in which three overdue cards are behind something
+ * you forgot was there, and no state in which the way to the board is. What
+ * the rail buys is the width, which is the one thing a board four columns wide
+ * actually wants back.
  *
  * Collapsed or not is remembered between visits, and it collapses by gliding
  * rather than by swapping: the two widths are drawn one over the other and
@@ -55,6 +57,7 @@ import {
 } from 'react'
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
 import { DayReportPanel } from './DayReport'
+import { ProjectNav } from './ProjectNav'
 import { SidebarSection } from './SidebarSection'
 import { Today, TodayCount } from './Today'
 import styles from './Sidebar.module.css'
@@ -74,7 +77,7 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
  * press of the handle writes this one, so what is under it is always an
  * answer rather than an echo of the default.
  */
-const OPEN_KEY = 'cylist.sidebar.showing'
+const SHOWING_KEY = 'cylist.sidebar.showing'
 const FOLDED_KEY = 'cylist.sidebar.folded'
 
 /**
@@ -91,9 +94,9 @@ const FOLDED_KEY = 'cylist.sidebar.folded'
  * reading it throws outright in a private window, and a frame that will not
  * render is a worse outcome than a preference that is not remembered.
  */
-function readOpen(): boolean {
+function readShowing(): boolean {
   try {
-    return window.localStorage.getItem(OPEN_KEY) === 'true'
+    return window.localStorage.getItem(SHOWING_KEY) === 'true'
   } catch {
     // A private window. Collapsed is the answer for a first visit anyway.
     return false
@@ -137,7 +140,7 @@ function readFolded(): string[] {
 }
 
 export function Sidebar() {
-  const [open, setOpen] = useState<boolean>(readOpen)
+  const [open, setOpen] = useState<boolean>(readShowing)
   const [folded, setFolded] = useState<string[]>(readFolded)
 
   /**
@@ -151,7 +154,7 @@ export function Sidebar() {
   const showSidebar = useCallback((showing: boolean) => {
     setOpen(showing)
     try {
-      window.localStorage.setItem(OPEN_KEY, String(showing))
+      window.localStorage.setItem(SHOWING_KEY, String(showing))
     } catch {
       // It still holds for this visit; it just will not be remembered.
     }
@@ -203,6 +206,10 @@ export function Sidebar() {
             can be shut needs it to be — a number nobody can see is a number
             that stops being worth keeping. */}
         <TodayCount />
+        {/* The project's areas, as marks. Nothing off a project, and nothing
+            once the rail is a strip across a phone, where the bar's tabs sit
+            just below it. */}
+        <ProjectNav rail />
         <span className={styles.railName} aria-hidden="true">
           Sidebar
         </span>
@@ -214,7 +221,10 @@ export function Sidebar() {
         <div className={styles.panelHead}>
           <Handle open onToggle={() => showSidebar(false)} />
         </div>
-        {/* Today's work at the top. It is the one whose answer changes hour to
+        {/* Where you are and where else you can go, first: it is the one thing
+            in the panel you use on every visit rather than now and then. */}
+        <ProjectNav />
+        {/* Today's work next. It is the one whose answer changes hour to
             hour, and its count is the thing worth having in the corner of your
             eye; Settings is the one you set once and leave, so it sits at the
             bottom. */}
@@ -252,15 +262,15 @@ export function Sidebar() {
  * button you have to be told about.
  */
 function Handle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const says = open ? 'Collapse the sidebar' : 'Expand the sidebar'
+  const label = open ? 'Collapse the sidebar' : 'Expand the sidebar'
 
   return (
     <button
       type="button"
       className={styles.handle}
       aria-expanded={open}
-      aria-label={says}
-      title={says}
+      aria-label={label}
+      title={label}
       onClick={onToggle}
     >
       <span aria-hidden="true">{open ? '‹' : '›'}</span>
@@ -316,10 +326,11 @@ function ThemeChoiceGroup() {
     const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
 
     event.preventDefault()
-    const at = THEME_CHOICES.indexOf(theme)
+    const currentIndex = THEME_CHOICES.indexOf(theme)
     // The fallback never fires — the modulo keeps the index in range — but
     // saying so costs less than an assertion that stops being true.
-    const next = THEME_CHOICES[(at + step + THEME_CHOICES.length) % THEME_CHOICES.length] ?? theme
+    const next =
+      THEME_CHOICES[(currentIndex + step + THEME_CHOICES.length) % THEME_CHOICES.length] ?? theme
     setTheme(next)
     // Focus follows selection in a radio group, and the button for `next` is
     // the only one that will be tabbable after this render.

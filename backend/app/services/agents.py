@@ -12,11 +12,15 @@ old one first.
 
 *A note is written once and never edited.* See :class:`~app.models.agent.
 AgentNote` — a rewritten note is a different thing learned, and its timestamp
-is part of what it says.
+is part of what it says. Nor is it written twice: a line that says what one
+already on the scratchpad says is refused, because the scratchpad is read in
+full by every agent that arrives and a fact repeated is a fact the next one
+reads twice.
 """
 
 from __future__ import annotations
 
+import re
 from typing import NamedTuple
 from uuid import UUID
 
@@ -25,13 +29,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.models.agent import AgentNote, Skill
-from app.models.person import Person
 from app.models.project import Project
 from app.schemas.agents import NoteCreate, SkillUpdate
-from app.schemas.files import clean_name
 from app.services import blobs
+from app.services.files import ensure_person_exists, filename_of
 from app.storage import BlobStore
 
 
@@ -87,14 +90,14 @@ async def upload_skill(
         UnprocessableRequestError: if the upload has no usable filename, or
             ``added_by`` names nobody in the directory.
     """
-    name = _filename_of(source)
-    await _ensure_person_exists(session, added_by)
+    name = filename_of(source)
+    await ensure_person_exists(session, added_by)
 
     existing = await session.scalar(
         select(Skill).where(Skill.project_id == project.id, Skill.name == name)
     )
 
-    blob, size, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
+    blob, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
 
     if existing is not None:
         # The bytes it used to hold may now be unreferenced. Read the old id
@@ -102,8 +105,9 @@ async def upload_skill(
         # the row — the two can be the same blob, and collecting first would
         # delete content the replacement is about to point at.
         previous = existing.blob_id
-        existing.blob_id = blob.id
-        existing.size = size
+        # The relationship rather than the id: the size a response reports is
+        # read off it, and an id alone would leave the old blob attached.
+        existing.blob = blob
         existing.mime = mime
         existing.added_by = added_by
         if description is not None:
@@ -117,8 +121,7 @@ async def upload_skill(
         project_id=project.id,
         name=name,
         description=description,
-        blob_id=blob.id,
-        size=size,
+        blob=blob,
         mime=mime,
         added_by=added_by,
     )
@@ -192,10 +195,12 @@ async def add_note(
     """Write a line onto the project's scratchpad.
 
     Raises:
+        ConflictError: if a line saying the same thing is already on it.
         UnprocessableRequestError: if ``added_by`` names nobody in the
             directory.
     """
-    await _ensure_person_exists(session, added_by)
+    await ensure_person_exists(session, added_by)
+    await _ensure_not_already_noted(session, project, data.body)
     note = AgentNote(
         project_id=project.id,
         body=data.body,
@@ -206,6 +211,40 @@ async def add_note(
     await session.flush()
     await session.refresh(note, ["added_by_person"])
     return note
+
+
+_NOT_A_WORD = re.compile(r"[\W_]+")
+
+
+def _gist(body: str) -> str:
+    """A note reduced to its words: case, spacing and punctuation dropped.
+
+    Deliberately no cleverer than that. Two agents that learn the same thing
+    usually write it the same way, give or take a full stop or a backtick, and
+    that is the duplicate worth catching; deciding that two differently worded
+    lines *mean* the same is a judgement, and the one making it should be the
+    agent that has just read the scratchpad, not this.
+    """
+    return _NOT_A_WORD.sub(" ", body.casefold()).strip()
+
+
+async def _ensure_not_already_noted(session: AsyncSession, project: Project, body: str) -> None:
+    """Refuse a line the scratchpad already holds, naming the one it matches.
+
+    Compared in Python over the project's own notes rather than by an index:
+    a scratchpad is tens of lines, and the comparison is on a normalised form
+    no column holds.
+    """
+    gist = _gist(body)
+    rows = await session.execute(
+        select(AgentNote.id, AgentNote.body).where(AgentNote.project_id == project.id)
+    )
+    for note_id, existing in rows:
+        if _gist(existing) == gist:
+            raise ConflictError(
+                f"That is already on the scratchpad: {existing!r}",
+                details={"note_id": str(note_id), "body": existing},
+            )
 
 
 async def delete_note(session: AsyncSession, note: AgentNote) -> None:
@@ -226,31 +265,3 @@ async def counts(session: AsyncSession, project: Project) -> Counts:
         select(func.count()).select_from(AgentNote).where(AgentNote.project_id == project.id)
     )
     return Counts(skills=skills or 0, notes=notes or 0)
-
-
-# --- Internals -------------------------------------------------------------
-
-
-def _filename_of(source: UploadFile) -> str:
-    """The name to file a skill under, stripped of any directory part.
-
-    Shares :func:`app.schemas.files.clean_name` with the file tree: the rules
-    for what is a name rather than a path do not differ because the row it
-    lands in is a different table.
-    """
-    candidate = (source.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
-    try:
-        return clean_name(candidate)
-    except ValueError as exc:
-        raise UnprocessableRequestError(
-            "That upload has no usable filename.", details={"filename": source.filename}
-        ) from exc
-
-
-async def _ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
-    if person_id is None:
-        return
-    if await session.get(Person, person_id) is None:
-        raise UnprocessableRequestError(
-            "That person is not in the directory.", details={"person_id": str(person_id)}
-        )

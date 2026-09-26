@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import Enum, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -32,6 +32,24 @@ password, or the ``?host=%2Ftmp%2F…`` of a unix socket — is full of them.
 
 target_metadata = Base.metadata
 
+ENUM_CHECKS = frozenset(
+    f"ck_{table.name}_{column.type.name}"
+    for table in target_metadata.tables.values()
+    for column in table.columns
+    if isinstance(column.type, Enum) and column.type.create_constraint
+)
+"""The CHECKs the non-native enums bring with them, by name.
+
+Autogenerate leaves these out of the models' side of its comparison — they
+belong to the type rather than the table — but reflects them from the database
+all the same, so each would read as a constraint to drop. They are compared
+member by member in ``tests/test_migrations.py`` instead.
+"""
+
+
+def _include_name(name: str | None, type_: str, parent_names: object) -> bool:
+    return not (type_ == "check_constraint" and name in ENUM_CHECKS)
+
 
 def _configure(connection: Connection) -> None:
     context.configure(
@@ -39,6 +57,7 @@ def _configure(connection: Connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,  # notice column type changes
         compare_server_default=True,
+        include_name=_include_name,
         render_as_batch=False,
     )
 

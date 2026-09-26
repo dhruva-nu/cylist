@@ -72,14 +72,14 @@ async def setup(
 ) -> SetupInfo:
     """Describe this deployment to a client that is configuring itself."""
     return SetupInfo(
-        urls=_normalise(settings.client_urls),
+        urls=_normalised_urls(settings.client_urls),
         environment=settings.environment,
         agent_scopes=AGENT_SCOPES,
         has_accounts=await people.has_any_account(session),
     )
 
 
-def _normalise(urls: list[str]) -> list[str]:
+def _normalised_urls(urls: list[str]) -> list[str]:
     """Trim, drop blanks and duplicates, and keep the configured order.
 
     Order is the whole value of the list — it is the order a client will try

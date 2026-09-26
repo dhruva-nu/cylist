@@ -92,7 +92,7 @@ async def project_admin(
     return principal
 
 
-def _read(role: ProjectRole) -> RoleRead:
+def _role_read(role: ProjectRole) -> RoleRead:
     return RoleRead(
         id=role.id,
         name=role.name,
@@ -102,9 +102,9 @@ def _read(role: ProjectRole) -> RoleRead:
     )
 
 
-def _summary(role: ProjectRole, member_count: int) -> RoleSummary:
+def _role_summary(role: ProjectRole, member_count: int) -> RoleSummary:
     return RoleSummary(
-        **_read(role).model_dump(),
+        **_role_read(role).model_dump(),
         member_count=member_count,
         created_at=role.created_at,
     )
@@ -127,7 +127,7 @@ async def list_roles(
     """
     found = await roles.list_roles(session, project)
     counts = await roles.holder_counts(session, project)
-    return [_summary(role, counts.get(role.id, 0)) for role in found]
+    return [_role_summary(role, counts.get(role.id, 0)) for role in found]
 
 
 @router.post(
@@ -165,7 +165,7 @@ async def create_role(
         project_id=project.id,
         payload={"name": role.name},
     )
-    return _summary(role, 0)
+    return _role_summary(role, 0)
 
 
 @router.patch(
@@ -206,7 +206,7 @@ async def update_role(
             "fields": sorted(body.model_dump(exclude_unset=True)),
         },
     )
-    return _summary(updated, counts.get(updated.id, 0))
+    return _role_summary(updated, counts.get(updated.id, 0))
 
 
 @router.delete(
@@ -281,4 +281,4 @@ async def set_member_role(
         project_id=project.id,
         payload={"person": person.name, "role": role.name if role else None},
     )
-    return _read(role) if role else None
+    return _role_read(role) if role else None

@@ -45,9 +45,30 @@ SKILL_MAX_CHARS = 40_000
 instructions; anything past this is not one, and filling a context window
 with it would be the wrong failure."""
 
+INSTRUCTIONS_SEEN = 2048
+"""How much of the instructions a client can be relied on to show. Claude Code
+cuts them off at this many characters, so what an agent must do on every card
+goes before it; the tests hold the scratchpad to that."""
+
 INSTRUCTIONS = """\
 Cylist is a project manager: each project has a Kanban board, a people
 directory, files and a vault of credentials.
+
+Every project has a **scratchpad**: one-line notes that agents before you left
+about it, newest first. Keep it as you go, not only when asked:
+
+1. Given a card, call `read_scratchpad` for its project (the key before the
+   dash in `ATL-41`) before you start on the work, and act on what it says.
+2. The moment you find something the next agent would otherwise have to find
+   again — a command that does not work as documented, a constraint nothing
+   states, where a thing actually lives — and it is not already in the code,
+   the README or the scratchpad, write it with `note_learned`. Then, not at
+   the end: a session can stop before it gets there. It belongs on the
+   scratchpad even if you also say it in a comment on the card.
+3. One short, factual sentence per fact. Not a progress log — the board
+   already reports that — and not a repeat: the server refuses a line that
+   says what one already there says. If a line has stopped being true, write
+   the correction.
 
 Two things are worth knowing before you start.
 
@@ -81,12 +102,7 @@ what is still outstanding.
 
 Each project carries what its agents work from. `list_skills` and `read_skill`
 give you the procedures somebody has already written down for this project —
-worth a look before improvising one. `read_scratchpad` is the shorter and more
-important half: one-line notes that agents before you left about this project
-specifically, newest first. Read it before you start on a project you do not
-know, and when you work something out the hard way that is not in the code, the
-board or the README, leave it there with `note_learned`. One sentence. It is
-not a progress log — the board already reports that.
+worth a look before improvising one.
 
 Progress is reported for you. When a session is bound to a card — someone ran
 `cylist work ATL-41`, or typed `/work ATL-41` — the harness's own hooks tell
@@ -146,7 +162,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             projects = await client.get("/projects", include_archived=include_archived or None)
             return {"projects": projects}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="get_project",
@@ -166,7 +182,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             board = await client.get(f"/projects/{project}/columns")
             return {"project": summary, "columns": board.get("columns", [])}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Tasks -------------------------------------------------------------
 
@@ -207,7 +223,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 ]
             return {"tasks": tasks, "columns": board.get("columns", [])}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="get_task",
@@ -218,7 +234,8 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "'agent_session' says whether an agent is on this card right now, and "
             "'agent_sessions' lists each harness session on it with what became "
             "of it — worth reading before you start, so two of you are not on "
-            "the same card without knowing."
+            "the same card without knowing. Before you start work on it, call "
+            "read_scratchpad for its project."
         ),
     )
     async def get_task(
@@ -227,7 +244,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"task": await client.get(f"/tasks/{task}")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="read_task_history",
@@ -254,7 +271,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             history = await client.get(f"/tasks/{task}/history", page=page, per_page=per_page)
             return {"history": history}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="create_task",
@@ -324,7 +341,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["pr_ref"] = pr_ref
             return {"task": await client.post(f"/projects/{project}/tasks", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="create_subtask",
@@ -385,7 +402,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["pr_ref"] = pr_ref
             return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="finish_subtask",
@@ -411,7 +428,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"task": await client.post(f"/tasks/{task}/finish", {"finished": finished})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="add_checklist_item",
@@ -432,7 +449,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"item": await client.post(f"/tasks/{task}/checklist", {"title": title})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_checklist_item",
@@ -467,7 +484,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 )
             return {"item": await client.patch(f"/checklist/{item}", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="move_task",
@@ -513,7 +530,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             moved = await client.post(f"/tasks/{task}/move", body)
             return {"task": moved}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_task_status",
@@ -563,7 +580,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["reason"] = reason
             return {"task": await client.post(f"/tasks/{task}/status", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="add_comment",
@@ -589,7 +606,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 )
             return {"comment": await client.post(f"/tasks/{task}/comments", payload)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Goals -------------------------------------------------------------
 
@@ -618,7 +635,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"goals": goals}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="get_goal",
@@ -639,7 +656,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             reference = await resolve.goal_ref(client, project, goal)
             return {"goal": await client.get(f"/goals/{reference}")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="create_goal",
@@ -684,7 +701,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["colour"] = colour
             return {"goal": await client.post(f"/projects/{project}/goals", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_task_goal",
@@ -712,7 +729,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 goal_id = str((await client.get(f"/goals/{reference}"))["id"])
             return {"task": await client.patch(f"/tasks/{task}", {"goal_id": goal_id})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="set_goal_status",
@@ -736,7 +753,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             reference = await resolve.goal_ref(client, project, goal)
             return {"goal": await client.patch(f"/goals/{reference}", {"status": status})}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- People ------------------------------------------------------------
 
@@ -772,7 +789,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 people = await client.get("/people", kind=kind)
             return {"people": people}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Files -------------------------------------------------------------
 
@@ -805,7 +822,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 "items": listing.get("items", []),
             }
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="add_link",
@@ -840,7 +857,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["added_by"] = await resolve.person_id(client, added_by, project_ref=project)
             return {"item": await client.post(f"/folders/{folder_id}/links", body)}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Vault -------------------------------------------------------------
 
@@ -865,7 +882,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             summary = resolve.pick(list(trees), tree, kind="vault tree", where=project)
             return {"tree": await client.get(f"/vault/trees/{summary['id']}")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Audit -------------------------------------------------------------
 
@@ -896,7 +913,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"activity": entries}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="day_report",
@@ -940,7 +957,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"report": report}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     # --- Skills and the scratchpad -----------------------------------------
 
@@ -950,8 +967,10 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "List the skills uploaded for a project's agents — packaged jobs "
             "you can be handed, such as tidying a board or writing a day "
             "report. Returns each one's name, description and size, not its "
-            "content; read_skill fetches that. Worth calling before you "
-            "improvise a procedure that somebody has already written down."
+            "content; read_skill fetches that, and download_skill gives you one "
+            "to install as a Claude Code skill of your own. Worth calling "
+            "before you improvise a procedure that somebody has already "
+            "written down."
         ),
     )
     async def list_skills(
@@ -960,13 +979,15 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"skills": await client.get(f"/projects/{project}/skills")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="read_skill",
         description=(
             "Read one skill's own text, by the name list_skills gave. Skills "
-            "are usually markdown: instructions written for you to follow. "
+            "are usually markdown: instructions written for you to follow. A "
+            "zipped skill is read as its SKILL.md, with the other files it "
+            "carries listed beside it. "
             f"Truncated past {SKILL_MAX_CHARS} characters, which is said in "
             "the result when it happens."
         ),
@@ -976,30 +997,73 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         name: Annotated[str, Field(description="The skill's name, e.g. 'board-tidy.md'.")],
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            skills = await client.get(f"/projects/{project}/skills")
-            match = next((one for one in skills if one.get("name") == name), None)
-            if match is None:
-                available = sorted(str(one.get("name")) for one in skills)
-                raise CylistError(
-                    f"{project} has no skill called {name!r}."
-                    + (f" It has: {', '.join(available)}." if available else " It has none."),
-                    code="not_found",
-                    details={"name": name, "available": available},
+            skill = await _find_skill(client, project, name)
+            if not _is_zip(skill):
+                text, truncated = await client.get_text(
+                    f"/skills/{skill['id']}/download", max_chars=SKILL_MAX_CHARS
                 )
-            text, truncated = await client.get_text(
-                f"/skills/{match['id']}/download", max_chars=SKILL_MAX_CHARS
-            )
-            return {"skill": match, "content": text, "truncated": truncated}
+                return {"skill": skill, "content": text, "truncated": truncated}
 
-        return await _guard(call)
+            # The bytes of a zip are no use to a model. What it wants is the
+            # instructions, which are SKILL.md once the server has unpacked it.
+            folder = await client.get(f"/skills/{skill['id']}/folder")
+            files = folder.get("files", [])
+            text = _skill_md(files)
+            return {
+                "skill": skill,
+                "content": text[:SKILL_MAX_CHARS],
+                "truncated": len(text) > SKILL_MAX_CHARS,
+                "files": [entry.get("path") for entry in files],
+            }
+
+        return await _as_tool_result(call)
+
+    @server.tool(
+        name="download_skill",
+        description=(
+            "Get one skill as the folder Claude Code loads skills from, so you "
+            "can install it and use it rather than only read it. Returns the "
+            "folder's name and every file in it — SKILL.md first, a zip "
+            "unpacked, base64 for anything that is not text — and how to "
+            "install it. The simplest way is to run the `command` it gives "
+            "(`cylist skills pull ...`), which writes .claude/skills/<folder>/ "
+            "in the repository you are in and will not overwrite a skill it did "
+            "not write; without the cylist CLI, write each file under that "
+            "directory yourself. A running session picks the skill up within "
+            "seconds if .claude/skills already existed when it started, and "
+            "from the next session otherwise; until then, follow its SKILL.md "
+            "from disk."
+        ),
+    )
+    async def download_skill(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        name: Annotated[
+            str,
+            Field(description="The skill's name as list_skills gave it, e.g. 'cylist.zip'."),
+        ],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            skill = await _find_skill(client, project, name)
+            folder = await client.get(f"/skills/{skill['id']}/folder")
+            directory = f".claude/skills/{folder.get('folder')}/"
+            return {
+                **folder,
+                "install": {
+                    "command": f"cylist skills pull {project} {skill['name']}",
+                    "directory": directory,
+                },
+            }
+
+        return await _as_tool_result(call)
 
     @server.tool(
         name="read_scratchpad",
         description=(
             "Read a project's agent scratchpad: short lines that agents before "
             "you wrote down when they learned something about this project the "
-            "hard way. Newest first. Read it before you start work on a "
-            "project you do not already know."
+            "hard way. Newest first. Call it first whenever you are given a "
+            "card, before you start on the work, and again before note_learned "
+            "so you do not write down what is already there."
         ),
     )
     async def read_scratchpad(
@@ -1008,7 +1072,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         async def call() -> dict[str, Any]:
             return {"notes": await client.get(f"/projects/{project}/agent-notes")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     @server.tool(
         name="note_learned",
@@ -1019,8 +1083,11 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             f"{NOTE_MAX_CHARS} characters and newlines are folded into "
             "spaces. Write what is not already in the code, the board or the "
             "README: a surprising constraint, a command that does not work "
-            "here, a convention nothing states. Do not use it as a progress "
-            "log; the board already reports that."
+            "here, a convention nothing states. Write it the moment you learn "
+            "it, not at the end of the session. Do not use it as a progress "
+            "log; the board already reports that. A line saying what one "
+            "already on the scratchpad says — ignoring case and punctuation — "
+            "is refused, naming the line that is there."
         ),
     )
     async def note_learned(
@@ -1039,7 +1106,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             )
             return {"note": written}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
     if VAULT_REVEAL in scopes:
         _register_reveal(server, client)
@@ -1078,7 +1145,7 @@ def _register_reveal(server: MCPServer, client: Api) -> None:
                 )
             return {"secret": await client.post(f"/vault/nodes/{node['id']}/reveal")}
 
-        return await _guard(call)
+        return await _as_tool_result(call)
 
 
 # --- Plumbing --------------------------------------------------------------
@@ -1111,7 +1178,7 @@ def local_timezone() -> str | None:
     return None
 
 
-async def _guard(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResult:
+async def _as_tool_result(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResult:
     """Run a tool body, turning a failure into a result the model can read."""
     try:
         payload = await call()
@@ -1126,6 +1193,36 @@ async def _guard(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResul
         structured_content=payload,
         is_error=False,
     )
+
+
+async def _find_skill(client: Api, project: str, name: str) -> dict[str, Any]:
+    """The skill of that name on the project, or an error listing the ones it has."""
+    skills = await client.get(f"/projects/{project}/skills")
+    for skill in skills:
+        if skill.get("name") == name:
+            return dict(skill)
+
+    available = sorted(str(skill.get("name")) for skill in skills)
+    what_it_has = f"It has: {', '.join(available)}." if available else "It has none."
+    raise CylistError(
+        f"{project} has no skill called {name!r}. {what_it_has}",
+        code="not_found",
+        details={"name": name, "available": available},
+    )
+
+
+def _is_zip(skill: dict[str, Any]) -> bool:
+    named_as_zip = str(skill.get("name", "")).lower().endswith(".zip")
+    typed_as_zip = "zip" in str(skill.get("mime", ""))
+    return named_as_zip or typed_as_zip
+
+
+def _skill_md(files: list[dict[str, Any]]) -> str:
+    """The text of the SKILL.md among an unpacked skill's files, or ``""``."""
+    for entry in files:
+        if entry.get("path") == "SKILL.md":
+            return str(entry["content"])
+    return ""
 
 
 def _project_of(task: dict[str, Any]) -> str:

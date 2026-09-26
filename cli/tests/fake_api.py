@@ -13,6 +13,7 @@ The payloads below are shaped like the real API's responses (see
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -477,6 +478,65 @@ MINTED = {
 }
 
 
+TIDY_SKILL_ID = "0192f3c4-000b-7000-8000-000000000001"
+KIT_SKILL_ID = "0192f3c4-000b-7000-8000-000000000002"
+SKILLS = [
+    {
+        "id": TIDY_SKILL_ID,
+        "project_id": PROJECT_ID,
+        "name": "board-tidy.md",
+        "description": "Move stale cards back to triage.",
+        "size": 58,
+        "mime": "text/markdown",
+        "added_by": None,
+        "created_at": "2026-02-01T09:00:00Z",
+    },
+    {
+        "id": KIT_SKILL_ID,
+        "project_id": PROJECT_ID,
+        "name": "release-kit.zip",
+        "description": "Cut a release.",
+        "size": 2048,
+        "mime": "application/zip",
+        "added_by": None,
+        "created_at": "2026-02-01T09:00:00Z",
+    },
+]
+TIDY_TEXT = '---\nname: "board-tidy"\ndescription: "Move stale cards."\n---\n\nMove them.\n'
+LOGO_BYTES = b"\x89PNG\r\n\x1a\n\x00\xff"
+
+
+def skill_folder(skill: dict[str, Any], folder: str, files: list[dict[str, Any]]) -> dict[str, Any]:
+    """A ``GET /skills/{id}/folder`` response."""
+    return {"skill": skill, "folder": folder, "files": files}
+
+
+def folder_file(path: str, data: bytes, *, executable: bool = False) -> dict[str, Any]:
+    try:
+        content, encoding = data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        content, encoding = base64.b64encode(data).decode(), "base64"
+    return {
+        "path": path,
+        "encoding": encoding,
+        "content": content,
+        "size": len(data),
+        "executable": executable,
+    }
+
+
+TIDY_FOLDER = skill_folder(SKILLS[0], "board-tidy", [folder_file("SKILL.md", TIDY_TEXT.encode())])
+KIT_FOLDER = skill_folder(
+    SKILLS[1],
+    "release-kit",
+    [
+        folder_file("SKILL.md", b"---\nname: release-kit\n---\nRun ./scripts/cut.sh\n"),
+        folder_file("logo.png", LOGO_BYTES),
+        folder_file("scripts/cut.sh", b"#!/bin/sh\ngit tag\n", executable=True),
+    ],
+)
+
+
 @dataclass
 class Recorder:
     """Every request the CLI made, so a test can assert on the body it sent."""
@@ -719,6 +779,13 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
     if path == "/vault/nodes" and method == "POST":
         body = json.loads(request.content)
         return httpx.Response(201, json={**STRIPE_NODE, "name": body["name"]})
+
+    if path.endswith("/skills") and method == "GET":
+        return httpx.Response(200, json=SKILLS)
+    if path == f"/skills/{TIDY_SKILL_ID}/folder":
+        return httpx.Response(200, json=TIDY_FOLDER)
+    if path == f"/skills/{KIT_SKILL_ID}/folder":
+        return httpx.Response(200, json=KIT_FOLDER)
 
     if path == "/activity":
         return httpx.Response(200, json=ACTIVITY)

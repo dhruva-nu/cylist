@@ -187,64 +187,73 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
         since_link=machine.since_link + elapsed,
         since_keepalive=machine.since_keepalive + elapsed,
     )
-
     if isinstance(event, HookState):
-        agent = Agent.WAITING if event.state == "waiting" else Agent.WORKING
-        moved = bool(event.task) and event.task != machine.task
-        unchanged = agent is machine.agent and event.reason == machine.reason and not moved
-        machine = replace(
-            machine,
-            task=event.task or machine.task,
-            agent=agent,
-            reason=event.reason,
-            client_name=event.client_name or machine.client_name,
-            since_hook=0.0,
-        )
-        if unchanged or machine.link is not Link.LIVE:
-            # Either the server already knows, or it cannot be told and will
-            # be given the current level when the link comes back.
-            return machine, []
-        return machine, [Send(_level(machine))]
-
+        return _on_hook_state(machine, event)
     if isinstance(event, HookBind):
-        machine = replace(
-            machine,
-            task=event.task,
-            client_name=event.client_name or machine.client_name,
-            agent=Agent.WORKING,
-            reason=None,
-            since_hook=0.0,
-        )
-        if machine.link is not Link.LIVE:
-            return machine, []
-        return machine, [Send(_level(machine))]
-
+        return _on_hook_bind(machine, event)
     if isinstance(event, HookEnd):
-        actions: list[Action] = []
-        if machine.link is Link.LIVE:
-            actions.append(Send(protocol.bye_frame(event.reason)))
-        actions.append(Finish(event.reason))
-        return machine, actions
-
+        return _on_hook_end(machine, event)
     if isinstance(event, LinkUp):
-        machine = replace(machine, link=Link.LIVE, attempt=0, since_link=0.0, since_keepalive=0.0)
-        return machine, [Send(_level(machine))]
-
+        return _on_link_up(machine)
     if isinstance(event, LinkDown):
-        delay = backoff(machine.attempt)
-        machine = replace(machine, link=Link.BACKOFF, attempt=machine.attempt + 1, since_link=0.0)
-        return machine, [Reconnect(delay)]
+        return _on_link_down(machine)
+    return _on_tick(machine)
 
-    # --- Tick ---------------------------------------------------------------
+
+def _on_hook_state(machine: Machine, event: HookState) -> tuple[Machine, list[Action]]:
+    agent = Agent.WAITING if event.state == "waiting" else Agent.WORKING
+    moved = bool(event.task) and event.task != machine.task
+    unchanged = agent is machine.agent and event.reason == machine.reason and not moved
+    machine = replace(
+        machine,
+        task=event.task or machine.task,
+        agent=agent,
+        reason=event.reason,
+        client_name=event.client_name or machine.client_name,
+        since_hook=0.0,
+    )
+    if unchanged or machine.link is not Link.LIVE:
+        # Either the server already knows, or it cannot be told and will
+        # be given the current level when the link comes back.
+        return machine, []
+    return machine, [Send(_level(machine))]
+
+
+def _on_hook_bind(machine: Machine, event: HookBind) -> tuple[Machine, list[Action]]:
+    machine = replace(
+        machine,
+        task=event.task,
+        client_name=event.client_name or machine.client_name,
+        agent=Agent.WORKING,
+        reason=None,
+        since_hook=0.0,
+    )
+    if machine.link is not Link.LIVE:
+        return machine, []
+    return machine, [Send(_level(machine))]
+
+
+def _on_hook_end(machine: Machine, event: HookEnd) -> tuple[Machine, list[Action]]:
+    return machine, _goodbye(machine, bye_reason=event.reason, finish_reason=event.reason)
+
+
+def _on_link_up(machine: Machine) -> tuple[Machine, list[Action]]:
+    machine = replace(machine, link=Link.LIVE, attempt=0, since_link=0.0, since_keepalive=0.0)
+    return machine, [Send(_level(machine))]
+
+
+def _on_link_down(machine: Machine) -> tuple[Machine, list[Action]]:
+    delay = backoff(machine.attempt)
+    machine = replace(machine, link=Link.BACKOFF, attempt=machine.attempt + 1, since_link=0.0)
+    return machine, [Reconnect(delay)]
+
+
+def _on_tick(machine: Machine) -> tuple[Machine, list[Action]]:
     if machine.agent is Agent.WAITING and machine.since_hook >= IDLE_AFTER:
         # Nobody is coming. The server's own window would close the socket at
         # the same moment; saying goodbye first makes it an ending rather than
         # a timeout.
-        actions = []
-        if machine.link is Link.LIVE:
-            actions.append(Send(protocol.bye_frame("session_ended")))
-        actions.append(Finish("idle"))
-        return machine, actions
+        return machine, _goodbye(machine, bye_reason="session_ended", finish_reason="idle")
 
     if machine.link is Link.BACKOFF and machine.since_link >= BACKOFF_GIVE_UP:
         return machine, [Finish("backend_gone")]
@@ -260,6 +269,15 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
         return machine, [Send(protocol.heartbeat_frame())]
 
     return machine, []
+
+
+def _goodbye(machine: Machine, *, bye_reason: str, finish_reason: str) -> list[Action]:
+    """Say goodbye if there is anyone to say it to, then stop."""
+    actions: list[Action] = []
+    if machine.link is Link.LIVE:
+        actions.append(Send(protocol.bye_frame(bye_reason)))
+    actions.append(Finish(finish_reason))
+    return actions
 
 
 def _level(machine: Machine) -> str:

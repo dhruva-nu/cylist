@@ -69,7 +69,7 @@ export function readableInkOn(colour: string): string {
   const digits = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(colour.trim())?.[1]
   if (digits === undefined) return 'var(--on-accent)'
 
-  const full = digits.length === 3 ? digits.replace(/./g, (pair) => pair + pair) : digits
+  const full = digits.length === 3 ? digits.replace(/./g, (digit) => digit + digit) : digits
   const [r = 0, g = 0, b = 0] = [0, 2, 4].map((offset) => {
     const channel = parseInt(full.slice(offset, offset + 2), 16) / 255
     return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
@@ -141,14 +141,6 @@ function Tip({ tip }: { tip: TipState | null }) {
   )
 }
 
-/**
- * The stage labels a task's sub-status is made of, and where it has got to.
- *
- * Nothing here is only a colour: the bar says position, the head line names
- * the stage you are on, and the hover tip carries whichever label you point
- * at in full. Labels can be a sentence long, so no part of the design asks
- * one to fit inside a fixed width.
- */
 /**
  * Text with its tags drawn as tags — `@` for a person, `>` for a file; see
  * `mentions.ts` for what counts as one. Used wherever somebody's prose is read
@@ -230,6 +222,14 @@ function FileTag({ file, text }: { file: FiledItem; text: string }) {
   )
 }
 
+/**
+ * The stage labels a task's sub-status is made of, and where it has got to.
+ *
+ * Nothing here is only a colour: the bar says position, the head line names
+ * the stage you are on, and the hover tip carries whichever label you point
+ * at in full. Labels can be a sentence long, so no part of the design asks
+ * one to fit inside a fixed width.
+ */
 interface SubStatusProps {
   labels: string[]
   index: number
@@ -575,21 +575,6 @@ export function CommentIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/**
- * A list with things ticked off it.
- *
- * Not on a board card, where a set of sub-tasks is drawn as the dots that
- * count them rather than as an icon and a fraction — see `SubtaskDots` on the
- * board. This is the mark for the places that name the list instead.
- */
-export function ChecklistIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Glyph size={size}>
-      <path d="M3 4.6 4.3 5.9 6.6 3.6M3 11 4.3 12.3 6.6 10M8.6 4.8h4.4M8.6 11.2h4.4" />
-    </Glyph>
-  )
-}
-
 /** Jira's four-diamond mark, near enough to be recognised at 14px. */
 function JiraIcon({ size = 14 }: { size?: number }) {
   return (
@@ -660,15 +645,6 @@ export function MailIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/** Add one of whatever the control is next to. */
-export function PlusIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Glyph size={size} weight={1.8}>
-      <path d="M8 3.6v8.8M3.6 8h8.8" />
-    </Glyph>
-  )
-}
-
 export function KindTag({ kind }: { kind: PersonKind }) {
   return <span className={`${styles.tag} ${styles[kind]}`}>{kind}</span>
 }
@@ -732,16 +708,16 @@ export function LevelPicker({
   // The same query the roles screen draws its clearances from, so a level is
   // worded identically wherever it appears and the catalogue is fetched once
   // per project rather than once per picker.
-  const grid = useQuery({
+  const permissions = useQuery({
     queryKey: ['permissions', projectKey],
     queryFn: () => api.getPermissions(projectKey),
   })
-  const levels = { data: grid.data?.levels }
+  const levels = permissions.data?.levels ?? []
 
   return (
     <select value={value} onChange={(event) => onChange(event.target.value as Sensitivity | '')}>
       {includeInherit ? <option value="">{includeInherit}</option> : null}
-      {(levels.data ?? []).map((level) => (
+      {levels.map((level) => (
         <option key={level.key} value={level.key}>
           {level.label}
         </option>
@@ -827,23 +803,23 @@ export function TaskRef({
   value: string
   compact?: boolean
 }) {
-  const { label, href } = kind === 'jira' ? jiraRef(value) : prRef(value)
+  const { label, href } = kind === 'jira' ? jiraRefDisplay(value) : prRefDisplay(value)
   const icon = kind === 'jira' ? <JiraIcon /> : <PrIcon />
   // The icon is decoration and the label is an abbreviation, so neither says
   // on its own what the reference is of.
-  const said = `${kind === 'jira' ? 'Jira' : 'Pull request'} ${label}`
+  const accessibleName = `${kind === 'jira' ? 'Jira' : 'Pull request'} ${label}`
 
   // Hidden rather than dropped: what compact takes off the card it keeps for
   // the reader who is not looking at the card.
   const text = compact ? (
-    <span className="visually-hidden">{said}</span>
+    <span className="visually-hidden">{accessibleName}</span>
   ) : (
     <span className={styles.refLabel}>{label}</span>
   )
 
   if (!href) {
     return (
-      <span className={styles.refMark} title={compact ? said : undefined}>
+      <span className={styles.refMark} title={compact ? accessibleName : undefined}>
         {icon}
         {text}
       </span>
@@ -856,10 +832,10 @@ export function TaskRef({
       href={href}
       target="_blank"
       rel="noreferrer"
-      aria-label={said}
+      aria-label={accessibleName}
       // The URL is the useful tooltip where the identifier is already on
       // screen. Where it is not, the identifier is what the tooltip is for.
-      title={compact ? said : href}
+      title={compact ? accessibleName : href}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
@@ -871,7 +847,7 @@ export function TaskRef({
 }
 
 /** What :func:`TaskRef` renders: the text to show, and where it points. */
-interface Ref {
+interface RefDisplay {
   label: string
   /** Null when the stored value is not a URL — there is nothing to follow. */
   href: string | null
@@ -897,7 +873,7 @@ function lastSegment(url: URL): string {
   return url.pathname.split('/').filter(Boolean).pop() ?? url.hostname
 }
 
-function jiraRef(value: string): Ref {
+function jiraRefDisplay(value: string): RefDisplay {
   const url = asUrl(value)
   if (!url) return { label: value, href: null }
   // The query string is searched as well as the path: `/browse/ATL-41` is the
@@ -906,7 +882,7 @@ function jiraRef(value: string): Ref {
   return { label: key ? key[0].toUpperCase() : lastSegment(url), href: value }
 }
 
-function prRef(value: string): Ref {
+function prRefDisplay(value: string): RefDisplay {
   const url = asUrl(value)
   if (!url) return { label: value, href: null }
   // GitHub and Bitbucket say `pull`/`pull-requests`, GitLab `merge_requests`.

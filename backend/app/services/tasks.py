@@ -217,39 +217,22 @@ async def create(
     assignee_id = await _assignee_for(session, project, data, creator_id)
     template = await templates.require_template(session, project.id, data.template_id)
     await goals.require_goal(session, project.id, data.goal_id)
+    if parent is not None:
+        _refuse_unfit_parent(parent, data.goal_id)
 
-    if parent is not None and data.goal_id is not None:
-        raise UnprocessableRequestError(
-            f"A sub-task cannot be put on a goal of its own. {parent.reference} is what "
-            "belongs to a goal; this is work on it.",
-            details={"parent": parent.reference, "goal_id": str(data.goal_id)},
+    if parent is None:
+        number: int | None = await _next_number(session, project)
+        sub_number: int | None = None
+        column: BoardColumn | None = templates.landing_column(
+            template, await columns.first(session, project)
         )
+    else:
+        number = None
+        sub_number = await _next_sub_number(session, parent)
+        column = None
 
-    if parent is not None and parent.parent_id is not None:
-        raise UnprocessableRequestError(
-            f"{parent.reference} is already a sub-task, so it cannot have sub-tasks of its own. "
-            "A board that nests further is a tree, not a board.",
-            details={"parent": parent.reference},
-        )
-
-    number = None if parent else await _next_number(session, project)
-    sub_number = await _next_sub_number(session, parent) if parent else None
-
-    column = (
-        None
-        if parent
-        else templates.landing_column(template, await columns.first(session, project))
-    )
-    position = None if column is None else await _length(session, column.id)
-
-    # The template's own sub-stages for the landing column win over whatever
-    # the caller sent — that is the template's whole point — but a column the
-    # template says nothing about leaves the caller's choice alone. A sub-task
-    # lands in no column, so there is no stage to inherit and the caller's own
-    # list stands.
-    sub_statuses = None if column is None else templates.landing_sub_stages(template, column.id)
-    if sub_statuses is None:
-        sub_statuses = data.sub_statuses
+    position = None if column is None else await _count_cards_in_column(session, column.id)
+    sub_statuses = _landing_sub_statuses(template, column, data.sub_statuses)
 
     task = Task(
         project_id=project.id,
@@ -292,6 +275,45 @@ async def create(
     )
     await set_column_due_dates(session, task, data.column_due_dates)
     return task
+
+
+def _refuse_unfit_parent(parent: Task, goal_id: UUID | None) -> None:
+    """Stop a sub-task being written somewhere a sub-task cannot go.
+
+    Raises:
+        UnprocessableRequestError: if the new sub-task names a goal of its own,
+            or if ``parent`` is itself a sub-task.
+    """
+    if goal_id is not None:
+        raise UnprocessableRequestError(
+            f"A sub-task cannot be put on a goal of its own. {parent.reference} is what "
+            "belongs to a goal; this is work on it.",
+            details={"parent": parent.reference, "goal_id": str(goal_id)},
+        )
+
+    if parent.parent_id is not None:
+        raise UnprocessableRequestError(
+            f"{parent.reference} is already a sub-task, so it cannot have sub-tasks of its own. "
+            "A board that nests further is a tree, not a board.",
+            details={"parent": parent.reference},
+        )
+
+
+def _landing_sub_statuses(
+    template: TaskTemplate | None, column: BoardColumn | None, requested: list[str]
+) -> list[str]:
+    """The sub-stages a new card starts with.
+
+    The template's own sub-stages for the landing column win over whatever the
+    caller sent — that is the template's whole point — but a column the
+    template says nothing about leaves the caller's choice alone. A sub-task
+    lands in no column, so there is no stage to inherit and the caller's own
+    list stands.
+    """
+    if column is None:
+        return requested
+    from_template = templates.landing_sub_stages(template, column.id)
+    return requested if from_template is None else from_template
 
 
 async def resolve(session: AsyncSession, reference: str) -> Task:
@@ -389,17 +411,9 @@ async def update(
             silently moving it would be worse: the card would leave the column
             somebody was looking at it in.
     """
-    before = _snapshot(task)
-    dated_before = _dated(task)
-
-    # Only the fields in _CLEARABLE can be emptied. A null anywhere else is a
-    # client sending back a field it never filled in, not a request to erase a
-    # title or unassign the work.
-    fields = {
-        field: value
-        for field, value in data.model_dump(exclude_unset=True).items()
-        if value is not None or field in _CLEARABLE
-    }
+    before = _tracked_values(task)
+    column_dates_before = _column_due_dates_of(task)
+    fields = _fields_to_write(data)
 
     # Rows of their own rather than a column on the task, so they are written
     # through their own call and taken out of the plain field loop below.
@@ -407,6 +421,55 @@ async def update(
     if data.column_due_dates is not None:
         await set_column_due_dates(session, task, data.column_due_dates)
 
+    await _refuse_invalid_references(session, task, fields)
+
+    if "sub_statuses" in fields or "sub_status_index" in fields:
+        _set_sub_statuses(
+            task,
+            fields.pop("sub_statuses", task.sub_statuses),
+            fields.pop("sub_status_index", None),
+        )
+
+    for field, value in fields.items():
+        setattr(task, field, value)
+
+    await session.flush()
+    await session.refresh(task, ["assignee", "template", "goal"])
+    changes = await _describe_changes(session, before, _tracked_values(task))
+    column_dates_change = await _column_dates_changed(session, task, column_dates_before)
+    if column_dates_change is not None:
+        changes.append(column_dates_change)
+    return task, changes
+
+
+def _fields_to_write(data: TaskUpdate) -> dict[str, Any]:
+    """The fields a ``PATCH`` asks to set, with its echoed-back nulls dropped.
+
+    Only the fields in :data:`_CLEARABLE` can be emptied. A null anywhere else
+    is a client sending back a field it never filled in, not a request to erase
+    a title or unassign the work.
+    """
+    fields: dict[str, Any] = {}
+    for field, value in data.model_dump(exclude_unset=True).items():
+        if value is not None or field in _CLEARABLE:
+            fields[field] = value
+    return fields
+
+
+async def _refuse_invalid_references(
+    session: AsyncSession, task: Task, fields: dict[str, Any]
+) -> None:
+    """Check every person, goal and template an update points the card at.
+
+    A goal or template is checked only when it is changing: a client echoing
+    back the one the card already has is not asking for anything new, and a
+    rule tightened since should not stop it editing the title.
+
+    Raises:
+        UnprocessableRequestError: if the assignee is not a project member, if
+            the goal or template is another project's, if a sub-task is being
+            given a goal, or if the new template strands the card.
+    """
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
 
@@ -420,39 +483,31 @@ async def update(
         )
         await _refuse_stranded(session, task, new_template)
 
-    if "sub_statuses" in fields or "sub_status_index" in fields:
-        new_statuses = fields.pop("sub_statuses", task.sub_statuses)
-        wanted = fields.pop("sub_status_index", None)
-        if not new_statuses:
-            # Nothing to point at, so an index sent alongside is moot rather
-            # than wrong: clearing the stages clears the marker.
-            task.sub_status_index = None
-        elif wanted is not None:
-            # A caller that reordered or removed a stage knows where the
-            # current one ended up. Out of range is a bug on its side, not
-            # something to quietly round off.
-            if wanted >= len(new_statuses):
-                raise UnprocessableRequestError(
-                    f"sub_status_index {wanted} is past the last of "
-                    f"{len(new_statuses)} sub-statuses.",
-                )
-            task.sub_status_index = wanted
-        else:
-            # Preserve how far along the card was rather than restarting it —
-            # only pulled back as far as the shorter list requires.
-            task.sub_status_index = min(task.sub_status_index or 0, len(new_statuses) - 1)
-        task.sub_statuses = new_statuses
 
-    for field, value in fields.items():
-        setattr(task, field, value)
+def _set_sub_statuses(task: Task, stages: list[str], wanted_index: int | None) -> None:
+    """Give a card a new list of sub-stages, keeping the marker on a sensible one.
 
-    await session.flush()
-    await session.refresh(task, ["assignee", "template", "goal"])
-    changes = await _diff(session, before, _snapshot(task))
-    moved_dates = await _column_dates_changed(session, task, dated_before)
-    if moved_dates is not None:
-        changes.append(moved_dates)
-    return task, changes
+    Raises:
+        UnprocessableRequestError: if ``wanted_index`` is past the last stage.
+    """
+    if not stages:
+        # Nothing to point at, so an index sent alongside is moot rather than
+        # wrong: clearing the stages clears the marker.
+        task.sub_status_index = None
+    elif wanted_index is not None:
+        # A caller that reordered or removed a stage knows where the current
+        # one ended up. Out of range is a bug on its side, not something to
+        # quietly round off.
+        if wanted_index >= len(stages):
+            raise UnprocessableRequestError(
+                f"sub_status_index {wanted_index} is past the last of {len(stages)} sub-statuses.",
+            )
+        task.sub_status_index = wanted_index
+    else:
+        # Preserve how far along the card was rather than restarting it — only
+        # pulled back as far as the shorter list requires.
+        task.sub_status_index = min(task.sub_status_index or 0, len(stages) - 1)
+    task.sub_statuses = stages
 
 
 async def set_column_due_dates(
@@ -523,26 +578,28 @@ def board_dates(task: Task, board: list[BoardColumn]) -> BoardDates:
     whether the card is late: the one that will make it late first is the one
     to draw.
     """
-    named = {column.id: column for column in board}
-    here = named[task.column_id].position if task.column_id in named else None
+    columns_by_id = {column.id: column for column in board}
+    current_position = (
+        columns_by_id[task.column_id].position if task.column_id in columns_by_id else None
+    )
 
     entries = [
         ColumnDue(
             column_id=row.column_id,
-            column_name=named[row.column_id].name,
+            column_name=columns_by_id[row.column_id].name,
             due_date=row.due_date,
-            met=here is not None and here >= named[row.column_id].position,
+            met=current_position is not None
+            and current_position >= columns_by_id[row.column_id].position,
         )
         for row in task.column_due_dates
-        if row.column_id in named
+        if row.column_id in columns_by_id
     ]
-    entries.sort(key=lambda entry: named[entry.column_id].position)
+    entries.sort(key=lambda entry: columns_by_id[entry.column_id].position)
 
-    finished = (
-        task.finished_at is not None
-        if task.parent_id is not None
-        else bool(board) and task.column_id == board[-1].id
-    )
+    if task.parent_id is not None:
+        finished = task.finished_at is not None
+    else:
+        finished = bool(board) and task.column_id == board[-1].id
     pending = [entry.due_date for entry in entries if not entry.met]
     if task.due_date is not None and not finished:
         pending.append(task.due_date)
@@ -573,17 +630,21 @@ async def set_sub_status(
             f"{task.reference} has {len(task.sub_statuses)} sub-statuses; "
             f"there is no stage {index}.",
         )
-    was_on = _stage(task.sub_statuses, task.sub_status_index)
+    stage_before = _stage_label(task.sub_statuses, task.sub_status_index)
     task.sub_status_index = index
     await session.flush()
 
-    now_on = _stage(task.sub_statuses, index)
-    changes: list[dict[str, Any]] = (
-        []
-        if now_on == was_on
-        else [{"field": "sub_status_index", "label": "sub-status", "from": was_on, "to": now_on}]
-    )
-    return task, changes
+    stage_after = _stage_label(task.sub_statuses, index)
+    if stage_after == stage_before:
+        return task, []
+    return task, [
+        {
+            "field": "sub_status_index",
+            "label": "sub-status",
+            "from": stage_before,
+            "to": stage_after,
+        }
+    ]
 
 
 async def delete(session: AsyncSession, task: Task) -> None:
@@ -651,6 +712,71 @@ async def move(
             short of the last sub-stage its template set there, or if the
             destination is the last column and a sub-task is still open.
     """
+    _refuse_moving_subtask(task)
+    column = await _destination_column(session, task, data.column_id)
+    templates.require_permitted(task, column)
+    if task.column_id != column.id:
+        await _refuse_stage_incomplete(session, task)
+    last_column = await columns.last(session, task.project_id)
+    await _refuse_unfinished(session, task, column, last_column)
+    landing_outcome = _landing_outcome(task, column, data.outcome)
+
+    source_id = _board_column_id(task)
+    stage_before = _stage_label(task.sub_statuses, task.sub_status_index)
+    # Read off the source column while the card is still in it. The label the
+    # index points at is a fact about a column, and in a moment the card will
+    # be in a different one.
+    outcome_before = _outcome_label(task.column, task.outcome_index)
+    outcome_after = _outcome_label(column, landing_outcome)
+
+    await _restack(session, task, column, data.position)
+    if source_id != column.id:
+        _restart_stages(task, column)
+    task.outcome_index = landing_outcome
+    await session.flush()
+    # The card is in a different column now, and the one still hanging off the
+    # relationship is the one it left — which is the column ``Task.outcome``
+    # would read its own label out of.
+    await session.refresh(task, ["column"])
+
+    if source_id == column.id:
+        # Dragged between the sections of one column: not a move by the board's
+        # reckoning, but a change of how the work ended, which is worth saying.
+        if outcome_before == outcome_after:
+            return task, []
+        return task, [_outcome_change(outcome_before, outcome_after)]
+
+    await _renumber(session, source_id)
+    source = await columns.get(session, source_id)
+    changes: list[dict[str, Any]] = [
+        {"field": "column", "label": "column", "from": source.name, "to": column.name},
+    ]
+    stage_after = _stage_label(task.sub_statuses, task.sub_status_index)
+    if stage_after != stage_before:
+        changes.append(
+            {
+                "field": "sub_status_index",
+                "label": "sub-status",
+                "from": stage_before,
+                "to": stage_after,
+            }
+        )
+
+    if outcome_before != outcome_after:
+        changes.append(_outcome_change(outcome_before, outcome_after))
+
+    finished_change = _mark_finished_by_column(task, column, last_column)
+    if finished_change is not None:
+        changes.append(finished_change)
+    return task, changes
+
+
+def _refuse_moving_subtask(task: Task) -> None:
+    """Stop a sub-task being dragged anywhere: it is not on the board.
+
+    Raises:
+        UnprocessableRequestError: if the task is a sub-task.
+    """
     # `parent` rather than `parent_id`: it is eagerly loaded — a sub-task cannot
     # spell its own reference without it — and naming the card to go and move
     # instead is most of what makes this refusal useful.
@@ -662,85 +788,71 @@ async def move(
             details={"parent": task.parent.reference},
         )
 
-    column = await columns.get(session, data.column_id)
+
+async def _destination_column(session: AsyncSession, task: Task, column_id: UUID) -> BoardColumn:
+    """The column a card is being moved into, which must be on its own board.
+
+    Raises:
+        NotFoundError: if there is no such column.
+        UnprocessableRequestError: if the column is on another project's board.
+    """
+    column = await columns.get(session, column_id)
     if column.project_id != task.project_id:
         raise UnprocessableRequestError(
             "That column is on a different project's board.",
             details={"column_id": str(column.id)},
         )
+    return column
 
-    templates.require_permitted(task, column)
-    if task.column_id != column.id:
-        await _refuse_stage_incomplete(session, task)
-    done_column = await columns.last(session, task.project_id)
-    await _refuse_unfinished(session, task, column, done_column)
-    landing_on = _landing_outcome(task, column, data.outcome)
 
-    source_id = _column_of(task)
-    was_on = _stage(task.sub_statuses, task.sub_status_index)
-    # Read off the source column while the card is still in it. The label the
-    # index points at is a fact about a column, and in a moment the card will
-    # be in a different one.
-    was_ending = _outcome_label(task.column, task.outcome_index)
-    now_ending = _outcome_label(column, landing_on)
-    siblings = [
-        sibling
-        for sibling in await _ordered(session, column.id)
-        if sibling.id != task.id  # a move within one column must not count twice
-    ]
-    siblings.insert(min(data.position, len(siblings)), task)
+async def _restack(session: AsyncSession, task: Task, column: BoardColumn, position: int) -> None:
+    """Put a card into a column's stack at ``position`` and renumber the stack.
 
+    ``position`` is clamped to the bottom of the stack, and the card is taken
+    out of the list first, so a move within one column does not count it twice.
+    """
+    stack = [card for card in await _cards_in_column(session, column.id) if card.id != task.id]
+    stack.insert(min(position, len(stack)), task)
     task.column_id = column.id
-    if source_id != column.id:
-        landed_sub_stages = templates.landing_sub_stages(task.template, column.id)
-        if landed_sub_stages is not None:
-            task.sub_statuses = landed_sub_stages
-            task.sub_status_index = 0
-        elif task.sub_statuses:
-            task.sub_status_index = 0
-    task.outcome_index = landing_on
-    for position, sibling in enumerate(siblings):
-        sibling.position = position
-    await session.flush()
-    # The card is in a different column now, and the one still hanging off the
-    # relationship is the one it left — which is the column ``Task.outcome``
-    # would read its own label out of.
-    await session.refresh(task, ["column"])
+    for index, card in enumerate(stack):
+        card.position = index
 
-    if source_id == column.id:
-        # Dragged between the sections of one column: not a move by the board's
-        # reckoning, but a change of how the work ended, which is worth saying.
-        if was_ending == now_ending:
-            return task, []
-        return task, [_outcome_change(was_ending, now_ending)]
 
-    await _renumber(session, source_id)
-    source = await columns.get(session, source_id)
-    changes: list[dict[str, Any]] = [
-        {"field": "column", "label": "column", "from": source.name, "to": column.name},
-    ]
-    now_on = _stage(task.sub_statuses, task.sub_status_index)
-    if now_on != was_on:
-        changes.append(
-            {"field": "sub_status_index", "label": "sub-status", "from": was_on, "to": now_on}
-        )
+def _restart_stages(task: Task, column: BoardColumn) -> None:
+    """Start a card's sub-stages again as it arrives in a new column.
 
-    if was_ending != now_ending:
-        changes.append(_outcome_change(was_ending, now_ending))
+    The template's sub-stages for the column replace whatever the card carried;
+    a column the template says nothing about keeps the card's own list, and
+    only the marker goes back to the first stage.
+    """
+    stages_from_template = templates.landing_sub_stages(task.template, column.id)
+    if stages_from_template is not None:
+        task.sub_statuses = stages_from_template
+        task.sub_status_index = 0
+    elif task.sub_statuses:
+        task.sub_status_index = 0
 
+
+def _mark_finished_by_column(
+    task: Task, column: BoardColumn, last_column: BoardColumn
+) -> dict[str, Any] | None:
+    """Finish a card that has arrived in the last column, or reopen one that left.
+
+    Returns the history entry for the change, or None if the card was already
+    as finished as where it now sits says it is.
+    """
     was_finished = task.finished_at is not None
-    now_finished = column.id == done_column.id
-    if now_finished != was_finished:
-        task.finished_at = datetime.now(UTC) if now_finished else None
-        changes.append(
-            {
-                "field": "finished",
-                "label": "finished",
-                "from": "finished" if was_finished else "open",
-                "to": "finished" if now_finished else "open",
-            }
-        )
-    return task, changes
+    now_finished = column.id == last_column.id
+    if now_finished == was_finished:
+        return None
+
+    task.finished_at = datetime.now(UTC) if now_finished else None
+    return {
+        "field": "finished",
+        "label": "finished",
+        "from": "finished" if was_finished else "open",
+        "to": "finished" if now_finished else "open",
+    }
 
 
 async def set_finished(
@@ -1083,12 +1195,12 @@ async def subtask_owners(session: AsyncSession, task_ids: list[UUID]) -> dict[UU
     return owners
 
 
-def _snapshot(task: Task) -> dict[str, Any]:
+def _tracked_values(task: Task) -> dict[str, Any]:
     """The tracked fields of a task as they stand, for diffing against later."""
     return {field: getattr(task, field) for field in _TRACKED}
 
 
-def _dated(task: Task) -> dict[UUID, date]:
+def _column_due_dates_of(task: Task) -> dict[UUID, date]:
     """Which columns this card is dated in, and when.
 
     Copied out of the relationship rather than snapshotted with the rest of the
@@ -1107,7 +1219,7 @@ async def _column_dates_changed(
     read: "Review 2026-09-20, QA 2026-09-25" says what changed, where a list of
     column ids says only that something did.
     """
-    after = _dated(task)
+    after = _column_due_dates_of(task)
     if after == before:
         return None
 
@@ -1115,19 +1227,19 @@ async def _column_dates_changed(
     return {
         "field": "column_due_dates",
         "label": "column due dates",
-        "from": _dates_said(before, board),
-        "to": _dates_said(after, board),
+        "from": _describe_column_dates(before, board),
+        "to": _describe_column_dates(after, board),
     }
 
 
-def _dates_said(dates: dict[UUID, date], board: list[BoardColumn]) -> str | None:
+def _describe_column_dates(dates: dict[UUID, date], board: list[BoardColumn]) -> str | None:
     said = [
         f"{column.name} {dates[column.id].isoformat()}" for column in board if column.id in dates
     ]
     return ", ".join(said) or None
 
 
-async def _diff(
+async def _describe_changes(
     session: AsyncSession, before: dict[str, Any], after: dict[str, Any]
 ) -> list[dict[str, Any]]:
     """Describe what moved between two snapshots, in :data:`_TRACKED` order.
@@ -1154,13 +1266,15 @@ async def _diff(
             field = "goal"
             was, now = await _goal_name(session, was), await _goal_name(session, now)
         elif field == "sub_status_index":
-            was = _stage(before["sub_statuses"], was)
-            now = _stage(after["sub_statuses"], now)
-        changes.append({"field": field, "label": label, "from": _plain(was), "to": _plain(now)})
+            was = _stage_label(before["sub_statuses"], was)
+            now = _stage_label(after["sub_statuses"], now)
+        changes.append(
+            {"field": field, "label": label, "from": _json_ready(was), "to": _json_ready(now)}
+        )
     return changes
 
 
-def _stage(labels: list[str], index: int | None) -> str | None:
+def _stage_label(labels: list[str], index: int | None) -> str | None:
     """Name the stage an index points at, for a card that has stages."""
     if index is None or not 0 <= index < len(labels):
         return None
@@ -1208,7 +1322,7 @@ async def _refuse_goal_on_subtask(task: Task, goal_id: UUID | None) -> None:
     )
 
 
-def _plain(value: Any) -> Any:
+def _json_ready(value: Any) -> Any:
     """Make a value fit to store in the audit payload, which is JSONB."""
     if isinstance(value, StrEnum):
         return value.value
@@ -1217,7 +1331,7 @@ def _plain(value: Any) -> Any:
     if isinstance(value, UUID):
         return str(value)
     if isinstance(value, list):
-        return [_plain(item) for item in value]
+        return [_json_ready(item) for item in value]
     return value
 
 
@@ -1270,8 +1384,8 @@ async def _refuse_stage_incomplete(session: AsyncSession, task: Task) -> None:
             current column has sub-stages the card's template set and the card
             has not reached the last one.
     """
-    here_id = _column_of(task)
-    stage = templates.stage_for_column(task.template, here_id)
+    current_column_id = _board_column_id(task)
+    stage = templates.stage_for_column(task.template, current_column_id)
     if stage is None or not stage.sub_stage_labels:
         return
 
@@ -1280,7 +1394,7 @@ async def _refuse_stage_incomplete(session: AsyncSession, task: Task) -> None:
     if index == last:
         return
 
-    here = await columns.get(session, here_id)
+    here = await columns.get(session, current_column_id)
     current = stage.sub_stage_labels[index] if index >= 0 else "not yet started"
     raise UnprocessableRequestError(
         f'{task.reference} is still on "{current}" in {here.name}. Move it to '
@@ -1294,7 +1408,7 @@ async def _refuse_stage_incomplete(session: AsyncSession, task: Task) -> None:
 
 
 async def _refuse_unfinished(
-    session: AsyncSession, task: Task, column: BoardColumn, finished: BoardColumn
+    session: AsyncSession, task: Task, column: BoardColumn, last_column: BoardColumn
 ) -> None:
     """Stop a card reaching the last column while a sub-task is still open.
 
@@ -1302,14 +1416,13 @@ async def _refuse_unfinished(
     the parent: a sub-task may be left open for as long as anybody likes, and
     the moment that matters is the one where its parent claims to be done.
 
-    ``finished`` is the board's last column, handed in rather than looked up
-    because :func:`move` has already had to find it to know whether the card is
-    arriving at done.
+    ``last_column`` is handed in rather than looked up because :func:`move` has
+    already had to find it to know whether the card is arriving at done.
 
     Raises:
         UnprocessableRequestError: if anything under the task is still open.
     """
-    if column.id != finished.id or task.column_id == finished.id:
+    if column.id != last_column.id or task.column_id == last_column.id:
         return
 
     open_cards = [
@@ -1328,9 +1441,9 @@ async def _refuse_unfinished(
         f"{task.reference} still has {len(outstanding)} unfinished "
         f"{'sub-task' if len(outstanding) == 1 else 'sub-tasks'}: "
         f"{', '.join(outstanding)}. Finish or cancel each of them before moving this card "
-        f"to {finished.name}.",
+        f"to {last_column.name}.",
         details={
-            "column": finished.name,
+            "column": last_column.name,
             "open_subtasks": open_cards,
             "open_checklist_items": open_boxes,
         },
@@ -1386,7 +1499,7 @@ def _landing_outcome(task: Task, column: BoardColumn, wanted: str | None) -> int
     return landed
 
 
-def _column_of(task: Task) -> UUID:
+def _board_column_id(task: Task) -> UUID:
     """The column a top-level card is in.
 
     States the invariant ``placed_by_parentage`` enforces rather than checking
@@ -1435,7 +1548,7 @@ async def _next_number(session: AsyncSession, project: Project) -> int:
     return project.task_counter
 
 
-async def _ordered(session: AsyncSession, column_id: UUID) -> list[Task]:
+async def _cards_in_column(session: AsyncSession, column_id: UUID) -> list[Task]:
     return list(
         await session.scalars(
             select(Task).where(Task.column_id == column_id).order_by(Task.position)
@@ -1443,7 +1556,7 @@ async def _ordered(session: AsyncSession, column_id: UUID) -> list[Task]:
     )
 
 
-async def _length(session: AsyncSession, column_id: UUID) -> int:
+async def _count_cards_in_column(session: AsyncSession, column_id: UUID) -> int:
     total = await session.scalar(
         select(func.count()).select_from(Task).where(Task.column_id == column_id)
     )
@@ -1452,6 +1565,6 @@ async def _length(session: AsyncSession, column_id: UUID) -> int:
 
 async def _renumber(session: AsyncSession, column_id: UUID) -> None:
     """Close the gap a departed task left, keeping positions contiguous."""
-    for position, task in enumerate(await _ordered(session, column_id)):
+    for position, task in enumerate(await _cards_in_column(session, column_id)):
         task.position = position
     await session.flush()

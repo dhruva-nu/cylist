@@ -108,9 +108,10 @@ export function ProjectGoals() {
   if (goals.isPending) return <EmptyState>Loading goals…</EmptyState>
   if (goals.error) return <ErrorBanner>{goals.error.message}</ErrorBanner>
 
-  const all = goals.data
-  const open = all.filter((goal) => goal.status === 'open')
-  const settled = all.filter((goal) => goal.status !== 'open')
+  const allGoals = goals.data
+  const openGoals = allGoals.filter((goal) => goal.status === 'open')
+  const settledGoals = allGoals.filter((goal) => goal.status !== 'open')
+  const memberList = members.data?.members ?? []
 
   return (
     <>
@@ -135,48 +136,33 @@ export function ProjectGoals() {
 
       <LiveRegion message={message} />
 
-      {all.length === 0 ? (
+      {allGoals.length === 0 ? (
         <EmptyState>
           No goals yet. A goal is a heading — “Search revamp”, “SOC 2 readiness” — that a board's
           cards are written under.
         </EmptyState>
       ) : null}
 
-      {view === 'calendar' && all.length ? (
-        <GoalCalendar goals={all} projectKey={projectKey} />
+      {view === 'calendar' && allGoals.length ? (
+        <GoalCalendar goals={allGoals} projectKey={projectKey} />
       ) : null}
 
-      {view === 'list' && open.length ? (
-        <div className={styles.grid}>
-          {open.map((goal) => (
-            <GoalCard
-              key={goal.id}
-              goal={goal}
-              projectKey={projectKey}
-              members={members.data?.members ?? []}
-              files={files}
-            />
-          ))}
-        </div>
+      {view === 'list' && openGoals.length ? (
+        <GoalGrid goals={openGoals} projectKey={projectKey} members={memberList} files={files} />
       ) : null}
 
-      {view === 'list' && settled.length ? (
+      {view === 'list' && settledGoals.length ? (
         <>
           {/* Kept on the page rather than hidden behind a filter: a goal that
               was reached is the most useful thing a goals page holds three
               months later, and one that was dropped is the second. */}
           <h2 className={styles.settledHead}>Settled</h2>
-          <div className={styles.grid}>
-            {settled.map((goal) => (
-              <GoalCard
-                key={goal.id}
-                goal={goal}
-                projectKey={projectKey}
-                members={members.data?.members ?? []}
-                files={files}
-              />
-            ))}
-          </div>
+          <GoalGrid
+            goals={settledGoals}
+            projectKey={projectKey}
+            members={memberList}
+            files={files}
+          />
         </>
       ) : null}
 
@@ -184,7 +170,7 @@ export function ProjectGoals() {
         <GoalDialog
           projectKey={projectKey}
           goal={editing === 'new' ? null : editing}
-          members={members.data?.members ?? []}
+          members={memberList}
           announce={announce}
           onDone={refresh}
           onClose={() => setEditing(null)}
@@ -192,6 +178,13 @@ export function ProjectGoals() {
       ) : null}
     </>
   )
+}
+
+/** Which way an arrow key moves through a radio group: forward, back, or not at all. */
+function arrowStep(key: string): number {
+  if (key === 'ArrowRight' || key === 'ArrowDown') return 1
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return -1
+  return 0
 }
 
 /**
@@ -206,8 +199,8 @@ function ViewToggle({ view, onPick }: { view: View; onPick: (view: View) => void
   const group = useRef<HTMLDivElement>(null)
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
-    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) return
+    const step = arrowStep(event.key)
+    if (step === 0) return
 
     event.preventDefault()
     const at = VIEWS.findIndex((option) => option.value === view)
@@ -260,11 +253,12 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
   const { dated, undated } = useMemo(() => goalsByDate(goals), [goals])
   const weeks = useMemo(() => monthWeeks(month.getFullYear(), month.getMonth()), [month])
 
-  const step = (by: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + by, 1))
+  const moveMonth = (by: number) =>
+    setMonth(new Date(month.getFullYear(), month.getMonth() + by, 1))
   const today = new Date()
   const onThisMonth =
     month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth()
-  const shown = weeks
+  const targetedThisMonth = weeks
     .flat()
     .filter((day) => day.inMonth)
     .reduce((count, day) => count + (dated.get(day.iso)?.length ?? 0), 0)
@@ -274,7 +268,7 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
       <div className={styles.monthBar}>
         <h2 className={styles.month}>{monthName(month.getFullYear(), month.getMonth())}</h2>
         <div className={styles.monthNav}>
-          <Button small onClick={() => step(-1)} aria-label="Previous month">
+          <Button small onClick={() => moveMonth(-1)} aria-label="Previous month">
             ‹
           </Button>
           <Button
@@ -284,7 +278,7 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
           >
             Today
           </Button>
-          <Button small onClick={() => step(1)} aria-label="Next month">
+          <Button small onClick={() => moveMonth(1)} aria-label="Next month">
             ›
           </Button>
         </div>
@@ -298,7 +292,7 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
             </div>
           ))}
           {weeks.flat().map((day) => {
-            const on = dated.get(day.iso) ?? []
+            const goalsOnDay = dated.get(day.iso) ?? []
             return (
               <div
                 key={day.iso}
@@ -313,7 +307,7 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
                 <span className={styles.dayNumber} title={dayName(day.iso)}>
                   {day.day}
                 </span>
-                {on.map((goal) => (
+                {goalsOnDay.map((goal) => (
                   <GoalPin key={goal.id} goal={goal} projectKey={projectKey} />
                 ))}
               </div>
@@ -324,7 +318,9 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
 
       {/* Said in words as well as drawn, because "nothing here" and "nothing
           loaded" look identical on an empty grid. */}
-      {shown === 0 ? <p className={styles.quiet}>Nothing is targeted in this month.</p> : null}
+      {targetedThisMonth === 0 ? (
+        <p className={styles.quiet}>Nothing is targeted in this month.</p>
+      ) : null}
 
       {undated.length ? (
         <div className={styles.undated}>
@@ -342,13 +338,7 @@ function GoalCalendar({ goals, projectKey }: { goals: Goal[]; projectKey: string
 
 /** A goal as it appears on a day: its colour, its reference, its name. */
 function GoalPin({ goal, projectKey }: { goal: Goal; projectKey: string }) {
-  const { total, done } = goal.progress
-  const said =
-    goal.status === 'open'
-      ? total === 0
-        ? 'no cards yet'
-        : `${done} of ${total} done`
-      : GOAL_STATUS_LABELS[goal.status].toLowerCase()
+  const said = pinProgress(goal)
 
   return (
     <Link
@@ -361,6 +351,40 @@ function GoalPin({ goal, projectKey }: { goal: Goal; projectKey: string }) {
       <span className={styles.pinRef}>{goal.reference}</span>
       <span className={styles.pinName}>{goal.name}</span>
     </Link>
+  )
+}
+
+/** How far along a pinned goal is, as its tooltip says it: a count, or how it ended. */
+function pinProgress(goal: Goal): string {
+  if (goal.status !== 'open') return GOAL_STATUS_LABELS[goal.status].toLowerCase()
+  const { total, done } = goal.progress
+  return total === 0 ? 'no cards yet' : `${done} of ${total} done`
+}
+
+/** A grid of goal cards — the open ones, or the settled ones under their heading. */
+function GoalGrid({
+  goals,
+  projectKey,
+  members,
+  files,
+}: {
+  goals: Goal[]
+  projectKey: string
+  members: Person[]
+  files: readonly FiledItem[]
+}) {
+  return (
+    <div className={styles.grid}>
+      {goals.map((goal) => (
+        <GoalCard
+          key={goal.id}
+          goal={goal}
+          projectKey={projectKey}
+          members={members}
+          files={files}
+        />
+      ))}
+    </div>
   )
 }
 
