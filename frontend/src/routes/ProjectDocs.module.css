@@ -1,0 +1,438 @@
+/*
+ * The Docs page: the tree down the left, the doc or the editor beside it.
+ * Under 900px the two stack, the doc first — the same breakpoint the sidebar
+ * folds at, so a page never has two panes squeezed next to a rail.
+ */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+/* Stacked, the doc comes first: somebody who followed a link to one should
+   be reading it, not scrolling past every topic to find where it starts. */
+@media (max-width: 899px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pane {
+    order: -1;
+  }
+}
+
+/* --- The tree --- */
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 12px;
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sectionHead {
+  margin: 0 6px 2px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.topics,
+.docs {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.topics {
+  gap: 4px;
+}
+
+.topic {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topicHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 6px;
+  border-radius: var(--radius-control);
+}
+
+.topicHead:hover,
+.topicHead:focus-within {
+  background: var(--paper-2);
+}
+
+.topicName {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.topicHead:hover .count {
+  background: var(--paper);
+}
+
+/* The tools stay out of the way until the row is pointed at or reached by
+   keyboard; on a touch screen, where there is no hover, they always show. */
+.topicTools {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+}
+
+.topicHead:hover .topicTools,
+.topicHead:focus-within .topicTools {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .topicTools {
+    opacity: 1;
+  }
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.iconButton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.docs {
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  margin-left: 12px;
+}
+
+.docLink {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.docLink:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* The open doc wears the brand's soft ground, as the lit area in the sidebar
+   does: the same statement — this one, of these. */
+.docOn,
+.docOn:hover {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+
+.addTopic {
+  align-self: flex-start;
+  margin: 2px 0 0 2px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--link);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addTopic:hover {
+  background: var(--paper-2);
+}
+
+.nameForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+}
+
+.nameForm input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.nameFormButtons {
+  display: flex;
+  gap: 6px;
+}
+
+.quiet {
+  margin: 0 6px;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.inlineError {
+  margin: 2px 6px;
+  color: var(--blocked);
+  font-size: 13px;
+}
+
+/* --- The pane --- */
+
+.pane {
+  min-width: 0;
+}
+
+.reader,
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 26px 30px 32px;
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 599px) {
+  .reader,
+  .editor {
+    padding: 18px 16px 22px;
+  }
+}
+
+.readerHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.readerTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.readerTitle h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.filed {
+  margin: 0;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.byline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+.readerTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  align-self: flex-start;
+}
+
+.moveTo select {
+  max-width: 170px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- The editor --- */
+
+.editorHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.editorHeading {
+  margin: 0;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 15px;
+}
+
+.titleInput {
+  padding: 8px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  min-height: 460px;
+}
+
+.bodyInput {
+  min-height: 460px;
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.preview {
+  overflow: auto;
+  padding: 14px 4px;
+}
+
+/* The toggle only matters where the two do not fit side by side. */
+.previewToggle {
+  display: none;
+  padding: 5px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.previewToggle[aria-pressed='true'] {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+@media (max-width: 1099px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .previewToggle {
+    display: inline-block;
+  }
+
+  .split .preview {
+    display: none;
+  }
+
+  .split.previewing .preview {
+    display: block;
+  }
+
+  .split.previewing .bodyInput {
+    display: none;
+  }
+}

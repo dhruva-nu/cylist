@@ -1,9 +1,9 @@
 /**
  * A project's areas, and the two places they are listed.
  *
- * The bar carries four tabs — Goals, Board, People, Agents — which are what
- * somebody working a project moves between all day. The sidebar carries every
- * area: those four, and Roles, Files and Vault, which are places you go to
+ * The bar carries five tabs — Goals, Board, Docs, People, Agents — which are
+ * what somebody working a project moves between all day. The sidebar carries
+ * every area: those five, and Roles, Files and Vault, which are places you go to
  * fetch or settle something rather than places you work. So the bar stays a
  * short row across the top of the page, and nothing is reachable only by
  * typing its address.
@@ -16,7 +16,7 @@
  * a column of rows with a mark and a name each. Collapsed to its rail it is
  * the marks alone down a 46px column, named by their tooltips and to a screen
  * reader. Under 900px, where the rail is a strip across the top instead, it
- * draws nothing: seven names do not fit across a phone, and the four you use
+ * draws nothing: eight names do not fit across a phone, and the five you use
  * most are in the bar's own row directly beneath it — see `.tabs` in the
  * stylesheet. The other three are one press of the handle away.
  *
@@ -64,6 +64,13 @@ const ICONS = {
       <circle cx="14.5" cy="13" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   ),
+  docs: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M14 3v5h5" />
+      <path d="M8.5 13h7M8.5 16.5h5" />
+    </svg>
+  ),
   files: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -79,13 +86,14 @@ const ICONS = {
 }
 
 /**
- * Every area, in the order the sidebar lists them. `inBar` marks the four the
+ * Every area, in the order the sidebar lists them. `inBar` marks the five the
  * bar carries too, in the same order, so the two lists never disagree about
  * which comes first.
  */
 const AREAS = [
   { to: '/p/$projectKey/goals', name: 'Goals', icon: ICONS.goals, inBar: true },
   { to: '/p/$projectKey/board', name: 'Board', icon: ICONS.board, inBar: true },
+  { to: '/p/$projectKey/docs', name: 'Docs', icon: ICONS.docs, inBar: true },
   { to: '/p/$projectKey/people', name: 'People', icon: ICONS.people, inBar: true },
   { to: '/p/$projectKey/roles', name: 'Roles', icon: ICONS.roles, inBar: false },
   { to: '/p/$projectKey/agents', name: 'Agents', icon: ICONS.agents, inBar: true },
@@ -100,7 +108,7 @@ function useProjectKey(): string | null {
   return match ? match.projectKey : null
 }
 
-/** The bar's four tabs. */
+/** The bar's five tabs. */
 export function ProjectTabs() {
   const projectKey = useProjectKey()
   if (projectKey === null) return null

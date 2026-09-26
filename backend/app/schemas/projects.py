@@ -101,6 +101,8 @@ class ProjectSummary(ProjectRead):
         description="Everything in the project's folders — uploads and links alike."
     )
 
+    doc_count: int = Field(description="Docs across both sections and every topic.")
+
     vault_tree_count: int
     vault_secret_count: int = Field(description="Credentials stored across every tree.")
 

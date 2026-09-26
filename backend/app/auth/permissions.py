@@ -75,6 +75,9 @@ class Permission(StrEnum):
     FILES = "files"
     """Create folders, upload files, add links, rename and delete them."""
 
+    DOCS = "docs"
+    """Write, edit, move and delete this project's docs, and arrange their topics."""
+
     VAULT = "vault"
     """Add, change and delete vault entries — never read their secrets."""
 
@@ -153,6 +156,12 @@ CATALOGUE: tuple[PermissionInfo, ...] = (
         "Files",
         "Create folders, upload files and add links.",
         "change this project's files",
+    ),
+    PermissionInfo(
+        Permission.DOCS,
+        "Docs",
+        "Write, edit and move docs, and arrange their topics.",
+        "change this project's docs",
     ),
     PermissionInfo(
         Permission.VAULT,

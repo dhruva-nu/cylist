@@ -11,6 +11,7 @@ from app.models.agent_session import AgentSession, AgentSessionReason, AgentSess
 from app.models.api_token import ApiToken, TokenKind
 from app.models.base import Base
 from app.models.board import BoardColumn
+from app.models.doc import Doc, DocSection, DocTopic
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
 from app.models.permission import (
@@ -51,6 +52,9 @@ __all__ = [
     "Channel",
     "ChecklistState",
     "CommentKind",
+    "Doc",
+    "DocSection",
+    "DocTopic",
     "FileItem",
     "Folder",
     "Goal",
