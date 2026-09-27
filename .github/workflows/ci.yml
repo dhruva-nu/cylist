@@ -61,8 +61,11 @@ jobs:
       - name: Type-check
         run: uv run mypy app scripts
 
+      # One worker per core, each on a database of its own beside
+      # cylist_test (tests/conftest.py). The suite is CPU-bound, not
+      # database-bound, so this is close to a core's worth of speed-up each.
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q -n auto
 
       # Proves the migrations produce exactly the schema the models describe,
       # and that every revision reverses cleanly. Uses its own scratch database.

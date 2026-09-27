@@ -38,6 +38,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from contextvars import ContextVar
+from functools import cached_property
 from typing import Any
 
 import httpx
@@ -96,9 +97,19 @@ class HostedMcp:
     ) -> None:
         self._transport = transport
         self._base_url = base_url
-        caller = _Caller()
-        self._without_reveal = _manager(caller, frozenset())
-        self._with_reveal = _manager(caller, frozenset({VAULT_REVEAL}))
+        self._caller = _Caller()
+
+    # Built on first use rather than here. Building one registers every tool,
+    # which costs a quarter of a second for the pair, and a host builds this
+    # whenever it builds an app — the backend's test suite builds one or two
+    # per test, and almost none of them ever serve /mcp.
+    @cached_property
+    def _without_reveal(self) -> StreamableHTTPSessionManager:
+        return _manager(self._caller, frozenset())
+
+    @cached_property
+    def _with_reveal(self) -> StreamableHTTPSessionManager:
+        return _manager(self._caller, frozenset({VAULT_REVEAL}))
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
