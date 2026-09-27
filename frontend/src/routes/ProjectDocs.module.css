@@ -2,20 +2,62 @@
  * The Docs page: the tree down the left, the doc or the editor beside it.
  * Under 900px the two stack, the doc first — the same breakpoint the sidebar
  * folds at, so a page never has two panes squeezed next to a rail.
+ *
+ * Side by side, the layout takes the height Shell leaves under the heading
+ * (the page is one of its `.wide` ones) and each pane scrolls on its own:
+ * reading down a long doc keeps the tree where it was, and the heading and
+ * the bar stay put. The one row is `minmax(0, 1fr)` so it is exactly that
+ * height rather than as tall as the longer pane; each pane then stops at the
+ * row's height and scrolls past it, or is as short as what it holds.
  */
 
 .layout {
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 22px;
   align-items: start;
+  min-height: 0;
+}
+
+/* The card that scrolls is the tree itself and, beside it, the reader or the
+   editor inside the pane rather than the pane — so the scrollbar sits inside
+   the card and the card's shadow is not clipped by a scrolling box around it. */
+.nav {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.reader,
+.editor {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Stacked, the doc comes first: somebody who followed a link to one should
-   be reading it, not scrolling past every topic to find where it starts. */
+   be reading it, not scrolling past every topic to find where it starts.
+   And the page scrolls as a whole again — Shell hands the scroll to the frame
+   under 900px, so there is no window-high box left to scroll inside. */
 @media (max-width: 899px) {
   .layout {
+    flex: none;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  .nav,
+  .pane,
+  .reader,
+  .editor {
+    max-height: none;
+    overflow-y: visible;
   }
 
   .pane {

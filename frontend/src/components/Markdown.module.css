@@ -1,16 +1,26 @@
 /*
  * Prose, as a doc is read. Body type for the words and the UI face for the
- * headings, as every other page draws the two; a measure of about seventy
- * characters, because a doc is reading matter even on a roomy page.
+ * headings, as every other page draws the two.
+ *
+ * No measure of its own: a doc takes the width of the pane it is drawn in.
+ * It used to stop at 72ch, which on the Docs page's roomy width left the
+ * right half of the page it sits on empty while tables and code blocks
+ * wrapped and scrolled inside the left half.
  */
 
 .prose {
-  max-width: 72ch;
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 15.5px;
   line-height: 1.65;
   overflow-wrap: anywhere;
+}
+
+/* Shell's `.wrap p` gives every paragraph on a page a 68ch measure, and a
+   doc's paragraphs are let out of it along with the doc. The element in the
+   selector is what outranks that rule, whichever stylesheet loads last. */
+div.prose p {
+  max-width: none;
 }
 
 .prose > :first-child {
