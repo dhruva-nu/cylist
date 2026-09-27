@@ -62,9 +62,13 @@ function usePageWidth(): string | undefined {
 
 export function Shell() {
   const matchRoute = useMatchRoute()
-  // The board scrolls sideways, so it gets the full window rather than the
-  // reading-width column every other screen sits in.
-  const wide = Boolean(matchRoute({ to: '/p/$projectKey/board' }))
+  // The board and Docs scroll inside themselves — the board's columns, the
+  // docs' tree and open doc — so the page is exactly the height left under the
+  // bar rather than as tall as what it holds. The board also scrolls sideways,
+  // which is why it gets the full window rather than a capped column.
+  const wide = Boolean(
+    matchRoute({ to: '/p/$projectKey/board' }) || matchRoute({ to: '/p/$projectKey/docs' }),
+  )
   const page = usePageWidth() ?? ''
 
   return (
