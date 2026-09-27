@@ -30,9 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from alembic import command
 from app.config import get_settings
 from app.models import Base
+from tests.conftest import _on_maintenance_db, per_worker
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
-SCRATCH_DATABASE = "cylist_migration_data"
+SCRATCH_DATABASE = per_worker("cylist_migration_data")
 
 BEFORE_ROOTS = "0005"
 WITH_ROOTS = "0006"
@@ -42,20 +43,6 @@ PROJECTS = [
     ("HRM", "Hermes Notifications"),
     ("ORB", "Orbit Internal Portal"),
 ]
-
-
-async def _on_maintenance_db(url: URL, statements: list[str]) -> None:
-    """Run statements against the server's default database.
-
-    CREATE and DROP DATABASE cannot run inside a transaction, hence AUTOCOMMIT.
-    """
-    engine = create_async_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
-    try:
-        async with engine.connect() as connection:
-            for statement in statements:
-                await connection.exec_driver_sql(statement)
-    finally:
-        await engine.dispose()
 
 
 @pytest.fixture

@@ -163,7 +163,7 @@ dev: ## Run the API and the web app together
 	@$(MAKE) -j2 dev-api dev-web
 
 test: ## Run both test suites (starts an embedded database if needed)
-	cd $(BACKEND) && uv run pytest -q
+	cd $(BACKEND) && uv run pytest -q -n auto
 	npm --prefix $(FRONTEND) test
 
 lint: ## Lint both sides

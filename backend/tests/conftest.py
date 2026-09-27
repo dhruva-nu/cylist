@@ -11,6 +11,12 @@ Which instance is used:
 * unset — an embedded PostgreSQL, started for the run and thrown away
   afterwards, so ``make test`` needs no Docker and no setup.
 
+Run under pytest-xdist (``-n auto``, as CI and ``make test`` do), each worker
+is a process of its own with a database of its own: a configured server gets
+one database per worker, named after it, and the embedded case one server per
+worker. Truncating between tests is only safe because nobody else is using the
+tables.
+
 Each test gets a clean schema: tables are created once per session from the ORM
 metadata and truncated between tests, which is far quicker than re-running
 migrations for every test. ``make migrate-check`` separately proves the
@@ -20,14 +26,17 @@ migrations produce that same schema.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
+from argon2 import PasswordHasher, profiles
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.auth import passwords
 from app.auth.passwords import hash_password
 from app.config import Settings
 from app.core.palette import colour_for
@@ -35,6 +44,14 @@ from app.db import Database
 from app.main import create_app
 from app.models import Base
 from app.models.person import Person, PersonKind
+
+# Before anything below hashes a password. The deployed parameters cost ~70 ms
+# a hash or a check, and the suite does one or more of those in nearly every
+# test — through sign-in, invitations and the bootstrap login — which added up
+# to over a minute of the serial run. What the tests prove about hashing (salted, the
+# wrong password refused, a malformed hash refused) holds at any cost; the
+# parameters themselves are argon2-cffi's defaults, which are its business.
+passwords._hasher = PasswordHasher.from_parameters(profiles.CHEAPEST)
 
 OWNER_PASSWORD = "correct-horse-battery-staple"
 INVITEE_PASSWORD = "sixteen-horses-and-one-stapler"
@@ -44,12 +61,7 @@ OWNER_EMAIL = "dhruva@cylist.dev"
 OWNER_NAME = "Dhruva N"
 
 OWNER_PASSWORD_HASH = hash_password(OWNER_PASSWORD)
-"""Hashed once for the whole run.
-
-Argon2 is deliberately slow, and almost every test in the suite signs in.
-Hashing per test would add a large multiple of the suite's own runtime to
-prove something one test already proves.
-"""
+"""Hashed once for the whole run, rather than once per test that signs in."""
 
 VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
 """A fixed 32-byte AES key, so a ciphertext written by one test is readable by
@@ -58,13 +70,48 @@ the next. Never used anywhere but here; a real one comes from
 
 TEST_DATABASE_NAME = "cylist_test"
 
+XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER")
+"""``gw0``, ``gw1``… in a pytest-xdist worker; ``None`` in a run without one."""
+
+
+def per_worker(name: str) -> str:
+    """A database name no other worker of this run is using."""
+    return f"{name}_{XDIST_WORKER}" if XDIST_WORKER else name
+
+
+async def _on_maintenance_db(url: URL, statements: list[str]) -> None:
+    """Run statements against the server's ``postgres`` database.
+
+    CREATE and DROP DATABASE cannot run inside a transaction, hence AUTOCOMMIT.
+    """
+    engine = create_async_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            for statement in statements:
+                await connection.exec_driver_sql(statement)
+    finally:
+        await engine.dispose()
+
 
 @pytest.fixture(scope="session")
-def database_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+async def database_url(tmp_path_factory: pytest.TempPathFactory) -> AsyncIterator[str]:
     """The database to test against; embedded unless one is configured."""
     configured = os.environ.get("CYLIST_TEST_DATABASE_URL")
-    if configured:
+    if configured and not XDIST_WORKER:
         yield configured
+        return
+    if configured:
+        # The configured database names the run; each worker takes one of its
+        # own beside it, on the same server, for as long as the run lasts.
+        base = make_url(configured)
+        name = per_worker(base.database or TEST_DATABASE_NAME)
+        await _on_maintenance_db(
+            base, [f'DROP DATABASE IF EXISTS "{name}"', f'CREATE DATABASE "{name}"']
+        )
+        try:
+            yield base.set(database=name).render_as_string(hide_password=False)
+        finally:
+            await _on_maintenance_db(base, [f'DROP DATABASE IF EXISTS "{name}"'])
         return
 
     try:
@@ -75,6 +122,7 @@ def database_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             "Run 'uv sync' or start a database with 'make db'."
         )
 
+    # tmp_path_factory is per worker, so under xdist this is a server each.
     server = pgserver.get_server(tmp_path_factory.mktemp("pgdata"))
     server.psql(f"CREATE DATABASE {TEST_DATABASE_NAME};")
     try:
@@ -93,7 +141,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory, database_url: str) -> Set
         environment="test",
         database_url=database_url,
         data_dir=tmp_path_factory.mktemp("cylist-data"),
-        password_hash=hash_password(OWNER_PASSWORD),
+        password_hash=OWNER_PASSWORD_HASH,
         vault_key=VAULT_KEY,
         cors_origins=[],
     )
