@@ -254,8 +254,9 @@
   max-width: 68ch;
 }
 
-/* The board: full width, and a column of its own so the board inside it can
-   take whatever height is left under the bar and the heading by asking for it.
+/* The board and Docs: full width, and a column of their own so what is inside
+   can take whatever height is left under the bar and the heading by asking
+   for it.
    `min-height: 0` because a flex item will not shrink below its content
    without it, which is how a board that scrolls its own columns ends up
    pushing the page down instead of scrolling.

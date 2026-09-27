@@ -124,6 +124,9 @@ export function ProjectDocs() {
             <ErrorBanner>{open.error.message}</ErrorBanner>
           ) : (
             <DocReader
+              // A fresh reader per doc, so the next one opens at its top rather
+              // than scrolled as far down as the last one was read.
+              key={open.data.id}
               doc={open.data}
               tree={tree.data}
               writable={writable}
