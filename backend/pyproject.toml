@@ -48,6 +48,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.14",
     "pgserver>=0.1.4",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
