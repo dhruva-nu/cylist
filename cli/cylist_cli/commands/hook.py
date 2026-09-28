@@ -136,13 +136,13 @@ argument-hint: <TASK-REF | off>
 This session is now bound to Cylist task $ARGUMENTS by the Cylist hook
 (the board shows it as working / waiting / done automatically; you do not
 need to report progress). If $ARGUMENTS is `off`, just acknowledge.
-Otherwise fetch the task with `get_task`, which lists the project's docs the
-card needs; `read_doc` the ones that bear on the work and act on what they
-say, restate the task in two lines, and begin. As you work, whenever you find
-something the next agent would otherwise have to find again, and it is not
-already in the code, the README or the docs, add it straight away with
-`write_doc` — title `learned.md`, `append` true, one `- ` line: a short,
-factual sentence, not a progress report.
+Otherwise fetch the task with `get_task`, restate it in two lines, and
+begin. As you work, whenever you would open the code to answer a question,
+ask the project's docs first with `ask_docs`; an `ok` answer is the section
+to act on. Any other status means the docs do not know yet: find it in the
+code, then straight away `place_doc` what you found and make the edits it
+plans with `write_doc`, so the next agent to ask is answered — short,
+factual sentences, not a progress report.
 """
 
 BRIEFED_STARTS = frozenset({"startup", "clear", "compact"})
@@ -156,19 +156,19 @@ def working_brief(ref: str) -> str:
 
     The same ask as the ``/work`` command, for the sessions that were bound
     without one — ``cylist work ATL-41``, or a ``/clear`` that carried the
-    binding across — and would otherwise start on the card without having
-    read what the agents before them learned about its project.
+    binding across — and would otherwise start on the card without asking
+    what the agents before them wrote down about its project.
     """
     key = ref.split("-", 1)[0]
     return (
         f"This session is bound to Cylist task {ref}; the board shows its progress "
-        f"automatically. Before you start on it, call get_task for {ref}, which "
-        "lists the project's docs the card needs, and read_doc the ones that bear "
-        "on the work; act on what they say. As you work, whenever you find "
-        "something the next agent would otherwise have to find again, and it is "
-        "not already in the code, the README or the docs, add it straight away with "
-        f"write_doc for {key} — title learned.md, append true, one '- ' line: a "
-        "short, factual sentence, not a progress report."
+        f"automatically. Before you start on it, call get_task for {ref}. As you "
+        "work, whenever you would open the code to answer a question, first "
+        f"ask_docs for {key}; an 'ok' answer is the section to act on. Any other "
+        "status means the docs do not know yet: find it in the code, then straight "
+        "away place_doc what you found and make the edits it plans with write_doc, "
+        "so the next agent to ask is answered — short, factual sentences, not a "
+        "progress report."
     )
 
 

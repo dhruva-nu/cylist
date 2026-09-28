@@ -420,21 +420,41 @@ LEARNED_DOC = {
     "body": "- Claude Code shows 2048 characters of the instructions.",
 }
 
-TASK_DOCS = {
-    "task_reference": "ATL-2",
-    "ranked_by": "jev",
-    "threshold": 0.5,
+DOC_ANSWER = {
+    "question": "How much of the instructions does Claude Code show?",
+    "status": "ok",
+    "threshold": 0.7,
+    "found": {
+        "doc_id": LEARNED_ID,
+        "path": "Engineering / MCP / learned.md",
+        "section": "Claude Code shows 2048 characters of the instructions.",
+        "text": "Claude Code shows 2048 characters of the instructions.",
+        "whole_doc": False,
+        "relevance": 0.91,
+    },
+    "also": None,
+    "alternatives": [],
     "reason": None,
-    "docs": [
+}
+
+DOC_PLAN = {
+    "status": "planned",
+    "reason": None,
+    "edits": [
         {
-            **_listing(LEARNED_ID, MCP_TOPIC_ID, "learned.md"),
-            "section": "engineering",
-            "topic_name": "MCP",
-            "summary": "Claude Code shows 2048 characters of the instructions.",
-            "probability": 0.82,
+            "kind": "add_section",
+            "sure": True,
+            "probability": 0.8,
+            "why": "no section holds this fact",
+            "facts": [0],
+            "doc_id": LEARNED_ID,
+            "path": "Engineering / MCP / learned.md",
+            "section": None,
+            "topic_id": MCP_TOPIC_ID,
+            "doc_shape": "bullets",
+            "related_path": None,
         }
     ],
-    "doc_count": 2,
 }
 
 
@@ -534,16 +554,17 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
             json={
                 "doc": {**LEARNED_DOC, "title": body["title"], "body": body["body"]},
                 "created": True,
-                "filed_by": "caller" if body.get("topic_id") else "jev",
-                "confidence": None if body.get("topic_id") else 0.9,
+                "filed_by": "caller" if body.get("topic_id") else "only_topic",
             },
         )
     if path == f"/docs/{LEARNED_ID}" and method == "GET":
         return httpx.Response(200, json=LEARNED_DOC)
     if path == f"/docs/{LEARNED_ID}" and method == "PATCH":
         return httpx.Response(200, json={**LEARNED_DOC, **json.loads(request.content)})
-    if path in {"/tasks/ATL-2/docs", f"/tasks/{TASK_ID}/docs"}:
-        return httpx.Response(200, json=TASK_DOCS)
+    if path == "/projects/ATL/docs/ask" and method == "POST":
+        return httpx.Response(200, json=DOC_ANSWER)
+    if path == "/projects/ATL/docs/place" and method == "POST":
+        return httpx.Response(200, json=DOC_PLAN)
 
     if path.endswith("/tasks") and method == "GET":
         return httpx.Response(200, json=[TASK])

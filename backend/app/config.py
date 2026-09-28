@@ -114,30 +114,30 @@ class Settings(BaseSettings):
     vault_key: str = ""
 
     # --- Jev ----------------------------------------------------------------
-    # TypeSafe's System One model, asked which docs a card needs and where a
-    # new doc belongs — see app/services/doc_judge.py. Here rather than in the
-    # MCP server, so the key lives in one place and every client gets the same
-    # answer.
+    # TypeSafe's System One model, which jev-docs asks which section of a
+    # project's docs answers an agent's question, and where a new fact belongs
+    # — see app/services/doc_engine.py. Here rather than in the MCP server, so
+    # the key lives in one place and every client gets the same answer.
     jev_api_key: str = Field(
         default="", validation_alias=AliasChoices("CYLIST_JEV_API_KEY", "JEV_API_KEY")
     )
     """Read as ``JEV_API_KEY``, the name the SDK itself uses, as well as the
-    prefixed one. Empty means jev is not asked at all: an agent is handed the
-    whole doc tree, and a doc written without a topic is refused with the
-    topics to choose from — the same answers as when jev is down."""
+    prefixed one. Empty means jev is not asked at all: every question comes
+    back unanswered, so the agent reads the code, and a doc written without a
+    topic is refused with the topics to choose from — the same answers as when
+    jev is down."""
 
     jev_model: str = "jev-latest"
 
     jev_timeout_seconds: float = Field(default=10.0, gt=0)
-    """Per attempt. Short, because a relevance check sits in front of an agent
-    reading its card, and the whole tree is a better answer than a long wait."""
+    """Per request; a question is about five of them. Short, because a question
+    sits in front of an agent's work, and reading the code is a better answer
+    than a long wait."""
 
-    doc_relevance_threshold: float = Field(default=0.5, ge=0, le=1)
-    """How likely jev must think a card needs a doc before it is listed."""
-
-    doc_filing_confidence: float = Field(default=0.6, ge=0, le=1)
-    """How sure jev must be of a topic before a doc is filed under it unasked.
-    Below this the writer is asked to pick, with jev's ranking to pick from."""
+    doc_relevance_threshold: float = Field(default=0.7, ge=0, le=1)
+    """How likely jev must think a section answers the question, having read it,
+    before the answer is ``ok`` rather than ``unverified``. jev-docs' calibrated
+    cut: its correct routes score 0.86 and up, its wrong ones 0.5 to 0.65."""
 
     # --- HTTP -------------------------------------------------------------
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])

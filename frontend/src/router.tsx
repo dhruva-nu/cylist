@@ -73,14 +73,17 @@ const projectFilesRoute = createRoute({
 })
 
 // `?doc=` so a doc can be linked to — pasted into a card or a chat — and open
-// on the doc rather than on the tree it is somewhere in. Anything else in the
-// query string is dropped, as the board drops it.
+// on the doc rather than on the tree it is somewhere in. `?ask=` the same for
+// a question put to the docs, so an answer can be passed on too. Anything else
+// in the query string is dropped, as the board drops it.
 const projectDocsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/p/$projectKey/docs',
   component: ProjectDocs,
-  validateSearch: (search: Record<string, unknown>): { doc?: string } =>
-    typeof search.doc === 'string' && search.doc ? { doc: search.doc } : {},
+  validateSearch: (search: Record<string, unknown>): { doc?: string; ask?: string } => ({
+    ...(typeof search.doc === 'string' && search.doc ? { doc: search.doc } : {}),
+    ...(typeof search.ask === 'string' && search.ask.trim() ? { ask: search.ask } : {}),
+  }),
 })
 
 const projectPeopleRoute = createRoute({

@@ -40,6 +40,8 @@ EXPECTED_TOOLS = {
     "download_skill",
     "list_docs",
     "read_doc",
+    "ask_docs",
+    "place_doc",
     "write_doc",
     "list_vault",
     "read_activity",
@@ -801,7 +803,7 @@ async def test_download_skill_names_the_skills_there_are(server: MCPServer) -> N
 # --- Docs --------------------------------------------------------------------
 
 
-async def test_the_instructions_say_to_read_the_docs_first_and_write_as_you_go(
+async def test_the_instructions_say_to_ask_the_docs_first_and_teach_them_what_they_miss(
     server: MCPServer,
 ) -> None:
     """The ask has to be in what every client is sent, not only in a README —
@@ -809,51 +811,64 @@ async def test_the_instructions_say_to_read_the_docs_first_and_write_as_you_go(
     instructions off at 2048 characters; the scratchpad's paragraph once
     started at 2047, which is why agents only kept it when reminded."""
     seen = " ".join((server.instructions or "")[:INSTRUCTIONS_SEEN].split())
-    assert "`get_task` hands you the docs the work needs" in seen
-    assert "`read_doc` the ones that bear on the work before you start" in seen
-    assert "title `learned.md`, `append` true and one `- ` line. Then, not at the end" in seen
-    assert "topics are made by people, never agents" in seen
+    assert "Whenever you would open the repo to answer a question" in seen
+    assert "`ask_docs` it first" in seen
+    assert "`ok` hands you the one section that answers it" in seen
+    assert "Find the answer in the code, then straight away" in seen
+    assert "`place_doc` what you found" in seen
+    assert "make the edits it plans with `write_doc`" in seen
+    assert "Topics are made by people, never agents" in seen
     tools = {tool.name: tool.description or "" for tool in await server.list_tools()}
     assert "read_scratchpad" not in tools and "note_learned" not in tools
-    assert "read_doc before you start" in tools["get_task"]
-    assert "the moment you learn it" in tools["write_doc"]
+    assert "before you open the code" in tools["ask_docs"]
+    assert "Nothing is written" in tools["place_doc"]
+    assert "ask_docs" in tools["get_task"]
+    assert "not at the end of the session" in tools["write_doc"]
 
 
-async def test_get_task_hands_over_the_docs_the_card_needs(
-    server: MCPServer, recorder: fake_api.Recorder
-) -> None:
+async def test_get_task_is_the_card_alone(server: MCPServer, recorder: fake_api.Recorder) -> None:
     result = await call(server, "get_task", task="ATL-2")
 
     assert not result.is_error
-    assert result.data["docs"]["docs"][0]["probability"] == 0.82
-    assert recorder.count("GET", "/tasks/ATL-2/docs") == 1
+    assert list(result.data) == ["task"]
+    assert not any("/docs" in path for path in recorder.paths())
 
 
-async def test_get_task_can_leave_the_docs_out(
-    server: MCPServer, recorder: fake_api.Recorder
-) -> None:
-    result = await call(server, "get_task", task="ATL-2", include_docs=False)
-
-    assert "docs" not in result.data
-    assert recorder.count("GET", "/tasks/ATL-2/docs") == 0
-
-
-async def test_a_card_is_still_handed_over_when_its_docs_fail(
-    make_server: Callable[..., MCPServer],
-) -> None:
-    server = make_server(
-        overrides={
-            ("GET", "/tasks/ATL-2/docs"): httpx.Response(
-                500, json={"error": {"code": "internal_error", "message": "boom", "details": {}}}
-            )
-        }
+async def test_ask_docs_sends_the_question(server: MCPServer, recorder: fake_api.Recorder) -> None:
+    result = await call(
+        server, "ask_docs", project="ATL", question="How much of the instructions is shown?"
     )
 
-    result = await call(server, "get_task", task="ATL-2")
+    assert not result.is_error, result.text
+    assert result.data["status"] == "ok"
+    assert result.data["found"]["path"] == "Engineering / MCP / learned.md"
+    assert recorder.body("POST", "/projects/ATL/docs/ask") == {
+        "question": "How much of the instructions is shown?"
+    }
 
-    assert not result.is_error
-    assert result.data["task"]["reference"] == "ATL-2"
-    assert "error" in result.data["docs"]
+
+async def test_place_doc_sends_each_fact_and_leaves_out_what_was_not_given(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server,
+        "place_doc",
+        project="ATL",
+        title="Instructions cutoff",
+        facts=["Claude Code shows 2048 characters.", "The rest is dropped silently."],
+        entities=["INSTRUCTIONS_SEEN"],
+    )
+
+    assert not result.is_error, result.text
+    assert result.data["edits"][0]["doc_shape"] == "bullets"
+    assert recorder.body("POST", "/projects/ATL/docs/place") == {
+        "title": "Instructions cutoff",
+        "facts": [
+            {"text": "Claude Code shows 2048 characters."},
+            {"text": "The rest is dropped silently."},
+        ],
+        "entities": ["INSTRUCTIONS_SEEN"],
+    }
 
 
 async def test_list_docs_returns_the_tree(server: MCPServer) -> None:
@@ -918,7 +933,7 @@ async def test_write_doc_without_a_topic_leaves_it_to_the_server(
     result = await call(server, "write_doc", project="ATL", title="Retries", body="Three days.")
 
     assert not result.is_error
-    assert result.data["filed_by"] == "jev"
+    assert result.data["filed_by"] == "only_topic"
     assert "topic_id" not in recorder.body("POST", "/projects/ATL/docs")
 
 
@@ -931,7 +946,7 @@ async def test_write_doc_refuses_a_topic_that_is_not_there(server: MCPServer) ->
     assert "Engineering / MCP" in result.text
 
 
-async def test_an_unsure_filing_lists_the_topics_in_the_message(
+async def test_a_missing_topic_lists_the_topics_in_the_message(
     make_server: Callable[..., MCPServer],
 ) -> None:
     server = make_server(
@@ -941,22 +956,12 @@ async def test_an_unsure_filing_lists_the_topics_in_the_message(
                 json={
                     "error": {
                         "code": "topic_unclear",
-                        "message": "jev is not sure where this belongs (confidence 0.41), "
-                        "so name a topic. Its ranking is attached.",
+                        "message": "Name the topic to file this under — `place` says "
+                        "which. The project's topics are attached.",
                         "details": {
                             "topics": [
-                                {
-                                    "id": "t1",
-                                    "section": "Engineering",
-                                    "name": "MCP",
-                                    "probability": 0.41,
-                                },
-                                {
-                                    "id": "t2",
-                                    "section": "Product",
-                                    "name": "Goals",
-                                    "probability": 0.3,
-                                },
+                                {"id": "t1", "section": "Engineering", "name": "MCP"},
+                                {"id": "t2", "section": "Product", "name": "Goals"},
                             ]
                         },
                     }
@@ -968,7 +973,7 @@ async def test_an_unsure_filing_lists_the_topics_in_the_message(
     result = await call(server, "write_doc", project="ATL", title="Retries", body="…")
 
     assert result.is_error
-    assert "Topics: Engineering / MCP (0.41); Product / Goals (0.30)" in result.text
+    assert "Topics: Engineering / MCP; Product / Goals." in result.text
     assert result.data["error"]["code"] == "topic_unclear"
 
 

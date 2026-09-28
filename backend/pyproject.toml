@@ -29,16 +29,20 @@ dependencies = [
     # add` line and installs nothing. The same package the stdio server is, from
     # this repository rather than a registry — see app/mcp.py.
     "cylist-mcp",
-    # TypeSafe's Jev System One client, which decides which docs a card needs
-    # and where a new doc is filed — see app/services/doc_judge.py. Vendored
-    # rather than fetched: the SDK is not on a registry (the `jev` on PyPI is
-    # a different package), and the image is built from this repository alone.
+    # TypeSafe's Jev System One client, and jev-docs, the engine built on it
+    # that routes an agent's question to the one section of the docs that
+    # answers it, and plans where a new fact belongs — see
+    # app/services/doc_engine.py. Both vendored rather than fetched: neither is
+    # on a registry (the `jev` on PyPI is a different package), and the image
+    # is built from this repository alone.
     "jev",
+    "jevdocs",
 ]
 
 [tool.uv.sources]
 cylist-mcp = { path = "../mcp" }
 jev = { path = "../vendor/jev-sdk" }
+jevdocs = { path = "../vendor/jev-docs" }
 
 [dependency-groups]
 dev = [
@@ -103,6 +107,13 @@ warn_unreachable = true
 [[tool.mypy.overrides]]
 module = ["alembic.*"]
 ignore_missing_imports = true
+
+# jev-docs carries no type information; app/services/doc_engine.py is the one
+# place that touches it, and types what it hands back.
+[[tool.mypy.overrides]]
+module = ["jevdocs", "jevdocs.*"]
+ignore_missing_imports = true
+follow_untyped_imports = true
 
 # --- Tests -----------------------------------------------------------------
 [tool.pytest.ini_options]

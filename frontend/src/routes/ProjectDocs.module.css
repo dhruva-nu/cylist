@@ -289,6 +289,178 @@
   font-size: 13px;
 }
 
+/* --- Asking the docs --- */
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 2px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.askLabel {
+  margin: 0 4px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.askRow {
+  display: flex;
+  gap: 6px;
+}
+
+.askInput {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.status {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.statusOk {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.statusHold {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.statusBlocked {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+.miss {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.found {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.found + .found,
+.miss + .found {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.foundHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.subhead {
+  margin: 0;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.weighed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.weighed ul {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weighed li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.weighed .docLink {
+  width: auto;
+  min-width: 0;
+}
+
+.weighedScore {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.howRouted {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.howRouted summary {
+  cursor: pointer;
+}
+
+.howRouted p {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.back {
+  align-self: flex-start;
+  margin: -10px 0 -6px -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--link);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.back:hover {
+  background: var(--paper-2);
+}
+
+/* The part of a doc an answer came from, marked where the reader lands. */
+.answered {
+  border-radius: 4px;
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 6px var(--brand-soft);
+  scroll-margin-top: 16px;
+}
+
 /* --- The pane --- */
 
 .pane {
