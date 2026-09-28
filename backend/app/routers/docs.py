@@ -1,11 +1,11 @@
 """Docs: a project's markdown, filed as section → topic → doc.
 
 The tree is one request — `GET /projects/{ref}/docs` — and carries no bodies;
-a doc's markdown is read with `GET /docs/{id}`. Two routes are for agents:
-`GET /tasks/{ref}/docs` is the docs a card needs, as jev ranks them, and
-`POST /projects/{ref}/docs` writes a doc with jev choosing its topic when the
-writer does not. Topics and docs are addressed
-by id: neither has a reference of its own, because neither is something people
+a doc's markdown is read with `GET /docs/{id}`. Three routes are for agents:
+`POST /projects/{ref}/docs/ask` is the section that answers a question, as
+jev-docs routes it; `POST /projects/{ref}/docs/place` is where a new fact
+belongs; and `POST /projects/{ref}/docs` writes a doc there. Topics and docs are
+addressed by id: neither has a reference of its own, because neither is something people
 read out to each other the way they do `ATL-41`.
 """
 
@@ -25,15 +25,18 @@ from app.config import Settings, app_settings
 from app.db import SessionDependency
 from app.models.doc import SECTION_ORDER, Doc, DocTopic
 from app.models.project import Project
-from app.models.task import Task
 from app.routers import guards
 from app.routers.projects import resolved_project
-from app.routers.tasks import resolved_task
 from app.schemas.common import Acknowledged
 from app.schemas.docs import (
+    Alternative,
+    DocAnswer,
     DocCreate,
     DocListing,
     DocOrder,
+    DocPlace,
+    DocPlan,
+    DocQuestion,
     DocRead,
     DocSectionTree,
     DocTopicCreate,
@@ -45,12 +48,12 @@ from app.schemas.docs import (
     DocUpdate,
     DocWrite,
     DocWritten,
-    RelevantDoc,
-    TaskDocs,
+    PlannedEdit,
+    SectionFound,
 )
 from app.schemas.people import PersonRead
 from app.services import activity, docs
-from app.services.doc_judge import DocJudge
+from app.services.doc_engine import DocEngine
 
 router = APIRouter(tags=["docs"])
 
@@ -69,10 +72,10 @@ async def resolved_doc(
     return await docs.get_doc(session, doc_id)
 
 
-def doc_judge(request: Request) -> DocJudge | None:
-    """The app's jev judge, or None when this deployment has no key."""
-    judge: DocJudge | None = request.app.state.doc_judge
-    return judge
+def doc_engine(request: Request) -> DocEngine | None:
+    """The app's jev-docs engine, or None when this deployment has no key."""
+    engine: DocEngine | None = request.app.state.doc_engine
+    return engine
 
 
 WRITE_DOCS = guards.on_project(Permission.DOCS)
@@ -182,48 +185,107 @@ async def get_tree(
 # --- What agents read and write -----------------------------------------------
 
 
-@router.get(
-    "/tasks/{task_ref}/docs",
-    response_model=TaskDocs,
-    summary="Get the docs a card needs",
+@router.post(
+    "/projects/{project_ref}/docs/ask",
+    response_model=DocAnswer,
+    summary="Ask the docs a question",
 )
-async def task_docs(
-    task: Task = Depends(resolved_task),
+async def ask_docs(
+    body: DocQuestion,
+    project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     settings: Settings = Depends(app_settings),
-    judge: DocJudge | None = Depends(doc_judge),
-) -> TaskDocs:
-    """The project's docs that work on this card needs, most likely first.
+    engine: DocEngine | None = Depends(doc_engine),
+) -> DocAnswer:
+    """The one section of the project's docs that answers the question.
 
-    jev reads the card — its title, description and checklist — and says, for
-    each doc on the project, how likely it is that the work needs it. Those at
-    or past the threshold are listed, each with its probability and its
-    opening paragraph; read the ones that bear on the work with
-    `GET /docs/{id}`.
-
-    When jev cannot be asked, `ranked_by` is `none`, `reason` says why, and
-    every doc on the project is listed in tree order instead.
+    jev-docs routes the question — section, topic, doc, then section — and
+    reads the section it lands on against the question. `ok` means the section
+    passed that check and answers it. Anything else — the best guess marked
+    `unverified`, `not_documented`, or `unavailable` when jev could not be
+    asked — means the answer is not in the docs yet: find it in the code, then
+    `POST /projects/{ref}/docs/place` to learn where it belongs.
     """
-    relevance = await docs.relevant_to(
-        session, task, judge, threshold=settings.doc_relevance_threshold
-    )
-    return TaskDocs(
-        task_reference=task.reference,
-        ranked_by=relevance.ranked_by,
-        threshold=settings.doc_relevance_threshold if relevance.ranked_by == "jev" else None,
-        reason=relevance.reason,
-        docs=[
-            RelevantDoc(
-                **_listing(entry.doc).model_dump(),
-                section=entry.topic.section,
-                topic_name=entry.topic.name,
-                summary=entry.summary,
-                probability=entry.probability,
+    answer = await docs.ask(session, project, body.question, engine)
+    return DocAnswer(
+        question=body.question,
+        status=answer.status,
+        threshold=settings.doc_relevance_threshold,
+        found=_section_found(answer.found),
+        also=_section_found(answer.also),
+        alternatives=[
+            Alternative(
+                doc_id=weighed.doc.id,
+                path=weighed.doc.path,
+                section=weighed.section,
+                score=round(weighed.score, 3),
+                relevance=_rounded(weighed.relevance),
             )
-            for entry in relevance.docs
+            for weighed in answer.alternatives
         ],
-        doc_count=relevance.doc_count,
+        reason=answer.reason,
+    )
+
+
+def _section_found(found: docs.Found | None) -> SectionFound | None:
+    if found is None:
+        return None
+    return SectionFound(
+        doc_id=found.doc.id,
+        path=found.doc.path,
+        section=found.section,
+        text=found.text,
+        whole_doc=found.whole_doc,
+        relevance=_rounded(found.relevance),
+    )
+
+
+def _rounded(probability: float | None) -> float | None:
+    return None if probability is None else round(probability, 3)
+
+
+@router.post(
+    "/projects/{project_ref}/docs/place",
+    response_model=DocPlan,
+    summary="Plan where a new fact goes in the docs",
+    responses={422: {"description": "The project has no topics to file under."}},
+)
+async def place_doc(
+    body: DocPlace,
+    project: Project = Depends(resolved_project),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+    engine: DocEngine | None = Depends(doc_engine),
+) -> DocPlan:
+    """Where each fact belongs in the project's docs. Nothing is written.
+
+    For facts found in the code after the docs had no answer. jev-docs plans
+    the edits: the section each fact belongs in, a new section or a new doc
+    when none holds it, and the sections the facts leave out of date. Make
+    them with `POST /projects/{ref}/docs`, in the shape each doc is written in.
+    `unavailable` means jev could not be asked; choose the topic yourself.
+    """
+    placed = await docs.place(session, project, body, engine)
+    return DocPlan(
+        status=placed.status,
+        reason=placed.reason,
+        edits=[
+            PlannedEdit(
+                kind=edit.kind,
+                sure=edit.sure,
+                probability=round(edit.probability, 3),
+                why=edit.why,
+                facts=edit.facts,
+                doc_id=edit.doc.id if edit.doc else None,
+                path=edit.doc.path if edit.doc else edit.topic.path if edit.topic else None,
+                section=edit.section,
+                topic_id=(edit.doc.topic.id if edit.doc else edit.topic.id if edit.topic else None),
+                doc_shape=edit.doc.shape if edit.doc else None,
+                related_path=edit.related.path if edit.related else None,
+            )
+            for edit in placed.edits
+        ],
     )
 
 
@@ -231,13 +293,13 @@ async def task_docs(
     "/projects/{project_ref}/docs",
     response_model=DocWritten,
     status_code=status.HTTP_201_CREATED,
-    summary="Write a doc, filed by jev when no topic is named",
+    summary="Write a doc under a topic",
     responses={
         200: {"description": "`append` added to a doc of that title already in the topic."},
         409: {"description": "The topic already has a doc of that title, and `append` is off."},
         422: {
-            "description": "The project has no topics, or the topic could not be chosen "
-            "(`topic_unclear`, with every topic to choose from, ranked when jev was asked)."
+            "description": "The project has no topics, or none was named on a project with "
+            "several (`topic_unclear`, with every topic to choose from)."
         },
     },
 )
@@ -247,29 +309,19 @@ async def write_doc(
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(WRITE_DOCS),
     session: AsyncSession = SessionDependency,
-    settings: Settings = Depends(app_settings),
-    judge: DocJudge | None = Depends(doc_judge),
 ) -> DocWritten:
     """Write a doc onto the project.
 
-    Name `topic_id` to file it there. Leave it out and it is filed for you:
-    under the project's only topic if it has one, otherwise where jev says —
-    provided jev is confident. When it is not, or cannot be asked, nothing is
-    written and the 422 lists every topic, ranked when jev had an opinion, so
-    the writer can name one. Topics are never created here.
+    Name `topic_id` to file it there — the topic `place` planned it under. It
+    may be left out only when the project has a single topic; otherwise
+    nothing is written and the 422 lists every topic to choose from. Topics are
+    never created here.
 
     A title the topic already holds is refused unless `append` is set, which
     adds `body` to the end of that doc — how an agent adds a line to a topic's
     `learned.md`.
     """
-    written = await docs.write(
-        session,
-        project,
-        body,
-        judge,
-        confidence=settings.doc_filing_confidence,
-        author_id=principal.person_id,
-    )
+    written = await docs.write(session, project, body, author_id=principal.person_id)
     if not written.created:
         response.status_code = status.HTTP_200_OK
     await _record(
@@ -286,7 +338,6 @@ async def write_doc(
         doc=await _doc_read(session, written.doc),
         created=written.created,
         filed_by=written.filed_by,
-        confidence=written.confidence,
     )
 
 

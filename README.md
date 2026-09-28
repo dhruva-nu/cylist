@@ -365,16 +365,18 @@ is for a machine.
 
 Each project carries what its agents work from. Under its **Agents** tab, skills
 you upload for them to follow. Under its **Docs** tab, the project's markdown —
-section → topic → doc — which agents read and write over MCP with `list_docs`,
-`read_doc` and `write_doc`. `get_task` hands an agent the docs its card needs,
-ranked by [jev](https://api.typesafe.ai) (TypeSafe's System One model): one
-yes/no question per doc about the card, the likely ones listed with their
-probabilities. What an agent works out the hard way goes onto the `learned.md`
-of the topic it belongs to, one `- ` line at a time, as it learns it — the MCP
-instructions and the `/work` command both say so. A doc written without a topic
-is filed by jev when it is confident and refused with the topics to choose from
-when it is not; agents never create topics. Without `JEV_API_KEY` on the server
-an agent is handed every doc and names its topics itself.
+section → topic → doc — which agents read and write over MCP. Before an agent
+reads the code to answer a question, it asks the docs with `ask_docs`:
+[jev-docs](vendor/jev-docs), on [jev](https://api.typesafe.ai) (TypeSafe's System
+One model), routes the question to the one section that answers it and reads
+that section back against the question. Past the relevance threshold the answer
+is `ok` and the agent works from it; otherwise the agent finds the answer in the
+code, asks `place_doc` where it belongs — which doc and section, or a doc of its
+own — and writes it there with `write_doc`, so the next agent to ask gets it
+from the docs. The MCP instructions and the `/work` command both say so. Agents
+never create topics. Without `JEV_API_KEY` on the server every question comes
+back unanswered, and a doc written without a topic is refused with the topics to
+choose from.
 
 ### Giving an agent the project's skills
 

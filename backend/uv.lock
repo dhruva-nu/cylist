@@ -248,6 +248,7 @@ dependencies = [
     { name = "cylist-mcp" },
     { name = "fastapi" },
     { name = "jev" },
+    { name = "jevdocs" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
@@ -276,6 +277,7 @@ requires-dist = [
     { name = "cylist-mcp", directory = "../mcp" },
     { name = "fastapi", specifier = ">=0.141" },
     { name = "jev", directory = "../vendor/jev-sdk" },
+    { name = "jevdocs", directory = "../vendor/jev-docs" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "python-multipart", specifier = ">=0.0.20" },
@@ -521,6 +523,24 @@ dev = [
     { name = "opentelemetry-sdk", specifier = ">=1.20" },
     { name = "pytest", specifier = ">=8" },
 ]
+
+[[package]]
+name = "jevdocs"
+version = "0.1.0"
+source = { directory = "../vendor/jev-docs" }
+dependencies = [
+    { name = "httpx" },
+    { name = "jev" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.25" },
+    { name = "jev", directory = "../vendor/jev-sdk" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8" }]
 
 [[package]]
 name = "jsonschema"

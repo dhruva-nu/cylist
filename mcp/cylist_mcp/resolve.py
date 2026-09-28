@@ -176,7 +176,7 @@ async def doc_topic_id(client: Api, project_ref: str, name: str) -> str:
             raise
         raise CylistError(
             f"{exc.message} Topics are made by people, not agents: file the doc under one "
-            "of these, or leave the topic out and it is filed for you.",
+            "of these — `place_doc` says which.",
             code=exc.code,
             details=exc.details,
         ) from exc

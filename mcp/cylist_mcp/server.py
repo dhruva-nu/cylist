@@ -56,24 +56,20 @@ Cylist is a project manager: each project has a Kanban board, a people
 directory, files and a vault of credentials.
 
 Every project has **docs**: markdown filed as section (Product,
-Engineering) → topic → doc, much of it written by agents before you. Keep
-them as you go, not only when asked:
+Engineering) → topic → doc, much of it written by agents before you. Ask
+them before you read the code, and teach them what they could not answer:
 
-1. Given a card, `get_task` hands you the docs the work needs beside it,
-   ranked by how likely each is to matter — or every doc, when they could not
-   be ranked. `read_doc` the ones that bear on the work before you start, and
-   act on what they say. `list_docs` is the whole tree.
-2. The moment you find something the next agent would otherwise have to find
-   again — a command that does not work as documented, a constraint nothing
-   states, where a thing actually lives — and it is not already in the code,
-   the README or the docs, add it to a topic's `learned.md`: `write_doc` with
-   title `learned.md`, `append` true and one `- ` line. Then, not at the end:
-   a session can stop before it gets there. It belongs in the docs even if
-   you also say it in a comment on the card.
-3. One short, factual line per fact. Not a progress log — the board already
-   reports that. Leave `topic` out and the doc is filed for you, or refused
-   with the topics to choose from; topics are made by people, never agents.
-   If a line has stopped being true, write the correction.
+1. Whenever you would open the repo to answer a question — where a thing
+   lives, how it works, why it is the way it is — `ask_docs` it first, in
+   plain words. `ok` hands you the one section that answers it: act on it.
+2. Any other status means the docs do not know yet. Find the answer in the
+   code, then straight away — not at the end, a session can stop first —
+   `place_doc` what you found, one fact per sentence, and make the edits it
+   plans with `write_doc`, in the shape it says each doc is written in. The
+   next agent to ask gets it from the docs.
+3. Facts, not a progress log — the board already reports that. Topics are
+   made by people, never agents. If a section has stopped being true, write
+   the correction.
 
 Two things are worth knowing before you start.
 
@@ -239,35 +235,15 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "'agent_session' says whether an agent is on this card right now, and "
             "'agent_sessions' lists each harness session on it with what became "
             "of it — worth reading before you start, so two of you are not on "
-            "the same card without knowing. 'docs' is the project's docs the "
-            "work on this card needs, most likely first, each with its "
-            "probability and opening line — read the ones that bear on the "
-            "work with read_doc before you start. When they could not be "
-            "ranked, 'ranked_by' is 'none' and every doc is listed instead."
+            "the same card without knowing. What the work needs to know, ask "
+            "the project's docs with ask_docs before reading the code."
         ),
     )
     async def get_task(
         task: Annotated[str, Field(description="Task reference such as 'ATL-41', or its id.")],
-        include_docs: Annotated[
-            bool,
-            Field(
-                description=(
-                    "Also rank the project's docs for this card. Default true; "
-                    "turn it off when you only need the card's fields again."
-                )
-            ),
-        ] = True,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            found: dict[str, Any] = {"task": await client.get(f"/tasks/{task}")}
-            if include_docs:
-                # A card is still worth having without its docs, so a failure
-                # here is said beside it rather than instead of it.
-                try:
-                    found["docs"] = await client.get(f"/tasks/{task}/docs")
-                except CylistError as exc:
-                    found["docs"] = {"error": exc.message}
-            return found
+            return {"task": await client.get(f"/tasks/{task}")}
 
         return await _as_tool_result(call)
 
@@ -1089,9 +1065,8 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "List a project's docs as the tree they are filed in: both "
             "sections, Product then Engineering, each with its topics in order "
             "and each topic with its docs in order — titles, ids and authors, "
-            "not bodies; read_doc fetches one. get_task already hands you the "
-            "docs a card needs; this is for looking further, or for finding "
-            "the topic a doc of yours belongs under."
+            "not bodies; read_doc fetches one. To find something out, "
+            "ask_docs is the way in; this is for looking around."
         ),
     )
     async def list_docs(
@@ -1106,7 +1081,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         name="read_doc",
         description=(
             "Read one doc's markdown, with the section and topic it is filed "
-            "under. Name it by the id get_task or list_docs gave, or by its "
+            "under. Name it by the id ask_docs or list_docs gave, or by its "
             "path with the project: 'Engineering / MCP / learned.md', or "
             "'MCP / learned.md', or just the title when only one doc has it. "
             f"Truncated past {DOC_MAX_CHARS} characters, which is said in the "
@@ -1133,20 +1108,116 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         return await _as_tool_result(call)
 
     @server.tool(
+        name="ask_docs",
+        description=(
+            "Ask a project's docs a question — before you open the code to "
+            "answer it. jev-docs routes it to the one section that answers it, "
+            "then reads that section against the question. 'status' says what "
+            "you got:\n"
+            "- ok: 'found' is the section, with its text. Act on it.\n"
+            "- ambiguous: 'found' passed the check but the route was close; "
+            "glance at 'alternatives'.\n"
+            "- unverified: nothing passed the check; 'found' is only the best "
+            "guess. not_documented: nothing is written on it. unavailable: "
+            "jev could not be asked, 'reason' says why.\n"
+            "For those last three, find the answer in the code, then "
+            "place_doc it and write it with write_doc, so the next agent to "
+            "ask is answered."
+        ),
+    )
+    async def ask_docs(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        question: Annotated[
+            str,
+            Field(
+                description=(
+                    "What you want to know, as you would ask a colleague: "
+                    "'where is the check that stops a sub-task being moved?'"
+                )
+            ),
+        ],
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            return dict(await client.post(f"/projects/{project}/docs/ask", {"question": question}))
+
+        return await _as_tool_result(call)
+
+    @server.tool(
+        name="place_doc",
+        description=(
+            "Plan where what you found in the code goes in a project's docs, "
+            "after ask_docs had no answer for it. Nothing is written: the "
+            "result is 'edits', in the order to make them, each with the doc "
+            "('doc_id', 'path') or, for a new doc, the topic ('topic_id') it "
+            "belongs under. Make the 'sure' ones with write_doc; the others "
+            "are worth a look. Match each doc's 'doc_shape':\n"
+            "- indexed: add an '## Index' entry 'N. Title — blurb' and a "
+            "matching '## Title' section (read_doc it and send the whole "
+            "body back with `doc`).\n"
+            "- headings: add a '## Title' section — write_doc with `doc` and "
+            "append.\n"
+            f"- bullets: one '- ' line, appended, as on a {LEARNED}.\n"
+            "- plain: anywhere.\n"
+            "A new doc is best written the indexed way: '# Title', two to five "
+            "lines saying what it covers, '## Index', then its sections. "
+            "'new_topic' means no topic fits; topics are made by people, so "
+            "file it under the nearest and say so on the card. 'unavailable' "
+            "means jev could not be asked: choose the topic from list_docs."
+        ),
+    )
+    async def place_doc(
+        project: Annotated[str, Field(description="Project key such as 'ATL', or its id.")],
+        title: Annotated[
+            str, Field(description="A short name for what you found: 'Refund webhooks'.")
+        ],
+        facts: Annotated[
+            list[str],
+            Field(
+                description=(
+                    "What you found, one fact per item, each a sentence the next "
+                    "reader could act on without the code open."
+                ),
+                min_length=1,
+            ),
+        ],
+        summary: Annotated[
+            str | None, Field(description="One line on what the facts are about.")
+        ] = None,
+        entities: Annotated[
+            list[str] | None,
+            Field(
+                description=("Names a reader would type to find this: 'move_task', 'stripe_event'.")
+            ),
+        ] = None,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            request: dict[str, Any] = {
+                "title": title,
+                "facts": [{"text": fact} for fact in facts],
+            }
+            if summary:
+                request["summary"] = summary
+            if entities:
+                request["entities"] = entities
+            return dict(await client.post(f"/projects/{project}/docs/place", request))
+
+        return await _as_tool_result(call)
+
+    @server.tool(
         name="write_doc",
         description=(
-            "Write markdown into a project's docs. Three ways:\n"
-            f"- Something you learned: title '{LEARNED}', append true, and one "
-            "'- ' line as the body. It goes onto the end of that topic's "
-            f"{LEARNED}, which is made if the topic has none. Do this the "
-            "moment you learn it, not at the end of the session.\n"
-            "- A new doc: a title and a body. Name `topic` if you know it "
-            "('Engineering / MCP'); leave it out and it is filed for you. "
-            "When the filer is not confident, nothing is written and the "
-            "result lists the topics, most likely first — call again naming "
-            "one. You cannot create topics; people do.\n"
+            "Write markdown into a project's docs — the edits place_doc "
+            "planned, made the moment you have the answer, not at the end of "
+            "the session. Three ways:\n"
             "- An edit: `doc` names one already there, by id or path; the body "
             "you send replaces its body, or with append is added to the end.\n"
+            "- A new doc: a title, a body and `topic`, the topic place_doc "
+            "named ('Engineering / MCP'). It may be left out only on a project "
+            "with one topic; otherwise nothing is written and the result lists "
+            "the topics. You cannot create topics; people do.\n"
+            f"- A line on a topic's {LEARNED}: title '{LEARNED}', `topic`, "
+            "append true and one '- ' line as the body; the doc is made if the "
+            "topic has none.\n"
             "A title the topic already holds is refused unless append is set, "
             "so an existing doc is never overwritten by accident."
         ),
@@ -1169,7 +1240,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             Field(
                 description=(
                     "Where to file a new doc: 'Engineering / MCP', or a topic's "
-                    "name or id. Leave it out to have it filed for you."
+                    "name or id — the topic place_doc named."
                 )
             ),
         ] = None,
@@ -1346,12 +1417,7 @@ def _with_topics_listed(exc: CylistError) -> CylistError:
     if exc.code != "topic_unclear" or not isinstance(topics, list) or not topics:
         return exc
 
-    def entry(topic: dict[str, Any]) -> str:
-        label = f"{topic.get('section')} / {topic.get('name')}"
-        probability = topic.get("probability")
-        return f"{label} ({probability:.2f})" if isinstance(probability, float) else label
-
-    listed = "; ".join(entry(topic) for topic in topics)
+    listed = "; ".join(f"{topic.get('section')} / {topic.get('name')}" for topic in topics)
     return CylistError(
         f"{exc.message} Topics: {listed}. Call write_doc again with `topic` set to one.",
         code=exc.code,
