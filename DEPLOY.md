@@ -78,7 +78,7 @@ Both files are `chmod 600`. Everything that is not actually secret —
 
 Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
 `JEV_API_KEY` is TypeSafe's, for jev (see backend/.env.example); without it the
-server still runs, and agents are handed every doc rather than the ranked few.
+server still runs, but `ask_docs` answers nothing and agents read the code.
 Set it before deploying 0033, too: that migration asks jev which topic each old
 scratchpad note belongs under, and without a key files them all under
 *Engineering → Agents*.

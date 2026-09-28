@@ -22,6 +22,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Dev asks jev with production's key rather than one of its own: jev is a
+      # paid API, not per-environment state, and a key that exists once is a
+      # key that is rotated once. Copied across on every deploy, so dev follows
+      # a rotation, and never printed — it goes file to file on this machine.
+      - name: Use production's jev key
+        run: |
+          umask 077
+          dev="${CYLIST_DEV_DIR:-$HOME/cylist-dev}/app.env"
+          prod="${CYLIST_PROD_DIR:-$HOME/cylist-prod}/app.env"
+          key_line='^(CYLIST_)?JEV_API_KEY=.'
+          if ! grep -qE "$key_line" "$prod" 2>/dev/null; then
+            echo "::warning::production has no JEV_API_KEY, so dev keeps its own (if any)"
+            exit 0
+          fi
+          { grep -vE '^(CYLIST_)?JEV_API_KEY=' "$dev" || true; grep -m1 -E "$key_line" "$prod"; } \
+            > "$dev.new"
+          mv "$dev.new" "$dev"
+          echo "dev now uses production's jev key"
+
       # Builds the image, dumps the database, migrates, restarts the stack and
       # waits for /api/v1/health — the same script production and staging use.
       - name: Deploy

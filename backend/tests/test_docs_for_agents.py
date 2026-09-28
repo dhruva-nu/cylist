@@ -1,74 +1,131 @@
-"""The docs an agent is handed for a card, and the docs it writes back.
+"""The questions an agent asks the docs, and the docs it writes back.
 
-jev is replaced by :class:`FakeJudge`, which answers from a table and records
-what it was asked. What is checked is Cylist's side of the conversation: what
-the card and the docs look like to jev, what is done with its numbers, and
-what an agent is told when there are no numbers to go on.
+jev-docs is replaced by :class:`FakeEngine`, which answers with real jev-docs
+routes and plans built over the corpus it was handed, and records what it was
+asked. What is checked is Cylist's side: what a project's docs look like to
+jev-docs, how its answers are addressed back to docs and topics, and what an
+agent is told when there is no answer to go on. Two tests at the end run the
+real router and planner over jev-docs' offline mock, to prove the plumbing.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
-from uuid import UUID
+from typing import Any, ClassVar
+from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from jev import ChoiceAnswer, NoulAnswer, Result, Usage
+from jevdocs import Action, Candidate, Change, Corpus, Hop, Plan, Route, mock_client
 
-from app.services.doc_judge import (
-    Card,
-    DocOnFile,
-    Filing,
-    JevJudge,
-    JudgeUnavailableError,
-    TopicOnFile,
-    summary_of,
-)
+from app.models.doc import Doc, DocSection, DocTopic
+from app.services import doc_corpus
+from app.services.doc_corpus import summary_of
+from app.services.doc_engine import EngineUnavailableError, JevDocEngine
 from app.services.docs import appended
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 
+Router = Callable[[Corpus, str], Route]
+Planner = Callable[[Corpus, Change], Plan]
+
 
 @dataclass
-class FakeJudge:
-    """jev, as a table: a probability per doc title and a topic per doc title."""
+class FakeEngine:
+    """jev-docs, as whatever routes and plans the test builds."""
 
-    relevance_by_title: dict[str, float] = field(default_factory=dict)
-    topic_by_title: dict[str, tuple[str, float]] = field(default_factory=dict)
+    route: Router | None = None
+    plan: Planner | None = None
     down: bool = False
-    cards: list[Card] = field(default_factory=list)
-    asked_about: list[list[DocOnFile]] = field(default_factory=list)
-    offered: list[list[TopicOnFile]] = field(default_factory=list)
+    asked: list[tuple[Corpus, str]] = field(default_factory=list)
+    placed: list[tuple[Corpus, Change]] = field(default_factory=list)
 
-    async def relevance(self, card: Card, docs: Sequence[DocOnFile]) -> dict[UUID, float]:
+    async def ask(self, corpus: Corpus, question: str) -> Route:
         if self.down:
-            raise JudgeUnavailableError("503 overloaded")
-        self.cards.append(card)
-        self.asked_about.append(list(docs))
-        return {doc.id: self.relevance_by_title.get(doc.title, 0.0) for doc in docs}
+            raise EngineUnavailableError("503 overloaded")
+        self.asked.append((corpus, question))
+        assert self.route is not None, "the test did not say how to route"
+        return self.route(corpus, question)
 
-    async def filing(self, title: str, body: str, topics: Sequence[TopicOnFile]) -> Filing:
+    async def place(self, corpus: Corpus, change: Change) -> Plan:
         if self.down:
-            raise JudgeUnavailableError("timed out")
-        self.offered.append(list(topics))
-        name, confidence = self.topic_by_title[title]
-        chosen = next(topic for topic in topics if topic.name == name)
-        rest = [topic for topic in topics if topic is not chosen]
-        spread = (1 - confidence) / max(len(rest), 1)
-        return Filing(
-            topic_id=chosen.id,
-            confidence=confidence,
-            ranking=[(chosen.id, confidence), *((topic.id, spread) for topic in rest)],
-        )
+            raise EngineUnavailableError("timed out")
+        self.placed.append((corpus, change))
+        assert self.plan is not None, "the test did not say how to plan"
+        return self.plan(corpus, change)
 
 
 @pytest.fixture
-def judge(signed_in: AsyncClient) -> FakeJudge:
-    fake = FakeJudge()
-    signed_in.app.state.doc_judge = fake  # type: ignore[attr-defined]
+def engine(signed_in: AsyncClient) -> FakeEngine:
+    fake = FakeEngine()
+    signed_in.app.state.doc_engine = fake  # type: ignore[attr-defined]
     return fake
+
+
+def routed(
+    ref: str,
+    *,
+    status: str = "ok",
+    relevance: float | None = 0.93,
+    also: str | None = None,
+    weighed: tuple[str, ...] = (),
+) -> Router:
+    """A router that lands on ``ref`` — ``engineering/webhooks.md#retries`` —
+    having weighed ``weighed`` too."""
+
+    def candidate(corpus: Corpus, target: str) -> Candidate:
+        path, _, anchor = target.partition("#")
+        file = corpus.get(path)
+        assert file is not None, f"{path} is not in the corpus: {[f.key for f in corpus.files()]}"
+        # As the router does: a file of one section is routed to it.
+        only = file.sections[0] if len(file.sections) == 1 else None
+        section = file.section(anchor) if anchor else only
+        return Candidate(
+            file,
+            0.8,
+            section=Hop.certain("section", section.anchor) if section else None,
+            section_obj=section,
+            relevance=relevance,
+        )
+
+    def route(corpus: Corpus, question: str) -> Route:
+        chosen = candidate(corpus, ref)
+        found = Route(
+            question=question,
+            status=status,
+            domain=Hop.certain("domain", chosen.file.domain),
+            answerable=0.9,
+            spans_domains=0.1,
+            file=chosen.file,
+            section_obj=chosen.section_obj,
+            section=chosen.section,
+            relevance=relevance,
+            checked=[chosen, *(candidate(corpus, other) for other in weighed)],
+            notes=[] if status == "ok" else ["no candidate passed the relevance check"],
+        )
+        if also is not None:
+            twin = candidate(corpus, also)
+            found.also = Route(
+                question=question,
+                status="ok",
+                domain=Hop.certain("domain", twin.file.domain),
+                answerable=1.0,
+                spans_domains=0.0,
+                file=twin.file,
+                section_obj=twin.section_obj,
+                relevance=relevance,
+            )
+        return found
+
+    return route
+
+
+def planned(*actions: Action) -> Planner:
+    def plan(corpus: Corpus, change: Change) -> Plan:
+        return Plan(change, [], list(actions))
+
+    return plan
 
 
 async def _topic(client: AsyncClient, section: str, name: str) -> dict[str, Any]:
@@ -87,20 +144,24 @@ async def _doc(client: AsyncClient, topic_id: str, title: str, body: str = "") -
     return dict(response.json())
 
 
-async def _card(client: AsyncClient, *checklist: str) -> str:
-    response = await client.post(
-        "/projects/ATL/tasks",
-        json={
-            "title": "Dedupe Stripe webhooks",
-            "description": "Duplicate deliveries create double payments.",
-            "type": "bug",
-        },
-    )
-    assert response.status_code == 201, response.text
-    reference = str(response.json()["reference"])
-    for title in checklist:
-        await client.post(f"/tasks/{reference}/checklist", json={"title": title})
-    return reference
+WEBHOOKS = """# Webhooks
+
+How Stripe events reach us, and what we do with a duplicate.
+
+## Index
+1. Signing — how a delivery proves it came from Stripe
+2. Retries — how long Stripe keeps retrying a failed delivery
+3. Duplicates — what stops a redelivered event paying twice
+
+## Signing
+Every delivery carries a v1 signature, checked in webhooks/verify.py.
+
+## Retries
+Stripe retries a failed delivery for three days, backing off each time.
+
+## Duplicates
+The event id is unique in stripe_event, so a redelivery is a no-op.
+"""
 
 
 async def _a_filed_project(client: AsyncClient) -> dict[str, dict[str, Any]]:
@@ -108,101 +169,408 @@ async def _a_filed_project(client: AsyncClient) -> dict[str, dict[str, Any]]:
     apis = await _topic(client, "engineering", "APIs")
     schema = await _topic(client, "engineering", "DB schema")
     goals = await _topic(client, "product", "Goals")
-    await _doc(client, apis["id"], "Webhooks", "# Webhooks\n\nHow Stripe events reach us.")
-    await _doc(client, schema["id"], "Payments table", "One row per charge.")
-    await _doc(client, goals["id"], "Q4 goals", "Ship search.")
-    return {"apis": apis, "schema": schema, "goals": goals}
+    webhooks = await _doc(client, apis["id"], "Webhooks", WEBHOOKS)
+    learned = await _doc(client, apis["id"], "learned.md", "- Stripe's test clock skips retries.\n")
+    payments = await _doc(client, schema["id"], "Payments table", "One row per charge.")
+    q4 = await _doc(client, goals["id"], "Q4 goals", "Ship search.")
+    return {
+        "apis": apis,
+        "schema": schema,
+        "goals": goals,
+        "webhooks": webhooks,
+        "learned": learned,
+        "payments": payments,
+        "q4": q4,
+    }
 
 
-class TestTheDocsACardNeeds:
-    async def test_jev_reads_the_card_and_is_asked_about_every_doc(
-        self, signed_in: AsyncClient, judge: FakeJudge
+class TestTheCorpus:
+    """A project's rows as jev-docs reads them. No database, no jev."""
+
+    @staticmethod
+    def _topic(section: DocSection, name: str, *docs: tuple[str, str]) -> tuple[DocTopic, Any]:
+        topic = DocTopic(id=uuid4(), section=section, name=name)
+        return topic, [Doc(id=uuid4(), title=title, body=body) for title, body in docs]
+
+    def test_sections_are_domains_topics_are_groups_docs_are_files(self) -> None:
+        built = doc_corpus.build(
+            "ATL",
+            [
+                self._topic(DocSection.ENGINEERING, "DB schema", ("Payments table", "One row.")),
+                self._topic(DocSection.PRODUCT, "Goals", ("Q4 goals", "Ship search.")),
+            ],
+        )
+
+        assert list(built.corpus.domains) == ["product", "engineering"]
+        engineering = built.corpus.domains["engineering"]
+        assert list(engineering.groups) == ["db-schema"]
+        assert list(engineering.groups["db-schema"].files) == ["payments-table"]
+        assert "Engineering / DB schema" in engineering.groups["db-schema"].description
+        filed = built.doc_at("engineering/db-schema/payments-table.md")
+        assert filed is not None
+        assert filed.path == "Engineering / DB schema / Payments table"
+
+    def test_both_domains_are_there_before_anything_is_written(self) -> None:
+        built = doc_corpus.build("ATL", [])
+
+        assert list(built.corpus.domains) == ["product", "engineering"]
+        assert built.empty
+
+    def test_a_doc_in_the_jev_docs_format_keeps_its_own_sections(self) -> None:
+        file, shape = doc_corpus.as_file("Webhooks", WEBHOOKS, name="webhooks", domain="x")
+
+        assert shape == "indexed"
+        assert file.title == "Webhooks"
+        assert file.summary_text() == "How Stripe events reach us, and what we do with a duplicate."
+        assert [(s.title, s.blurb) for s in file.sections][1] == (
+            "Retries",
+            "how long Stripe keeps retrying a failed delivery",
+        )
+        assert file.sections[1].body.startswith("Stripe retries")
+
+    def test_headings_become_sections_and_what_comes_first_is_an_overview(self) -> None:
+        body = "# Deploys\n\nWe deploy from main.\n\n## Staging\nPort 8443.\n\n## Dev\nPort 9443."
+
+        file, shape = doc_corpus.as_file("Deploys", body, name="deploys", domain="x")
+
+        assert shape == "headings"
+        assert [s.title for s in file.sections] == ["Overview", "Staging", "Dev"]
+        assert file.sections[2].body == "Port 9443."
+        assert file.sections[1].blurb == "Port 8443."
+        assert file.summary_text() == "We deploy from main."
+
+    def test_a_list_is_a_section_per_item(self) -> None:
+        body = (
+            "- `make db` cannot run here; there is no Docker.\n"
+            "- Alembic revisions are numbered by hand,\n  so they collide across branches.\n"
+        )
+
+        file, shape = doc_corpus.as_file("learned.md", body, name="learned", domain="x")
+
+        assert shape == "bullets"
+        assert file.title == "What agents learned here"
+        assert [s.body for s in file.sections] == [
+            "`make db` cannot run here; there is no Docker.",
+            "Alembic revisions are numbered by hand, so they collide across branches.",
+        ]
+        assert file.sections[1].title == "Alembic revisions are numbered by hand, so they…"
+
+    def test_prose_is_one_section(self) -> None:
+        file, shape = doc_corpus.as_file("Q4 goals", "Ship search.", name="q4", domain="x")
+
+        assert shape == "plain"
+        assert [(s.title, s.body) for s in file.sections] == [("Q4 goals", "Ship search.")]
+
+    def test_sections_of_one_title_get_anchors_of_their_own(self) -> None:
+        file, _ = doc_corpus.as_file("t", "- Retries\n- Retries\n", name="t", domain="x")
+
+        assert len({s.anchor for s in file.sections}) == 2
+
+    def test_every_topics_learned_md_is_a_file_of_its_own(self) -> None:
+        built = doc_corpus.build(
+            "ATL",
+            [
+                self._topic(DocSection.ENGINEERING, "APIs", ("learned.md", "- one")),
+                self._topic(DocSection.ENGINEERING, "MCP", ("learned.md", "- two")),
+            ],
+        )
+
+        files = built.corpus.domains["engineering"].files
+        assert list(files) == ["learned", "mcp-learned"]
+        second = built.doc_at("engineering/mcp/mcp-learned.md#two")
+        assert second is not None
+        assert second.path == "Engineering / MCP / learned.md"
+        assert built.doc_at("engineering/mcp-learned.md") == second, "the group is optional"
+        assert built.topic_at("engineering/mcp/(new topic).md") == second.topic
+
+
+class TestAsking:
+    async def test_an_ok_answer_is_the_section_and_where_it_lives(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        filed = await _a_filed_project(signed_in)
+        engine.route = routed("engineering/webhooks.md#retries")
+
+        response = await signed_in.post(
+            "/projects/ATL/docs/ask", json={"question": "  How long does Stripe retry?  "}
+        )
+
+        assert response.status_code == 200, response.text
+        answer = response.json()
+        assert answer["status"] == "ok"
+        assert answer["question"] == "How long does Stripe retry?"
+        assert answer["threshold"] == 0.7
+        assert answer["found"] == {
+            "doc_id": filed["webhooks"]["id"],
+            "path": "Engineering / APIs / Webhooks",
+            "section": "Retries",
+            "text": "Stripe retries a failed delivery for three days, backing off each time.",
+            "whole_doc": False,
+            "relevance": 0.93,
+        }
+        assert answer["reason"] is None
+        ((corpus, question),) = engine.asked
+        assert question == "How long does Stripe retry?"
+        assert sorted(file.key for file in corpus.files()) == [
+            "engineering/learned.md",
+            "engineering/payments-table.md",
+            "engineering/webhooks.md",
+            "product/q4-goals.md",
+        ]
+
+    async def test_a_miss_says_so_and_names_what_was_weighed(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        filed = await _a_filed_project(signed_in)
+        engine.route = routed(
+            "engineering/webhooks.md#signing",
+            status="unverified",
+            relevance=0.41,
+            weighed=("engineering/payments-table.md",),
+        )
+
+        answer = (
+            await signed_in.post("/projects/ATL/docs/ask", json={"question": "Who owns refunds?"})
+        ).json()
+
+        assert answer["status"] == "unverified"
+        assert answer["found"]["section"] == "Signing"
+        assert answer["reason"] == "no candidate passed the relevance check"
+        assert answer["alternatives"] == [
+            {
+                "doc_id": filed["payments"]["id"],
+                "path": "Engineering / DB schema / Payments table",
+                "section": "Payments table",
+                "score": 0.8,
+                "relevance": 0.41,
+            }
+        ]
+
+    async def test_a_question_that_spans_why_and_how_brings_both_sides(
+        self, signed_in: AsyncClient, engine: FakeEngine
     ) -> None:
         await _a_filed_project(signed_in)
-        reference = await _card(signed_in, "Add a unique index on event id")
+        engine.route = routed("engineering/webhooks.md#duplicates", also="product/q4-goals.md")
 
-        await signed_in.get(f"/tasks/{reference}/docs")
+        answer = (
+            await signed_in.post("/projects/ATL/docs/ask", json={"question": "Why dedupe?"})
+        ).json()
 
-        (card,) = judge.cards
-        assert card.reference == reference
-        assert card.title == "Dedupe Stripe webhooks"
-        assert card.description == "Duplicate deliveries create double payments."
-        assert card.checklist == ["Add a unique index on event id"]
-        (asked,) = judge.asked_about
-        assert [(doc.title, doc.section_label, doc.topic_name) for doc in asked] == [
-            ("Q4 goals", "Product", "Goals"),
-            ("Webhooks", "Engineering", "APIs"),
-            ("Payments table", "Engineering", "DB schema"),
-        ]
-        assert asked[1].summary == "How Stripe events reach us.", "the heading is skipped"
+        assert answer["also"]["path"] == "Product / Goals / Q4 goals"
+        assert answer["also"]["text"] == "Ship search."
 
-    async def test_lists_only_what_passes_the_threshold_most_likely_first(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
-        await _a_filed_project(signed_in)
-        reference = await _card(signed_in)
-        judge.relevance_by_title = {"Webhooks": 0.71, "Payments table": 0.93, "Q4 goals": 0.1}
-
-        found = (await signed_in.get(f"/tasks/{reference}/docs")).json()
-
-        assert found["ranked_by"] == "jev"
-        assert found["threshold"] == 0.5
-        assert found["reason"] is None
-        assert [(doc["title"], doc["probability"]) for doc in found["docs"]] == [
-            ("Payments table", 0.93),
-            ("Webhooks", 0.71),
-        ]
-        assert found["docs"][0]["topic_name"] == "DB schema"
-        assert found["docs"][0]["section"] == "engineering"
-        assert found["doc_count"] == 3
-
-    async def test_hands_over_the_whole_tree_when_jev_is_down(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
-        await _a_filed_project(signed_in)
-        reference = await _card(signed_in)
-        judge.down = True
-
-        found = (await signed_in.get(f"/tasks/{reference}/docs")).json()
-
-        assert found["ranked_by"] == "none"
-        assert found["threshold"] is None
-        assert "503 overloaded" in found["reason"]
-        assert [doc["title"] for doc in found["docs"]] == [
-            "Q4 goals",
-            "Webhooks",
-            "Payments table",
-        ]
-        assert all(doc["probability"] is None for doc in found["docs"])
-
-    async def test_and_when_no_key_is_configured(self, signed_in: AsyncClient) -> None:
-        signed_in.app.state.doc_judge = None  # type: ignore[attr-defined]
-        await _a_filed_project(signed_in)
-        reference = await _card(signed_in)
-
-        found = (await signed_in.get(f"/tasks/{reference}/docs")).json()
-
-        assert found["ranked_by"] == "none"
-        assert found["reason"] == "jev is not configured on this server."
-        assert len(found["docs"]) == 3
-
-    async def test_a_project_with_no_docs_asks_jev_nothing(
-        self, signed_in: AsyncClient, judge: FakeJudge
+    async def test_a_project_with_no_docs_is_not_documented_without_asking(
+        self, signed_in: AsyncClient, engine: FakeEngine
     ) -> None:
         await signed_in.post("/projects", json=ATLAS)
-        reference = await _card(signed_in)
 
-        found = (await signed_in.get(f"/tasks/{reference}/docs")).json()
+        answer = (
+            await signed_in.post("/projects/ATL/docs/ask", json={"question": "Anything?"})
+        ).json()
 
-        assert found["docs"] == []
-        assert found["reason"] is None
-        assert judge.cards == []
+        assert answer["status"] == "not_documented"
+        assert answer["found"] is None
+        assert engine.asked == []
+
+    async def test_without_jev_every_question_is_unavailable(self, signed_in: AsyncClient) -> None:
+        await _a_filed_project(signed_in)
+        signed_in.app.state.doc_engine = None  # type: ignore[attr-defined]
+
+        answer = (
+            await signed_in.post("/projects/ATL/docs/ask", json={"question": "Retries?"})
+        ).json()
+
+        assert answer["status"] == "unavailable"
+        assert answer["reason"] == "jev is not configured on this server."
+
+    async def test_jev_down_is_a_miss_not_an_error(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        engine.down = True
+
+        response = await signed_in.post("/projects/ATL/docs/ask", json={"question": "Retries?"})
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "unavailable"
+        assert "503 overloaded" in response.json()["reason"]
+
+    async def test_a_blank_question_is_refused(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+
+        response = await signed_in.post("/projects/ATL/docs/ask", json={"question": "   "})
+
+        assert response.status_code == 422
+        assert engine.asked == []
+
+    async def test_a_card_no_longer_hands_out_docs(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        created = await signed_in.post(
+            "/projects/ATL/tasks",
+            json={"title": "Dedupe", "description": "Double payments.", "type": "bug"},
+        )
+
+        response = await signed_in.get(f"/tasks/{created.json()['reference']}/docs")
+
+        assert response.status_code in {404, 405}
+
+
+class TestPlacing:
+    FACTS: ClassVar[dict[str, Any]] = {
+        "title": "Refund webhooks",
+        "summary": "Refunds arrive as charge.refunded.",
+        "entities": ["charge.refunded"],
+        "facts": [
+            {"text": "A refund arrives as charge.refunded.", "shape": "contract"},
+            {"text": "Refunds are deduped by event id too."},
+        ],
+    }
+
+    async def test_the_plan_is_addressed_by_doc_and_topic_and_nothing_is_written(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        filed = await _a_filed_project(signed_in)
+        engine.plan = planned(
+            Action("add_section", "engineering/apis/webhooks.md", ["f0"], "no section holds it"),
+            Action("add_index_entry", "engineering/apis/webhooks.md", ["f0"], "findable"),
+            Action("update_section", "engineering/apis/webhooks.md#duplicates", ["f1"], "p=.8"),
+            Action("new_file", "engineering/db-schema/(new topic).md", ["f1"], "nobody takes it"),
+            Action("update_group_readme", "engineering/db-schema/", [], "name it"),
+            Action("add_related", "engineering/webhooks.md -> engineering/payments-table.md"),
+            Action("new_group", "product/(new group)/", [], "no product group fits"),
+        )
+
+        response = await signed_in.post("/projects/ATL/docs/place", json=self.FACTS)
+
+        assert response.status_code == 200, response.text
+        plan = response.json()
+        assert plan["status"] == "planned"
+        edits = {(edit["kind"], edit["path"]): edit for edit in plan["edits"]}
+        assert list(edits) == [
+            ("new_topic", None),
+            ("new_file", "Engineering / DB schema"),
+            ("add_section", "Engineering / APIs / Webhooks"),
+            ("update_section", "Engineering / APIs / Webhooks"),
+            ("add_index_entry", "Engineering / APIs / Webhooks"),
+            ("add_related", "Engineering / APIs / Webhooks"),
+        ], "in the order to make them; the README update is Cylist's own business"
+        section = edits[("update_section", "Engineering / APIs / Webhooks")]
+        assert section["section"] == "Duplicates"
+        assert section["facts"] == [1]
+        assert section["doc_id"] == filed["webhooks"]["id"]
+        assert section["topic_id"] == filed["apis"]["id"]
+        assert section["doc_shape"] == "indexed"
+        assert edits[("new_file", "Engineering / DB schema")]["topic_id"] == filed["schema"]["id"]
+        assert edits[("new_file", "Engineering / DB schema")]["doc_id"] is None
+        related = edits[("add_related", "Engineering / APIs / Webhooks")]
+        assert related["related_path"] == "Engineering / DB schema / Payments table"
+
+        ((_, change),) = engine.placed
+        assert [(fact.id, fact.text, fact.shape) for fact in change.facts] == [
+            ("f0", "A refund arrives as charge.refunded.", "contract"),
+            ("f1", "Refunds are deduped by event id too.", ""),
+        ]
+        assert change.entities == ["charge.refunded"]
+        tree = (await signed_in.get("/projects/ATL/docs")).json()
+        assert tree["doc_count"] == 4, "nothing was written"
+
+    async def test_an_unsure_readme_update_is_the_fallback_topic_for_a_new_doc(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        filed = await _a_filed_project(signed_in)
+        engine.plan = planned(
+            Action("update_group_readme", "engineering/apis/", [], "or put it here", 0.4, False)
+        )
+
+        plan = (await signed_in.post("/projects/ATL/docs/place", json=self.FACTS)).json()
+
+        (edit,) = plan["edits"]
+        assert (edit["kind"], edit["topic_id"], edit["sure"]) == (
+            "new_file",
+            filed["apis"]["id"],
+            False,
+        )
+
+    async def test_without_jev_the_plan_is_unavailable(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        engine.down = True
+
+        plan = (await signed_in.post("/projects/ATL/docs/place", json=self.FACTS)).json()
+
+        assert plan["status"] == "unavailable"
+        assert "timed out" in plan["reason"]
+        assert plan["edits"] == []
+
+    async def test_a_project_with_no_topics_is_refused(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+
+        response = await signed_in.post("/projects/ATL/docs/place", json=self.FACTS)
+
+        assert response.status_code == 422
+        assert "Topics are made by people" in response.json()["error"]["message"]
+
+    async def test_an_unknown_shape_is_refused(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        body = {"title": "t", "facts": [{"text": "x", "shape": "vibe"}]}
+
+        response = await signed_in.post("/projects/ATL/docs/place", json=body)
+
+        assert response.status_code == 422
+
+
+class TestTheRealEngineOffline:
+    """jev-docs' own router and planner, over jev-docs' lexical mock of jev."""
+
+    @pytest.fixture
+    def offline(self, signed_in: AsyncClient) -> JevDocEngine:
+        real = JevDocEngine(mock_client, relevance_threshold=0.7)
+        signed_in.app.state.doc_engine = real  # type: ignore[attr-defined]
+        return real
+
+    async def test_a_question_lands_on_the_section_that_answers_it(
+        self, signed_in: AsyncClient, offline: JevDocEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+
+        answer = (
+            await signed_in.post(
+                "/projects/ATL/docs/ask",
+                json={"question": "How many days does Stripe keep retrying a failed delivery?"},
+            )
+        ).json()
+
+        assert answer["status"] == "ok", answer
+        assert answer["found"]["path"] == "Engineering / APIs / Webhooks"
+        assert answer["found"]["section"] == "Retries"
+
+    async def test_a_fact_is_planned_into_the_docs(
+        self, signed_in: AsyncClient, offline: JevDocEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        body = {
+            "title": "Webhook signing secret",
+            "facts": [{"text": "The Stripe webhook signature secret rotates every delivery."}],
+        }
+
+        plan = (await signed_in.post("/projects/ATL/docs/place", json=body)).json()
+
+        assert plan["status"] == "planned", plan
+        assert plan["edits"], plan
+        assert all(edit["path"] or edit["kind"] == "new_topic" for edit in plan["edits"])
 
 
 class TestWritingADoc:
-    async def test_a_named_topic_is_where_it_goes(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
+    async def test_a_named_topic_is_where_it_goes(self, signed_in: AsyncClient) -> None:
         topics = await _a_filed_project(signed_in)
 
         response = await signed_in.post(
@@ -219,35 +587,11 @@ class TestWritingADoc:
         assert written["filed_by"] == "caller"
         assert written["created"] is True
         assert written["doc"]["topic_name"] == "APIs"
-        assert judge.offered == [], "jev is not asked where the writer already said"
 
-    async def test_jev_files_it_when_it_is_confident(
-        self, signed_in: AsyncClient, judge: FakeJudge
+    async def test_no_topic_on_a_project_with_several_is_refused_with_them_listed(
+        self, signed_in: AsyncClient
     ) -> None:
         await _a_filed_project(signed_in)
-        judge.topic_by_title = {"Retries": ("APIs", 0.9)}
-
-        response = await signed_in.post(
-            "/projects/ATL/docs", json={"title": "Retries", "body": "Stripe retries for 3 days."}
-        )
-
-        assert response.status_code == 201, response.text
-        written = response.json()
-        assert written["filed_by"] == "jev"
-        assert written["confidence"] == 0.9
-        assert written["doc"]["topic_name"] == "APIs"
-        (offered,) = judge.offered
-        assert [(topic.label, list(topic.doc_titles)) for topic in offered] == [
-            ("Product / Goals", ["Q4 goals"]),
-            ("Engineering / APIs", ["Webhooks"]),
-            ("Engineering / DB schema", ["Payments table"]),
-        ]
-
-    async def test_asks_the_writer_when_jev_is_unsure(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
-        await _a_filed_project(signed_in)
-        judge.topic_by_title = {"Retries": ("DB schema", 0.4)}
 
         response = await signed_in.post(
             "/projects/ATL/docs", json={"title": "Retries", "body": "…"}
@@ -256,31 +600,16 @@ class TestWritingADoc:
         assert response.status_code == 422
         error = response.json()["error"]
         assert error["code"] == "topic_unclear"
-        assert "name a topic" in error["message"]
-        ranked = error["details"]["topics"]
-        assert ranked[0]["name"] == "DB schema"
-        assert ranked[0]["probability"] == 0.4
-        assert {topic["name"] for topic in ranked} == {"Goals", "APIs", "DB schema"}
+        assert "`place` says which" in error["message"]
+        assert {topic["name"] for topic in error["details"]["topics"]} == {
+            "Goals",
+            "APIs",
+            "DB schema",
+        }
         tree = (await signed_in.get("/projects/ATL/docs")).json()
-        assert tree["doc_count"] == 3, "nothing was written"
+        assert tree["doc_count"] == 4, "nothing was written"
 
-    async def test_asks_the_writer_when_jev_is_down(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
-        await _a_filed_project(signed_in)
-        judge.down = True
-
-        response = await signed_in.post("/projects/ATL/docs", json={"title": "Retries"})
-
-        assert response.status_code == 422
-        error = response.json()["error"]
-        assert error["code"] == "topic_unclear"
-        assert "timed out" in error["message"]
-        assert len(error["details"]["topics"]) == 3
-
-    async def test_the_only_topic_needs_no_question(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
+    async def test_the_only_topic_needs_no_naming(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)
         await _topic(signed_in, "engineering", "Notes")
 
@@ -288,10 +617,9 @@ class TestWritingADoc:
 
         assert response.status_code == 201
         assert response.json()["filed_by"] == "only_topic"
-        assert judge.offered == []
 
     async def test_a_project_with_no_topics_is_refused_and_none_is_made(
-        self, signed_in: AsyncClient, judge: FakeJudge
+        self, signed_in: AsyncClient
     ) -> None:
         await signed_in.post("/projects", json=ATLAS)
 
@@ -303,7 +631,7 @@ class TestWritingADoc:
         assert all(part["topics"] == [] for part in tree["sections"])
 
     async def test_a_title_already_in_the_topic_is_refused_without_append(
-        self, signed_in: AsyncClient, judge: FakeJudge
+        self, signed_in: AsyncClient
     ) -> None:
         topics = await _a_filed_project(signed_in)
 
@@ -315,17 +643,15 @@ class TestWritingADoc:
         assert response.status_code == 409
         assert "Set append" in response.json()["error"]["message"]
 
-    async def test_append_adds_a_line_to_learned_md(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
+    async def test_append_adds_a_line_to_learned_md(self, signed_in: AsyncClient) -> None:
         topics = await _a_filed_project(signed_in)
-        apis = topics["apis"]["id"]
+        schema = topics["schema"]["id"]
         first = await signed_in.post(
             "/projects/ATL/docs",
             json={
                 "title": "learned.md",
                 "body": "- Stripe signs with v1.",
-                "topic_id": apis,
+                "topic_id": schema,
                 "append": True,
             },
         )
@@ -336,7 +662,7 @@ class TestWritingADoc:
             json={
                 "title": "learned.md",
                 "body": "- Retries last 3 days.",
-                "topic_id": apis,
+                "topic_id": schema,
                 "append": True,
             },
         )
@@ -347,9 +673,7 @@ class TestWritingADoc:
         assert written["doc"]["id"] == first.json()["doc"]["id"]
         assert written["doc"]["body"] == "- Stripe signs with v1.\n- Retries last 3 days."
 
-    async def test_a_topic_on_another_project_is_refused(
-        self, signed_in: AsyncClient, judge: FakeJudge
-    ) -> None:
+    async def test_a_topic_on_another_project_is_refused(self, signed_in: AsyncClient) -> None:
         await _a_filed_project(signed_in)
         await signed_in.post("/projects", json={"key": "HRM", "name": "Hermes"})
         elsewhere = (
@@ -396,86 +720,3 @@ class TestSummaries:
 
     def test_an_empty_doc_has_none(self) -> None:
         assert summary_of("# Only a heading\n") == ""
-
-
-class TestJevJudge:
-    """The real judge, with jev's own client answering from a table."""
-
-    async def test_asks_one_noul_per_doc_in_one_request(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        seen: list[tuple[Any, list[str]]] = []
-
-        async def ask(self: Any, state: Any, *questions: Any, model: Any = None) -> Result:
-            seen.append((state, [question.name for question in questions]))
-            return Result(
-                {"doc_0": NoulAnswer(0.8), "doc_1": NoulAnswer(0.2)}, Usage(10), "jev-test"
-            )
-
-        monkeypatch.setattr("jev.AsyncJev.ask", ask)
-        first, second = UUID(int=1), UUID(int=2)
-        docs = [
-            DocOnFile(first, "Webhooks", "Engineering", "APIs", "How events arrive."),
-            DocOnFile(second, "Q4 goals", "Product", "Goals", ""),
-        ]
-        card = Card("ATL-1", "Dedupe", "Double payments.", ["Index"])
-
-        probabilities = await JevJudge("key", model="jev-latest", timeout=1).relevance(card, docs)
-
-        assert probabilities == {first: 0.8, second: 0.2}
-        ((state, names),) = seen
-        assert names == ["doc_0", "doc_1"]
-        assert state == {
-            "card": {
-                "reference": "ATL-1",
-                "title": "Dedupe",
-                "description": "Double payments.",
-                "checklist": ["Index"],
-            }
-        }
-
-    async def test_files_by_one_choice_over_the_topics(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        async def ask(self: Any, state: Any, *questions: Any, model: Any = None) -> Result:
-            (question,) = questions
-            assert question.labels() == ["Product / Goals", "Engineering / APIs"]
-            return Result(
-                {
-                    "topic": ChoiceAnswer(
-                        "Engineering / APIs",
-                        {"Product / Goals": 0.1, "Engineering / APIs": 0.9},
-                        0.85,
-                    )
-                },
-                Usage(10),
-                "jev-test",
-            )
-
-        monkeypatch.setattr("jev.AsyncJev.ask", ask)
-        goals, apis = UUID(int=1), UUID(int=2)
-        topics = [
-            TopicOnFile(goals, "Product", "Goals", []),
-            TopicOnFile(apis, "Engineering", "APIs", ["Webhooks"]),
-        ]
-
-        filing = await JevJudge("key", model="jev-latest", timeout=1).filing("T", "B", topics)
-
-        assert filing.topic_id == apis
-        assert filing.confidence == 0.85
-        assert list(filing.ranking) == [(apis, 0.9), (goals, 0.1)]
-
-    async def test_a_jev_failure_is_unavailable_not_a_crash(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from jev import JevConnectionError
-
-        async def ask(self: Any, *args: Any, **kwargs: Any) -> Result:
-            raise JevConnectionError("connection refused")
-
-        monkeypatch.setattr("jev.AsyncJev.ask", ask)
-        card = Card("ATL-1", "t", "d", [])
-        docs = [DocOnFile(UUID(int=1), "Webhooks", "Engineering", "APIs", "")]
-
-        with pytest.raises(JudgeUnavailableError, match="connection refused"):
-            await JevJudge("key", model="jev-latest", timeout=1).relevance(card, docs)

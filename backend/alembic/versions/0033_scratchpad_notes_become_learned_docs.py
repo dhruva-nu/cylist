@@ -6,10 +6,10 @@ still on the scratchpad is filed into one of its project's topics and added to
 that topic's ``learned.md`` — made at the bottom of the topic if it has none —
 and ``agent_note`` is dropped.
 
-**Which topic is jev's call, as it is for a doc an agent writes today**: one
+**Which topic is jev's call, as it was for a doc an agent wrote then**: one
 Choice over the project's topics, each described by the docs it already holds
-(see ``app.services.doc_judge.filing_question``, which this mirrors as of this
-revision). Unlike a live write there is nobody to ask when jev is unsure, so
+(``app.services.doc_judge.filing_question`` as of this revision; jev-docs'
+planner has since replaced it for live writes). Unlike a live write there is nobody to ask when jev is unsure, so
 its first choice stands. A project with one topic needs no question; a project
 with none, or a note jev cannot be asked about — no ``JEV_API_KEY``, or no
 answer — goes to an *Engineering → Agents* topic, made if it is not there. A

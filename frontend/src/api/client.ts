@@ -344,6 +344,45 @@ export interface DocTree {
   doc_count: number
 }
 
+/**
+ * How sure the docs are of an answer. `ok` passed jev's relevance check;
+ * `ambiguous` passed it on a close route; `unverified` is only the best guess;
+ * `not_documented` is nothing written on it; `unavailable` is jev not asked.
+ */
+export type DocAnswerStatus = 'ok' | 'ambiguous' | 'unverified' | 'not_documented' | 'unavailable'
+
+/** One section of one doc, as a question was routed to it. */
+export interface DocSectionFound {
+  doc_id: string
+  /** `Engineering / APIs / Webhooks`. */
+  path: string
+  /** The section's title; null when the answer is the whole doc. */
+  section: string | null
+  text: string
+  whole_doc: boolean
+  /** jev's probability, having read the section, that it answers the question. */
+  relevance: number | null
+}
+
+/** Where the docs answer a question — `POST /projects/{key}/docs/ask`. */
+export interface DocAnswer {
+  question: string
+  status: DocAnswerStatus
+  /** The relevance an answer has to reach to be `ok`. */
+  threshold: number
+  found: DocSectionFound | null
+  /** When the question asks both why and how: the other side's section. */
+  also: DocSectionFound | null
+  alternatives: {
+    doc_id: string
+    path: string
+    section: string | null
+    score: number
+    relevance: number | null
+  }[]
+  reason: string | null
+}
+
 export interface DocUpdate {
   title?: string
   body?: string
@@ -1255,6 +1294,11 @@ export const api = {
       body: jsonBody({ section, topic_ids: topicIds }),
     }),
   getDoc: (docId: string) => request<Doc>(`/docs/${docId}`),
+  askDocs: (projectKey: string, question: string) =>
+    request<DocAnswer>(`/projects/${projectKey}/docs/ask`, {
+      method: 'POST',
+      body: jsonBody({ question }),
+    }),
   createDoc: (topicId: string, title: string, body: string) =>
     request<Doc>(`/doc-topics/${topicId}/docs`, {
       method: 'POST',

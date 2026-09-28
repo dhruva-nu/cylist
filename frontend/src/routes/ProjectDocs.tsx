@@ -12,14 +12,29 @@
  * in. What is *being edited* is not: a link somebody pastes should open the
  * doc, not their half-finished edit of it.
  *
+ * Above the tree, the docs can be asked a question — the same `ask_docs` the
+ * agents use before they read the code. jev-docs routes it to the one section
+ * that answers it and reads that section back against the question; the pane
+ * shows the section, how sure it is, and the doc it came from. The question
+ * is in the address too (`?ask=`), so an answer can be passed on as a link.
+ *
  * The sections are fixed and the topics are the project's own, one level deep.
  * Nothing here can nest a topic in a topic, because nothing on the server can.
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { api, type Doc, type DocSection, type DocTopicWithDocs, type DocTree } from '../api/client'
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import {
+  api,
+  type Doc,
+  type DocAnswer,
+  type DocAnswerStatus,
+  type DocSection,
+  type DocSectionFound,
+  type DocTopicWithDocs,
+  type DocTree,
+} from '../api/client'
 import { formatStamp } from '../components/format'
 import { Markdown } from '../components/Markdown'
 import { PageHead } from '../components/Shell'
@@ -31,7 +46,7 @@ type Mode = { kind: 'read' } | { kind: 'edit'; doc: Doc } | { kind: 'new'; topic
 
 export function ProjectDocs() {
   const { projectKey } = useParams({ from: '/p/$projectKey/docs' })
-  const { doc: openId } = useSearch({ from: '/p/$projectKey/docs' })
+  const { doc: openId, ask } = useSearch({ from: '/p/$projectKey/docs' })
   const navigate = useNavigate({ from: '/p/$projectKey/docs' })
   const may = usePermissions(projectKey)
   const queryClient = useQueryClient()
@@ -49,11 +64,34 @@ export function ProjectDocs() {
     enabled: Boolean(openId),
   })
 
-  // Opening a different doc leaves whatever was being edited or written.
-  useEffect(() => setMode({ kind: 'read' }), [openId])
+  // Each question is about five jev requests, so an answer is kept rather than
+  // asked again whenever the window regains focus; an edit to the docs is what
+  // makes it stale, and `refresh` says so.
+  const answer = useQuery({
+    queryKey: ['doc-answer', projectKey, ask],
+    queryFn: () => api.askDocs(projectKey, ask ?? ''),
+    enabled: Boolean(ask),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
 
+  // Opening a different doc, or asking something, leaves whatever was being
+  // edited or written.
+  useEffect(() => setMode({ kind: 'read' }), [openId, ask])
+
+  /** Open a doc from the tree: the question, if there was one, is done with. */
   function show(docId: string | null) {
     void navigate({ search: docId ? { doc: docId } : {} })
+  }
+
+  /** Open a doc from an answer, keeping the question to come back to. */
+  function showFromAnswer(docId: string) {
+    void navigate({ search: ask ? { doc: docId, ask } : { doc: docId } })
+  }
+
+  function askTheDocs(question: string) {
+    void navigate({ search: { ask: question } })
   }
 
   async function refresh(docId?: string) {
@@ -61,6 +99,7 @@ export function ProjectDocs() {
       queryClient.invalidateQueries({ queryKey: ['docs', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
       docId ? queryClient.invalidateQueries({ queryKey: ['doc', docId] }) : null,
+      queryClient.invalidateQueries({ queryKey: ['doc-answer', projectKey] }),
     ])
   }
 
@@ -68,6 +107,10 @@ export function ProjectDocs() {
   if (tree.error) return <ErrorBanner>{tree.error.message}</ErrorBanner>
 
   const writable = may('docs')
+  // The section the answer pointed into, when the open doc is the one it named.
+  const answeredIn = [answer.data?.found, answer.data?.also].find(
+    (found) => found && found.doc_id === openId,
+  )
 
   return (
     <>
@@ -84,6 +127,9 @@ export function ProjectDocs() {
           tree={tree.data}
           openId={openId ?? null}
           writable={writable}
+          ask={ask ?? ''}
+          asking={answer.isFetching}
+          onAsk={askTheDocs}
           onOpen={show}
           onNew={(topic) => setMode({ kind: 'new', topic })}
           onChanged={() => refresh()}
@@ -116,6 +162,15 @@ export function ProjectDocs() {
                 setMode({ kind: 'read' })
               }}
             />
+          ) : !openId && ask ? (
+            <AnswerView
+              key={ask}
+              question={ask}
+              answer={answer.data}
+              pending={answer.isPending}
+              error={answer.error}
+              onOpen={showFromAnswer}
+            />
           ) : !openId ? (
             <Overview tree={tree.data} />
           ) : open.isPending ? (
@@ -130,6 +185,8 @@ export function ProjectDocs() {
               doc={open.data}
               tree={tree.data}
               writable={writable}
+              focusSection={answeredIn?.whole_doc ? null : (answeredIn?.section ?? null)}
+              onBack={ask ? () => void navigate({ search: { ask } }) : undefined}
               onEdit={() => setMode({ kind: 'edit', doc: open.data })}
               onChanged={() => refresh(open.data.id)}
               onDeleted={async () => {
@@ -153,6 +210,9 @@ function DocNav({
   tree,
   openId,
   writable,
+  ask,
+  asking,
+  onAsk,
   onOpen,
   onNew,
   onChanged,
@@ -162,6 +222,9 @@ function DocNav({
   tree: DocTree
   openId: string | null
   writable: boolean
+  ask: string
+  asking: boolean
+  onAsk: (question: string) => void
   onOpen: (docId: string) => void
   onNew: (topic: DocTopicWithDocs) => void
   onChanged: () => Promise<void>
@@ -169,6 +232,7 @@ function DocNav({
 }) {
   return (
     <nav className={styles.nav} aria-label="Docs by section and topic">
+      {tree.doc_count > 0 ? <AskBox asked={ask} asking={asking} onAsk={onAsk} /> : null}
       {tree.sections.map((part) => (
         <div key={part.section} className={styles.section}>
           <h2 className={styles.sectionHead}>{part.label}</h2>
@@ -467,6 +531,235 @@ function IconButton({
   )
 }
 
+// --- Asking the docs -------------------------------------------------------------
+
+/**
+ * One line to ask the docs a question in. Enter asks; the answer is drawn in
+ * the pane. Kept to what was last asked when the address changes under it —
+ * back, or a link — so the box always says what the pane is answering.
+ */
+function AskBox({
+  asked,
+  asking,
+  onAsk,
+}: {
+  asked: string
+  asking: boolean
+  onAsk: (question: string) => void
+}) {
+  const [question, setQuestion] = useState(asked)
+  const id = useId()
+
+  useEffect(() => setQuestion(asked), [asked])
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const trimmed = question.trim()
+    if (trimmed) onAsk(trimmed)
+  }
+
+  return (
+    <form role="search" className={styles.ask} onSubmit={submit}>
+      <label className={styles.askLabel} htmlFor={id}>
+        Ask the docs
+      </label>
+      <div className={styles.askRow}>
+        <input
+          id={id}
+          type="search"
+          className={styles.askInput}
+          placeholder="Where is a sub-task’s move refused?"
+          value={question}
+          maxLength={1000}
+          onChange={(event) => setQuestion(event.target.value)}
+        />
+        <Button small variant="go" type="submit" disabled={asking || !question.trim()}>
+          {asking ? 'Asking…' : 'Ask'}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+const STATUS_LABEL: Record<DocAnswerStatus, string> = {
+  ok: 'Answered',
+  ambiguous: 'Answered — a close call',
+  unverified: 'Best guess only',
+  not_documented: 'Not in the docs',
+  unavailable: 'Could not ask',
+}
+
+const STATUS_CLASS: Record<DocAnswerStatus, string | undefined> = {
+  ok: styles.statusOk,
+  ambiguous: styles.statusOk,
+  unverified: styles.statusHold,
+  not_documented: styles.statusHold,
+  unavailable: styles.statusBlocked,
+}
+
+function percent(probability: number | null): string | null {
+  return probability === null ? null : `${Math.round(probability * 100)}% relevant`
+}
+
+/** Below this, a section jev read and set aside is not worth a line beside an
+ * answer: it was weighed for its title and found to be about something else. */
+const WORTH_A_LOOK = 0.3
+
+/** `Engineering / APIs / Webhooks` and a section, drawn the way the reader's
+ * breadcrumb is. */
+function Where({ path, section }: { path: string; section: string | null }) {
+  const parts = [...path.split(' / '), ...(section ? [section] : [])]
+  return (
+    <p className={styles.filed}>
+      {parts.map((part, index) => (
+        <span key={index}>
+          {index ? <span aria-hidden="true"> › </span> : null}
+          {part}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+function AnswerView({
+  question,
+  answer,
+  pending,
+  error,
+  onOpen,
+}: {
+  question: string
+  answer: DocAnswer | undefined
+  pending: boolean
+  error: Error | null
+  onOpen: (docId: string) => void
+}) {
+  const head = (status?: DocAnswerStatus, relevance?: string | null) => (
+    <header className={styles.readerHead}>
+      <div className={styles.readerTitle}>
+        <p className={styles.filed}>Asked the docs</p>
+        <h2>{question}</h2>
+        {status ? (
+          <p className={styles.byline}>
+            <span className={[styles.status, STATUS_CLASS[status]].filter(Boolean).join(' ')}>
+              {STATUS_LABEL[status]}
+            </span>
+            {relevance ? <span>{relevance}</span> : null}
+          </p>
+        ) : null}
+      </div>
+    </header>
+  )
+
+  if (pending) {
+    return (
+      <article className={styles.reader} aria-busy="true">
+        {head()}
+        <p className={styles.quiet}>
+          Finding the section that answers it — a few seconds, while jev reads the likely ones.
+        </p>
+      </article>
+    )
+  }
+  if (error || !answer) {
+    return (
+      <article className={styles.reader}>
+        {head()}
+        <ErrorBanner>{error?.message ?? 'The docs could not be asked.'}</ErrorBanner>
+      </article>
+    )
+  }
+
+  const answered = answer.status === 'ok' || answer.status === 'ambiguous'
+  // Beside an answer, only the near misses. Without one, every section that
+  // was weighed — the best guess among them, whose text is not shown, since a
+  // section that failed the check drawn as a page reads as though it answered.
+  const weighed = answered
+    ? answer.alternatives.filter((other) => (other.relevance ?? 0) >= WORTH_A_LOOK)
+    : [...(answer.found ? [{ ...answer.found, score: 1 }] : []), ...answer.alternatives]
+  return (
+    <article className={styles.reader}>
+      {head(answer.status, answered ? percent(answer.found?.relevance ?? null) : null)}
+
+      {answer.found && answered ? <Found found={answer.found} onOpen={onOpen} /> : null}
+
+      {!answered ? (
+        <p className={styles.miss}>
+          {answer.status === 'unavailable'
+            ? `The docs could not be asked just now: ${answer.reason ?? 'jev did not answer'}.`
+            : answer.status === 'unverified'
+              ? 'No section passed the relevance check, so nothing here is sure to answer it. ' +
+                'An agent that works it out from the code writes it into the docs.'
+              : 'Nothing in the docs answers this yet. An agent that works it out from the ' +
+                'code writes it into the docs, so the next time it is asked it is here.'}
+        </p>
+      ) : null}
+
+      {answer.also ? (
+        <Found found={answer.also} onOpen={onOpen} heading="The other side of it" />
+      ) : null}
+
+      {weighed.length ? (
+        <section className={styles.weighed}>
+          <h3 className={styles.subhead}>{answered ? 'Also close' : 'Sections it weighed'}</h3>
+          <ul>
+            {weighed.map((other) => (
+              <li key={`${other.doc_id}#${other.section ?? ''}`}>
+                <button
+                  type="button"
+                  className={styles.docLink}
+                  onClick={() => onOpen(other.doc_id)}
+                >
+                  {[...other.path.split(' / '), ...(other.section ? [other.section] : [])].join(
+                    ' › ',
+                  )}
+                </button>
+                {percent(other.relevance) ? (
+                  <span className={styles.weighedScore}>{percent(other.relevance)}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {answer.reason && answer.status !== 'unavailable' ? (
+        <details className={styles.howRouted}>
+          <summary>How it was routed</summary>
+          <p>{answer.reason}</p>
+        </details>
+      ) : null}
+    </article>
+  )
+}
+
+function Found({
+  found,
+  onOpen,
+  heading,
+}: {
+  found: DocSectionFound
+  onOpen: (docId: string) => void
+  heading?: string
+}) {
+  return (
+    <section className={styles.found}>
+      {heading ? <h3 className={styles.subhead}>{heading}</h3> : null}
+      <div className={styles.foundHead}>
+        <Where path={found.path} section={found.whole_doc ? null : found.section} />
+        <Button small variant="ghost" onClick={() => onOpen(found.doc_id)}>
+          Open doc
+        </Button>
+      </div>
+      {found.text.trim() ? (
+        <Markdown source={found.text} />
+      ) : (
+        <p className={styles.quiet}>This section is empty.</p>
+      )}
+    </section>
+  )
+}
+
 // --- The pane --------------------------------------------------------------------
 
 function Overview({ tree }: { tree: DocTree }) {
@@ -483,7 +776,7 @@ function Overview({ tree }: { tree: DocTree }) {
     <EmptyState>
       {tree.doc_count === 0
         ? `${topics} topic${topics === 1 ? '' : 's'}, no docs yet. Press + beside a topic to write the first.`
-        : `${tree.doc_count} doc${tree.doc_count === 1 ? '' : 's'} across ${topics} topic${topics === 1 ? '' : 's'}. Pick one to read it.`}
+        : `${tree.doc_count} doc${tree.doc_count === 1 ? '' : 's'} across ${topics} topic${topics === 1 ? '' : 's'}. Pick one to read it, or ask the docs a question.`}
     </EmptyState>
   )
 }
@@ -492,6 +785,8 @@ function DocReader({
   doc,
   tree,
   writable,
+  focusSection,
+  onBack,
   onEdit,
   onChanged,
   onDeleted,
@@ -500,12 +795,35 @@ function DocReader({
   doc: Doc
   tree: DocTree
   writable: boolean
+  /** The section an answer pointed into, scrolled to and marked when the doc opens. */
+  focusSection: string | null
+  /** Back to the answer this doc was opened from. */
+  onBack: (() => void) | undefined
   onEdit: () => void
   onChanged: () => Promise<void>
   onDeleted: () => Promise<void>
   announce: (message: string) => void
 }) {
   const [error, setError] = useState<string | null>(null)
+  const body = useRef<HTMLDivElement>(null)
+
+  // The section is found by its text rather than an anchor: the markdown has
+  // no ids. A heading of that title first — before an `## Index` entry that
+  // starts with the same words — and otherwise the list item or paragraph a
+  // section jev-docs made from it opens with, its title being those words.
+  useEffect(() => {
+    if (!focusSection || !body.current) return
+    const wanted = focusSection.replace(/…$/, '').trim().toLowerCase()
+    const text = (element: HTMLElement) => (element.textContent ?? '').trim().toLowerCase()
+    const all = (selector: string) =>
+      Array.from(body.current?.querySelectorAll<HTMLElement>(selector) ?? [])
+    const target =
+      all('h1, h2, h3, h4').find((element) => text(element) === wanted) ??
+      all('li, p').find((element) => text(element).startsWith(wanted))
+    if (!target) return
+    target.classList.add(styles.answered ?? '')
+    target.scrollIntoView({ block: 'start' })
+  }, [focusSection, doc.body])
   const sectionLabel = tree.sections.find((part) => part.section === doc.section)?.label
   const siblings =
     tree.sections.flatMap((part) => part.topics).find((topic) => topic.id === doc.topic_id)?.docs ??
@@ -523,6 +841,11 @@ function DocReader({
 
   return (
     <article className={styles.reader}>
+      {onBack ? (
+        <button type="button" className={styles.back} onClick={onBack}>
+          ← Back to the answer
+        </button>
+      ) : null}
       <header className={styles.readerHead}>
         <div className={styles.readerTitle}>
           <p className={styles.filed}>
@@ -614,7 +937,9 @@ function DocReader({
       </header>
       {error ? <ErrorBanner>{error}</ErrorBanner> : null}
       {doc.body.trim() ? (
-        <Markdown source={doc.body} />
+        <div ref={body}>
+          <Markdown source={doc.body} />
+        </div>
       ) : (
         <p className={styles.quiet}>This doc is empty.</p>
       )}
