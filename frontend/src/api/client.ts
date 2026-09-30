@@ -1275,6 +1275,14 @@ export const api = {
   },
   addLink: (folderId: string, input: LinkInput) =>
     request<FileItem>(`/folders/${folderId}/links`, { method: 'POST', body: jsonBody(input) }),
+  /**
+   * Rename a file or link, or change how far it may travel.
+   *
+   * A file's URL and source are fixed by the upload, so only a link's may be
+   * sent; the server refuses the rest rather than ignoring it.
+   */
+  updateItem: (id: string, input: { name?: string; sensitivity?: Sensitivity }) =>
+    request<FileItem>(`/items/${id}`, { method: 'PATCH', body: jsonBody(input) }),
   deleteItem: (id: string) => request<{ ok: boolean }>(`/items/${id}`, { method: 'DELETE' }),
   /** Where the browser fetches a file's bytes from — used as an anchor's href. */
   downloadUrl: (id: string) => `${API_BASE}/items/${id}/download`,
