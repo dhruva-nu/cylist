@@ -166,7 +166,10 @@ class TaskSpec:
     assignee: str
     column: int
     jira_ref: str | None = None
-    pr_ref: str | None = None
+    pr_refs: tuple[str, ...] = ()
+    """The pull requests this card landed as. A tuple rather than a list so
+    the spec stays hashable and no two cards can share one by accident."""
+
     goal: str | None = None
     """The goal this card is written under, by name. None stands on its own —
     which most cards do, and the sample keeps it that way so the board shows
@@ -423,7 +426,7 @@ ATLAS = ProjectSpec(
             assignee="ak",
             column=1,
             jira_ref="ATL-35",
-            pr_ref="#212",
+            pr_refs=("#212", "#219"),
             comments=(("dn", "Repro is in the ticket, happens on retries after 5xx."),),
             # Two kinds of sub-task on one card, which is the point of them:
             # the dedupe store needs an owner and a date, telling support does
@@ -476,7 +479,7 @@ ATLAS = ProjectSpec(
             assignee="rs",
             column=1,
             jira_ref="ATL-30",
-            pr_ref="#207",
+            pr_refs=("#207",),
             status=TaskStatus.BLOCKED,
             reason="Font licence for the invoice template hasn't been approved by legal.",
             waiting_on=("lw", "sf"),
@@ -491,7 +494,7 @@ ATLAS = ProjectSpec(
             assignee="dn",
             column=2,
             jira_ref="ATL-27",
-            pr_ref="#204",
+            pr_refs=("#204",),
         ),
         TaskSpec(
             goal="Billing service foundations",
@@ -503,7 +506,7 @@ ATLAS = ProjectSpec(
             assignee="dn",
             column=3,
             jira_ref="ATL-22",
-            pr_ref="#198",
+            pr_refs=("#198",),
         ),
         TaskSpec(
             goal="Billing service foundations",
@@ -515,7 +518,7 @@ ATLAS = ProjectSpec(
             assignee="ak",
             column=3,
             jira_ref="ATL-19",
-            pr_ref="#191",
+            pr_refs=("#191",),
         ),
     ),
     root_items=(
@@ -755,7 +758,7 @@ HERMES = ProjectSpec(
             assignee="rs",
             column=1,
             jira_ref="HRM-9",
-            pr_ref="#44",
+            pr_refs=("#44",),
         ),
         TaskSpec(
             number=7,
@@ -1173,7 +1176,7 @@ async def _write_task(
             assignee_id=directory[spec.assignee],
             goal_id=goal_ids.get(spec.goal) if spec.goal else None,
             jira_ref=spec.jira_ref,
-            pr_ref=spec.pr_ref,
+            pr_refs=list(spec.pr_refs),
         ),
     )
     if task.number != spec.number:

@@ -90,6 +90,7 @@ import { localDate } from './dates'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
+import { addPrRef, cleanPrRefs, removePrRefAt, setPrRefAt } from './prRefs'
 import { useProjectFiles } from './projectFiles'
 import {
   Avatar,
@@ -361,13 +362,28 @@ function TaskDetailView({
           </ReadField>
         </div>
 
-        {task.jira_ref || task.pr_ref ? (
+        {task.jira_ref || task.pr_refs.length ? (
           <div className={styles.readPair}>
             <ReadField label="Jira">
               {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} /> : '—'}
             </ReadField>
-            <ReadField label="Pull request">
-              {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} /> : '—'}
+            {/* Singular or plural by what the card actually has, because a
+                label reading "Pull requests" over one of them says the card is
+                missing some. */}
+            <ReadField label={task.pr_refs.length > 1 ? 'Pull requests' : 'Pull request'}>
+              {task.pr_refs.length ? (
+                <ul className={styles.prRefs}>
+                  {/* Keyed by the reference: the server stores no duplicates,
+                      so it is the stable identity an index is not. */}
+                  {task.pr_refs.map((ref) => (
+                    <li key={ref}>
+                      <TaskRef kind="pr" value={ref} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                '—'
+              )}
             </ReadField>
           </div>
         ) : null}
@@ -1238,7 +1254,7 @@ function initialFormFields(
     template_id: task?.template_id ?? null,
     goal_id: task?.goal_id ?? defaultGoalId ?? null,
     jira_ref: task?.jira_ref ?? '',
-    pr_ref: task?.pr_ref ?? '',
+    pr_refs: task?.pr_refs ?? [],
   }
 }
 
@@ -1281,7 +1297,10 @@ function taskPayload(form: TaskInput, columnDueDates: ColumnDueDateInput[] | nul
     due_date: form.due_date || null,
     ...(columnDueDates ? { column_due_dates: columnDueDates } : {}),
     jira_ref: form.jira_ref?.trim() ? form.jira_ref.trim() : null,
-    pr_ref: form.pr_ref?.trim() ? form.pr_ref.trim() : null,
+    // A row somebody added and left empty is a box not filled in yet, so it is
+    // dropped rather than sent. The server cleans the list too; doing it here
+    // as well is what leaves the user looking at what was actually saved.
+    pr_refs: cleanPrRefs(form.pr_refs),
   }
 }
 
@@ -1578,22 +1597,20 @@ function TrackingFields({
         />
       </Field>
 
-      <FieldPair>
-        <Field label="Jira">
-          <input
-            value={form.jira_ref ?? ''}
-            onChange={(event) => onChange({ jira_ref: event.target.value })}
-            placeholder="ATL-00 or a URL"
-          />
-        </Field>
-        <Field label="Pull request">
-          <input
-            value={form.pr_ref ?? ''}
-            onChange={(event) => onChange({ pr_ref: event.target.value })}
-            placeholder="#000 or a URL"
-          />
-        </Field>
-      </FieldPair>
+      <Field label="Jira">
+        <input
+          value={form.jira_ref ?? ''}
+          onChange={(event) => onChange({ jira_ref: event.target.value })}
+          placeholder="ATL-00 or a URL"
+        />
+      </Field>
+
+      <Field
+        label="Pull requests"
+        hint="One line each. A change that took a backend pull request and a frontend one is still one card."
+      >
+        <PrRefListEditor value={form.pr_refs} onChange={(pr_refs) => onChange({ pr_refs })} />
+      </Field>
     </>
   )
 }
@@ -1917,6 +1934,62 @@ function templateHint(
   return (
     `${template.name} cards go to ${named.join(' → ')}, and nowhere else.` +
     (staged ? ' Each column may set sub-stages a card must reach before leaving it.' : '')
+  )
+}
+
+/**
+ * The pull requests a card names, edited by hand: one row each, added and
+ * removed.
+ *
+ * A plain list rather than the stage editor's numbered one: the order is kept,
+ * but nothing points at a current entry and nothing downstream reads position
+ * as meaning, so the up and down buttons would be three more controls buying
+ * one cosmetic choice. Removing and retyping is the rare case; adding is the
+ * common one, and it is the button at the bottom.
+ *
+ * An empty list draws no rows at all, only the button — a card with no pull
+ * request yet, which most cards are for most of their lives, should not look
+ * like a card with an empty one.
+ */
+function PrRefListEditor({
+  value,
+  onChange,
+}: {
+  value: string[]
+  onChange: (value: string[]) => void
+}) {
+  return (
+    <div className={styles.prRefEditor}>
+      {value.map((ref, index) => (
+        // Keyed by position, not by the reference: the reference is what is
+        // being typed, so keying by it would remount the input on every
+        // keystroke and lose the cursor.
+        <div key={index} className={styles.prRefEditorRow}>
+          <input
+            className={styles.grow}
+            value={ref}
+            maxLength={200}
+            placeholder="#000 or a URL"
+            aria-label={`Pull request ${index + 1}`}
+            onChange={(event) => onChange(setPrRefAt(value, index, event.target.value))}
+          />
+          <Button
+            variant="ghost"
+            small
+            aria-label={`Remove pull request ${index + 1}`}
+            title="Remove"
+            onClick={() => onChange(removePrRefAt(value, index))}
+          >
+            ×
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button variant="ghost" small onClick={() => onChange(addPrRef(value))}>
+          + Add a pull request
+        </Button>
+      </div>
+    </div>
   )
 }
 

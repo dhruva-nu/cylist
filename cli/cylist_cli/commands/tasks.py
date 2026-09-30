@@ -70,7 +70,15 @@ def register(subparsers: Any) -> None:
         help="A member of the project. Left off, the card is yours.",
     )
     new.add_argument("--jira", metavar="REF")
-    new.add_argument("--pr", metavar="REF")
+    # Repeatable, because one card's work routinely lands as more than one pull
+    # request. `action="append"` leaves the default as None rather than a shared
+    # list, which is what lets `_new` tell "none given" from "explicitly empty".
+    new.add_argument(
+        "--pr",
+        metavar="REF",
+        action="append",
+        help="A pull request this card lands as. Repeat it for several.",
+    )
     new.set_defaults(handler=_new)
 
     move = task_actions.add_parser("move", help="Move a task to another column.")
@@ -235,11 +243,19 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
             ("Assignee", str((task.get("assignee") or {}).get("name", ""))),
             ("Waiting on", waiting),
             ("Jira", str(task.get("jira_ref") or "")),
-            ("PR", str(task.get("pr_ref") or "")),
+            ("PRs", ", ".join(_pr_refs(task))),
             ("Parent", str(task.get("parent_reference") or "")),
         ]
     )
     _render_subtasks(task)
+
+
+def _pr_refs(task: dict[str, Any]) -> list[str]:
+    """A task's pull-request references as strings, in the order it lists them."""
+    refs = task.get("pr_refs")
+    if not isinstance(refs, list):
+        return []
+    return [str(ref) for ref in refs]
 
 
 def _column_name(task: dict[str, Any], ctx: Context) -> str:
@@ -394,7 +410,7 @@ def _new(args: argparse.Namespace, ctx: Context) -> None:
     if args.jira:
         body["jira_ref"] = args.jira
     if args.pr:
-        body["pr_ref"] = args.pr
+        body["pr_refs"] = args.pr
 
     task = ctx.client.post(f"/projects/{args.project}/tasks", body)
     if ctx.as_json:

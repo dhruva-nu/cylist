@@ -8,7 +8,15 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
-from app.models.task import ChecklistState, CommentKind, TaskPriority, TaskStatus, TaskType
+from app.models.task import (
+    MAX_PR_REFS,
+    REF_MAX_LENGTH,
+    ChecklistState,
+    CommentKind,
+    TaskPriority,
+    TaskStatus,
+    TaskType,
+)
 from app.schemas.activity import HistoryEntry
 from app.schemas.agent_sessions import AgentPresence, AgentSessionRead
 from app.schemas.common import Schema
@@ -21,6 +29,29 @@ def _blank_to_none(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _clean_pr_refs(value: list[str]) -> list[str]:
+    """Tidy a list of pull-request references into what is worth storing.
+
+    Each entry is stripped; blanks are dropped rather than refused, because an
+    empty row in the dialog's list is a box somebody has not filled in yet, not
+    a mistake to reject the whole save over — the same reading `_blank_to_none`
+    gives the Jira box. Duplicates are dropped too, keeping the first of each:
+    the same pull request named twice is one pull request, and showing it twice
+    on the card would only invite the reader to look for a difference.
+
+    Order is kept, because it is the order somebody put them in and there is no
+    better one to impose — a card's first pull request is usually its main one.
+    """
+    seen: list[str] = []
+    for entry in value:
+        stripped = entry.strip()
+        if stripped and stripped not in seen:
+            seen.append(stripped)
+    if len(seen) > MAX_PR_REFS:
+        raise ValueError(f"a card may name at most {MAX_PR_REFS} pull requests")
+    return seen
 
 
 def _clean_sub_statuses(value: list[str]) -> list[str]:
@@ -135,8 +166,20 @@ class TaskCreate(Schema):
             "The goal's colour becomes the card's rail on the board."
         ),
     )
-    jira_ref: str | None = Field(default=None, max_length=200)
-    pr_ref: str | None = Field(default=None, max_length=200)
+    jira_ref: str | None = Field(
+        default=None,
+        max_length=REF_MAX_LENGTH,
+        description="The Jira issue this card tracks — a key such as `ATL-41`, or the whole URL.",
+    )
+    pr_refs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The pull requests this card's work lands as — each a URL or a short "
+            "form such as `#212`. Several are expected: a change that took a "
+            "backend pull request and a frontend one is still one card. Blank "
+            "and repeated entries are dropped, and the order is kept."
+        ),
+    )
 
     @field_validator("title", "description")
     @classmethod
@@ -156,10 +199,15 @@ class TaskCreate(Schema):
     def _one_per_column(cls, value: list[ColumnDueDateInput]) -> list[ColumnDueDateInput]:
         return _one_date_per_column(value)
 
-    @field_validator("jira_ref", "pr_ref")
+    @field_validator("jira_ref")
     @classmethod
     def _optional(cls, value: str | None) -> str | None:
         return _blank_to_none(value)
+
+    @field_validator("pr_refs")
+    @classmethod
+    def _clean_prs(cls, value: list[str]) -> list[str]:
+        return _clean_pr_refs(value)
 
 
 class SubtaskCreate(TaskCreate):
@@ -277,8 +325,23 @@ class TaskUpdate(Schema):
             "its card is what belongs to a goal."
         ),
     )
-    jira_ref: str | None = Field(default=None, max_length=200)
-    pr_ref: str | None = Field(default=None, max_length=200)
+    jira_ref: str | None = Field(
+        default=None,
+        max_length=REF_MAX_LENGTH,
+        description=(
+            "A different Jira issue, or null to take the reference off. Like "
+            "`due_date`, null here means clear rather than leave alone."
+        ),
+    )
+    pr_refs: list[str] | None = Field(
+        default=None,
+        description=(
+            "The whole list of pull requests this card is carried by, replacing "
+            "whatever it had: this is how one is added and how one is removed. "
+            "An empty list takes them all off, and leaving the field out leaves "
+            "them alone — which is why null is not how they are cleared here."
+        ),
+    )
 
     @field_validator("sub_statuses")
     @classmethod
@@ -292,10 +355,15 @@ class TaskUpdate(Schema):
     ) -> list[ColumnDueDateInput] | None:
         return None if value is None else _one_date_per_column(value)
 
-    @field_validator("jira_ref", "pr_ref")
+    @field_validator("jira_ref")
     @classmethod
     def _optional(cls, value: str | None) -> str | None:
         return _blank_to_none(value)
+
+    @field_validator("pr_refs")
+    @classmethod
+    def _clean_prs(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _clean_pr_refs(value)
 
 
 class TaskMove(Schema):
@@ -455,7 +523,10 @@ class TaskRead(Schema):
         "when the card is on no goal, and the board draws its status colour instead."
     )
     jira_ref: str | None
-    pr_ref: str | None
+    pr_refs: list[str] = Field(
+        description="The pull requests this card's work lands as, in the order they were "
+        "added. Empty on a card that has none yet, which most cards are for most of their lives."
+    )
     waiting_on: list[PersonRead] = Field(
         description="Who this is waiting on. Empty unless the task is on hold or blocked."
     )

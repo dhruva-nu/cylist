@@ -109,13 +109,17 @@ class Split(NamedTuple):
     open: int
 
 
-_CLEARABLE = frozenset({"jira_ref", "pr_ref", "due_date", "template_id", "goal_id"})
+_CLEARABLE = frozenset({"jira_ref", "due_date", "template_id", "goal_id"})
 """The only task fields a ``PATCH`` may set back to null.
 
 Everything else reads a null as a client echoing back a field it never filled
-in. These five are the fields a card can genuinely be without, so for them a
+in. These four are the fields a card can genuinely be without, so for them a
 null is the request it looks like: take the date off, drop the link, take the
-card out of its template, take it off its goal."""
+card out of its template, take it off its goal.
+
+``pr_refs`` is not among them although a card can be without pull requests
+too: the empty list already says that, so a null there is the echo it looks
+like rather than a second way to spell "none"."""
 
 _TRACKED: dict[str, str] = {
     "title": "title",
@@ -129,7 +133,7 @@ _TRACKED: dict[str, str] = {
     "template_id": "template",
     "goal_id": "goal",
     "jira_ref": "Jira reference",
-    "pr_ref": "pull request",
+    "pr_refs": "pull requests",
 }
 """The fields a task's history reports on, and how it names them.
 
@@ -253,7 +257,7 @@ async def create(
         goal_id=data.goal_id,
         status=TaskStatus.ACTIVE,
         jira_ref=data.jira_ref,
-        pr_ref=data.pr_ref,
+        pr_refs=data.pr_refs,
     )
     session.add(task)
     await session.flush()
