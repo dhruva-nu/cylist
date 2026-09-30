@@ -182,6 +182,21 @@ def test_a_session_started_on_a_card_is_told_to_ask_its_docs(
     assert "scratchpad" not in reply["additionalContext"]
 
 
+def test_a_session_started_on_a_card_is_told_how_the_card_is_finished(
+    fire: Fire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Writing the code is not finishing it: a pull request, proof, and a move."""
+    monkeypatch.setenv("CYLIST_TASK", "ATL-1")
+
+    _, out, _ = fire(_event("SessionStart", source="startup"))
+
+    brief = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "pull request" in brief
+    assert "screenshot" in brief
+    assert "add_comment its link on ATL-1" in brief
+    assert "move_task" in brief and "Dev" in brief
+
+
 def test_a_compacted_session_is_briefed_again(fire: Fire) -> None:
     """Compaction is where the first brief is most likely to have been lost."""
     _bind(title_applied="ATL-1")
@@ -522,6 +537,8 @@ def test_install_writes_every_event_and_the_work_command(
     assert command.startswith("---\ndescription: Bind this session")
     assert "$ARGUMENTS" in command
     assert "ask_docs" in command and "place_doc" in command and "write_doc" in command
+    assert "pull request" in command and "screenshot" in command
+    assert "`add_comment`" in command and "`move_task`" in command
     assert "Open a new Claude Code session" in result.out
 
 
