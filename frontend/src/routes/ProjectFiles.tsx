@@ -592,18 +592,22 @@ function FolderContents({
             <span className={styles.hint}>Upload a file, add a link, or make a folder.</span>
           </div>
         ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Source</th>
-                <th>Size</th>
-                <th>Added by</th>
-                <th>Date</th>
-                <th />
+          <table className={styles.table} role="table">
+            {/* The roles are stated because the rows are laid out as grids, and
+                that drops the roles a table would otherwise have carried. */}
+            <thead role="rowgroup">
+              <tr role="row">
+                <th role="columnheader">Name</th>
+                <th role="columnheader">Source</th>
+                <th role="columnheader">Size</th>
+                <th role="columnheader">Added by</th>
+                <th role="columnheader">Date</th>
+                <th role="columnheader">
+                  <span className={styles.offscreen}>Actions</span>
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup">
               {folders.map((folder) => (
                 <FolderRow
                   key={folder.id}
@@ -686,8 +690,8 @@ function FolderRow({
     // The whole row is clickable for the mouse, but a `tr` is not something
     // the keyboard can reach, so the name is a real button and that is what
     // Tab lands on. Both do the same thing.
-    <tr className={styles.folderRow} onClick={() => onOpen(id)}>
-      <td>
+    <tr className={styles.folderRow} role="row" onClick={() => onOpen(id)}>
+      <td role="cell">
         <button
           type="button"
           className={`${styles.name} ${styles.openFolder}`}
@@ -702,11 +706,19 @@ function FolderRow({
           {name}
         </button>
       </td>
-      <td className={styles.muted}>Folder</td>
-      <td className={styles.mono}>—</td>
-      <td className={styles.muted}>—</td>
-      <td className={styles.mono}>—</td>
-      <td>
+      <td className={styles.muted} role="cell">
+        Folder
+      </td>
+      <td className={styles.mono} role="cell">
+        —
+      </td>
+      <td className={styles.muted} role="cell">
+        —
+      </td>
+      <td className={styles.mono} role="cell">
+        —
+      </td>
+      <td role="cell">
         <div className={styles.actions}>
           {onDelete ? (
             <GhostAction
@@ -737,8 +749,8 @@ function ItemRow({
   const badge = isLink ? { kind: 'link', label: '↗' } : badgeOf(item.name)
 
   return (
-    <tr>
-      <td>
+    <tr role="row">
+      <td role="cell">
         <div className={styles.name}>
           <span className={`${styles.badge} ${styles[badge.kind]}`}>{badge.label}</span>
           <span>
@@ -751,9 +763,13 @@ function ItemRow({
           </span>
         </div>
       </td>
-      <td className={styles.muted}>{SOURCE_LABELS[item.source]}</td>
-      <td className={styles.mono}>{formatSize(item.size)}</td>
-      <td>
+      <td className={styles.muted} role="cell">
+        {SOURCE_LABELS[item.source]}
+      </td>
+      <td className={styles.mono} role="cell">
+        {formatSize(item.size)}
+      </td>
+      <td role="cell">
         {item.added_by ? (
           <span className={styles.who}>
             <Avatar name={item.added_by.name} colour={item.added_by.colour} />
@@ -763,8 +779,10 @@ function ItemRow({
           <span className={styles.muted}>—</span>
         )}
       </td>
-      <td className={styles.mono}>{formatStamp(item.created_at)}</td>
-      <td>
+      <td className={styles.mono} role="cell">
+        {formatStamp(item.created_at)}
+      </td>
+      <td role="cell">
         <div className={styles.actions}>
           {isLink && item.url ? (
             <a

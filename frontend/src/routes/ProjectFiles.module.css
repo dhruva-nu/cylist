@@ -126,45 +126,69 @@
 }
 
 .table {
+  /*
+   * Rows are grids rather than table rows, because a table shares one set of
+   * column widths across every row and this screen needs the opposite: the
+   * actions take no width at all until the pointer is on a row, and then only
+   * that row gives them the room.
+   *
+   * Every row reads `--cols` from here, so the columns still line up down the
+   * page; a hovered row is the one that overrides it. Laying table elements
+   * out as grids drops their implicit roles, so the markup states `role` on
+   * the table, the rows, the headers and the cells itself.
+   */
+  --actions: 252px;
+  --cols: minmax(0, 1fr) 130px 100px 170px 110px 0;
+  display: block;
   width: 100%;
-  border-collapse: collapse;
+  min-width: 750px;
   font-size: 14.5px;
+}
+
+.table thead,
+.table tbody {
+  display: block;
+}
+
+.table tr {
+  display: grid;
+  align-items: center;
+  grid-template-columns: var(--cols);
+  /* Animatable in current Chrome and Firefox; elsewhere the row simply snaps,
+     which is the same interaction without the ease. */
+  transition: grid-template-columns 140ms ease;
+}
+
+/*
+ * The hovered row, and only it, hands the actions their width. Focus does the
+ * same, so tabbing to Rename opens the row it belongs to rather than firing a
+ * button nobody can see.
+ */
+.table tbody tr:hover,
+.table tbody tr:focus-within {
+  --cols: minmax(0, 1fr) 130px 100px 170px 110px var(--actions);
+}
+
+/* A folder offers one button, so it asks for one button's worth of room
+   rather than the three a file moves aside for. */
+.table tbody tr.folderRow {
+  --actions: 96px;
 }
 
 /*
  * Stated widths for the five columns that hold a known kind of thing, so Name
  * takes everything that is left.
  *
- * Auto layout shares a table's spare width out between its columns in
- * proportion to what they hold, which on a wide page turned "PDF", "1.2 MB"
- * and a date into three roomy columns and left the file name — the one column
- * anybody reads — no wider than it had been. These five are as wide as their
- * contents ever get and not a pixel wider; the width the page gained goes
- * where the names are.
+ * Sharing the spare width out between the columns in proportion to what they
+ * hold turned "PDF", "1.2 MB" and a date into three roomy columns and left the
+ * file name — the one column anybody reads — no wider than it had been. These
+ * five are as wide as their contents ever get and not a pixel wider; the width
+ * the page gained goes where the names are, and the name is what gives it back
+ * when the actions need it.
  */
-.table th:nth-child(2) {
-  width: 190px;
-}
-
-.table th:nth-child(3) {
-  width: 120px;
-}
-
-.table th:nth-child(4) {
-  width: 230px;
-}
-
-.table th:nth-child(5) {
-  width: 150px;
-}
-
-.table th:nth-child(6) {
-  width: 150px;
-}
-
 .table th {
+  min-width: 0;
   padding: 12px 18px;
-  border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -175,13 +199,25 @@
 }
 
 .table td {
+  min-width: 0;
+  /* A value wider than its column is cut rather than allowed to sit on top of
+     the next one; every column here is as wide as its content normally is. */
+  overflow: hidden;
   padding: 12px 18px;
-  border-bottom: 1px solid var(--line);
-  vertical-align: middle;
 }
 
-.table tr:last-child td {
+.table thead tr,
+.table tbody tr {
+  border-bottom: 1px solid var(--line);
+}
+
+.table tbody tr:last-child {
   border-bottom: 0;
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-left: 0;
 }
 
 .table tbody tr:hover {
@@ -195,8 +231,22 @@
 .name {
   display: flex;
   gap: 10px;
+  min-width: 0;
   align-items: center;
   font-weight: 600;
+}
+
+/*
+ * The name is the column that shrinks to let the actions in, so it ends in an
+ * ellipsis rather than wrapping. Wrapping would make the row taller the moment
+ * it was hovered, and a row that changes height under the pointer is a row
+ * whose buttons move while you are reaching for them.
+ */
+.name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A button that has to read as the row it sits in, not as a control. */
@@ -297,20 +347,44 @@
   white-space: nowrap;
 }
 
+/*
+ * The buttons sit in a column that is zero wide until the row is hovered, so
+ * they are clipped rather than hidden. The fade is only there to stop them
+ * appearing fully drawn in a column that is still opening.
+ */
 .actions {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
+  overflow: hidden;
   opacity: 0;
+  transition: opacity 140ms ease;
 }
 
 .table tbody tr:hover .actions,
-.actions:focus-within {
+.table tbody tr:focus-within .actions {
   opacity: 1;
+}
+
+/* A button in a column that has not opened yet is not a target for the mouse,
+   though it stays in the tab order so the keyboard can reach the row. */
+.table tbody tr:not(:hover):not(:focus-within) .actions {
+  pointer-events: none;
 }
 
 .action {
   text-decoration: none;
+}
+
+/* Named for a screen reader, drawn for nobody: the actions column has no
+   heading anyone needs to see. */
+.offscreen {
+  position: absolute;
+  overflow: hidden;
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  white-space: nowrap;
 }
 
 .blank {
