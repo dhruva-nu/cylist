@@ -101,7 +101,7 @@ function card(
     goal_name: null,
     goal_colour: null,
     jira_ref: null,
-    pr_ref: null,
+    pr_refs: [],
     waiting_on: [],
     comment_count: 0,
     checklist: [],

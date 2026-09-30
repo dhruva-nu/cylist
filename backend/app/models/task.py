@@ -47,6 +47,23 @@ from app.models.person import Person
 from app.models.project import Project
 from app.models.template import TaskTemplate
 
+REF_MAX_LENGTH = 200
+"""How wide a Jira or pull-request reference is stored.
+
+Wide enough for a whole URL off the browser bar, because that is what people
+paste. A short form like ``ATL-41`` or ``#212`` is equally valid — the field is
+free text, and the frontend shortens whichever shape it is given for display.
+"""
+
+MAX_PR_REFS = 20
+"""How many pull requests one card may name.
+
+A cap rather than a limit anybody is expected to reach: a card that took twenty
+pull requests was more than one card. It is here so a runaway client cannot
+grow a row without bound, and it is a check constraint because the database is
+the only place that holds for every writer.
+"""
+
 
 class TaskType(StrEnum):
     """What kind of work this is."""
@@ -209,6 +226,12 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # position along a bar, not so many that a segment on a board card is
         # too narrow to point at.
         CheckConstraint("cardinality(sub_statuses) <= 4", name="sub_status_max_four"),
+        # A card may name several pull requests — a change that took a backend
+        # PR and a frontend one is one piece of work — but not without bound.
+        CheckConstraint(
+            f"cardinality(pr_refs) <= {MAX_PR_REFS}",
+            name="pr_ref_max_count",
+        ),
         # The pointer exists exactly when there is something for it to point
         # at: no stage list means nothing is "current", and any stage list has
         # exactly one.
@@ -399,8 +422,33 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     Only a card can carry one — see ``goal_only_on_cards``.
     """
 
-    jira_ref: Mapped[str | None] = mapped_column(String(200))
-    pr_ref: Mapped[str | None] = mapped_column(String(200))
+    jira_ref: Mapped[str | None] = mapped_column(String(REF_MAX_LENGTH))
+    """The issue this card tracks in Jira, if any: a key or the whole URL."""
+
+    pr_refs: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(REF_MAX_LENGTH)),
+        nullable=False,
+        default=list,
+        server_default=sql_text("'{}'"),
+    )
+    """The pull requests that carry this card's work, in the order they were
+    added — usually none, often one, sometimes several.
+
+    A list rather than the single ``pr_ref`` it replaced in ``0034``, because
+    one card's work routinely lands as more than one pull request: a backend
+    change and the frontend that calls it, or a fix and the follow-up that
+    tidied it. Storing only the last of them lost the rest, and storing them
+    comma-separated in one string made every reader parse it.
+
+    An array column rather than rows of its own, the same choice
+    ``sub_statuses`` and :attr:`app.models.board.BoardColumn.outcomes` make:
+    the values are short strings owned entirely by this row, read on every
+    board query, and never pointed at from anywhere. A child table would buy
+    nothing here but another SELECT on the board's hottest path.
+
+    Empty is a card with no pull request yet, which most cards are for most of
+    their lives. Never null — see ``pr_ref_max_count`` for the ceiling.
+    """
 
     parent_id: Mapped[UUID | None] = mapped_column(
         postgresql.UUID(as_uuid=True),

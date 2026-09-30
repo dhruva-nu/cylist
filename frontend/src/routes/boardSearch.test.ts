@@ -85,7 +85,7 @@ function task(title: string, onGoal: string | null): Task {
     goal_name: onGoal,
     goal_colour: onGoal ? '#3B6FC2' : null,
     jira_ref: null,
-    pr_ref: null,
+    pr_refs: [],
     waiting_on: [],
     comment_count: 0,
     checklist: [],

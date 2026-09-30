@@ -124,7 +124,7 @@ TASK = {
     "assignee": ADITI,
     "status": "active",
     "jira_ref": None,
-    "pr_ref": None,
+    "pr_refs": [],
     "waiting_on": [],
     "comment_count": 0,
     "checklist": [],

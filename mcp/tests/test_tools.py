@@ -1014,3 +1014,59 @@ async def test_write_doc_needs_a_title_or_a_doc(server: MCPServer) -> None:
 
     assert result.is_error
     assert "Give the doc a title" in result.text
+
+
+async def test_create_task_takes_several_pull_requests(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """CYLIST-63. An agent that opened a backend pull request and a frontend
+    one names both on the card rather than choosing between them."""
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Stripe webhook idempotency",
+        description="Dedupe on event id.",
+        task_type="bug",
+        pr_refs=["#212", "https://github.com/acme/atlas/pull/219"],
+    )
+    assert not result.is_error
+    assert recorder.body("POST", "/tasks")["pr_refs"] == [
+        "#212",
+        "https://github.com/acme/atlas/pull/219",
+    ]
+
+
+async def test_create_task_without_pull_requests_says_nothing_about_them(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """Omitted rather than sent empty: the card has none, which is not the
+    same request as "take the ones it has off"."""
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Stripe webhook idempotency",
+        description="Dedupe on event id.",
+        task_type="bug",
+    )
+    assert not result.is_error
+    assert "pr_refs" not in recorder.body("POST", "/tasks")
+
+
+async def test_create_subtask_takes_several_pull_requests(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """A sub-task is work with a reference of its own, so it has its own pull
+    requests too."""
+    result = await call(
+        server,
+        "create_subtask",
+        task="ATL-2",
+        title="Dedupe store",
+        description="Event ids, with a TTL.",
+        task_type="chore",
+        pr_refs=["#44", "#48"],
+    )
+    assert not result.is_error
+    assert recorder.body("POST", "/tasks/ATL-2/subtasks")["pr_refs"] == ["#44", "#48"]

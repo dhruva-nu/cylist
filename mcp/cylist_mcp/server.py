@@ -320,7 +320,17 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             ),
         ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
-        pr_ref: Annotated[str | None, Field(description="Pull request URL, if any.")] = None,
+        pr_refs: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "The pull requests this card's work lands as, each a URL or a "
+                    "short form such as '#212'. Pass several when the work took "
+                    "several — a backend pull request and the frontend one that "
+                    "calls it are still one card. Omit for a card with none yet."
+                )
+            ),
+        ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
             _check_choice("task_type", task_type, ("feature", "bug", "chore"))
@@ -338,8 +348,8 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["due_date"] = due_date
             if jira_ref:
                 body["jira_ref"] = jira_ref
-            if pr_ref:
-                body["pr_ref"] = pr_ref
+            if pr_refs:
+                body["pr_refs"] = pr_refs
             return {"task": await client.post(f"/projects/{project}/tasks", body)}
 
         return await _as_tool_result(call)
@@ -380,7 +390,17 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             Field(description="ISO date, e.g. '2026-03-31'. Omit for a card with no date."),
         ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
-        pr_ref: Annotated[str | None, Field(description="Pull request URL, if any.")] = None,
+        pr_refs: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "The pull requests this card's work lands as, each a URL or a "
+                    "short form such as '#212'. Pass several when the work took "
+                    "several — a backend pull request and the frontend one that "
+                    "calls it are still one card. Omit for a card with none yet."
+                )
+            ),
+        ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
             _check_choice("task_type", task_type, ("feature", "bug", "chore"))
@@ -399,8 +419,8 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                 body["due_date"] = due_date
             if jira_ref:
                 body["jira_ref"] = jira_ref
-            if pr_ref:
-                body["pr_ref"] = pr_ref
+            if pr_refs:
+                body["pr_refs"] = pr_refs
             return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
 
         return await _as_tool_result(call)

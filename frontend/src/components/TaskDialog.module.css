@@ -855,3 +855,43 @@
   gap: 8px;
   align-items: center;
 }
+
+/*
+ * The pull requests a card names, in the read view: one per line, each its own
+ * mark-and-label. A list rather than a comma-separated run, because each entry
+ * is a link with its own target and a run of them reads as one long one.
+ */
+.prRefs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The same column of rows as the stage editor, with the add button under it. */
+.prRefEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prRefEditorRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.prRefEditorRow .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Sized by the row rather than by the glyph, so the crosses line up down the
+   list however long the references beside them are. */
+.prRefEditorRow button {
+  flex-shrink: 0;
+  min-width: 32px;
+  padding-inline: 6px;
+}

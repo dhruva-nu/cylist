@@ -1955,3 +1955,182 @@ class TestRetiringTheScratchpad:
         notes = await connection.execute(text("SELECT count(*) FROM agent_note"))
         assert notes.scalar() == 0
         assert len(await _learned(connection)) == 1, "the filed notes stay where they went"
+
+
+# --- Every pull request a card names ---------------------------------------
+
+ONE_PR = "0033"
+MANY_PRS = "0034"
+
+
+async def seed_cards_with_prs(connection: AsyncConnection, *refs: str | None) -> None:
+    """One card per reference given, numbered from 1, on one project's board.
+
+    ``None`` is a card that never named a pull request and ``""`` one whose
+    form field was submitted empty — the two shapes revision 0034 has to tell
+    apart from a real reference, because only one of them is worth carrying
+    over.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46',"
+            " :count)"
+        ),
+        {"count": len(refs)},
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO person (id, name, kind, title, responsibilities, colour)"
+            " VALUES (gen_random_uuid(), 'Aditi K', 'team', 'Backend engineer', '', '#1D7D46')"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO board_column (id, project_id, name, description, position)"
+            " SELECT gen_random_uuid(), project.id, 'To do', '', 0 FROM project"
+        )
+    )
+    for number, ref in enumerate(refs, start=1):
+        await connection.execute(
+            text(
+                "INSERT INTO task (id, project_id, number, column_id, position, title,"
+                " description, type, assignee_id, status, pr_ref)"
+                " SELECT gen_random_uuid(), project.id, :number, board_column.id,"
+                " :number, :title, 'Work.', 'bug', person.id, 'active', :ref"
+                " FROM project, board_column, person WHERE person.name = 'Aditi K'"
+            ),
+            {"number": number, "title": f"Card {number}", "ref": ref},
+        )
+
+
+async def pr_refs_by_number(connection: AsyncConnection) -> dict[int, list[str]]:
+    rows = await connection.execute(text("SELECT number, pr_refs FROM task ORDER BY number"))
+    return {number: list(refs) for number, refs in rows}
+
+
+async def pr_ref_by_number(connection: AsyncConnection) -> dict[int, str | None]:
+    rows = await connection.execute(text("SELECT number, pr_ref FROM task ORDER BY number"))
+    return dict(rows.all())
+
+
+async def add_pr_refs(connection: AsyncConnection, number: int, refs: list[str]) -> None:
+    await connection.execute(
+        text("UPDATE task SET pr_refs = :refs WHERE number = :number"),
+        {"number": number, "refs": refs},
+    )
+
+
+class TestACardNamesEveryPullRequest:
+    """Revision 0034 against a database whose cards already name one each."""
+
+    async def test_carries_every_reference_over(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The whole point of the revision: nothing somebody typed is lost."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(
+            connection,
+            "#212",
+            "https://github.com/acme/atlas/pull/219",
+            None,
+        )
+
+        await migrate(MANY_PRS)
+
+        assert await pr_refs_by_number(connection) == {
+            1: ["#212"],
+            2: ["https://github.com/acme/atlas/pull/219"],
+            3: [],
+        }
+
+    async def test_a_card_with_no_reference_gets_the_empty_list_not_a_null(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """There is one way to say "no pull request" afterwards, not two."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+
+        await migrate(MANY_PRS)
+
+        nulls = await connection.execute(text("SELECT count(*) FROM task WHERE pr_refs IS NULL"))
+        assert nulls.scalar() == 0
+        assert await pr_refs_by_number(connection) == {1: []}
+
+    async def test_a_blank_reference_does_not_become_an_empty_entry(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """An empty string in the old column was an untouched form field, and
+        carrying it over would put a blank row in the card's new list."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, "", "   ")
+
+        await migrate(MANY_PRS)
+
+        assert await pr_refs_by_number(connection) == {1: [], 2: []}
+
+    async def test_then_takes_several_on_one_card(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+        await migrate(MANY_PRS)
+
+        await add_pr_refs(connection, 1, ["#212", "#219", "#231"])
+
+        assert await pr_refs_by_number(connection) == {1: ["#212", "#219", "#231"]}
+
+    async def test_refuses_more_than_the_ceiling(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The cap is the database's, so it holds for every writer rather than
+        only for the ones that went through the API."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+        await migrate(MANY_PRS)
+
+        with pytest.raises(IntegrityError, match="pr_ref_max_count"):
+            await add_pr_refs(connection, 1, [f"#{n}" for n in range(21)])
+
+
+class TestUndoingTheManyPullRequests:
+    async def test_puts_a_single_reference_back_where_it_was(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None, None)
+        await migrate(MANY_PRS)
+        await add_pr_refs(connection, 1, ["#212"])
+
+        await rewind(ONE_PR)
+
+        assert await pr_ref_by_number(connection) == {1: "#212", 2: None}
+
+    async def test_refuses_while_a_card_names_more_than_one(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Dropping all but the first is a choice nobody made, so it stops and
+        says which cards are in the way instead — as 0009 and 0012 do."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+        await migrate(MANY_PRS)
+        await add_pr_refs(connection, 1, ["#212", "#219"])
+
+        with pytest.raises(RuntimeError, match="name more than one pull request"):
+            await rewind(ONE_PR)

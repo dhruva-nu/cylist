@@ -2445,7 +2445,9 @@ function StripAccumulated({ task }: { task: Task }) {
           Quieting a board is only honest if what it stopped saying is one
           click away — see `TaskRef`. */}
       {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
-      {task.pr_ref ? <TaskRef kind="pr" value={task.pr_ref} compact /> : null}
+      {task.pr_refs.map((ref) => (
+        <TaskRef key={ref} kind="pr" value={ref} compact />
+      ))}
       {/* Sits on the line rather than above it. The stage bar and these dots
           are drawn as different things because they are different things —
           the bar is one journey with a position along it, the dots are a set

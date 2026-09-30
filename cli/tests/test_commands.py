@@ -631,3 +631,66 @@ def test_goals_status_sends_the_word_it_was_given(run: Runner, recorder: fake_ap
     result = run("goals", "status", "ATL-G1", "achieved")
     assert result.code == 0
     assert recorder.body("PATCH", "/goals/ATL-G1") == {"status": "achieved"}
+
+
+def test_task_new_takes_several_pull_requests(run: Runner, recorder: fake_api.Recorder) -> None:
+    """CYLIST-63. One card's work routinely lands as more than one pull
+    request, so --pr repeats rather than replacing what came before it."""
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "Stripe webhook idempotency",
+        "--description",
+        "Dedupe on event id.",
+        "--type",
+        "bug",
+        "--pr",
+        "#212",
+        "--pr",
+        "https://github.com/acme/atlas/pull/219",
+    )
+    assert result.code == 0
+    assert recorder.body("POST", "/tasks")["pr_refs"] == [
+        "#212",
+        "https://github.com/acme/atlas/pull/219",
+    ]
+
+
+def test_task_new_takes_one_pull_request(run: Runner, recorder: fake_api.Recorder) -> None:
+    """The ordinary case still reads the way it always did."""
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "Stripe webhook idempotency",
+        "--description",
+        "Dedupe on event id.",
+        "--type",
+        "bug",
+        "--pr",
+        "#212",
+    )
+    assert result.code == 0
+    assert recorder.body("POST", "/tasks")["pr_refs"] == ["#212"]
+
+
+def test_task_new_without_a_pull_request_says_nothing_about_one(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    """An absent --pr is a card with none, not a card with an empty list."""
+    result = run(
+        "task",
+        "new",
+        "ATL",
+        "--title",
+        "Stripe webhook idempotency",
+        "--description",
+        "Dedupe on event id.",
+        "--type",
+        "bug",
+    )
+    assert result.code == 0
+    assert "pr_refs" not in recorder.body("POST", "/tasks")
