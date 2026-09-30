@@ -85,13 +85,12 @@ import {
   activeToken,
   applySuggestion,
   filterTasks,
-  hidesSetAside,
-  isSetAside,
   parseQuery,
   suggestionsFor,
   tokenize,
   type Suggestion,
 } from './boardSearch'
+import { hidesCancelled, hidesHold, isCancelled, splitOnHold } from './boardHiding'
 import { agentIndicator, hasLiveAgent } from './agentState'
 import { useBoardSocket } from './useBoardSocket'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
@@ -249,7 +248,7 @@ function useFolded(storageKey: string) {
 
 /**
  * One way of looking at a board, on or off, remembered per project — whether
- * it is split into lanes, whether the cards set aside are hidden.
+ * it is split into lanes, whether the cancelled cards are shown.
  *
  * Kept the way the folded columns are, and for the same reason: how you look
  * at one board says nothing about how you want to look at another, and a
@@ -340,9 +339,10 @@ type QuickGoal = 'all' | 'none' | (string & {})
 type QuickStatus = 'all' | Task['status']
 
 /**
- * How this reader has chosen to look at this board: what is folded away, and
- * whether the board is in lanes and the set-aside cards hidden. All of it is
- * remembered per project — see `useFolded` and `useBoardToggle`.
+ * How this reader has chosen to look at this board: what is folded away,
+ * whether the board is in lanes, whether the cancelled cards are shown, and
+ * which columns have opened their on-hold cards. All of it is remembered per
+ * project — see `useFolded` and `useBoardToggle`.
  */
 function useBoardView(projectKey: string) {
   const { folded: collapsedColumns, toggle: toggleColumn } = useFolded(
@@ -379,15 +379,32 @@ function useBoardView(projectKey: string) {
   } = useFolded(`cylist.board.lanes.folded.${projectKey}`)
   const [lanesOn, setLanesOn] = useBoardToggle(`cylist.board.lanes.${projectKey}`)
   /**
-   * Whether the cards on hold and the cancelled ones are hidden.
+   * Whether the cancelled cards have been asked back onto the board.
    *
-   * Remembered per project rather than reset each visit, because it is a
-   * standing answer to a standing question: a board carrying a year of work
-   * that stopped is one you hide those on once and want to stay hidden. It is
-   * only ever a way of reading the board — nothing about the cards changes,
-   * and the button says how many it is holding back.
+   * Stored the way round it is because the hide is the default (CYLIST-62):
+   * work that is not going to happen is not what a board is for, and a board
+   * carrying a year of it is one you would otherwise hide them on every visit.
+   * Off is therefore the ordinary value, and `useBoardToggle` starts off.
+   *
+   * Remembered per project, like every other way of looking at a board: how
+   * much dropped work one project is carrying says nothing about another. It
+   * is only ever a way of reading the board — nothing about the cards changes.
    */
-  const [hideSetAside, setHideSetAside] = useBoardToggle(`cylist.board.setAside.${projectKey}`)
+  const [showCancelled, setShowCancelled] = useBoardToggle(`cylist.board.cancelled.${projectKey}`)
+  /**
+   * Which columns have been opened at the foot to show the cards on hold.
+   *
+   * A list of the columns showing them rather than of the columns hiding them,
+   * so the empty list — a reader who has never touched this — is every column
+   * holding its held work back, which is the default the card asked for.
+   *
+   * Kept per column, and shared by a column's lane cells: in lanes a column is
+   * drawn once per goal, and opening the foot is a question about the column
+   * ("what has stalled in review?"), not about one goal's corner of it.
+   */
+  const { folded: holdShown, toggle: toggleHold } = useFolded(
+    `cylist.board.holdShown.${projectKey}`,
+  )
 
   return {
     collapsedColumns,
@@ -399,8 +416,10 @@ function useBoardView(projectKey: string) {
     toggleLane,
     lanesOn,
     setLanesOn,
-    hideSetAside,
-    setHideSetAside,
+    showCancelled,
+    setShowCancelled,
+    holdShown,
+    toggleHold,
   }
 }
 
@@ -592,12 +611,18 @@ interface BoardFilters {
   search: string
   quickGoal: QuickGoal
   quickStatus: QuickStatus
-  hideSetAside: boolean
+  showCancelled: boolean
 }
 
 /**
  * The cards the board draws, once the search box, the quick filters and the
- * hide have each had their say — and how many the hide is holding back.
+ * cancelled hide have each had their say — and how many that hide is holding
+ * back.
+ *
+ * The cards on hold are not filtered here: they are held back at the foot of
+ * each column, which is a decision each column makes for itself — see
+ * `boardHiding.ts`. What this does settle for them is `hidingHold`, the half
+ * of that decision the whole board shares.
  *
  * Client-side, over what's already fetched: the board holds every task in
  * memory regardless, and a search endpoint would be a second way to ask a
@@ -605,7 +630,7 @@ interface BoardFilters {
  */
 function narrowBoard(
   tasks: Task[],
-  { search, quickGoal, quickStatus, hideSetAside }: BoardFilters,
+  { search, quickGoal, quickStatus, showCancelled }: BoardFilters,
   columns: BoardColumn[],
   members: Person[],
 ) {
@@ -623,18 +648,19 @@ function narrowBoard(
     })
     .filter((task) => quickStatus === 'all' || task.status === quickStatus)
   /**
-   * The hide, applied last — and only once everything else has had its say.
+   * The hides, settled last — and only once everything else has had its say.
    *
-   * Last because it is the one filter that answers to the others: asking the
-   * board for the cards on hold stands it down rather than emptying the board,
-   * which is `hidesSetAside`'s whole job. Counted off the narrowed set rather
+   * Last because they are the two filters that answer to the others: asking
+   * the board for the cancelled cards stands the cancelled hide down rather
+   * than emptying the board, which is `hidesCancelled`'s whole job, and the
+   * same goes for `hidesHold`. The count is taken off the narrowed set rather
    * than off every card there is, so the number on the button is how many this
    * board, as it is currently being read, is holding back.
    */
-  const hiding = hidesSetAside(hideSetAside, quickStatus, parsed)
-  const setAsideCount = narrowed.filter(isSetAside).length
-  const visibleTasks = hiding ? narrowed.filter((task) => !isSetAside(task)) : narrowed
-  return { visibleTasks, setAsideCount, hiding }
+  const hidingCancelled = hidesCancelled(showCancelled, quickStatus, parsed)
+  const cancelledCount = narrowed.filter(isCancelled).length
+  const visibleTasks = hidingCancelled ? narrowed.filter((task) => !isCancelled(task)) : narrowed
+  return { visibleTasks, cancelledCount, hidingCancelled, parsed }
 }
 
 /** The cards to draw, sorted into their columns in the order they arrived. */
@@ -723,8 +749,10 @@ export function ProjectBoard() {
     toggleLane,
     lanesOn,
     setLanesOn,
-    hideSetAside,
-    setHideSetAside,
+    showCancelled,
+    setShowCancelled,
+    holdShown,
+    toggleHold,
   } = useBoardView(projectKey)
   const { message, announce } = useAnnouncer()
   const { board, tasks, members, templates, goals } = useBoardData(projectKey)
@@ -768,9 +796,9 @@ export function ProjectBoard() {
     )
   }
 
-  const { visibleTasks, setAsideCount, hiding } = narrowBoard(
+  const { visibleTasks, cancelledCount, hidingCancelled, parsed } = narrowBoard(
     tasks.data,
-    { search, quickGoal, quickStatus, hideSetAside },
+    { search, quickGoal, quickStatus, showCancelled },
     columns,
     memberList,
   )
@@ -973,6 +1001,12 @@ export function ProjectBoard() {
     onAddTask: may('tasks') ? () => setCreatingTask(true) : null,
     onEdit: () => setColumnDialog(column),
     members: memberList,
+    // Settled per column, out of the column's own answer and the board's: see
+    // `hidesHold`. Passed in rather than read inside `Column` because the
+    // search box and the status filter are the board's, and a column that
+    // reached for them would be reaching past its own props for them.
+    hidingHold: hidesHold(holdShown.includes(column.id), quickStatus, parsed),
+    onToggleHold: () => toggleHold(column.id),
   })
 
   const onMoveSubStatus = (taskId: string, index: number) => moveSubStatus.mutate({ taskId, index })
@@ -1046,10 +1080,10 @@ export function ProjectBoard() {
             onGoal={setQuickGoal}
             status={quickStatus}
             onStatus={setQuickStatus}
-            hideSetAside={hideSetAside}
-            onHideSetAside={setHideSetAside}
-            setAsideCount={setAsideCount}
-            hiding={hiding}
+            showCancelled={showCancelled}
+            onShowCancelled={setShowCancelled}
+            cancelledCount={cancelledCount}
+            hiding={hidingCancelled}
           />
         </div>
       </div>
@@ -1270,8 +1304,8 @@ export function ProjectBoard() {
 }
 
 /**
- * The board's search box: free text plus `col:`, `who:`, `blk:` and `hld:`
- * tags (see `boardSearch.ts`). Typing `col:` or `who:` opens a suggestion
+ * The board's search box: free text plus `col:`, `who:`, `blk:`, `hld:` and
+ * `cnl:` tags (see `boardSearch.ts`). Typing `col:` or `who:` opens a suggestion
  * list of the matching columns or people — arrow keys to move through it,
  * enter or a click to accept, escape to dismiss it without losing the token
  * being typed.
@@ -1349,7 +1383,7 @@ function SearchBar({
           setHighlighted(0)
         }}
         onKeyDown={onKeyDown}
-        placeholder='Search, or tag it: col:"In progress"  who:Aditi  goal:Search  blk:  hld:'
+        placeholder='Search, or tag it: col:"In progress"  who:Aditi  goal:Search  blk:  hld:  cnl:'
         aria-label="Search tasks"
         aria-autocomplete="list"
         aria-expanded={suggestions.length > 0}
@@ -1424,11 +1458,14 @@ const SUGGESTION_KINDS: Record<Suggestion['kind'], string> = {
  * the search box is already narrowing to — see the `.filter` calls around
  * `visibleTasks`.
  *
- * The hide is a button rather than a third select because it has one question
- * and two answers, and because it is the one of the three anybody sets and
- * leaves: the status select asks "show me only these", the hide asks "stop
- * showing me those" — which is why it says how many it is holding back, and
- * why it says so even while it is standing down.
+ * The cancelled hide is a button rather than a third select because it has one
+ * question and two answers, and because it is the one of the three the board
+ * arrives with already set: the status select asks "show me only these", the
+ * hide asks "stop showing me those", and it is on from the first visit — which
+ * is why it says how many it is holding back, and why it says so even while it
+ * is standing down. The cards on hold are not here at all; they are held back
+ * and let out at the foot of each column, because which of them matters is a
+ * question about one column rather than about the board.
  *
  * Collapsed by default and opened from the button at its right, which is also
  * where it closes back to: a board with two more selects parked on the
@@ -1442,9 +1479,9 @@ function QuickFilters({
   onGoal,
   status,
   onStatus,
-  hideSetAside,
-  onHideSetAside,
-  setAsideCount,
+  showCancelled,
+  onShowCancelled,
+  cancelledCount,
   hiding,
 }: {
   goals: Goal[]
@@ -1452,17 +1489,22 @@ function QuickFilters({
   onGoal: (goal: QuickGoal) => void
   status: QuickStatus
   onStatus: (status: QuickStatus) => void
-  /** Whether the reader has asked for the cards on hold and the cancelled ones
-   * to be put away. */
-  hideSetAside: boolean
-  onHideSetAside: (hide: boolean) => void
-  /** How many such cards the board is holding, before the hide is applied. */
-  setAsideCount: number
-  /** Whether the hide is actually in force — see `hidesSetAside`. */
+  /** Whether the reader has asked for the cancelled cards back. Off by
+   * default, which is the hide being on. */
+  showCancelled: boolean
+  onShowCancelled: (show: boolean) => void
+  /** How many cancelled cards the board is holding, before the hide is
+   * applied. */
+  cancelledCount: number
+  /** Whether the hide is actually in force — see `hidesCancelled`. */
   hiding: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const active = goal !== 'all' || status !== 'all' || hiding
+  // The cancelled hide is on by default, so it is not what makes the drawer
+  // worth looking in — the dot means somebody changed something, and the
+  // ordinary board would otherwise wear one permanently. Turning the hide off
+  // is the change worth marking.
+  const active = goal !== 'all' || status !== 'all' || showCancelled
 
   return (
     <div className={styles.quickFilters}>
@@ -1509,18 +1551,20 @@ function QuickFilters({
             overruled by the more specific question next to it. */}
         <Button
           small
-          aria-pressed={hideSetAside}
+          aria-pressed={!showCancelled}
           className={hiding ? styles.groupedOn : undefined}
           tabIndex={open ? undefined : -1}
-          onClick={() => onHideSetAside(!hideSetAside)}
+          onClick={() => onShowCancelled(!showCancelled)}
           title={
-            hideSetAside
-              ? 'Show the cards on hold and the cancelled ones again'
-              : 'Hide the cards on hold and the cancelled ones'
+            showCancelled
+              ? 'Hide the cancelled cards again'
+              : 'Show the cancelled cards on the board'
           }
         >
-          ⊘ On hold &amp; cancelled
-          <span className={styles.hint}>{setAsideHint(hiding, hideSetAside, setAsideCount)}</span>
+          ⊘ Cancelled
+          <span className={styles.hint}>
+            {cancelledHint(hiding, showCancelled, cancelledCount)}
+          </span>
         </Button>
       </div>
       <Button
@@ -1539,13 +1583,14 @@ function QuickFilters({
 }
 
 /**
- * What the hide's button says beside its name: how many cards it is holding
- * back, that it has been overruled, or how many it would hold back if asked.
+ * What the cancelled hide's button says beside its name: how many cards it is
+ * holding back, that it has been overruled, or — once it is off — how many it
+ * has let through, which is the number the reader turned it off to see.
  */
-function setAsideHint(hiding: boolean, hideSetAside: boolean, setAsideCount: number) {
-  if (hiding) return `${setAsideCount} hidden`
-  if (hideSetAside) return 'overruled'
-  return setAsideCount || 'none'
+function cancelledHint(hiding: boolean, showCancelled: boolean, cancelledCount: number) {
+  if (hiding) return `${cancelledCount} hidden`
+  if (!showCancelled) return 'overruled'
+  return `${cancelledCount} shown`
 }
 
 /** A held drop: the move it would make, and the two columns it reads between. */
@@ -1715,6 +1760,8 @@ function Column({
   onAddTask,
   onEdit,
   members,
+  hidingHold,
+  onToggleHold,
   part = 'all',
   laneKey,
 }: {
@@ -1748,6 +1795,14 @@ function Column({
   onEdit: () => void
   /** The project's people, for the `@` tags in a stage label. */
   members: Person[]
+  /**
+   * Whether this column is keeping its on-hold cards back — decided by
+   * `hidesHold` out of this column's own foot and what the board is being
+   * asked. False means they are drawn in place, wherever in the stack they sit.
+   */
+  hidingHold: boolean
+  /** Open the column's foot, or shut it again. */
+  onToggleHold: () => void
   /**
    * Which half of a column this is drawing.
    *
@@ -1783,6 +1838,15 @@ function Column({
     disabled: part === 'cards',
   })
   const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
+  /**
+   * The cards this column draws, and the ones it is sitting on.
+   *
+   * `counted` above stays the whole column either way: the heading is the
+   * column's size, the foot is what of it is put down, and the two together
+   * are why the gap between the heading's number and the cards you can count
+   * is never a surprise.
+   */
+  const { shown, onHold } = splitOnHold(tasks, hidingHold)
 
   const setRefs = (node: HTMLElement | null) => {
     setDropRef(node)
@@ -1853,7 +1917,7 @@ function Column({
           {part === 'head' ? null : (
             <ColumnCards
               column={column}
-              tasks={tasks}
+              tasks={shown}
               dropId={dropId}
               members={members}
               collapsedOutcomes={collapsedOutcomes}
@@ -1862,6 +1926,29 @@ function Column({
               onMoveSubStatus={onMoveSubStatus}
             />
           )}
+
+          {/* The foot, under the cards and above the composer: the held work
+              is the bottom of this column, so the line that lets it out is
+              too. Drawn only when there is something behind it — a column
+              with nothing on hold has nothing to say here, and a row of "0 on
+              hold" down an untroubled board is noise on every column at
+              once. */}
+          {part !== 'head' && onHold.length > 0 ? (
+            <button
+              type="button"
+              className={styles.holdFoot}
+              aria-expanded={!hidingHold}
+              onClick={onToggleHold}
+              title={
+                hidingHold
+                  ? `Show the ${onHold.length === 1 ? 'card' : 'cards'} on hold in ${column.name}`
+                  : `Hide the ${onHold.length === 1 ? 'card' : 'cards'} on hold in ${column.name}`
+              }
+            >
+              <span aria-hidden="true">{hidingHold ? '+' : '−'}</span>
+              {onHold.length} on hold
+            </button>
+          ) : null}
 
           {isFirst && part === 'all' && onAddTask ? (
             <button className={styles.addTask} onClick={onAddTask}>
