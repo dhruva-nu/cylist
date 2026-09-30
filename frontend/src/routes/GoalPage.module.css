@@ -9,24 +9,10 @@
   vertical-align: -2px;
 }
 
+/* The eyebrow is a line of text rather than a row of boxes, so the pill in it
+   buys its own space. Everything else about it is GoalMarks'. */
 .pill {
   margin-left: 8px;
-  padding: 1px 9px;
-  border-radius: var(--radius-control);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.achieved {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.dropped {
-  background: var(--paper-2);
-  color: var(--ink-3);
 }
 
 .boardLink {
@@ -97,6 +83,17 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 16px;
+}
+
+/* Why the goal cannot be marked achieved yet, under the counts it is counted
+   from rather than beside the button it holds shut: the button is a few words
+   wide and this is a sentence, and the reader is looking at the counts when
+   they ask the question. The button points at it with aria-describedby. */
+.refusal {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .facts {

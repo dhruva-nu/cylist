@@ -94,7 +94,7 @@ import { hidesCancelled, hidesHold, isCancelled, splitOnHold } from './boardHidi
 import { agentIndicator, hasLiveAgent } from './agentState'
 import { useBoardSocket } from './useBoardSocket'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
-import { GoalChip } from '../components/GoalMarks'
+import { GoalChip, GoalStatusPill } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
@@ -1695,10 +1695,22 @@ function LaneHead({
   onAdd: (() => void) | null
 }) {
   const name = goal?.name ?? 'No goal'
+  // A settled goal is only in lanes at all while cards are still on it — see
+  // `lanesFor`. Those cards are work that has outlived the goal they were
+  // written under, which is the one thing about the lane worth saying, so the
+  // heading is drawn back and carries the pill rather than reading exactly
+  // like the lanes still being worked on.
+  const settled = goal !== null && goal.status !== 'open'
 
   return (
     <div
-      className={`${styles.laneHead} ${goal ? '' : styles.laneHeadLoose}`}
+      className={[
+        styles.laneHead,
+        goal ? '' : styles.laneHeadLoose,
+        settled ? styles.laneSettled : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       style={goal ? ({ '--goal': goal.colour } as CSSProperties) : undefined}
     >
       {/* The fold, on the heading rather than beside it: the heading is the
@@ -1716,15 +1728,18 @@ function LaneHead({
         <span aria-hidden="true">{folded ? '▸' : '▾'}</span>
       </button>
       {goal ? (
-        <Link
-          to="/p/$projectKey/goals/$goalRef"
-          params={{ projectKey, goalRef: goal.reference }}
-          className={styles.laneName}
-        >
-          <span className={styles.laneDot} aria-hidden="true" />
-          {goal.name}
-          <span className={styles.laneRef}>{goal.reference}</span>
-        </Link>
+        <>
+          <Link
+            to="/p/$projectKey/goals/$goalRef"
+            params={{ projectKey, goalRef: goal.reference }}
+            className={styles.laneName}
+          >
+            <span className={styles.laneDot} aria-hidden="true" />
+            {goal.name}
+            <span className={styles.laneRef}>{goal.reference}</span>
+          </Link>
+          <GoalStatusPill status={goal.status} />
+        </>
       ) : (
         <span className={styles.laneName}>
           <span className={styles.laneDot} aria-hidden="true" />

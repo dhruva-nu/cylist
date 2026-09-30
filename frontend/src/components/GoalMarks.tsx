@@ -20,6 +20,34 @@ export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
 }
 
 /**
+ * How a goal ended, drawn where the goal is named: the goals page, the goal's
+ * own page, and the lane heading on a board split by goal.
+ *
+ * Nothing at all for an open goal. Open is what a goal is nearly always, and a
+ * badge on every one of them would be a word repeated down the page that only
+ * means something by its absence — while a goal that has been closed needs to
+ * stop looking exactly like the ones still being worked on, wherever it is
+ * drawn. Achieved is the one status with a colour: the quiet grey of a dropped
+ * goal is the point of it.
+ */
+export function GoalStatusPill({
+  status,
+  className,
+}: {
+  status: GoalStatus
+  /** Spacing the place it is drawn in needs; everything else is this file's. */
+  className?: string | undefined
+}) {
+  if (status === 'open') return null
+
+  return (
+    <span className={[styles.pill, styles[status], className].filter(Boolean).join(' ')}>
+      {GOAL_STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+/**
  * How much of a goal is done, drawn as one bar.
  *
  * Three lengths on one track: what is finished in the goal's own colour, what

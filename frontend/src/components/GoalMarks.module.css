@@ -85,3 +85,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* How a goal ended, where its name is. Never drawn for an open goal — see the
+   note on GoalStatusPill — so these are the only two. */
+.pill {
+  flex: none;
+  padding: 1px 9px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.achieved {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* A dropped goal is not a failure to be marked in red; it is work that stopped.
+   The quietest ink there is says that without arguing about it. */
+.dropped {
+  background: var(--paper-2);
+  color: var(--ink-3);
+}

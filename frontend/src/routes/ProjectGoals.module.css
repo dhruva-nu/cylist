@@ -99,23 +99,6 @@
   margin-left: auto;
 }
 
-.pill {
-  padding: 1px 9px;
-  border-radius: var(--radius-control);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.achieved {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.dropped {
-  background: var(--paper-2);
-  color: var(--ink-3);
-}
-
 .foot {
   display: flex;
   gap: 10px;
