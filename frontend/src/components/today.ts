@@ -53,10 +53,16 @@ export interface TodayWork {
  * answer.
  *
  * A card is left out when it is in the board's last column, because that is
- * what finished means here, and when it is cancelled, because that is work
- * which is not going to happen. Cards on hold and blocked stay in: a blocked
- * card that was wanted yesterday is the most important thing the list can
- * tell you, and hiding it would hide the problem rather than the card.
+ * what finished means here, and when it is cancelled or on hold, because
+ * neither is work to do today: cancelled is not going to happen at all, and a
+ * card on hold has been put down on purpose, with a reason the server made
+ * whoever put it down give. Its due date carries on running while it waits,
+ * so left in it would sit at the top of the overdue group every morning
+ * saying nothing that the hold had not already said.
+ *
+ * Blocked stays in. It reads like hold and is not: the work is still wanted
+ * today and something is in the way, which is the most useful thing this list
+ * can tell you — hiding it would hide the problem rather than the card.
  */
 export function todaysWork(
   tasks: readonly Task[],
@@ -70,7 +76,7 @@ export function todaysWork(
   const doneColumnId = columns.at(-1)?.id ?? null
 
   const wantedByToday = tasks.filter((task) => {
-    if (task.status === 'cancelled') return false
+    if (task.status === 'cancelled' || task.status === 'hold') return false
     if (doneColumnId !== null && task.column_id === doneColumnId) return false
     if (me && task.assignee.id !== me.id) return false
     return task.next_due_date !== null && task.next_due_date <= today
