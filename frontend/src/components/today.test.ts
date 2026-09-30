@@ -163,20 +163,31 @@ describe('which cards are today’s work', () => {
     expect(todaysWorkCount(work)).toBe(0)
   })
 
-  it('keeps a blocked or on-hold card, because that is the part worth knowing', () => {
+  it('leaves out a card on hold, however long its date has been running', () => {
+    // Both groups, because a hold does not stop the date: the overdue one is
+    // the case that would otherwise sit at the top of the list every morning.
     const work = todaysWork(
-      [
-        card('A-1', { status: 'blocked', due: '2026-09-01' }),
-        card('A-2', { status: 'hold' }),
-        card('A-3'),
-      ],
+      [card('A-1', { status: 'hold' }), card('A-2', { status: 'hold', due: '2026-08-18' })],
+      BOARD,
+      ME,
+      TODAY,
+    )
+
+    expect(todaysWorkCount(work)).toBe(0)
+  })
+
+  it('keeps a blocked card, because that is the part worth knowing', () => {
+    // Blocked reads like hold and is not — the work is still wanted today and
+    // something is in the way, which is the one thing worth being told.
+    const work = todaysWork(
+      [card('A-1', { status: 'blocked', due: '2026-09-01' }), card('A-2', { status: 'blocked' })],
       BOARD,
       ME,
       TODAY,
     )
 
     expect(refs(work.overdue)).toEqual(['A-1'])
-    expect(refs(work.due)).toEqual(['A-2', 'A-3'])
+    expect(refs(work.due)).toEqual(['A-2'])
   })
 
   it('narrows to your own cards when the directory knows who you are', () => {
