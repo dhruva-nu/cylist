@@ -1501,6 +1501,14 @@
   font-weight: 400;
 }
 
+/* A lane whose goal has been achieved or dropped, still drawn because cards
+   are on it. Held back rather than hidden: the cards are live and droppable,
+   the heading over them is not the live work it looks like. */
+.laneSettled .laneName,
+.laneSettled .laneDot {
+  opacity: 0.6;
+}
+
 /* The lane for everything on no goal: an outline rather than a fill, because
    it is the absence of a goal rather than one more of them. */
 .laneHeadLoose {
