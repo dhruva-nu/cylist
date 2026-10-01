@@ -17,9 +17,10 @@ automating one.
 **Your password mints the token.** ``POST /tokens`` needs ``admin``, and a
 person's own session grants everything (``POST /auth/login``). So setup asks
 for the email and password it can prompt for, uses the session to mint a
-``read,write`` token — which is all an agent should ever hold — and revokes
-the session on the way out. Nobody has to hold an ``admin`` token to give an
-agent a narrow one.
+token with the scopes the server names for an agent (``GET /setup``'s
+``agent_scopes``: the board and the vault, never ``admin``), and revokes the
+session on the way out. Nobody has to hold an ``admin`` token to give an agent
+a narrower one.
 
 The token it mints acts as *you*, so the agent on this machine moves cards
 under your name rather than the server's. On a deployment that has no accounts
@@ -124,7 +125,7 @@ def register(subparsers: Any) -> None:
         "setup",
         help="Set this machine up: token, hooks and the MCP server, in one command.",
         description=(
-            "Finds the server, mints a read,write token for this machine, stores it "
+            "Finds the server, mints an agent token for this machine, stores it "
             "0600, installs Claude Code's lifecycle hooks and the /work command, and "
             "registers the Cylist MCP server. Asks for your email and password once, "
             "unless a working token is already configured. Safe to run again."

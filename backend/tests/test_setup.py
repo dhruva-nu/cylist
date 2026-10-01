@@ -21,7 +21,7 @@ async def test_reports_the_environment_and_the_scopes_an_agent_needs(
     body = (await client.get("/setup")).json()
 
     assert body["environment"] == "test"
-    assert body["agent_scopes"] == ["read", "write"]
+    assert body["agent_scopes"] == ["read", "write", "vault:read", "vault:reveal"]
 
 
 async def test_urls_are_empty_when_none_are_configured(client: AsyncClient) -> None:

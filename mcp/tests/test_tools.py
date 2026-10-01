@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import httpx
@@ -79,10 +80,28 @@ async def test_vault_read_alone_is_not_enough(make_server: Callable[..., MCPServ
     assert "reveal_secret" not in names
 
 
+async def test_vault_writes_are_absent_without_vault_read(server: MCPServer) -> None:
+    """The API wants ``vault:read`` beside ``write`` to put anything in the vault."""
+    names = {tool.name for tool in await server.list_tools()}
+    assert not names & {"add_secret", "update_secret"}
+
+
+async def test_vault_writes_appear_with_write_and_vault_read(
+    make_server: Callable[..., MCPServer],
+) -> None:
+    scoped = make_server(scopes=("read", "write", "vault:read"))
+    names = {tool.name for tool in await scoped.list_tools()}
+    assert {"add_secret", "update_secret"} <= names
+
+    read_only = make_server(scopes=("read", "vault:read"))
+    names = {tool.name for tool in await read_only.list_tools()}
+    assert not names & {"add_secret", "update_secret"}
+
+
 async def test_every_tool_has_a_description_and_documented_arguments(
     make_server: Callable[..., MCPServer],
 ) -> None:
-    scoped = make_server(scopes=("read", "write", "vault:reveal"))
+    scoped = make_server(scopes=("read", "write", "vault:read", "vault:reveal"))
     for tool in await scoped.list_tools():
         assert tool.description, f"{tool.name} has no description"
         assert len(tool.description) > 80, f"{tool.name}'s description is too thin to act on"
@@ -583,6 +602,174 @@ async def test_reveal_secret_refuses_a_branch(make_server: Callable[..., MCPServ
     assert "is a branch" in result.text
 
 
+VAULT_WRITER = ("read", "write", "vault:read")
+
+
+async def test_add_secret_files_it_under_an_existing_branch(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped,
+        "add_secret",
+        project="ATL",
+        path="Logins/Billing/Paddle",
+        value="pdl_do_not_log_me",
+        username="ops@example.com",
+    )
+    assert not result.is_error, result.text
+    assert recorder.count("POST", "/vault/nodes") == 1
+    assert recorder.body("POST", "/vault/nodes") == {
+        "tree_id": fake_api.TREE_ID,
+        "parent_id": fake_api.BILLING_ID,
+        "name": "Paddle",
+        "kind": "secret",
+        "secret": {"value": "pdl_do_not_log_me", "notes": "", "username": "ops@example.com"},
+    }
+    assert result.data["path"] == "Logins/Billing/Paddle"
+    assert result.data["created_branches"] == []
+    assert "pdl_do_not_log_me" not in result.text
+
+
+async def test_add_secret_makes_the_branches_it_is_missing(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped, "add_secret", project="ATL", path="Logins/Staging/Admin", value="hunter2"
+    )
+    assert not result.is_error, result.text
+    posted = [
+        json.loads(request.content)
+        for request in recorder.requests
+        if request.method == "POST" and request.url.path.endswith("/vault/nodes")
+    ]
+    assert [(body["name"], body["kind"]) for body in posted] == [
+        ("Staging", "branch"),
+        ("Admin", "secret"),
+    ]
+    assert posted[0]["parent_id"] is None
+    # The secret goes under the branch just made, by the id the API gave it
+    # (the fake numbers a new node by the length of its name).
+    assert posted[1]["parent_id"] == f"0192f3c4-0007-7000-8000-{len('Staging'):012d}"
+    assert result.data["created_branches"] == ["Logins/Staging"]
+
+
+async def test_add_secret_does_not_take_a_near_miss_for_a_branch(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    """'Bill' is not 'Billing': a write that guessed would file it in the wrong place."""
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(scoped, "add_secret", project="ATL", path="Logins/Bill/Paddle", value="x")
+    assert not result.is_error, result.text
+    assert result.data["created_branches"] == ["Logins/Bill"]
+
+
+async def test_add_secret_refuses_a_path_that_is_taken(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped, "add_secret", project="ATL", path="logins/billing/stripe", value="sk_new"
+    )
+    assert result.is_error
+    assert "'Logins/Billing/Stripe' already exists" in result.text
+    assert "update_secret" in result.text
+    assert recorder.count("POST", "/vault/nodes") == 0
+
+
+async def test_add_secret_refuses_to_file_under_a_secret(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped, "add_secret", project="ATL", path="Logins/Billing/Stripe/Webhook", value="whsec"
+    )
+    assert result.is_error
+    assert "is a secret, so nothing can be filed under it" in result.text
+    assert recorder.count("POST", "/vault/nodes") == 0
+
+
+async def test_add_secret_does_not_make_a_tree(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(scoped, "add_secret", project="ATL", path="Keys/Stripe", value="sk")
+    assert result.is_error
+    assert "No vault tree called 'Keys'" in result.text
+    assert "Logins" in result.text
+    assert recorder.count("POST", "/vault/nodes") == 0
+
+
+async def test_add_secret_checks_sensitivity_before_writing_anything(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped,
+        "add_secret",
+        project="ATL",
+        path="Logins/Staging/Admin",
+        value="x",
+        sensitivity="secret",
+    )
+    assert result.is_error
+    assert "'restricted'" in result.text
+    assert recorder.count("POST", "/vault/nodes") == 0
+
+
+async def test_update_secret_sends_only_what_changes(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped,
+        "update_secret",
+        project="ATL",
+        path="Logins/Billing/Stripe",
+        value="sk_rotated_do_not_log_me",
+        notes="Rotated after the staging test.",
+    )
+    assert not result.is_error, result.text
+    assert recorder.body("PATCH", f"/vault/nodes/{fake_api.STRIPE_ID}") == {
+        "secret": {"value": "sk_rotated_do_not_log_me", "notes": "Rotated after the staging test."}
+    }
+    assert result.data["changed"] == ["notes", "value"]
+    assert "sk_rotated_do_not_log_me" not in result.text
+
+
+async def test_update_secret_needs_something_to_change(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(scoped, "update_secret", project="ATL", path="Logins/Billing/Stripe")
+    assert result.is_error
+    assert "Nothing to change" in result.text
+    assert recorder.count("PATCH", f"/vault/nodes/{fake_api.STRIPE_ID}") == 0
+
+
+async def test_update_secret_refuses_a_branch(make_server: Callable[..., MCPServer]) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped, "update_secret", project="ATL", path="Logins/Billing", notes="Card payments"
+    )
+    assert result.is_error
+    assert "'Logins/Billing' is a branch" in result.text
+
+
+async def test_update_secret_matches_the_whole_name(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    scoped = make_server(scopes=VAULT_WRITER)
+    result = await call(
+        scoped, "update_secret", project="ATL", path="Logins/Billing/Str", value="sk"
+    )
+    assert result.is_error
+    assert "Nothing called 'Str' in Logins/Billing" in result.text
+    assert "Stripe" in result.text
+    assert recorder.count("PATCH", f"/vault/nodes/{fake_api.STRIPE_ID}") == 0
+
+
 # --- Failures --------------------------------------------------------------
 
 
@@ -1014,3 +1201,59 @@ async def test_write_doc_needs_a_title_or_a_doc(server: MCPServer) -> None:
 
     assert result.is_error
     assert "Give the doc a title" in result.text
+
+
+async def test_create_task_takes_several_pull_requests(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """CYLIST-63. An agent that opened a backend pull request and a frontend
+    one names both on the card rather than choosing between them."""
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Stripe webhook idempotency",
+        description="Dedupe on event id.",
+        task_type="bug",
+        pr_refs=["#212", "https://github.com/acme/atlas/pull/219"],
+    )
+    assert not result.is_error
+    assert recorder.body("POST", "/tasks")["pr_refs"] == [
+        "#212",
+        "https://github.com/acme/atlas/pull/219",
+    ]
+
+
+async def test_create_task_without_pull_requests_says_nothing_about_them(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """Omitted rather than sent empty: the card has none, which is not the
+    same request as "take the ones it has off"."""
+    result = await call(
+        server,
+        "create_task",
+        project="ATL",
+        title="Stripe webhook idempotency",
+        description="Dedupe on event id.",
+        task_type="bug",
+    )
+    assert not result.is_error
+    assert "pr_refs" not in recorder.body("POST", "/tasks")
+
+
+async def test_create_subtask_takes_several_pull_requests(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    """A sub-task is work with a reference of its own, so it has its own pull
+    requests too."""
+    result = await call(
+        server,
+        "create_subtask",
+        task="ATL-2",
+        title="Dedupe store",
+        description="Event ids, with a TTL.",
+        task_type="chore",
+        pr_refs=["#44", "#48"],
+    )
+    assert not result.is_error
+    assert recorder.body("POST", "/tasks/ATL-2/subtasks")["pr_refs"] == ["#44", "#48"]

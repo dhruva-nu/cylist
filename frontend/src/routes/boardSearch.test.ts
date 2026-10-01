@@ -15,8 +15,6 @@ import {
   NO_GOAL,
   applySuggestion,
   filterTasks,
-  hidesSetAside,
-  isSetAside,
   parseQuery,
   suggestionsFor,
   tokenize,
@@ -85,7 +83,7 @@ function task(title: string, onGoal: string | null): Task {
     goal_name: onGoal,
     goal_colour: onGoal ? '#3B6FC2' : null,
     jira_ref: null,
-    pr_ref: null,
+    pr_refs: [],
     waiting_on: [],
     comment_count: 0,
     checklist: [],
@@ -174,40 +172,41 @@ describe('its suggestions', () => {
 })
 
 /**
- * The hide, which is the other half of the same danger the goal tag has: a
- * card put away looks exactly like a card that is not there. What is tested
- * here is mostly when it declines to hide — a filter that empties the board in
- * answer to a question about the very cards it hides is the failure worth
- * having a test for.
+ * The status tags, which are the tags a hide answers to.
+ *
+ * `cnl:` narrows the board the way `blk:` and `hld:` do, and is also what
+ * tells the cancelled hide to stand down (see `boardHiding.ts`) — so a board
+ * that parsed it wrong would answer a question about the cancelled cards with
+ * an empty column and no sign that it had.
  */
-describe('hiding the cards set aside', () => {
+describe('the status tags', () => {
   const parsed = (query: string) => parseQuery(tokenize(query))
 
-  it('counts a card on hold and a cancelled one, and nothing else', () => {
-    expect(isSetAside({ ...SEARCH, status: 'hold' })).toBe(true)
-    expect(isSetAside({ ...SEARCH, status: 'cancelled' })).toBe(true)
-    expect(isSetAside({ ...SEARCH, status: 'active' })).toBe(false)
-    expect(isSetAside({ ...SEARCH, status: 'blocked' })).toBe(false)
+  it('reads each one off the query, and only when it is there', () => {
+    expect(parsed('cnl:')).toMatchObject({ blocked: false, hold: false, cancelled: true })
+    expect(parsed('hld:')).toMatchObject({ blocked: false, hold: true, cancelled: false })
+    expect(parsed('blk:')).toMatchObject({ blocked: true, hold: false, cancelled: false })
+    expect(parsed('totals')).toMatchObject({ blocked: false, hold: false, cancelled: false })
   })
 
-  it('is in force when it is on and nothing else asks for those cards', () => {
-    expect(hidesSetAside(true, 'all', parsed(''))).toBe(true)
-    expect(hidesSetAside(true, 'all', parsed('blk: totals'))).toBe(true)
-    expect(hidesSetAside(true, 'active', parsed(''))).toBe(true)
+  it('narrows the board to the cancelled cards', () => {
+    const cancelled = { ...SEARCH, title: 'Dropped work', status: 'cancelled' as const }
+    const tasks = [SEARCH, cancelled]
+    const found = (query: string) =>
+      filterTasks(tasks, parsed(query), [], [ADITI]).map((one) => one.title)
+
+    expect(found('cnl:')).toEqual(['Dropped work'])
+    expect(found('hld:')).toEqual([])
+    expect(found('')).toEqual(['Search filters', 'Dropped work'])
   })
 
-  it('does nothing while it is off', () => {
-    expect(hidesSetAside(false, 'all', parsed(''))).toBe(false)
-    expect(hidesSetAside(false, 'hold', parsed(''))).toBe(false)
-  })
+  it('is ANDed with the free text beside it', () => {
+    const cancelled = { ...SEARCH, title: 'Dropped work', status: 'cancelled' as const }
+    const tasks = [SEARCH, cancelled]
+    const found = (query: string) =>
+      filterTasks(tasks, parsed(query), [], [ADITI]).map((one) => one.title)
 
-  it('stands down when the status filter asks for exactly what it hides', () => {
-    expect(hidesSetAside(true, 'hold', parsed(''))).toBe(false)
-    expect(hidesSetAside(true, 'cancelled', parsed(''))).toBe(false)
-  })
-
-  it('stands down for hld: in the search box', () => {
-    expect(hidesSetAside(true, 'all', parsed('hld:'))).toBe(false)
-    expect(hidesSetAside(true, 'all', parsed('hld: totals'))).toBe(false)
+    expect(found('cnl: dropped')).toEqual(['Dropped work'])
+    expect(found('cnl: filters')).toEqual([])
   })
 })

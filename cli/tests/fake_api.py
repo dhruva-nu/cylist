@@ -184,7 +184,7 @@ def _task(
         "assignee": ADITI,
         "status": status,
         "jira_ref": None,
-        "pr_ref": None,
+        "pr_refs": [],
         "waiting_on": waiting_on or [],
         "comment_count": 0,
         "finished_at": None,

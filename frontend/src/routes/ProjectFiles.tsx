@@ -48,6 +48,7 @@ import {
   cardStyles,
   useAnnouncer,
 } from '../components/ui'
+import { extensionOf, extensionWarning, renameIsAChange, renameProblem } from './fileRename'
 import styles from './ProjectFiles.module.css'
 import { usePermissions } from './usePermissions'
 
@@ -87,11 +88,6 @@ const BADGES: Record<string, string> = {
   gif: 'img',
   svg: 'img',
   webp: 'img',
-}
-
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf('.')
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
 }
 
 function badgeOf(name: string): { kind: string; label: string } {
@@ -280,6 +276,9 @@ export function ProjectFiles() {
   const queryClient = useQueryClient()
 
   const [dialog, setDialog] = useState<'upload' | 'link' | 'folder' | null>(null)
+  // The item being renamed, rather than a fourth `dialog` value: the dialog is
+  // about one row, and it is the row it needs, not the fact that it is open.
+  const [renaming, setRenaming] = useState<FileItem | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const { message, announce } = useAnnouncer()
 
@@ -440,6 +439,7 @@ export function ProjectFiles() {
                   )
               : null
           }
+          onRenameItem={may('files') ? (item) => setRenaming(item) : null}
           onDeleteItem={
             may('files')
               ? (item) =>
@@ -468,6 +468,17 @@ export function ProjectFiles() {
           busy={upload.isPending}
           onUpload={(files, addedBy, level) => upload.mutate({ files, addedBy, level })}
           onClose={() => setDialog(null)}
+        />
+      ) : null}
+
+      {renaming ? (
+        <RenameDialog
+          item={renaming}
+          onDone={async (from, to) => {
+            await refresh()
+            announce(`${from} renamed to ${to}.`)
+          }}
+          onClose={() => setRenaming(null)}
         />
       ) : null}
 
@@ -555,6 +566,7 @@ function FolderContents({
   items,
   onOpenFolder,
   onDeleteFolder,
+  onRenameItem,
   onDeleteItem,
 }: {
   crumbs: string[]
@@ -562,6 +574,7 @@ function FolderContents({
   items: FileItem[]
   onOpenFolder: (folderId: string) => void
   onDeleteFolder: ((folder: Folder) => void) | null
+  onRenameItem: ((item: FileItem) => void) | null
   onDeleteItem: ((item: FileItem) => void) | null
 }) {
   return (
@@ -579,18 +592,22 @@ function FolderContents({
             <span className={styles.hint}>Upload a file, add a link, or make a folder.</span>
           </div>
         ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Source</th>
-                <th>Size</th>
-                <th>Added by</th>
-                <th>Date</th>
-                <th />
+          <table className={styles.table} role="table">
+            {/* The roles are stated because the rows are laid out as grids, and
+                that drops the roles a table would otherwise have carried. */}
+            <thead role="rowgroup">
+              <tr role="row">
+                <th role="columnheader">Name</th>
+                <th role="columnheader">Source</th>
+                <th role="columnheader">Size</th>
+                <th role="columnheader">Added by</th>
+                <th role="columnheader">Date</th>
+                <th role="columnheader">
+                  <span className={styles.offscreen}>Actions</span>
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup">
               {folders.map((folder) => (
                 <FolderRow
                   key={folder.id}
@@ -604,6 +621,7 @@ function FolderContents({
                 <ItemRow
                   key={item.id}
                   item={item}
+                  onRename={onRenameItem ? () => onRenameItem(item) : null}
                   onDelete={onDeleteItem ? () => onDeleteItem(item) : null}
                 />
               ))}
@@ -672,8 +690,8 @@ function FolderRow({
     // The whole row is clickable for the mouse, but a `tr` is not something
     // the keyboard can reach, so the name is a real button and that is what
     // Tab lands on. Both do the same thing.
-    <tr className={styles.folderRow} onClick={() => onOpen(id)}>
-      <td>
+    <tr className={styles.folderRow} role="row" onClick={() => onOpen(id)}>
+      <td role="cell">
         <button
           type="button"
           className={`${styles.name} ${styles.openFolder}`}
@@ -688,11 +706,19 @@ function FolderRow({
           {name}
         </button>
       </td>
-      <td className={styles.muted}>Folder</td>
-      <td className={styles.mono}>—</td>
-      <td className={styles.muted}>—</td>
-      <td className={styles.mono}>—</td>
-      <td>
+      <td className={styles.muted} role="cell">
+        Folder
+      </td>
+      <td className={styles.mono} role="cell">
+        —
+      </td>
+      <td className={styles.muted} role="cell">
+        —
+      </td>
+      <td className={styles.mono} role="cell">
+        —
+      </td>
+      <td role="cell">
         <div className={styles.actions}>
           {onDelete ? (
             <GhostAction
@@ -710,13 +736,21 @@ function FolderRow({
   )
 }
 
-function ItemRow({ item, onDelete }: { item: FileItem; onDelete: (() => void) | null }) {
+function ItemRow({
+  item,
+  onRename,
+  onDelete,
+}: {
+  item: FileItem
+  onRename: (() => void) | null
+  onDelete: (() => void) | null
+}) {
   const isLink = item.kind === 'link'
   const badge = isLink ? { kind: 'link', label: '↗' } : badgeOf(item.name)
 
   return (
-    <tr>
-      <td>
+    <tr role="row">
+      <td role="cell">
         <div className={styles.name}>
           <span className={`${styles.badge} ${styles[badge.kind]}`}>{badge.label}</span>
           <span>
@@ -729,9 +763,13 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: (() => void) | 
           </span>
         </div>
       </td>
-      <td className={styles.muted}>{SOURCE_LABELS[item.source]}</td>
-      <td className={styles.mono}>{formatSize(item.size)}</td>
-      <td>
+      <td className={styles.muted} role="cell">
+        {SOURCE_LABELS[item.source]}
+      </td>
+      <td className={styles.mono} role="cell">
+        {formatSize(item.size)}
+      </td>
+      <td role="cell">
         {item.added_by ? (
           <span className={styles.who}>
             <Avatar name={item.added_by.name} colour={item.added_by.colour} />
@@ -741,8 +779,10 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: (() => void) | 
           <span className={styles.muted}>—</span>
         )}
       </td>
-      <td className={styles.mono}>{formatStamp(item.created_at)}</td>
-      <td>
+      <td className={styles.mono} role="cell">
+        {formatStamp(item.created_at)}
+      </td>
+      <td role="cell">
         <div className={styles.actions}>
           {isLink && item.url ? (
             <a
@@ -762,6 +802,13 @@ function ItemRow({ item, onDelete }: { item: FileItem; onDelete: (() => void) | 
               Download
             </a>
           )}
+          {/* Not a `GhostAction`: that one is red, and this is the action
+              that undoes a bad name rather than one to hesitate over. */}
+          {onRename ? (
+            <Button variant="ghost" small onClick={() => onRename()}>
+              Rename
+            </Button>
+          ) : null}
           {onDelete ? <GhostAction onClick={() => onDelete()}>Delete</GhostAction> : null}
         </div>
       </td>
@@ -843,6 +890,89 @@ function NewFolderDialog({
             value={level}
             onChange={setLevel}
             includeInherit={`Same as ${parentName}`}
+          />
+        </Field>
+      </ModalBody>
+    </Modal>
+  )
+}
+
+/**
+ * Renaming a file or a link.
+ *
+ * An upload arrives named whatever it was called on the machine it came from,
+ * which is how `Screenshot 2026-09-18 at 11.04.22.png` ends up being the name
+ * of the thing everyone is meant to find. The name is the only handle this
+ * screen gives a file — it is what the table sorts by eye, what a `>` tag in
+ * a description carries, and what the download saves as — so it is the one
+ * thing that has to be correctable after the fact.
+ *
+ * The dialog holds itself open on a failure rather than closing and reporting
+ * from the page, because the failure that matters here is the folder already
+ * having something with that name, and the answer to it is to type a
+ * different one while the one you tried is still in the box.
+ */
+function RenameDialog({
+  item,
+  onDone,
+  onClose,
+}: {
+  item: FileItem
+  onDone: (from: string, to: string) => Promise<void>
+  onClose: () => void
+}) {
+  const [name, setName] = useState(item.name)
+
+  const rename = useMutation({
+    mutationFn: () => api.updateItem(item.id, { name: name.trim() }),
+    onSuccess: async (renamed) => {
+      await onDone(item.name, renamed.name)
+      onClose()
+    },
+  })
+
+  const problem = renameProblem(item.name, name)
+  const warning = extensionWarning(item.name, name)
+  const changed = renameIsAChange(item.name, name)
+
+  return (
+    <Modal
+      title={item.kind === 'link' ? 'Rename link' : 'Rename file'}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="go"
+            disabled={rename.isPending || !changed || problem !== null}
+            onClick={() => rename.mutate()}
+          >
+            {rename.isPending ? 'Renaming…' : 'Rename'}
+          </Button>
+        </>
+      }
+    >
+      <ModalBody>
+        {rename.error ? <ErrorBanner>{rename.error.message}</ErrorBanner> : null}
+        <Field
+          label="Name"
+          required
+          hint={
+            problem ??
+            warning ??
+            'The bytes, who added it and where it sits are unchanged. A > tag already written with the old name stops matching it.'
+          }
+        >
+          <input
+            value={name}
+            autoFocus
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter is what a one-field dialog is for.
+              if (event.key === 'Enter' && changed && !problem && !rename.isPending) {
+                rename.mutate()
+              }
+            }}
           />
         </Field>
       </ModalBody>

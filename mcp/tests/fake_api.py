@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -124,7 +124,7 @@ TASK = {
     "assignee": ADITI,
     "status": "active",
     "jira_ref": None,
-    "pr_ref": None,
+    "pr_refs": [],
     "waiting_on": [],
     "comment_count": 0,
     "checklist": [],
@@ -663,6 +663,44 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
     if path == f"/folders/{NESTED_ID}/links":
         body = json.loads(request.content)
         return httpx.Response(201, json={**ITEM, "name": body["name"], "url": body["url"]})
+
+    if path == "/vault/nodes" and request.method == "POST":
+        body = json.loads(request.content)
+        secret = body.get("secret")
+        made = {
+            "id": f"0192f3c4-0007-7000-8000-{len(body['name']):012d}",
+            "tree_id": body["tree_id"],
+            "parent_id": body.get("parent_id"),
+            "name": body["name"],
+            "kind": body["kind"],
+            "position": 0,
+            "sensitivity": body.get("sensitivity") or "internal",
+            "created_at": "2026-02-12T09:00:00Z",
+            "updated_at": "2026-02-12T09:00:00Z",
+            # As the API does: the metadata back, never the value.
+            "secret": (
+                None
+                if secret is None
+                else {
+                    "username": secret.get("username"),
+                    "url": secret.get("url"),
+                    "notes": secret.get("notes", ""),
+                    "key_version": 1,
+                    "updated_at": "2026-02-12T09:00:00Z",
+                }
+            ),
+            "children": [],
+        }
+        return httpx.Response(201, json=made)
+    if path == f"/vault/nodes/{STRIPE_ID}" and request.method == "PATCH":
+        body = json.loads(request.content)
+        billing = cast(list[dict[str, Any]], VAULT_TREE_DETAIL["nodes"])[0]
+        stripe = cast(list[dict[str, Any]], billing["children"])[0]
+        secret = {**stripe["secret"], **body.get("secret", {})}
+        secret.pop("value", None)
+        return httpx.Response(
+            200, json={**stripe, "name": body.get("name", stripe["name"]), "secret": secret}
+        )
 
     if path.endswith("/vault/trees"):
         return httpx.Response(200, json=VAULT_TREES)

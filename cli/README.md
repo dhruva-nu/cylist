@@ -50,8 +50,8 @@ cylist setup
 ```
 
 It finds
-the server, asks for your email and password **once**, mints a `read,write` token
-named after this machine, stores it `0600`, installs Claude Code's lifecycle
+the server, asks for your email and password **once**, mints an agent token
+(the scopes the server names: the board and the vault) named after this machine, stores it `0600`, installs Claude Code's lifecycle
 hooks and the `/work` command, and registers the Cylist MCP server. Run it
 again after a reinstall and it re-points everything at where things are now —
 without asking for the password, because a token that already works is kept.

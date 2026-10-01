@@ -309,8 +309,9 @@ claude mcp add --transport http --scope user cylist https://dnu-home-1.tail222f4
 ```
 
 It is the same line in PowerShell. It needs no CLI, no uv and no Python, and
-because production is funnelled it works off the tailnet too. The token is
-`read,write`, acts as whoever pressed the button, and is shown once.
+because production is funnelled it works off the tailnet too. The token carries the scopes
+`GET /setup` names for an agent — `read`, `write`, `vault:read`,
+`vault:reveal` — acts as whoever pressed the button, and is shown once.
 [`mcp/README.md`](mcp/README.md) has the details.
 
 **To also put that machine's sessions on the board**, which is what the CLI's
@@ -334,8 +335,8 @@ Both install [uv](https://docs.astral.sh/uv/) if it is missing, install the
 needs `sudo` or an administrator. From a clone, `make agent` is the same thing
 against your working tree.
 
-`cylist setup` finds the server, asks for your email and password once, mints a
-`read,write` token for this machine — one that acts as *you*, so the board says
+`cylist setup` finds the server, asks for your email and password once, mints an
+agent token (the board and the vault) for this machine — one that acts as *you*, so the board says
 whose agent moved a card — stores it `0600`, installs Claude Code's
 lifecycle hooks and `/work`, and registers the MCP server — installing it
 first if this machine has no copy. It is safe to run again, and it stores
@@ -415,7 +416,8 @@ folder and the `cylist skills pull` line to install it — or the files to write
 itself where the CLI is not installed.
 
 The MCP server in `mcp/` exposes the same surface to Claude Code and other agents.
-It registers `reveal_secret` **only** when its token carries `vault:reveal`, so an
+It registers `reveal_secret` **only** when its token carries `vault:reveal`, and
+`add_secret` / `update_secret` only with `write` and `vault:read`, so an
 agent is never offered a tool that will always fail. It reads the same 0600 file
 the CLI does, so the registration Claude Code holds contains no credential at
 all — see `mcp/README.md`.

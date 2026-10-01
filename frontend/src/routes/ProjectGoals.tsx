@@ -17,7 +17,12 @@ import { Link, useParams } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type FiledItem, type Goal, type Person } from '../api/client'
 import { GoalDialog } from '../components/GoalDialog'
-import { GOAL_STATUS_LABELS, GoalProgressBar, GoalTargetMark } from '../components/GoalMarks'
+import {
+  GOAL_STATUS_LABELS,
+  GoalProgressBar,
+  GoalStatusPill,
+  GoalTargetMark,
+} from '../components/GoalMarks'
 import { useProjectFiles } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
 import {
@@ -415,11 +420,7 @@ function GoalCard({
     >
       <div className={styles.goalHead}>
         <span className={styles.reference}>{goal.reference}</span>
-        {goal.status === 'open' ? null : (
-          <span className={`${styles.pill} ${styles[goal.status]}`}>
-            {GOAL_STATUS_LABELS[goal.status]}
-          </span>
-        )}
+        <GoalStatusPill status={goal.status} />
         <GoalTargetMark goal={goal} />
       </div>
 

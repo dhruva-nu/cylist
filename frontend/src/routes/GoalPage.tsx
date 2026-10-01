@@ -27,8 +27,9 @@ import {
   type Person,
   type Task,
 } from '../api/client'
-import { GOAL_STATUS_LABELS, GoalProgressBar, GoalTargetMark } from '../components/GoalMarks'
+import { GoalProgressBar, GoalStatusPill, GoalTargetMark } from '../components/GoalMarks'
 import { GoalDialog } from '../components/GoalDialog'
+import { goalClosure, type GoalClosure } from '../components/goalClose'
 import { useProjectFiles } from '../components/projectFiles'
 import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
@@ -46,9 +47,11 @@ import {
   useAnnouncer,
 } from '../components/ui'
 import styles from './GoalPage.module.css'
+import { usePermissions } from './usePermissions'
 
 export function GoalPage() {
   const { projectKey, goalRef } = useParams({ from: '/p/$projectKey/goals/$goalRef' })
+  const may = usePermissions(projectKey)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { message, announce } = useAnnouncer()
@@ -98,6 +101,26 @@ export function GoalPage() {
     },
   })
 
+  /**
+   * Closing the goal, and opening it again.
+   *
+   * Only the status is sent: a PATCH is a partial edit, and a form's worth of
+   * fields posted back alongside it would make a button that closes a goal
+   * also a button that saves whatever the goal looked like when the page
+   * loaded — which is how a rename made in another tab gets undone by someone
+   * ticking a goal off.
+   */
+  const close = useMutation({
+    mutationFn: async (closure: GoalClosure) => {
+      await api.updateGoal(goalRef, { status: closure.next })
+      return closure
+    },
+    onSuccess: async (closure) => {
+      await refresh()
+      announce(closure.announcement)
+    },
+  })
+
   if (goal.isPending || board.isPending) return <EmptyState>Loading the goal…</EmptyState>
   if (goal.error) return <ErrorBanner>{goal.error.message}</ErrorBanner>
   if (board.error) return <ErrorBanner>{board.error.message}</ErrorBanner>
@@ -105,6 +128,7 @@ export function GoalPage() {
   const goalDetail = goal.data
   const columns = board.data.columns
   const memberList = members.data?.members ?? []
+  const closure = goalClosure(goalDetail)
 
   const searchWord = searchText.trim().toLowerCase()
   const matchesSearch = (task: Task) =>
@@ -134,11 +158,7 @@ export function GoalPage() {
               aria-hidden="true"
             />
             {goalDetail.reference}
-            {goalDetail.status === 'open' ? null : (
-              <span className={`${styles.pill} ${styles[goalDetail.status]}`}>
-                {GOAL_STATUS_LABELS[goalDetail.status]}
-              </span>
-            )}
+            <GoalStatusPill status={goalDetail.status} className={styles.pill} />
           </Eyebrow>
         }
         title={goalDetail.name}
@@ -155,6 +175,16 @@ export function GoalPage() {
               On the board
             </Link>
             <Button onClick={() => setLinking(true)}>+ Link cards</Button>
+            {/* Not drawn for a role that is not allowed goals, as on the goals
+                page: a button that always refuses is worse than one that is
+                not there. */}
+            {may('goals') ? (
+              <CloseGoalButton
+                closure={closure}
+                pending={close.isPending}
+                onClose={() => close.mutate(closure)}
+              />
+            ) : null}
             <Button variant="go" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -164,13 +194,23 @@ export function GoalPage() {
 
       <LiveRegion message={message} />
       {unlink.error ? <ErrorBanner>{unlink.error.message}</ErrorBanner> : null}
+      {/* The button holds itself shut over open cards, so this is for what the
+          page could not know: a card finished in another tab, or a role the
+          server turned down. Either way the server's own sentence is the one
+          worth showing — it names the cards. */}
+      {close.error ? <ErrorBanner>{close.error.message}</ErrorBanner> : null}
 
       {/* The goal down one side, its cards down the other. The aside comes
           first in the source and is placed on the right by the grid, so that
           on a narrow window — where there is only one column — what the goal
           is still arrives before the list of what is on it. */}
       <div className={styles.detail}>
-        <GoalAside goal={goalDetail} members={memberList} files={files} />
+        <GoalAside
+          goal={goalDetail}
+          refusal={may('goals') ? closure.refusal : null}
+          members={memberList}
+          files={files}
+        />
 
         <div className={styles.list}>
           {goalDetail.tasks.length === 0 ? (
@@ -275,16 +315,65 @@ export function GoalPage() {
   )
 }
 
+/** Where the reason an open goal cannot be closed yet is written out in full. */
+const REFUSAL_ID = 'goal-close-refusal'
+
+/**
+ * The one button that ends a goal, and the one that starts it again.
+ *
+ * It says what it will do rather than naming a status — "Mark achieved", not
+ * "Achieved" — because it is a verb being pressed, not a value being set; the
+ * dropdown on the form is where a status is set, and this is the shortcut past
+ * it for the one change anybody makes twice a year per goal.
+ *
+ * Over open cards it is held shut rather than left to be refused by the
+ * server, and the sentence saying which cards is in the aside beside the
+ * counts it is about — the button points at it, so a reader on a screen reader
+ * is told why the moment they reach the button rather than after pressing it.
+ */
+function CloseGoalButton({
+  closure,
+  pending,
+  onClose,
+}: {
+  closure: GoalClosure
+  pending: boolean
+  onClose: () => void
+}) {
+  const held = closure.refusal !== null
+
+  return (
+    <Button
+      disabled={pending}
+      // aria-disabled rather than disabled while it is held, as on
+      // `AddColumnButton`: this is a button whose job at that moment is to say
+      // why it will not close the goal, and a disabled button cannot be focused
+      // to read it. Greying itself is the Button's own — see `[aria-disabled]`.
+      aria-disabled={held}
+      title={closure.refusal ?? closure.description}
+      aria-describedby={held ? REFUSAL_ID : undefined}
+      onClick={() => {
+        if (!held) onClose()
+      }}
+    >
+      {pending ? 'Saving…' : closure.label}
+    </Button>
+  )
+}
+
 /**
  * The goal itself, down the side of its page: how far along it is, who owns
  * it, when it is wanted, and what it is.
  */
 function GoalAside({
   goal,
+  refusal,
   members,
   files,
 }: {
   goal: GoalDetail
+  /** Why it cannot be closed yet, written under the counts it is counted from. */
+  refusal: string | null
   /** Only to draw the description's `@` tags as tags. */
   members: Person[]
   /** Likewise its `>` tags, drawn as links to the files. */
@@ -304,6 +393,11 @@ function GoalAside({
           {onHold ? <Stat label="On hold" value={onHold} tone="hold" /> : null}
           {cancelled ? <Stat label="Cancelled" value={cancelled} /> : null}
         </div>
+        {refusal ? (
+          <p id={REFUSAL_ID} className={styles.refusal}>
+            {refusal}
+          </p>
+        ) : null}
         <div className={styles.facts}>
           <div className={styles.owner}>
             <Avatar name={goal.owner.name} colour={goal.owner.colour} />

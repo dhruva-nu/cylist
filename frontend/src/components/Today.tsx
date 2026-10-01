@@ -289,10 +289,10 @@ function TodayRow({
                 <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
               </span>
             ) : null}
-            {/* Blocked and on hold are in this list on purpose — a blocked
-                card that was wanted yesterday is the most useful thing here —
-                so each says which it is rather than sitting among the
-                actionable ones looking like one of them. */}
+            {/* Blocked is in this list on purpose — a blocked card that was
+                wanted yesterday is the most useful thing here — so it says so
+                rather than sitting among the actionable ones looking like one
+                of them. Cancelled and on hold never reach a row. */}
             {task.status === 'active' ? null : (
               <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
                 {STATUS_LABELS[task.status]}

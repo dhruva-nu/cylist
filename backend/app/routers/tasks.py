@@ -152,7 +152,7 @@ def _task_read(
         goal_name=task.goal.name if task.goal else None,
         goal_colour=task.goal.colour if task.goal else None,
         jira_ref=task.jira_ref,
-        pr_ref=task.pr_ref,
+        pr_refs=list(task.pr_refs),
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
         comment_count=comment_count,
         checklist=[_checklist_item_read(item) for item in task.checklist],

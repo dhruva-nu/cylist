@@ -1174,6 +1174,52 @@
   height: 10px;
 }
 
+/* The line at the foot of a column that lets its on-hold cards out.
+
+   Quiet on purpose: it is the last thing in the column and it is about work
+   that is not moving, so it reads at the weight of a caption until you go
+   looking for it, and takes the hold tone only on hover — the colour is the
+   answer to "what is this about", which is a question you ask with the
+   pointer already on it.
+
+   Full width and left-aligned so it lines up with the cards above rather than
+   floating in the middle of the column, and separated by a hairline: without
+   one it reads as another card in the stack, which is exactly what it is not. */
+.holdFoot {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  margin: 0 12px;
+  padding: 8px 0 10px;
+  border: 0;
+  border-top: 1px solid var(--line-2);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.holdFoot:hover {
+  color: var(--hold);
+}
+
+/* The sign, sized to be the thing you aim at. Tabular so + and − occupy the
+   same width and the words beside them do not shift as it opens and shuts. */
+.holdFoot > span {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* A column being dropped into turns brand-soft, where --ink-3 goes quiet —
+   the same correction .addTask makes, for the same reason. */
+.over .holdFoot {
+  color: var(--brand-ink);
+}
+
 /* The quick filters: a drawer of two selects, and the button that opens it —
    see `QuickFilters`. The button sits last, so the drawer has only the button
    itself to push as it grows, rather than reflowing every other tool beside
@@ -1453,6 +1499,14 @@
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 400;
+}
+
+/* A lane whose goal has been achieved or dropped, still drawn because cards
+   are on it. Held back rather than hidden: the cards are live and droppable,
+   the heading over them is not the live work it looks like. */
+.laneSettled .laneName,
+.laneSettled .laneDot {
+  opacity: 0.6;
 }
 
 /* The lane for everything on no goal: an outline rather than a fill, because
