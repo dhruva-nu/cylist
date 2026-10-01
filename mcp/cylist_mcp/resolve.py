@@ -151,6 +151,81 @@ async def vault_node(client: Api, project_ref: str, path: str) -> tuple[JsonDict
     return tree, node
 
 
+def vault_segments(path: str) -> list[str]:
+    """``Logins/Billing/Stripe`` as its parts: a tree, then at least one node."""
+    segments = [segment.strip() for segment in path.split("/") if segment.strip()]
+    if len(segments) < 2:
+        raise CylistError(
+            f"{path!r} needs a tree and at least one node, e.g. 'Logins/Stripe'.",
+            code="not_found",
+        )
+    return segments
+
+
+def named_exactly(candidates: Sequence[JsonDict], name: str) -> JsonDict | None:
+    """The candidate whose name is ``name``, ignoring case — never a near miss.
+
+    :func:`pick` is right for finding something to read. It is wrong for
+    deciding what to write: a prefix match would file a new secret under
+    "Billing-old" when "Billing" was meant, or overwrite "Stripe-test" when the
+    caller asked for "Stripe". So the vault's writes match whole names only.
+    """
+    wanted = name.strip().casefold()
+    for item in candidates:
+        if str(item.get("name", "")).strip().casefold() == wanted:
+            return item
+    return None
+
+
+async def vault_tree_exactly(client: Api, project_ref: str, name: str) -> JsonDict:
+    """A vault tree with its nodes, by its whole name.
+
+    Trees are not made here. They are the vault's top-level shape, which
+    people choose in the Vault tab, so a tree that does not exist is an error
+    naming the ones that do rather than a new tree.
+    """
+    trees = list(await client.get(f"/projects/{project_ref}/vault/trees"))
+    summary = named_exactly(trees, name)
+    if summary is None:
+        known = [str(tree.get("name", "")) for tree in trees]
+        raise CylistError(
+            f"No vault tree called {name!r} in {project_ref}. "
+            f"These exist: {', '.join(known) or 'none'}. Trees are made in the Vault tab.",
+            code="not_found",
+            details={"known": known},
+        )
+    tree: JsonDict = await client.get(f"/vault/trees/{summary['id']}")
+    return tree
+
+
+async def vault_node_exactly(
+    client: Api, project_ref: str, path: str
+) -> tuple[JsonDict, JsonDict, str]:
+    """Resolve a vault path for a write: its tree, its node, and the path as stored."""
+    segments = vault_segments(path)
+    tree = await vault_tree_exactly(client, project_ref, segments[0])
+    level: list[JsonDict] = list(tree.get("nodes", []))
+    walked = [str(tree.get("name", segments[0]))]
+    node: JsonDict = {}
+
+    for segment in segments[1:]:
+        found = named_exactly(level, segment)
+        if found is None:
+            known = [str(item.get("name", "")) for item in level]
+            raise CylistError(
+                f"Nothing called {segment!r} in {'/'.join(walked)}. "
+                f"These exist: {', '.join(known) or 'none'}.",
+                code="not_found",
+                details={"known": known},
+            )
+        node = found
+        walked.append(str(node.get("name", segment)))
+        children = node.get("children", [])
+        level = children if isinstance(children, list) else []
+
+    return tree, node, "/".join(walked)
+
+
 def doc_topics(tree: JsonDict) -> list[JsonDict]:
     """Every topic in a docs tree, named as ``Engineering / MCP``.
 
