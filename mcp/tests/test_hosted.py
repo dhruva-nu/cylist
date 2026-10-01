@@ -19,7 +19,7 @@ from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, TextContent
 
-from cylist_mcp.hosted import HostedMcp
+from cylist_mcp.hosted import TOOL_SETS, HostedMcp, tool_set
 from tests import fake_api
 
 URL = "http://cylist.test/mcp"
@@ -48,7 +48,12 @@ def hosted(recorder: fake_api.Recorder) -> HostedMcp:
     return HostedMcp(
         _api(
             recorder,
-            {"cyl_board": ["read", "write"], "cyl_vault": ["read", "write", "vault:reveal"]},
+            {
+                "cyl_board": ["read", "write"],
+                "cyl_vault": ["read", "write", "vault:reveal"],
+                "cyl_agent": ["read", "write", "vault:read", "vault:reveal"],
+                "cyl_filer": ["read", "write", "vault:read"],
+            },
         )
     )
 
@@ -134,6 +139,39 @@ async def test_reveal_secret_is_offered_only_to_a_token_that_can_use_it(
     assert "list_projects" in board
     assert "reveal_secret" not in board
     assert "reveal_secret" in vault
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_the_vault_writes_are_offered_only_with_write_and_vault_read(
+    hosted: HostedMcp, mode: str
+) -> None:
+    """The connection line's token is the one this has to get right (CYLIST-61)."""
+
+    async def names(token: str) -> set[str]:
+        async with (
+            _http(hosted, token) as http,
+            Client(streamable_http_client(URL, http_client=http), mode=mode) as client,
+        ):
+            return {tool.name for tool in (await client.list_tools()).tools}
+
+    writes = {"add_secret", "update_secret"}
+    async with hosted.run():
+        board = await names("cyl_board")
+        reveal_only = await names("cyl_vault")
+        agent = await names("cyl_agent")
+        filer = await names("cyl_filer")
+
+    assert not board & writes
+    assert not reveal_only & writes
+    assert writes <= agent and "reveal_secret" in agent
+    assert writes <= filer and "reveal_secret" not in filer
+
+
+def test_every_token_lands_on_one_of_the_tool_sets() -> None:
+    every = ["read", "write", "vault:read", "vault:reveal", "admin"]
+    for mask in range(1 << len(every)):
+        scopes = frozenset(scope for bit, scope in enumerate(every) if mask & (1 << bit))
+        assert tool_set(scopes) in TOOL_SETS
 
 
 async def test_two_callers_at_once_each_get_their_own_token(

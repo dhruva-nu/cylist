@@ -16,10 +16,11 @@ itself, in-process). So a hosted tool can do exactly what that token can do
 over plain HTTP and nothing more: the API's own scope checks stay the only
 ones, and the activity feed names whoever minted the token, as it does now.
 
-**``reveal_secret`` still exists only for a token that can use it.** One
-process serves every token here, so the choice is made per request rather
-than at startup: there are two servers, one with the tool and one without,
-and each request goes to the one its token's scopes select.
+**A scoped tool still exists only for a token that can use it.** One process
+serves every token here, so the choice is made per request rather than at
+startup: there is one server for each combination of the scopes that decide
+which tools exist (``vault:reveal``, and ``write`` with ``vault:read`` for the
+vault's writes), and each request goes to the one its token's scopes select.
 
 **Stateless.** Each POST is answered on its own and nothing is kept between
 them, so there are no sessions to leak, expire or lose to a restart — which
@@ -48,10 +49,32 @@ from starlette.types import Receive, Scope, Send
 
 from cylist_mcp.client import ApiClient
 from cylist_mcp.errors import CylistError
-from cylist_mcp.server import VAULT_REVEAL, build_server
+from cylist_mcp.server import VAULT_REVEAL, VAULT_WRITE, build_server
 
 _caller: ContextVar[ApiClient] = ContextVar("cylist_mcp_caller")
 """The client carrying the token of the request being served."""
+
+TOOL_SETS: tuple[frozenset[str], ...] = (
+    frozenset(),
+    VAULT_WRITE,
+    frozenset({VAULT_REVEAL}),
+    VAULT_WRITE | {VAULT_REVEAL},
+)
+"""Every distinct set of tools :func:`build_server` can register.
+
+Scopes outside these change nothing about which tools exist — the API checks
+them — so four servers cover every token there is.
+"""
+
+
+def tool_set(scopes: frozenset[str]) -> frozenset[str]:
+    """Which of :data:`TOOL_SETS` a token holding ``scopes`` is served."""
+    held: set[str] = set()
+    if scopes >= VAULT_WRITE:
+        held |= VAULT_WRITE
+    if VAULT_REVEAL in scopes:
+        held.add(VAULT_REVEAL)
+    return frozenset(held)
 
 
 class _Caller:
@@ -100,21 +123,17 @@ class HostedMcp:
         self._caller = _Caller()
 
     # Built on first use rather than here. Building one registers every tool,
-    # which costs a quarter of a second for the pair, and a host builds this
+    # which costs about an eighth of a second each, and a host builds this
     # whenever it builds an app — the backend's test suite builds one or two
     # per test, and almost none of them ever serve /mcp.
     @cached_property
-    def _without_reveal(self) -> StreamableHTTPSessionManager:
-        return _manager(self._caller, frozenset())
-
-    @cached_property
-    def _with_reveal(self) -> StreamableHTTPSessionManager:
-        return _manager(self._caller, frozenset({VAULT_REVEAL}))
+    def _managers(self) -> dict[frozenset[str], StreamableHTTPSessionManager]:
+        return {tools: _manager(self._caller, tools) for tools in TOOL_SETS}
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
-            for manager in (self._without_reveal, self._with_reveal):
+            for manager in self._managers.values():
                 await stack.enter_async_context(manager.run())
             yield
 
@@ -153,7 +172,7 @@ class HostedMcp:
                 return
 
             scopes = frozenset(str(scope) for scope in identity.get("scopes", []))
-            manager = self._with_reveal if VAULT_REVEAL in scopes else self._without_reveal
+            manager = self._managers[tool_set(scopes)]
             caller_reset = _caller.set(client)
             try:
                 await manager.handle_request(scope, receive, send)

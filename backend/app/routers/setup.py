@@ -29,8 +29,14 @@ from app.services import people
 
 router = APIRouter(tags=["setup"])
 
-AGENT_SCOPES = ["read", "write"]
-"""What an agent that runs a board needs, and the most it should be given.
+AGENT_SCOPES = ["read", "write", "vault:read", "vault:reveal"]
+"""What an agent that runs a board is given: the board, and the vault.
+
+An agent files and reads the credentials its work needs — the staging login
+it tests with, the key it has just rotated — so it holds the vault scopes too
+(CYLIST-61). ``vault:reveal`` is not a free pass: every reveal is written to
+the audit feed, and the project's role for the token's owner must still allow
+``vault_reveal`` before a single secret is decrypted.
 
 Returned so that whatever mints a token for one does not have to hold its own
 opinion about this, and so that widening it is a change in one place.
