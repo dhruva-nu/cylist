@@ -143,6 +143,14 @@ to act on. Any other status means the docs do not know yet: find it in the
 code, then straight away `place_doc` what you found and make the edits it
 plans with `write_doc`, so the next agent to ask is answered — short,
 factual sentences, not a progress report.
+
+Writing the code is not finishing the card. Finish it by raising a pull
+request whose body shows the work running: a screenshot of every change
+that has a screen, and the checks you ran with their result. Then
+`add_comment` the pull request's link on the card and `move_task` it to the
+column the board keeps for work that is raised and waiting to be deployed —
+`get_project` names the columns, and on most boards it is `Dev`. If the
+work cannot be raised, leave the card where it is and say why.
 """
 
 BRIEFED_STARTS = frozenset({"startup", "clear", "compact"})
@@ -168,7 +176,13 @@ def working_brief(ref: str) -> str:
         "status means the docs do not know yet: find it in the code, then straight "
         "away place_doc what you found and make the edits it plans with write_doc, "
         "so the next agent to ask is answered — short, factual sentences, not a "
-        "progress report."
+        "progress report. Writing the code is not finishing the card: raise a pull "
+        "request whose body shows the work running — a screenshot of every change "
+        "that has a screen, and the checks you ran with their result — then "
+        f"add_comment its link on {ref} and move_task it to the column the board "
+        "keeps for work that is raised and waiting to be deployed (get_project "
+        "names them; on most boards it is Dev). If the work cannot be raised, "
+        "leave the card where it is and say why."
     )
 
 
