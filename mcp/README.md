@@ -15,8 +15,8 @@ uv sync
 **Hosted — one line, nothing installed.** The Cylist server serves these same
 tools over MCP's streamable HTTP transport at `/mcp` (see
 [`cylist_mcp/hosted.py`](cylist_mcp/hosted.py) and `backend/app/mcp.py`). A
-project's **Agents** page mints a `read,write` token and shows the line with it
-filled in:
+project's **Agents** page mints a token with the scopes `GET /setup` names for
+an agent (below) and shows the line with it filled in:
 
 ```
 claude mcp add --transport http --scope user cylist https://<host>/mcp --header "Authorization: Bearer cyl_…"
@@ -28,7 +28,8 @@ earlier it swallows the name and the address as more headers.
 Each request runs as its own token. The header is checked with `GET /me` before
 any tool runs, and the tools then call the API with that token, in-process, so
 they can do exactly what the token can do over plain HTTP. `reveal_secret` is
-listed only for a token holding `vault:reveal`. A session cookie is not
+listed only for a token holding `vault:reveal`, and `add_secret` /
+`update_secret` only for one holding `write` and `vault:read`. A session cookie is not
 accepted: being signed in to the board in a browser does not let a page drive
 these tools. The server is stateless, so a restart or deploy loses nothing.
 
@@ -88,8 +89,12 @@ curl -sX POST http://localhost:8000/api/v1/tokens \
 
 The response contains the plaintext token exactly once.
 
-**An agent that moves cards wants `read,write` and nothing more.** The scopes
-are separate so that you can decline to hand out the dangerous one:
+**What an agent is given.** `cylist setup` and the Agents page both mint what
+`GET /setup` names as `agent_scopes`: `read`, `write`, `vault:read` and
+`vault:reveal` — the board, and the vault, so an agent can file the credentials
+its work needs and read them back. A reveal is still written to the audit log,
+and the project's role for the token's owner must still allow `vault_reveal`.
+The scopes stay separate so that a token minted by hand can leave the vault out:
 
 | Scope | Lets the agent |
 |---|---|
@@ -99,8 +104,8 @@ are separate so that you can decline to hand out the dangerous one:
 | `vault:reveal` | decrypt a stored credential; every use is written to the audit log |
 | `admin` | mint and revoke tokens |
 
-Give `vault:reveal` only to an agent whose actual job is to use a credential,
-and never give `admin` to an agent at all — with it, a token can widen its own
+An agent that only moves cards can be given `read,write` alone. Never give
+`admin` to an agent at all — with it, a token can widen its own
 authority, which is the one thing scopes exist to prevent.
 
 `reveal_secret` is registered **only** when the configured token carries
@@ -203,6 +208,8 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `read_doc` | one doc's markdown, by id or by path (`Engineering / MCP / learned.md`) |
 | `write_doc` | write a doc, edit one, or add a `- ` line to a topic's `learned.md` with `append`; leave `topic` out and it is filed for you, or refused with the topics to pick |
 | `list_vault` | trees and structure — never a value |
+| `add_secret` | file a credential at `tree/branch/name`, making missing branches — **only with `write` and `vault:read`** |
+| `update_secret` | change a credential's value, username, URL, notes, name or sensitivity — **only with `write` and `vault:read`** |
 | `read_activity` | the audit feed |
 | `day_report` | what was done on a project on one day, with a paste-ready note |
 | `reveal_secret` | decrypt one credential — **only with `vault:reveal`** |

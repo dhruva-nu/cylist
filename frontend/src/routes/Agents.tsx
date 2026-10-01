@@ -38,7 +38,7 @@ import {
   useAnnouncer,
 } from '../components/ui'
 import styles from './Agents.module.css'
-import { MCP_NAME, connectLine } from './connectLine'
+import { MCP_NAME, agentScopes, connectLine } from './connectLine'
 import { usePermissions } from './usePermissions'
 
 export function Agents() {
@@ -103,9 +103,10 @@ function Section({
  * machine installs nothing — no CLI, no uv, no Python. It needs Claude Code
  * and this one line.
  *
- * The token is minted here, `read,write` only, and acts as whoever pressed the
- * button, exactly as `cylist setup` would have made it. It is shown once,
- * because the server never shows it again.
+ * The token is minted here with the scopes `GET /setup` names for an agent —
+ * the board and the vault — and acts as whoever pressed the button, exactly as
+ * `cylist setup` would have made it. It is shown once, because the server never
+ * shows it again.
  */
 function Connect({ announce }: { announce: (message: string) => void }) {
   const [name, setName] = useState('Claude Code')
@@ -113,8 +114,9 @@ function Connect({ announce }: { announce: (message: string) => void }) {
   const [problem, setProblem] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
+  const setup = useQuery({ queryKey: ['setup'], queryFn: api.setup })
   const mint = useMutation({
-    mutationFn: (label: string) => api.createToken(label, ['read', 'write']),
+    mutationFn: (label: string) => api.createToken(label, agentScopes(setup.data)),
     onMutate: () => setProblem(null),
     onSuccess: (token) => {
       setIssued(token)
