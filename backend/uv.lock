@@ -238,7 +238,7 @@ wheels = [
 
 [[package]]
 name = "cylist-backend"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -299,7 +299,7 @@ dev = [
 
 [[package]]
 name = "cylist-mcp"
-version = "0.1.0"
+version = "0.1.1"
 source = { directory = "../mcp" }
 dependencies = [
     { name = "httpx" },

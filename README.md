@@ -53,7 +53,7 @@ you want the board to show while an agent is working on a card.
 ### 1. The MCP tools: one line, nothing installed
 
 This gives Claude Code the board's tools: read and create cards, move them,
-comment, set goals, browse files, and read and write docs.
+comment, set goals, browse files, use the vault, and read and write docs.
 
 1. Open any project's **Agents** page.
 2. Under **Connect Claude Code**, name the machine (for example, "Claude Code on
@@ -70,8 +70,11 @@ comment, set goals, browse files, and read and write docs.
    connected.
 
 The token acts as **you**, so the board shows whose agent did what. It can read
-and change the board but can't reveal vault secrets. To reconnect a machine,
-first run `claude mcp remove cylist --scope user`.
+and change the board, and add, change and read vault secrets. Every reveal is
+logged, and a project's roles decide whether you, and so your agent, may reveal
+anything there. A line made before v0.1.1 only reaches the board; make a new
+one for the vault. To reconnect a machine, first run
+`claude mcp remove cylist --scope user`.
 
 ### 2. The CLI: put your sessions on the board
 
@@ -129,6 +132,9 @@ Once connected, an agent has tools to:
   `set_goal_status`.
 - **Read the project:** `list_people`, `list_files`, `list_vault`,
   `read_activity`, `day_report`.
+- **Use the vault:** `add_secret` files a credential at a path like
+  `Logins/Staging/Admin`, `update_secret` changes or rotates one, and
+  `reveal_secret` reads its value.
 - **Use the docs:** `ask_docs` answers a question from the docs before the
   agent reads the code. When the docs can't answer, the agent writes what it
   found back with `place_doc` and `write_doc`.
