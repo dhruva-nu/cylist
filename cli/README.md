@@ -65,6 +65,7 @@ Minted 'my-laptop agent' with read, write.
 Wrote /home/you/.config/cylist/config.toml (mode 0600 — owner only).
 Claude Code hooks in /home/you/.claude/settings.json: SessionStart, UserPromptSubmit, PostToolUse, Stop, Notification, SessionEnd.
 Wrote /home/you/.claude/commands/work.md — type /work <REF> in a session.
+Wrote /home/you/.claude/commands/cylist-setup.md — type /cylist-setup <KEY> in any repository.
 Registered the 'cylist' MCP server (user scope).
 
 Open a new Claude Code session, then 'cylist work <REF>' or /work <REF>.
@@ -216,6 +217,9 @@ cylist vault add ATL Logins/Billing/Twilio [--username …] [--value-stdin]
 cylist activity [--project ATL] [--entity task] [--limit 20]
 cylist whoami
 
+cylist repo setup ATL [--path PATH] [--dry-run]
+                                       teach this repository's CLAUDE.md to use a board
+
 cylist setup                           token, hooks and MCP, in one command
 cylist work ATL-41 [-- --model opus]   open Claude Code on a card
 cylist hook install                    wire the board up to Claude Code's hooks
@@ -231,9 +235,10 @@ same documents.
 
 `cylist setup` does this along with everything else; `cylist hook install` is
 the same step on its own. Either adds one command — `cylist hook` — to Claude
-Code's user-level `settings.json`, on six lifecycle events, and writes a
-`/work` slash command beside it. It never touches hooks you already have, and running
-it again only points it at wherever the binary is now.
+Code's user-level `settings.json`, on six lifecycle events, and writes the
+`/work` and `/cylist-setup` slash commands beside it. It never touches hooks
+you already have, and running it again only points it at wherever the binary
+is now.
 
 After that, a Claude Code session bound to a card shows up on the board while
 it runs: the card's border pulses while the agent is working, turns amber the
@@ -364,6 +369,61 @@ on Windows too, rather than under `%APPDATA%`. Unidiomatic, and deliberate:
 the MCP server is a separate package that reads the same token file, and two
 platform-dependent path rules that have to agree is a divergence waiting to
 happen. `~/.claude` is already in the same place.
+
+## Setting a repository up to use a board
+
+A machine that has had `cylist setup` run on it can reach every board. What it
+does not know, standing in some other repository, is *which* board that
+repository's work is on or how that project does things. That is one command,
+run from the repository's root:
+
+```
+cylist repo setup ATL
+```
+
+or, inside a Claude Code session, the slash command `cylist hook install`
+wrote for it:
+
+```
+/cylist-setup ATL
+```
+
+It appends a block to the repository's `CLAUDE.md`, so every session opened
+there afterwards starts knowing it. Half of the block is the same everywhere —
+ask the project's docs with `ask_docs` before reading the code and write back
+what they could not answer with `place_doc` and `write_doc`; take a procedure
+from `list_skills` rather than inventing one; take credentials from
+`list_vault` and `reveal_secret` rather than from a config file. The other
+half is read off the board as the command runs: the project's name, its
+columns and what each one means — spelled exactly as `move_task` wants them —
+which doc topics exist and how full they are, and which skills it has. None
+of it is written from memory, which is the point: a paragraph describing a
+board from memory is wrong the week after it is written, and a wrong
+instruction in a `CLAUDE.md` is read by every session afterwards.
+
+```
+$ cylist repo setup ATL
+Created /home/you/atlas/CLAUDE.md with ATL's Cylist block.
+It describes 3 columns, 3 docs and 2 skills, between the
+'<!-- cylist:begin ATL -->' markers. Run it again to refresh it.
+```
+
+Three things it will not do. It will not write anything if the project key is
+not on the server — it says which keys are, and leaves the file closed. It
+will not touch a byte outside its own two marker comments, so your own notes
+are safe and a second project in the same repository gets a second block
+rather than overwriting the first. And it will not duplicate itself: a re-run
+replaces the block it wrote last time, and says `already says this` when the
+board has not moved since.
+
+| Flag | For |
+|---|---|
+| `--path PATH` | a `CLAUDE.md` somewhere other than the repository root |
+| `--dry-run` | print the block on stdout and write nothing |
+
+Line endings are the file's own: a CRLF `CLAUDE.md` stays CRLF and an LF one
+stays LF, on either platform. A file it creates is LF, so the command produces
+the same bytes on Windows as it does on Linux.
 
 ## Names, not ids
 

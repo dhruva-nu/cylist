@@ -186,7 +186,7 @@ def test_a_rejected_token_is_replaced_rather_than_reported(
     assert recorder.count("POST", "/tokens") == 1
 
 
-def test_the_hooks_and_the_work_command_are_installed(
+def test_the_hooks_and_the_slash_commands_are_installed(
     run: Runner, fresh: None, credentials: None
 ) -> None:
     run("setup", "--no-mcp")
@@ -194,6 +194,7 @@ def test_the_hooks_and_the_work_command_are_installed(
     settings = json.loads((Path(hook.claude_config_dir()) / "settings.json").read_text())
     assert set(settings["hooks"]) == set(hook.HOOK_EVENTS)
     assert (hook.claude_config_dir() / "commands" / "work.md").is_file()
+    assert (hook.claude_config_dir() / "commands" / "cylist-setup.md").is_file()
 
 
 def test_the_mcp_server_is_registered_without_a_token_in_it(

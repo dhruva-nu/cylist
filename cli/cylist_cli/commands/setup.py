@@ -701,7 +701,7 @@ def _setup(args: argparse.Namespace, ctx: Context) -> None:
                     "settings": str(hooks.settings_path),
                     "command": hooks.command,
                     "added": hooks.added,
-                    "work_command": str(hooks.work_command),
+                    "commands": [str(command.path) for command in hooks.commands],
                 },
                 "mcp": None
                 if registration is None
@@ -740,7 +740,8 @@ def _report(
     if hooks is not None:
         what = ", ".join(hooks.added) if hooks.added else "nothing new"
         output.echo(f"Claude Code hooks in {hooks.settings_path}: {what}.")
-        output.echo(f"Wrote {hooks.work_command} — type /work <REF> in a session.")
+        for command in hooks.commands:
+            output.echo(f"Wrote {command.path} — {command.hint}.")
     if registration is not None:
         if registration.installed:
             output.echo(f"Installed the MCP server at {registration.argv[0]}.")
