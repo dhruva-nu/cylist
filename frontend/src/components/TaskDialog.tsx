@@ -192,6 +192,7 @@ export function TaskDialog(props: DialogProps) {
   if (loading || error || !members.data) {
     return (
       <Modal
+        wide
         title={taskId ? 'Task' : 'New task'}
         onClose={onClose}
         footer={<Button onClick={onClose}>Close</Button>}
@@ -285,6 +286,7 @@ function TaskDetailView({
 
   return (
     <Modal
+      wide
       title={task.reference}
       onClose={onClose}
       headerActions={editButton}
@@ -1075,6 +1077,10 @@ function TaskForm({
 
   return (
     <Modal
+      // Every state of this dialog takes the same width — loading, reading and
+      // editing — so pressing the pencil swaps the contents without the panel
+      // resizing under the pointer.
+      wide
       // Escape and the backdrop mean "stop editing", which on an existing card
       // is the detail view rather than the board.
       title={formTitle(task, parentRef)}

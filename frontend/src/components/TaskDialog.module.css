@@ -140,8 +140,17 @@
   font-size: 14px;
 }
 
+/* A measure, so that widening the panel does not set a comment to 110
+   characters a line. A bubble is not a `p`, so the frame's `.wrap p` never
+   reached it and this is the only thing holding it.
+
+   80ch rather than the 68ch the description takes: this is somebody talking,
+   a few sentences at 14px, and the long end of a readable measure is right
+   for it. Held to the reading measure it would be a ribbon down the left of a
+   panel half again as wide. */
 .bubble {
   flex: 1;
+  max-width: 80ch;
   padding: 9px 13px;
   border-radius: 12px;
   background: var(--paper-2);
@@ -358,9 +367,29 @@
   gap: 16px;
 }
 
-/* The description is prose somebody typed, newlines and all. */
+/* On a phone the pair is not a pair. Below about 520px of window each half is
+   under 28 characters wide, which is narrower than "Aditi K · Backend
+   engineer" — the name breaks away from the title it belongs to and the two
+   columns read as four unrelated lines. One under the other says the same
+   thing in the same height. */
+@media (max-width: 519px) {
+  .readPair {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+/* The description is prose somebody typed, newlines and all.
+
+   Said here as well as in the frame. `.wrap p` (Shell.module.css) already
+   holds this to 68ch on a card opened from the board, because a dialog is a
+   descendant of the page it opens over however `fixed` it is painted — but a
+   card opened from the sidebar's Today list is not inside `.wrap`, and would
+   otherwise be the one place in the product where a description runs the full
+   width of the panel. */
 .prose {
   margin: 0;
+  max-width: 68ch;
   white-space: pre-wrap;
 }
 
