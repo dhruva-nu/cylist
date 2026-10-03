@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from tests import fake_api
-from tests.conftest import Runner
+from tests.conftest import Runner, posix_modes_only
 
 KIT_FOLDER_PATH = f"/skills/{fake_api.KIT_SKILL_ID}/folder"
 
@@ -331,6 +331,7 @@ def test_push_sends_every_file_at_its_path_inside_the_folder(
     assert ("folder", "", b"release-kit") in sent
 
 
+@posix_modes_only
 def test_push_says_which_files_the_machine_may_run(
     run: Runner, recorder: fake_api.Recorder, skill_dir: Path
 ) -> None:
@@ -380,7 +381,9 @@ def test_push_sends_a_single_file_as_one_file(
     run: Runner, recorder: fake_api.Recorder, tmp_path: Path
 ) -> None:
     one = tmp_path / "board-tidy.md"
-    one.write_text("Move them.\n")
+    # Bytes, not text: write_text translates the newline on Windows, and what
+    # is asserted below is the bytes that went on the wire.
+    one.write_bytes(b"Move them.\n")
 
     result = run("skills", "push", "ATL", str(one))
 

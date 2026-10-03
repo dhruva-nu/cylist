@@ -195,6 +195,16 @@ SKIPPED_DIRECTORIES = {".git", "__pycache__", ".venv", "node_modules"}
 """Never part of a skill, and a ``.git`` pushed by accident is somebody's whole
 history uploaded to a board."""
 
+MODES_ARE_REAL = os.name == "posix"
+"""Whether a file's execute bit means anything on this machine.
+
+NTFS has none, and ``os.access(path, os.X_OK)`` answers True there for every
+file that exists. Asking it on Windows would therefore mark the whole skill
+runnable, and the next ``skills pull`` onto a Linux box would `chmod +x` a
+README. Better to say nothing: a push from Windows leaves the bit to whoever
+pushed from a machine that has one.
+"""
+
 
 def _push(args: argparse.Namespace, ctx: Context) -> None:
     project = _project(args.project)
@@ -230,7 +240,7 @@ def _push_folder(ctx: Context, project: str, source: Path, args: argparse.Namesp
     for path in found:
         inside = f"{folder}/{path.relative_to(source).as_posix()}"
         parts.append(("file", (inside, path.read_bytes(), "application/octet-stream")))
-        if os.access(path, os.X_OK):
+        if MODES_ARE_REAL and os.access(path, os.X_OK):
             executable.append(inside)
 
     fields: dict[str, str | list[str]] = {"folder": folder}
