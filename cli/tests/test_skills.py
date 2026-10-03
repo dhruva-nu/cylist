@@ -281,3 +281,127 @@ def test_pull_says_when_a_running_session_will_not_see_it(run: Runner, repo: Pat
 
     assert "That directory is new" in first.out
     assert "That directory is new" not in second.out
+
+
+# --- push ------------------------------------------------------------------
+
+
+def parts_of(request: httpx.Request) -> list[tuple[str, str, bytes]]:
+    """The multipart body as (field, filename, bytes), filename "" for a text part."""
+    boundary = request.headers["content-type"].split("boundary=")[1].encode()
+    found: list[tuple[str, str, bytes]] = []
+    for chunk in request.content.split(b"--" + boundary)[1:-1]:
+        headers, _, body = chunk.lstrip(b"\r\n").partition(b"\r\n\r\n")
+        disposition = headers.decode().splitlines()[0]
+        field = disposition.split('name="')[1].split('"')[0]
+        filename = (
+            disposition.split('filename="')[1].split('"')[0] if "filename=" in (disposition) else ""
+        )
+        found.append((field, filename, body.removesuffix(b"\r\n")))
+    return found
+
+
+@pytest.fixture
+def skill_dir(tmp_path: Path) -> Path:
+    """A skill on disk: a SKILL.md, a script and something binary."""
+    folder = tmp_path / "release-kit"
+    (folder / "scripts").mkdir(parents=True)
+    (folder / "reference").mkdir()
+    (folder / "SKILL.md").write_bytes(b"---\nname: release-kit\n---\nRun scripts/cut.sh\n")
+    (folder / "scripts" / "cut.sh").write_bytes(b"#!/bin/sh\ngit tag\n")
+    (folder / "scripts" / "cut.sh").chmod(0o755)
+    (folder / "reference" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff")
+    return folder
+
+
+def test_push_sends_every_file_at_its_path_inside_the_folder(
+    run: Runner, recorder: fake_api.Recorder, skill_dir: Path
+) -> None:
+    result = run("skills", "push", "ATL", str(skill_dir))
+
+    assert result.code == 0, result.err
+    sent = parts_of(recorder.sent("POST", "/projects/ATL/skills"))
+    files = [(name, body) for field, name, body in sent if field == "file"]
+    assert [name for name, _ in files] == [
+        "release-kit/SKILL.md",
+        "release-kit/reference/logo.png",
+        "release-kit/scripts/cut.sh",
+    ]
+    assert dict(files)["release-kit/reference/logo.png"] == b"\x89PNG\r\n\x1a\n\x00\xff"
+    assert ("folder", "", b"release-kit") in sent
+
+
+def test_push_says_which_files_the_machine_may_run(
+    run: Runner, recorder: fake_api.Recorder, skill_dir: Path
+) -> None:
+    run("skills", "push", "ATL", str(skill_dir))
+
+    sent = parts_of(recorder.sent("POST", "/projects/ATL/skills"))
+    assert [body for field, _, body in sent if field == "executable"] == [
+        b"release-kit/scripts/cut.sh"
+    ]
+
+
+def test_push_leaves_behind_what_pull_wrote_about_itself(
+    run: Runner, recorder: fake_api.Recorder, skill_dir: Path
+) -> None:
+    (skill_dir / ".cylist-skill.json").write_text('{"skill_id": "x"}')
+    (skill_dir / ".gitignore").write_text(
+        "# Pulled from Cylist by 'cylist skills pull'. The board holds the original.\n*\n"
+    )
+    (skill_dir / ".git").mkdir()
+    (skill_dir / ".git" / "config").write_text("[core]\n")
+
+    run("skills", "push", "ATL", str(skill_dir))
+
+    sent = parts_of(recorder.sent("POST", "/projects/ATL/skills"))
+    assert [name for field, name, _ in sent if field == "file"] == [
+        "release-kit/SKILL.md",
+        "release-kit/reference/logo.png",
+        "release-kit/scripts/cut.sh",
+    ]
+
+
+def test_push_names_the_skill_what_you_ask(
+    run: Runner, recorder: fake_api.Recorder, skill_dir: Path
+) -> None:
+    run(
+        "skills", "push", "ATL", str(skill_dir), "--name", "cut-a-release", "--description", "Ship."
+    )
+
+    sent = parts_of(recorder.sent("POST", "/projects/ATL/skills"))
+    assert ("folder", "", b"cut-a-release") in sent
+    assert ("description", "", b"Ship.") in sent
+    first = next(name for field, name, _ in sent if field == "file")
+    assert first == "cut-a-release/SKILL.md"
+
+
+def test_push_sends_a_single_file_as_one_file(
+    run: Runner, recorder: fake_api.Recorder, tmp_path: Path
+) -> None:
+    one = tmp_path / "board-tidy.md"
+    one.write_text("Move them.\n")
+
+    result = run("skills", "push", "ATL", str(one))
+
+    assert result.code == 0
+    sent = parts_of(recorder.sent("POST", "/projects/ATL/skills"))
+    assert sent == [("file", "board-tidy.md", b"Move them.\n")], "no folder part: it is one file"
+
+
+def test_push_refuses_a_directory_with_no_skill_md(run: Runner, tmp_path: Path) -> None:
+    folder = tmp_path / "not-a-skill"
+    folder.mkdir()
+    (folder / "README.md").write_text("Nothing here.\n")
+
+    result = run("skills", "push", "ATL", str(folder))
+
+    assert result.code == 1
+    assert "SKILL.md" in result.err
+
+
+def test_push_says_when_there_is_nothing_there(run: Runner, tmp_path: Path) -> None:
+    result = run("skills", "push", "ATL", str(tmp_path / "missing"))
+
+    assert result.code == 1
+    assert "nothing at" in result.err

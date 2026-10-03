@@ -29,7 +29,7 @@ merely somewhere else. Two rules keep that honest:
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from time import monotonic
 from types import TracebackType
 from typing import Any, Self
@@ -130,6 +130,21 @@ class Client:
 
     def put(self, path: str, body: JsonDict) -> Any:
         return self._send("PUT", path, json=body)
+
+    def upload(
+        self,
+        path: str,
+        files: Sequence[tuple[str, tuple[str, bytes, str]]],
+        fields: Mapping[str, str | list[str]] | None = None,
+    ) -> Any:
+        """POST ``multipart/form-data`` — several parts, some under one name.
+
+        ``files`` is a list of pairs rather than a mapping because a skill's
+        folder is sent as one ``file`` part per file, and a mapping could hold
+        only the last of them. A ``fields`` value may likewise be a list, which
+        httpx writes as that text part repeated.
+        """
+        return self._send("POST", path, files=list(files), data=dict(fields or {}))
 
     def stream(self, path: str) -> Iterator[bytes]:
         """Download a response body in chunks, without holding it in memory.
