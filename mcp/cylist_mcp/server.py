@@ -996,9 +996,10 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "you can be handed, such as tidying a board or writing a day "
             "report. Returns each one's name, description and size, not its "
             "content; read_skill fetches that, and download_skill gives you one "
-            "to install as a Claude Code skill of your own. Worth calling "
-            "before you improvise a procedure that somebody has already "
-            "written down."
+            "to install as a Claude Code skill of your own. A skill is often a "
+            "whole folder — a SKILL.md beside the scripts and references it "
+            "uses — and is listed as '<folder>.zip'. Worth calling before you "
+            "improvise a procedure that somebody has already written down."
         ),
     )
     async def list_skills(
@@ -1014,8 +1015,9 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         description=(
             "Read one skill's own text, by the name list_skills gave. Skills "
             "are usually markdown: instructions written for you to follow. A "
-            "zipped skill is read as its SKILL.md, with the other files it "
-            "carries listed beside it. "
+            "skill that is a folder — listed as '<folder>.zip' — is read as "
+            "its SKILL.md, with the other files it carries listed beside it; "
+            "download_skill is what gets you those. "
             f"Truncated past {SKILL_MAX_CHARS} characters, which is said in "
             "the result when it happens."
         ),
@@ -1060,7 +1062,9 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             "directory yourself. A running session picks the skill up within "
             "seconds if .claude/skills already existed when it started, and "
             "from the next session otherwise; until then, follow its SKILL.md "
-            "from disk."
+            "from disk. To put a skill the other way, onto the board, run "
+            "`cylist skills push <project> <directory>`: it uploads the whole "
+            "folder in one go and there is no tool for it here."
         ),
     )
     async def download_skill(
