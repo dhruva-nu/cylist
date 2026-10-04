@@ -938,6 +938,25 @@
   box-shadow: 0 0 0 2px var(--card-surface, var(--paper));
 }
 
+/* The owner's disc, made a control: the select sits over it and does the
+   clicking, so the disc itself stays the only thing drawn. */
+.assigneePicker {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.assigneeSelect {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
 /* One dot per sub-task, filled as each is finished.
 
    Round, small and countable, because the stage bar further up the card may be

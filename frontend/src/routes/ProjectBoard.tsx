@@ -504,7 +504,11 @@ function withMoveApplied(task: Task, move: Move, landedGoal: Goal | null | undef
  * card dropped into another goal's lane borrows its name and colour from while
  * the move is in the air.
  */
-function useBoardMutations(projectKey: string, goals: Goal[] | undefined) {
+function useBoardMutations(
+  projectKey: string,
+  goals: Goal[] | undefined,
+  members: Person[] | undefined,
+) {
   const queryClient = useQueryClient()
   const tasksKey = ['tasks', projectKey]
   const boardKey = ['board', projectKey]
@@ -582,6 +586,33 @@ function useBoardMutations(projectKey: string, goals: Goal[] | undefined) {
     onSettled: refresh,
   })
 
+  /**
+   * Handing a card to someone else from the board, without opening it —
+   * optimistic for the same reason `moveSubStatus` is: the badge is the
+   * control, so it has to move the moment it is clicked.
+   */
+  const setAssignee = useMutation<
+    Task,
+    Error,
+    { taskId: string; taskRef: string; assigneeId: string },
+    { previous: Task[] | undefined }
+  >({
+    mutationFn: ({ taskRef, assigneeId }) => api.updateTask(taskRef, { assignee_id: assigneeId }),
+    onMutate: async ({ taskId, assigneeId }) => {
+      await queryClient.cancelQueries({ queryKey: tasksKey })
+      const previous = queryClient.getQueryData<Task[]>(tasksKey)
+      const assignee = (members ?? []).find((person) => person.id === assigneeId)
+      queryClient.setQueryData<Task[]>(tasksKey, (current) =>
+        current?.map((task) => (task.id === taskId && assignee ? { ...task, assignee } : task)),
+      )
+      return { previous }
+    },
+    onError: (_error, _move, context) => {
+      queryClient.setQueryData(tasksKey, context?.previous)
+    },
+    onSettled: refresh,
+  })
+
   const reorderColumns = useMutation<Board, Error, string[], { previous: Board | undefined }>({
     mutationFn: (columnIds) => api.reorderColumns(projectKey, columnIds),
     onMutate: async (columnIds) => {
@@ -603,7 +634,7 @@ function useBoardMutations(projectKey: string, goals: Goal[] | undefined) {
     onSettled: refresh,
   })
 
-  return { refresh, moveTask, moveSubStatus, reorderColumns }
+  return { refresh, moveTask, moveSubStatus, setAssignee, reorderColumns }
 }
 
 /** What the reader has asked the board to narrow itself to. */
@@ -756,9 +787,10 @@ export function ProjectBoard() {
   } = useBoardView(projectKey)
   const { message, announce } = useAnnouncer()
   const { board, tasks, members, templates, goals } = useBoardData(projectKey)
-  const { refresh, moveTask, moveSubStatus, reorderColumns } = useBoardMutations(
+  const { refresh, moveTask, moveSubStatus, setAssignee, reorderColumns } = useBoardMutations(
     projectKey,
     goals.data,
+    members.data?.members,
   )
 
   // A short drag threshold so a card can still be clicked open: without it
@@ -1010,6 +1042,8 @@ export function ProjectBoard() {
   })
 
   const onMoveSubStatus = (taskId: string, index: number) => moveSubStatus.mutate({ taskId, index })
+  const onSetAssignee = (taskId: string, taskRef: string, assigneeId: string) =>
+    setAssignee.mutate({ taskId, taskRef, assigneeId })
 
   return (
     <>
@@ -1119,6 +1153,7 @@ export function ProjectBoard() {
                   {...sharedColumnProps(column)}
                   tasks={byColumn.get(column.id) ?? []}
                   onMoveSubStatus={() => {}}
+                  onSetAssignee={() => {}}
                 />
               ))}
             </div>
@@ -1161,6 +1196,7 @@ export function ProjectBoard() {
                           {...sharedColumnProps(column)}
                           tasks={tasksInLane(key, column.id)}
                           onMoveSubStatus={onMoveSubStatus}
+                          onSetAssignee={onSetAssignee}
                         />
                       ))}
                     </div>
@@ -1177,6 +1213,7 @@ export function ProjectBoard() {
                 {...sharedColumnProps(column)}
                 tasks={byColumn.get(column.id) ?? []}
                 onMoveSubStatus={onMoveSubStatus}
+                onSetAssignee={onSetAssignee}
               />
             ))}
           </div>
@@ -1772,6 +1809,7 @@ function Column({
   onToggleOutcome,
   onOpenTask,
   onMoveSubStatus,
+  onSetAssignee,
   onAddTask,
   onEdit,
   members,
@@ -1801,6 +1839,8 @@ function Column({
   onToggleOutcome: (id: string) => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
+  /** Hand a card to someone else, by their id, from the board itself. */
+  onSetAssignee: (taskId: string, taskRef: string, assigneeId: string) => void
   /**
    * Open the whole form, which is where a card is written. Null for a reader
    * whose role does not allow cards, which is what takes the "+" off the
@@ -1939,6 +1979,7 @@ function Column({
               onToggleOutcome={onToggleOutcome}
               onOpenTask={onOpenTask}
               onMoveSubStatus={onMoveSubStatus}
+              onSetAssignee={onSetAssignee}
             />
           )}
 
@@ -2087,6 +2128,7 @@ function ColumnCards({
   onToggleOutcome,
   onOpenTask,
   onMoveSubStatus,
+  onSetAssignee,
 }: {
   column: BoardColumn
   tasks: Task[]
@@ -2097,6 +2139,7 @@ function ColumnCards({
   onToggleOutcome: (id: string) => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
+  onSetAssignee: (taskId: string, taskRef: string, assigneeId: string) => void
 }) {
   if (!column.outcomes.length) {
     return (
@@ -2105,6 +2148,7 @@ function ColumnCards({
         members={members}
         onOpenTask={onOpenTask}
         onMoveSubStatus={onMoveSubStatus}
+        onSetAssignee={onSetAssignee}
       />
     )
   }
@@ -2127,6 +2171,7 @@ function ColumnCards({
             onToggleCollapse={() => onToggleOutcome(outcomeId)}
             onOpenTask={onOpenTask}
             onMoveSubStatus={onMoveSubStatus}
+            onSetAssignee={onSetAssignee}
           />
         )
       })}
@@ -2140,11 +2185,13 @@ function CardList({
   members,
   onOpenTask,
   onMoveSubStatus,
+  onSetAssignee,
 }: {
   tasks: Task[]
   members: Person[]
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
+  onSetAssignee: (taskId: string, taskRef: string, assigneeId: string) => void
 }) {
   return (
     <div className={styles.cards}>
@@ -2155,6 +2202,7 @@ function CardList({
           members={members}
           onOpen={() => onOpenTask(task.id)}
           onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
+          onSetAssignee={(assigneeId) => onSetAssignee(task.id, task.reference, assigneeId)}
         />
       ))}
     </div>
@@ -2189,6 +2237,7 @@ function OutcomeSection({
   onToggleCollapse,
   onOpenTask,
   onMoveSubStatus,
+  onSetAssignee,
 }: {
   label: string
   dropId: string
@@ -2198,6 +2247,7 @@ function OutcomeSection({
   onToggleCollapse: () => void
   onOpenTask: (taskId: string) => void
   onMoveSubStatus: (taskId: string, index: number) => void
+  onSetAssignee: (taskId: string, taskRef: string, assigneeId: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: dropId })
   const counted = `${tasks.length} ${tasks.length === 1 ? 'card' : 'cards'}`
@@ -2227,6 +2277,7 @@ function OutcomeSection({
           members={members}
           onOpenTask={onOpenTask}
           onMoveSubStatus={onMoveSubStatus}
+          onSetAssignee={onSetAssignee}
         />
       )}
     </section>
@@ -2258,11 +2309,13 @@ function TaskCard({
   members,
   onOpen,
   onMoveSubStatus,
+  onSetAssignee,
 }: {
   task: Task
   members: Person[]
   onOpen: () => void
   onMoveSubStatus: (index: number) => void
+  onSetAssignee: (assigneeId: string) => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
   const agent = agentIndicator(task.agent_session, new Date())
@@ -2317,7 +2370,12 @@ function TaskCard({
         .filter(Boolean)
         .join(' ')}
     >
-      <TaskCardBody task={task} members={members} onMoveSubStatus={onMoveSubStatus} />
+      <TaskCardBody
+        task={task}
+        members={members}
+        onMoveSubStatus={onMoveSubStatus}
+        onSetAssignee={onSetAssignee}
+      />
     </article>
   )
 }
@@ -2362,10 +2420,13 @@ function TaskCardBody({
   task,
   members,
   onMoveSubStatus,
+  onSetAssignee,
 }: {
   task: Task
   members: Person[]
   onMoveSubStatus?: (index: number) => void
+  /** Undefined for the overlay's copy — see `onMoveSubStatus`. */
+  onSetAssignee?: (assigneeId: string) => void
 }) {
   const { owed, stage, tab } = owedDateOf(task)
 
@@ -2405,7 +2466,7 @@ function TaskCardBody({
       <div className={styles.strip}>
         <StripIdentity task={task} owed={owed} stage={stage} dueOnTab={tab !== null} />
         <span className={styles.stripGap} />
-        <StripAccumulated task={task} />
+        <StripAccumulated task={task} members={members} onSetAssignee={onSetAssignee} />
       </div>
     </>
   )
@@ -2531,7 +2592,16 @@ function StripIdentity({
  * has been said, what it is tracked as elsewhere, how far through its parts it
  * is, and who has it.
  */
-function StripAccumulated({ task }: { task: Task }) {
+function StripAccumulated({
+  task,
+  members,
+  onSetAssignee,
+}: {
+  task: Task
+  members: Person[]
+  /** Undefined for the overlay's copy, which draws the owner but cannot hand the card to anyone. */
+  onSetAssignee: ((assigneeId: string) => void) | undefined
+}) {
   return (
     <>
       {task.comment_count ? (
@@ -2575,9 +2645,61 @@ function StripAccumulated({ task }: { task: Task }) {
       {/* Small, like everything else on the line. The owner is still the
           last thing on the card and the only face at full strength, but it
           is no longer a 26px disc anchoring a row of 11px print — which is
-          what made the line read as a second row of chrome. */}
-      <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
+          what made the line read as a second row of chrome.
+
+          A control when the card can offer one: see `AssigneePicker`. The
+          overlay's copy gets the plain disc, same as `onMoveSubStatus`. */}
+      {onSetAssignee ? (
+        <AssigneePicker task={task} members={members} onSetAssignee={onSetAssignee} />
+      ) : (
+        <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
+      )}
     </>
+  )
+}
+
+/**
+ * The owner's badge, made a control: a native select sized over the disc so
+ * clicking it reassigns the card without leaving the board for the dialog —
+ * the same disguise `ProjectSwitcher` wears on the breadcrumb (Shell.tsx).
+ *
+ * Every event the select can fire is stopped here before it reaches the
+ * card underneath: the card is both a drag handle and a button that opens
+ * the task, and a click, a keystroke or a pointer-down left to bubble would
+ * do one of those instead of reassigning anybody — see `SubStatusBar` for
+ * the same guard around the sub-status slider.
+ */
+function AssigneePicker({
+  task,
+  members,
+  onSetAssignee,
+}: {
+  task: Task
+  members: Person[]
+  onSetAssignee: (assigneeId: string) => void
+}) {
+  return (
+    <span className={styles.assigneePicker} onPointerDown={(event) => event.stopPropagation()}>
+      <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
+      <select
+        className={styles.assigneeSelect}
+        aria-label={`Reassign ${task.reference}, now ${task.assignee.name}`}
+        value={task.assignee.id}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        onChange={(event) => {
+          event.stopPropagation()
+          const next = event.target.value
+          if (next !== task.assignee.id) onSetAssignee(next)
+        }}
+      >
+        {members.map((person) => (
+          <option key={person.id} value={person.id}>
+            {person.name}
+          </option>
+        ))}
+      </select>
+    </span>
   )
 }
 
