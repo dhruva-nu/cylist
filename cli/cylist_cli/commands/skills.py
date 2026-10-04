@@ -1,8 +1,11 @@
-"""``cylist skills ls`` and ``cylist skills pull`` — a project's skills, installed.
+"""``cylist skills ls``, ``push`` and ``pull`` — a project's skills, moved.
 
-``list_skills`` and ``read_skill`` let an agent *read* a skill. This puts one
-where Claude Code *loads* it: ``.claude/skills/<folder>/SKILL.md`` at the root
-of the repository you are in, or ``~/.claude/skills/`` with ``--user``.
+``list_skills`` and ``read_skill`` let an agent *read* a skill. ``pull`` puts
+one where Claude Code *loads* it: ``.claude/skills/<folder>/SKILL.md`` at the
+root of the repository you are in, or ``~/.claude/skills/`` with ``--user``.
+``push`` is the way back — a whole skill folder onto the board in one go,
+which is the only way to send one that is more than a single file without
+zipping it by hand first.
 
 When the skill turns up in a session depends on the directory, not on this
 command. Claude Code watches a skills directory that existed when the session
@@ -34,6 +37,14 @@ comes to three rules:
 Replacing a folder is done by writing the new one beside it and swapping the
 two, so an interrupted pull leaves either the old skill or the new one and
 never half of each.
+
+``push`` sends a directory as one ``file`` part per file, each named with its
+path inside the directory, and the server zips what arrives — see
+``backend/app/services/skill_folders.py``. It walks the directory rather than
+zipping here so that the rules about what a skill's folder may hold live in
+one place, on the server, where the web upload is held to them too. What it
+leaves behind is what ``pull`` put there: the ``.cylist-skill.json`` marker
+and the ``.gitignore`` of ``*``, neither of which belongs to the skill.
 """
 
 from __future__ import annotations
@@ -47,6 +58,7 @@ import re
 import shutil
 import stat
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -55,6 +67,11 @@ from cylist_cli import output
 from cylist_cli.commands.hook import REFERENCE, claude_config_dir
 from cylist_cli.context import Context
 from cylist_cli.errors import ApiError, CylistError
+
+SKILL_FILE = "SKILL.md"
+"""The file Claude Code loads a skill from, and so the one a pushed folder
+must have at its root. Checked here as well as on the server, so a mistyped
+path costs a sentence rather than a 422."""
 
 MARKER = ".cylist-skill.json"
 GITIGNORE = ".gitignore"
@@ -79,6 +96,31 @@ def register(subparsers: Any) -> None:
     ls = actions.add_parser("ls", help="List a project's skills.")
     ls.add_argument("project", nargs="?", metavar="PROJECT", help=_PROJECT_HELP)
     ls.set_defaults(handler=_list)
+
+    push = actions.add_parser(
+        "push",
+        help="Upload a skill folder to a project.",
+        description=(
+            "Uploads a directory as one skill, keeping its structure: the SKILL.md "
+            "and every script, reference and asset beside it. The directory's name "
+            "is the skill's unless --name says otherwise, and uploading that name "
+            "again replaces what is there. A single file may be pushed instead, "
+            "and is stored as that file."
+        ),
+    )
+    push.add_argument("project", nargs="?", metavar="PROJECT", help=_PROJECT_HELP)
+    push.add_argument("path", metavar="PATH", help="The skill's directory, or a single file.")
+    push.add_argument(
+        "--name",
+        metavar="NAME",
+        help="Call the skill this instead of the directory's own name.",
+    )
+    push.add_argument(
+        "--description",
+        metavar="TEXT",
+        help="One line on what the skill does, for the listing and its frontmatter.",
+    )
+    push.set_defaults(handler=_push)
 
     pull = actions.add_parser(
         "pull",
@@ -145,6 +187,108 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         ],
         empty=f"{project} has no skills yet. Upload one on its Agents page.",
     )
+
+
+# --- push ------------------------------------------------------------------
+
+SKIPPED_DIRECTORIES = {".git", "__pycache__", ".venv", "node_modules"}
+"""Never part of a skill, and a ``.git`` pushed by accident is somebody's whole
+history uploaded to a board."""
+
+MODES_ARE_REAL = os.name == "posix"
+"""Whether a file's execute bit means anything on this machine.
+
+NTFS has none, and ``os.access(path, os.X_OK)`` answers True there for every
+file that exists. Asking it on Windows would therefore mark the whole skill
+runnable, and the next ``skills pull`` onto a Linux box would `chmod +x` a
+README. Better to say nothing: a push from Windows leaves the bit to whoever
+pushed from a machine that has one.
+"""
+
+
+def _push(args: argparse.Namespace, ctx: Context) -> None:
+    project = _project(args.project)
+    source = Path(args.path).expanduser()
+    if not source.exists():
+        raise CylistError(f"There is nothing at {source}.")
+
+    if source.is_dir():
+        skill = _push_folder(ctx, project, source, args)
+    else:
+        skill = _push_file(ctx, project, source, args)
+
+    if ctx.as_json:
+        output.emit_json(skill)
+        return
+    output.echo(f"Uploaded {skill['name']} to {project} ({output.human_size(skill.get('size'))}).")
+    output.echo(f"Install it with: cylist skills pull {project} {skill['name']}")
+
+
+def _push_folder(ctx: Context, project: str, source: Path, args: argparse.Namespace) -> Any:
+    """Send every file under ``source``, each at its path inside the folder."""
+    folder = str(args.name or source.name)
+    found = sorted(_walk(source), key=lambda path: path.relative_to(source).as_posix())
+    if not found:
+        raise CylistError(f"{source} has no files in it.")
+    if not any(path.name == SKILL_FILE for path in found if path.parent == source):
+        raise CylistError(
+            f"{source} has no {SKILL_FILE}, which is the file Claude Code loads a skill from."
+        )
+
+    parts: list[tuple[str, tuple[str, bytes, str]]] = []
+    executable: list[str] = []
+    for path in found:
+        inside = f"{folder}/{path.relative_to(source).as_posix()}"
+        parts.append(("file", (inside, path.read_bytes(), "application/octet-stream")))
+        if MODES_ARE_REAL and os.access(path, os.X_OK):
+            executable.append(inside)
+
+    fields: dict[str, str | list[str]] = {"folder": folder}
+    if executable:
+        fields["executable"] = executable
+    if args.description:
+        fields["description"] = str(args.description)
+    return ctx.client.upload(f"/projects/{project}/skills", parts, fields)
+
+
+def _push_file(ctx: Context, project: str, source: Path, args: argparse.Namespace) -> Any:
+    """Send one file as the single-file skill it is."""
+    name = str(args.name or source.name)
+    fields: dict[str, str | list[str]] = {}
+    if args.description:
+        fields["description"] = str(args.description)
+    return ctx.client.upload(
+        f"/projects/{project}/skills",
+        [("file", (name, source.read_bytes(), "text/markdown"))],
+        fields,
+    )
+
+
+def _walk(source: Path) -> Iterator[Path]:
+    """Every file of the skill under ``source``.
+
+    What ``pull`` wrote about itself is left behind — the marker and the
+    ``.gitignore`` of ``*`` — so that a folder pulled and pushed back is the
+    skill and not a copy of the bookkeeping. So are the directories nothing
+    could want (:data:`SKIPPED_DIRECTORIES`) and the files an operating system
+    leaves lying around, which the server would drop anyway.
+    """
+    for path in sorted(source.iterdir()):
+        if path.is_dir():
+            if path.name not in SKIPPED_DIRECTORIES:
+                yield from _walk(path)
+            continue
+        if not path.is_file():
+            continue
+        if path.parent == source and path.name == MARKER:
+            continue
+        if path.name == GITIGNORE and path.read_text("utf-8", errors="replace") == (
+            IGNORE_EVERYTHING
+        ):
+            continue
+        if path.name in (".DS_Store", "Thumbs.db"):
+            continue
+        yield path
 
 
 # --- pull ------------------------------------------------------------------

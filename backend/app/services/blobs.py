@@ -77,22 +77,49 @@ async def store_upload(
             straight through in chunks, so an oversized file is refused
             part-way rather than after all of it has arrived.
     """
+    blob = await _store(session, store, chunks(source), max_bytes=max_bytes)
+    return blob, source.content_type or DEFAULT_MIME
+
+
+async def store_bytes(
+    session: AsyncSession, store: BlobStore, data: bytes, *, max_bytes: int
+) -> Blob:
+    """Write bytes the server itself assembled and return the blob holding them.
+
+    Separate from :func:`store_upload` because not everything stored came off
+    the wire as one part: a skill uploaded as a folder is zipped here and
+    stored as what was assembled, which has no ``UploadFile`` behind it and no
+    content type of its own to report.
+
+    Raises:
+        PayloadTooLargeError: if the content exceeds ``max_bytes``.
+    """
+
+    async def once() -> AsyncIterator[bytes]:
+        yield data
+
+    return await _store(session, store, once(), max_bytes=max_bytes)
+
+
+async def _store(
+    session: AsyncSession, store: BlobStore, stream: AsyncIterator[bytes], *, max_bytes: int
+) -> Blob:
+    """Write a stream under its digest, reusing the row if the bytes are held."""
     try:
-        stored = await store.write(chunks(source), max_bytes=max_bytes)
+        stored = await store.write(stream, max_bytes=max_bytes)
     except BlobTooLargeError as exc:
         raise PayloadTooLargeError(
             f"That file is larger than the {max_bytes // (1024 * 1024)} MB upload limit.",
             details={"max_bytes": max_bytes},
         ) from exc
 
-    mime = source.content_type or DEFAULT_MIME
     blob = await session.scalar(select(Blob).where(Blob.sha256 == stored.sha256))
     if blob is None:
         blob = Blob(sha256=stored.sha256, size=stored.size, path=stored.path)
         session.add(blob)
         await session.flush()
 
-    return blob, mime
+    return blob
 
 
 async def collect_garbage(session: AsyncSession, store: BlobStore, blob_ids: set[UUID]) -> None:

@@ -835,6 +835,8 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
 
     if path.endswith("/skills") and method == "GET":
         return httpx.Response(200, json=SKILLS)
+    if path.endswith("/skills") and method == "POST":
+        return httpx.Response(201, json={**SKILLS[1], "name": "release-kit.zip", "size": 512})
     if path == f"/skills/{TIDY_SKILL_ID}/folder":
         return httpx.Response(200, json=TIDY_FOLDER)
     if path == f"/skills/{KIT_SKILL_ID}/folder":
