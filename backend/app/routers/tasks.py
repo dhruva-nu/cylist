@@ -40,11 +40,12 @@ from app.schemas.tasks import (
     TaskFinish,
     TaskHistoryPage,
     TaskMove,
+    TaskMoveProject,
     TaskRead,
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import activity, agent_sessions, columns, permissions, tasks, templates
+from app.services import activity, agent_sessions, columns, permissions, projects, tasks, templates
 
 router = APIRouter(tags=["tasks"])
 
@@ -594,6 +595,56 @@ async def move_task(
             "column_id": str(moved.column_id),
             "position": moved.position,
             "changes": changes,
+        },
+    )
+    return await _task_detail(session, moved)
+
+
+@router.post(
+    "/tasks/{task_ref}/project",
+    response_model=TaskDetail,
+    summary="Move a task to a different project",
+    responses={
+        422: {
+            "description": (
+                "The task is a sub-task, the destination is the task's own project, "
+                "the column named is not on the destination's board, or the task's "
+                "assignee is not a member of the destination project."
+            )
+        }
+    },
+)
+async def move_task_project(
+    body: TaskMoveProject,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(WRITE_THIS_CARD),
+    session: AsyncSession = SessionDependency,
+) -> TaskDetail:
+    """Take a card off its board and put it on a different project's.
+
+    A heavier move than `POST /tasks/{ref}/move`: the card keeps its title,
+    description, type, priority, assignee and due date, but leaves its goal,
+    template, sub-stages and outcome behind, and is handed a fresh reference
+    under the destination project — the old one is retired, same as a deleted
+    card's.
+
+    Refused unless the caller may move cards on *both* boards.
+    """
+    source_project_id = task.project_id
+    destination = await projects.resolve(session, body.project_id)
+    await permissions.enforce(session, destination, principal, Permission.TASKS)
+    moved = await tasks.move_to_project(session, task, destination, body.column_id)
+    await activity.record(
+        session,
+        principal,
+        "task.project_changed",
+        entity_type="task",
+        entity_id=moved.id,
+        project_id=moved.project_id,
+        payload={
+            "reference": moved.reference,
+            "from_project_id": str(source_project_id),
+            "to_project_id": str(destination.id),
         },
     )
     return await _task_detail(session, moved)

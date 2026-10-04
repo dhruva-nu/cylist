@@ -1430,6 +1430,13 @@ export const api = {
       method: 'POST',
       body: jsonBody({ column_id: columnId, position, ...(outcome ? { outcome } : {}) }),
     }),
+  /** Takes a card off its own board and puts it on a different project's,
+   * landing in that board's first column unless `columnId` names another. */
+  moveTaskProject: (taskRef: string, projectId: string, columnId?: string) =>
+    request<TaskDetail>(`/tasks/${taskRef}/project`, {
+      method: 'POST',
+      body: jsonBody({ project_id: projectId, ...(columnId ? { column_id: columnId } : {}) }),
+    }),
   /** Ticks a sub-task off, or puts it back. The only way one is finished:
    * a sub-task is not on the board, so there is no last column to move it to. */
   finishTask: (taskRef: string, finished: boolean) =>

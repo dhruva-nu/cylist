@@ -898,6 +898,36 @@
   color: var(--ink-3);
 }
 
+/* Sits beside .reference, dressed the same way — mono, --ink-2, no box of its
+   own — so it reads as part of the same line rather than a control dropped on
+   top of it. Transparent background and no border until it is touched: a card
+   that is mostly read, rarely acted on, should not carry a button's chrome for
+   a thing most cards will never use. */
+.moveProject {
+  flex: none;
+  max-width: 72px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.moveProject:hover,
+.moveProject:focus-visible {
+  color: var(--ink);
+}
+
+.moveProjectError {
+  flex: none;
+  color: var(--blocked);
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
 .waiting {
   display: flex;
   flex-wrap: wrap;

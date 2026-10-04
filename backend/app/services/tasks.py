@@ -775,6 +775,75 @@ async def move(
     return task, changes
 
 
+async def move_to_project(
+    session: AsyncSession, task: Task, destination: Project, column_id: UUID | None
+) -> Task:
+    """Take a card off its board and put it on a different project's.
+
+    Mints the card a fresh number under the destination — ``ATL-41`` does not
+    travel, because a number is a fact about the board that handed it out, not
+    about the work. Any sub-tasks move with it, their own ``project_id``
+    brought along so they still belong to a project their parent is actually
+    on, though their reference is read off the parent and so changes anyway.
+
+    Lands in ``column_id`` if named and it belongs to the destination's board,
+    otherwise in that board's first column, exactly as a brand-new card would.
+    Everything the old board's columns gave meaning to does not survive the
+    trip: ``goal_id`` and ``template_id`` are cleared, ``sub_statuses`` and
+    ``outcome_index`` are reset, and any per-column due dates are dropped — the
+    destination's own columns have never heard of them. ``due_date`` itself,
+    being a date on the card rather than on a column, comes along unchanged.
+
+    Raises:
+        UnprocessableRequestError: if the task is a sub-task, if the
+            destination is the project the task is already on, if
+            ``column_id`` is on a board other than the destination's, or if
+            the task's assignee is not a member of the destination project.
+    """
+    _refuse_moving_subtask(task)
+    if destination.id == task.project_id:
+        raise UnprocessableRequestError(
+            f"{task.reference} is already on {destination.key}.",
+            details={"project_id": str(destination.id)},
+        )
+    column = (
+        await columns.first(session, destination)
+        if column_id is None
+        else await columns.get(session, column_id)
+    )
+    if column.project_id != destination.id:
+        raise UnprocessableRequestError(
+            "That column is not on the destination project's board.",
+            details={"column_id": str(column.id)},
+        )
+    if not await projects.is_member(session, destination.id, task.assignee_id):
+        raise UnprocessableRequestError(
+            f"{task.reference}'s assignee is not a member of {destination.key}. "
+            "Reassign the card before moving it.",
+            details={"assignee_id": str(task.assignee_id)},
+        )
+
+    source_column_id = task.column_id
+    task.project_id = destination.id
+    task.number = await _next_number(session, destination)
+    task.goal_id = None
+    task.template_id = None
+    task.sub_statuses = []
+    task.sub_status_index = None
+    task.outcome_index = None
+    task.column_due_dates = []
+    await _restack(session, task, column, await _count_cards_in_column(session, column.id))
+    subtasks = await session.scalars(select(Task).where(Task.parent_id == task.id))
+    for subtask in subtasks:
+        subtask.project_id = destination.id
+    await session.flush()
+    await session.refresh(task, ["column", "project"])
+
+    if source_column_id is not None:
+        await _renumber(session, source_column_id)
+    return task
+
+
 def _refuse_moving_subtask(task: Task) -> None:
     """Stop a sub-task being dragged anywhere: it is not on the board.
 

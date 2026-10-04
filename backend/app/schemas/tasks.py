@@ -389,6 +389,30 @@ class TaskMove(Schema):
     )
 
 
+class TaskMoveProject(Schema):
+    """Moves a card onto a different project's board.
+
+    Unlike :class:`TaskMove`, which only reshuffles a card within its own
+    board, this takes the card off one board and puts it on another's — a
+    heavier change, so it carries fewer guarantees than a move: the card's
+    goal and template are left behind (neither means anything on a board that
+    never offered them), its sub-stages and outcome reset, and its assignee
+    must already be on the destination project — nobody is silently added to
+    a board on a card's way through it.
+    """
+
+    project_id: str = Field(
+        description="The destination project's id, or its key such as `ATL`.",
+    )
+    column_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Which column of the destination board to land in. Left out, the "
+            "card lands in the board's first column, same as a brand new card."
+        ),
+    )
+
+
 class TaskFinish(Schema):
     """Ticks a sub-task off, or puts it back."""
 

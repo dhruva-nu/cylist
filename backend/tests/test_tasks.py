@@ -962,6 +962,123 @@ class TestMoving:
         assert entries[0]["payload"]["column_id"] == done
 
 
+class TestMovingToAnotherProject:
+    async def test_moves_a_card_onto_another_board(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        task = await _create(signed_in, person)
+
+        moved = (
+            await signed_in.post(f"/tasks/{task['id']}/project", json={"project_id": "HRM"})
+        ).json()
+
+        assert moved["reference"].startswith("HRM-")
+        board = (await signed_in.get("/projects/HRM/tasks")).json()
+        assert [card["id"] for card in board] == [task["id"]]
+        source_board = (await signed_in.get("/projects/ATL/tasks")).json()
+        assert source_board == []
+
+    async def test_lands_in_the_named_column(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        task = await _create(signed_in, person)
+        their_done = (await _columns(signed_in, "HRM"))[1]["id"]
+
+        moved = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/project",
+                json={"project_id": "HRM", "column_id": their_done},
+            )
+        ).json()
+
+        assert moved["column_id"] == their_done
+
+    async def test_clears_goal_and_template_and_resets_stages(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        task = await _create(signed_in, person, sub_statuses=["Draft", "Review"])
+        await signed_in.post(f"/tasks/{task['id']}/sub-status", json={"index": 1})
+
+        moved = (
+            await signed_in.post(f"/tasks/{task['id']}/project", json={"project_id": "HRM"})
+        ).json()
+
+        assert moved["goal_id"] is None
+        assert moved["template_id"] is None
+        assert moved["sub_statuses"] == []
+        assert moved["sub_status_index"] is None
+
+    async def test_refuses_its_own_project(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person)
+
+        response = await signed_in.post(
+            f"/tasks/{task['id']}/project", json={"project_id": "ATL"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_refuses_an_assignee_not_on_the_destination(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        task = await _create(signed_in, person)
+
+        response = await signed_in.post(
+            f"/tasks/{task['id']}/project", json={"project_id": "HRM"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_refuses_a_column_from_a_third_board(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        task = await _create(signed_in, person)
+        atl_column = (await _columns(signed_in, "ATL"))[0]["id"]
+
+        response = await signed_in.post(
+            f"/tasks/{task['id']}/project",
+            json={"project_id": "HRM", "column_id": atl_column},
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_sub_task_cannot_be_moved(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        task = await _create(signed_in, person)
+        sub = (
+            await signed_in.post(
+                f"/tasks/{task['id']}/subtasks", json=_task(person, title="Part one")
+            )
+        ).json()
+
+        response = await signed_in.post(
+            f"/tasks/{sub['id']}/project", json={"project_id": "HRM"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_it_is_recorded_against_the_project(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        await signed_in.post("/projects", json=HERMES)
+        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        task = await _create(signed_in, person)
+
+        await signed_in.post(f"/tasks/{task['id']}/project", json={"project_id": "HRM"})
+
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        assert entries[0]["verb"] == "task.project_changed"
+
+
 class TestListing:
     async def test_returns_the_board_in_reading_order(self, signed_in: AsyncClient) -> None:
         """Columns left to right, cards top to bottom — ready to group and draw."""

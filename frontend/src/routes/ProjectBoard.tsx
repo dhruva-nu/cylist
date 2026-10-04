@@ -2487,6 +2487,7 @@ function StripIdentity({
         </span>
       ) : null}
       <span className={styles.reference}>{task.reference}</span>
+      <MoveProjectControl task={task} />
       {/* A sub-task's own reference already carries its parent's number, but
           `ATL-41-2` only says so to a reader who knows the scheme — and on a
           board, where the two cards may be columns apart, the parent is the
@@ -2521,6 +2522,70 @@ function StripIdentity({
           colour={task.goal_colour}
           title={`On ${task.goal_name} (${task.goal_reference})`}
         />
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * A quiet dropdown beside the reference that sends the card to a different
+ * project's board, without opening the card to do it.
+ *
+ * Hidden whenever there is nowhere else to send a card to — a lone project —
+ * rather than shown disabled, which would ask every reader what it is for.
+ */
+function MoveProjectControl({ task }: { task: Task }) {
+  const { projectKey } = useParams({ from: '/p/$projectKey/board' })
+  const queryClient = useQueryClient()
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
+
+  const moveProject = useMutation({
+    mutationFn: (destinationKey: string) => api.moveTaskProject(task.id, destinationKey),
+    onSuccess: async (_result, destinationKey) => {
+      await Promise.all(
+        [projectKey, destinationKey].flatMap((key) => [
+          queryClient.invalidateQueries({ queryKey: ['board', key] }),
+          queryClient.invalidateQueries({ queryKey: ['tasks', key] }),
+          queryClient.invalidateQueries({ queryKey: ['project-summary', key] }),
+        ]),
+      )
+    },
+  })
+
+  const others = (projects.data ?? []).filter((project) => project.key !== projectKey)
+  if (!others.length) return null
+
+  return (
+    <>
+      <select
+        className={styles.moveProject}
+        value=""
+        disabled={moveProject.isPending}
+        aria-label={`Move ${task.reference} to a different project`}
+        title="Move to a different project"
+        // Every one of these stops the card itself from reacting: a click
+        // would otherwise open the task, and a pointer-down would otherwise
+        // hand the card to the drag sensor listening on the card above this
+        // control.
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        onChange={(event) => {
+          const destinationKey = event.target.value
+          if (destinationKey) moveProject.mutate(destinationKey)
+        }}
+      >
+        <option value="">Move to…</option>
+        {others.map((project) => (
+          <option key={project.id} value={project.key}>
+            {project.key}
+          </option>
+        ))}
+      </select>
+      {moveProject.isError ? (
+        <span className={styles.moveProjectError} role="alert">
+          {moveProject.error.message}
+        </span>
       ) : null}
     </>
   )
