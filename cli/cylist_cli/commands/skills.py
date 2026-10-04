@@ -267,15 +267,20 @@ def _destination(args: argparse.Namespace) -> Path:
         return Path(args.dest).expanduser().resolve()
     if args.user:
         return claude_config_dir() / "skills"
-    return _repository_root(Path.cwd()) / ".claude" / "skills"
+    return repository_root(Path.cwd()) / ".claude" / "skills"
 
 
-def _repository_root(start: Path) -> Path:
+def repository_root(start: Path) -> Path:
     """The top of the git repository ``start`` is in, or ``start`` itself.
 
     The top rather than here, because Claude Code reads ``.claude/skills``
     from the directory it was started in and every parent up to the root of
     the repository — so the root is the one place every session in it sees.
+    Public because ``repo setup`` wants the same answer for the same reason:
+    a repository's ``CLAUDE.md`` is read by every session anywhere inside it.
+
+    A worktree's ``.git`` is a file rather than a directory, so this asks
+    whether it exists and not whether it is a directory.
     """
     for candidate in (start, *start.parents):
         if (candidate / ".git").exists():
