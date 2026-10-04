@@ -4,7 +4,7 @@
  * a project's areas and the sidebar lists all of them — see `ProjectNav.tsx`.
  */
 
-import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
+import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode } from 'react'
 import { api } from '../api/client'
@@ -157,7 +157,7 @@ const PROJECT_AREAS = [
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  const area = PROJECT_AREAS.find((candidate) => matchRoute(candidate.route))?.name ?? null
+  const area = PROJECT_AREAS.find((candidate) => matchRoute(candidate.route)) ?? null
 
   if (!inProject) {
     return (
@@ -168,6 +168,7 @@ function Breadcrumbs() {
   }
 
   const { projectKey } = inProject
+  const areaRoute = area?.route.to ?? '/p/$projectKey/board'
 
   return (
     <div className={styles.crumbs}>
@@ -175,12 +176,12 @@ function Breadcrumbs() {
       <span className={styles.separator}>›</span>
       {area ? (
         <>
-          <ProjectCrumbLink projectKey={projectKey} />
+          <ProjectSwitcher projectKey={projectKey} areaRoute={areaRoute} />
           <span className={styles.separator}>›</span>
-          <b>{area}</b>
+          <b>{area.name}</b>
         </>
       ) : (
-        <ProjectName projectKey={projectKey} />
+        <ProjectSwitcher projectKey={projectKey} areaRoute={areaRoute} emphasized />
       )}
     </div>
   )
@@ -193,19 +194,57 @@ function useProject(projectKey: string) {
   })
 }
 
-function ProjectName({ projectKey }: { projectKey: string }) {
+/**
+ * The project's name in the breadcrumb, doubling as a switcher: picking
+ * another project jumps straight to the same area of its board rather than
+ * forcing a detour through "All projects". Hidden behind a plain link (or,
+ * on the project's own page, plain bold text) once there is only one project
+ * to be on — a dropdown with nothing else in it is a control for no reason.
+ */
+function ProjectSwitcher({
+  projectKey,
+  areaRoute,
+  emphasized,
+}: {
+  projectKey: string
+  areaRoute: (typeof PROJECT_AREAS)[number]['route']['to'] | '/p/$projectKey/board'
+  emphasized?: boolean
+}) {
   const project = useProject(projectKey)
-  return <b>{project.data?.name ?? projectKey}</b>
-}
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
+  const navigate = useNavigate()
+  const name = project.data?.name ?? projectKey
+  const others = (projects.data ?? []).filter((candidate) => candidate.key !== projectKey)
 
-/** The project's name, as the way to its board: there is no overview page to
- * send it to any more, and the board is what a project's address opens. */
-function ProjectCrumbLink({ projectKey }: { projectKey: string }) {
-  const project = useProject(projectKey)
+  if (!others.length) {
+    return emphasized ? (
+      <b>{name}</b>
+    ) : (
+      <Link to={areaRoute} params={{ projectKey }}>
+        {name}
+      </Link>
+    )
+  }
+
   return (
-    <Link to="/p/$projectKey/board" params={{ projectKey }}>
-      {project.data?.name ?? projectKey}
-    </Link>
+    <select
+      className={emphasized ? styles.switcherCurrent : styles.switcher}
+      aria-label="Switch project"
+      value={projectKey}
+      onChange={(event) => {
+        const nextKey = event.target.value
+        if (nextKey !== projectKey) {
+          void navigate({ to: areaRoute, params: { projectKey: nextKey } })
+        }
+      }}
+    >
+      <option value={projectKey}>{name}</option>
+      {others.map((candidate) => (
+        <option key={candidate.id} value={candidate.key}>
+          {candidate.name}
+        </option>
+      ))}
+    </select>
   )
 }
 

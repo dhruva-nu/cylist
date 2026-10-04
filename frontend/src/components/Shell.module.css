@@ -206,6 +206,32 @@
   color: var(--ink-3);
 }
 
+/* The project switcher: a native select styled to read as a breadcrumb link,
+   so it costs nothing visually until a reader notices the arrow. */
+.switcher {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.switcher:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* Same control, on the page it already names — bold like the other crumb's
+   current page, rather than the link weight above. */
+.switcherCurrent {
+  composes: switcher;
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* Where a page longer than the window scrolls, now that `#root` is exactly the
    window's height rather than at least it. The bar above stays put because it
    sits outside this box, not because it is sticky. `min-height: 0` so this may
