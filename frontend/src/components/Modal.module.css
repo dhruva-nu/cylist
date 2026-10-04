@@ -17,6 +17,21 @@
   box-shadow: var(--shadow-lg);
 }
 
+/* A dialog that is a whole screen rather than a short form — the task card's
+   detail view, which carries a description, a two-column grid of fields, a
+   checklist, sub-tasks, a conversation and a history.
+
+   860px because that is the widest a dialog can be and still read as one: the
+   frame stops being a desktop frame at 899px (see Shell.module.css), so above
+   860 the panel reaches the window's edges on the narrowest window that still
+   has a sidebar, and a panel with no scrim beside it is a page. Text does not
+   take all of the extra room: `.prose` and `.bubble` in TaskDialog.module.css
+   keep a measure. The grid of fields, the sub-tasks, the checklist and the
+   comment bubbles are what the width is for. */
+.modal.wide {
+  width: min(860px, 100%);
+}
+
 .header {
   display: flex;
   gap: 12px;
