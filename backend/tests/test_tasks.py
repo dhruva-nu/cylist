@@ -995,9 +995,7 @@ class TestMovingToAnotherProject:
 
         assert moved["column_id"] == their_done
 
-    async def test_clears_goal_and_template_and_resets_stages(
-        self, signed_in: AsyncClient
-    ) -> None:
+    async def test_clears_goal_and_template_and_resets_stages(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         await signed_in.post("/projects", json=HERMES)
         await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
@@ -1017,22 +1015,16 @@ class TestMovingToAnotherProject:
         person = await _setup(signed_in)
         task = await _create(signed_in, person)
 
-        response = await signed_in.post(
-            f"/tasks/{task['id']}/project", json={"project_id": "ATL"}
-        )
+        response = await signed_in.post(f"/tasks/{task['id']}/project", json={"project_id": "ATL"})
 
         assert response.status_code == 422
 
-    async def test_refuses_an_assignee_not_on_the_destination(
-        self, signed_in: AsyncClient
-    ) -> None:
+    async def test_refuses_an_assignee_not_on_the_destination(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         await signed_in.post("/projects", json=HERMES)
         task = await _create(signed_in, person)
 
-        response = await signed_in.post(
-            f"/tasks/{task['id']}/project", json={"project_id": "HRM"}
-        )
+        response = await signed_in.post(f"/tasks/{task['id']}/project", json={"project_id": "HRM"})
 
         assert response.status_code == 422
 
@@ -1061,9 +1053,7 @@ class TestMovingToAnotherProject:
             )
         ).json()
 
-        response = await signed_in.post(
-            f"/tasks/{sub['id']}/project", json={"project_id": "HRM"}
-        )
+        response = await signed_in.post(f"/tasks/{sub['id']}/project", json={"project_id": "HRM"})
 
         assert response.status_code == 422
 
