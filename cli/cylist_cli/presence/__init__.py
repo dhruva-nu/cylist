@@ -9,9 +9,12 @@ The point is not the saved handshakes. It is that a connection can *end*: a
 socket closing tells the board the session is over, where a PUT that stops
 coming tells it nothing at all and left the server guessing from a clock.
 
-The five modules, smallest first:
+The six modules, smallest first:
 
 * :mod:`.protocol` — the two wire formats. Pure.
+* :mod:`.owner` — which ``claude`` a session belongs to, and whether it is
+  still running. The answer to "is this session still open", replacing a
+  clock that could not tell a waiting human from a closed terminal.
 * :mod:`.machine` — every rule about when to send, keepalive and give up.
   Pure, and where to look first.
 * :mod:`.ipc` — the unix socket between hook and daemon.

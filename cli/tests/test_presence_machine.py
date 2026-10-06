@@ -10,6 +10,7 @@ the answers are exact.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from cylist_cli.presence import machine as m
@@ -27,6 +28,15 @@ def finishes(actions: list[m.Action]) -> list[str]:
 
 def live(machine: m.Machine = START) -> m.Machine:
     return m.step(machine, m.LinkUp())[0]
+
+
+def owned() -> m.Machine:
+    """A session whose `claude` process the daemon is watching.
+
+    What every real session on Linux or macOS now is. `live()` is left as the
+    unowned case on purpose, so the fallback keeps being exercised.
+    """
+    return live(replace(START, owned=True))
 
 
 class TestSaying:
@@ -148,10 +158,33 @@ class TestTheKeepalive:
 
         assert frames(actions) == [{"type": "heartbeat"}]
 
-    def test_it_stops_while_waiting(self) -> None:
-        """The client's half of the idle contract. Silence while waiting is
-        the signal — it is how the server learns the human has gone."""
+    def test_it_runs_while_waiting_too(self) -> None:
+        """The whole of CYLIST-74 in one assertion.
+
+        It used to stop here, and the server read five minutes of that
+        silence as a session that had gone. On a machine with ten sessions
+        open, nine of them are waiting on a human at any moment: nine cards
+        went out while their conversations were still on screen.
+        """
         machine, _ = m.step(live(), m.HookState("waiting", "turn_ended", "ATL-1"))
+
+        _, actions = m.step(machine, m.Tick(), elapsed=m.KEEPALIVE_EVERY)
+
+        assert frames(actions) == [{"type": "heartbeat"}]
+
+    def test_an_hour_of_waiting_keeps_the_card_lit(self) -> None:
+        """Long past both the client's old window and the server's."""
+        machine, _ = m.step(owned(), m.HookState("waiting", "turn_ended", "ATL-1"))
+        beats = 0
+        for _ in range(60):
+            machine, actions = m.step(machine, m.Tick(), elapsed=60.0)
+            beats += len(frames(actions))
+            assert finishes(actions) == []
+
+        assert beats == 60
+
+    def test_nothing_is_sent_while_the_link_is_down(self) -> None:
+        machine, _ = m.step(live(), m.LinkDown())
 
         _, actions = m.step(machine, m.Tick(), elapsed=m.KEEPALIVE_EVERY)
 
@@ -186,13 +219,46 @@ class TestEnding:
         assert frames(actions) == []
         assert finishes(actions) == ["session_ended"]
 
-    def test_waiting_five_minutes_ends_the_session(self) -> None:
+    def test_the_owner_exiting_ends_the_session(self) -> None:
+        """Closing the terminal clears the card, and within a tick.
+
+        This is the evidence the five-minute clock was standing in for, and
+        it is both faster and right: a session that has gone is gone now, and
+        a session that is merely quiet is not gone at all.
+        """
+        _, actions = m.step(owned(), m.OwnerGone())
+
+        assert frames(actions) == [{"type": "bye", "reason": "session_ended"}]
+        assert finishes(actions) == ["owner_gone"]
+
+    def test_the_owner_exiting_ends_it_even_mid_turn(self) -> None:
+        """A terminal closed while a tool call was running. The harness is
+        gone whatever the card last said."""
+        _, actions = m.step(owned(), m.OwnerGone())
+
+        assert finishes(actions) == ["owner_gone"]
+
+    def test_waiting_five_minutes_ends_a_session_with_no_owner(self) -> None:
+        """The fallback, for a platform that would not name the process.
+
+        Kept precisely because it is a worse answer: a card that can never go
+        out is a worse bug than a card that goes out early.
+        """
         machine, _ = m.step(live(), m.HookState("waiting", "turn_ended", "ATL-1"))
 
         _, actions = m.step(machine, m.Tick(), elapsed=m.IDLE_AFTER)
 
         assert frames(actions) == [{"type": "bye", "reason": "session_ended"}]
         assert finishes(actions) == ["idle"]
+
+    def test_the_idle_window_does_not_apply_to_an_owned_session(self) -> None:
+        """The clock is switched off, not lengthened. Nothing but the owner
+        exiting ends a session that has one."""
+        machine, _ = m.step(owned(), m.HookState("waiting", "turn_ended", "ATL-1"))
+
+        _, actions = m.step(machine, m.Tick(), elapsed=m.IDLE_AFTER * 10)
+
+        assert finishes(actions) == []
 
     def test_a_prompt_just_before_the_window_resets_it(self) -> None:
         machine, _ = m.step(live(), m.HookState("waiting", "turn_ended", "ATL-1"))

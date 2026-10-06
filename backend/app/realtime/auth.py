@@ -54,7 +54,12 @@ NOT_FOUND = 4404
 """The project or task in the path does not exist."""
 
 IDLE = 4408
-"""Nothing said for longer than the idle window."""
+"""Nothing said for longer than the idle window.
+
+A client that is still running heartbeats through this whether it is working
+or waiting, so this now means the daemon itself has gone — not that the
+person it was waiting on has. See ``AGENT_SOCKET_IDLE_AFTER``.
+"""
 
 DISPLACED = 4409
 """The same client session opened a socket somewhere else, and it now owns

@@ -254,6 +254,13 @@ def register(subparsers: Any) -> None:
     # Not for people. Started by the hook, and only ever by the hook.
     daemon = actions.add_parser("daemon", help=argparse.SUPPRESS)
     daemon.add_argument("--session", required=True)
+    # The `claude` this session belongs to, found by the hook that spawned us.
+    # Absent on a platform that would not say, and the daemon then keeps the
+    # five-minute idle window instead. `--owner-started` is opaque: whatever
+    # the platform calls the moment that pid began, compared only with another
+    # reading of the same pid.
+    daemon.add_argument("--owner-pid", type=int)
+    daemon.add_argument("--owner-started", default="")
     daemon.set_defaults(handler=_daemon, swallow_errors=True)
 
     status = actions.add_parser(
@@ -293,9 +300,14 @@ def _daemon(args: argparse.Namespace, ctx: Context) -> None:
     common case, since the hooks fire in every project — must not pay for a
     dependency it will never use.
     """
-    from cylist_cli.presence import daemon
+    from cylist_cli.presence import daemon, owner
 
-    daemon.run(ctx, args.session)
+    found = (
+        owner.Owner(pid=args.owner_pid, started=args.owner_started or "")
+        if args.owner_pid
+        else None
+    )
+    daemon.run(ctx, args.session, owner=found)
 
 
 def _status(_: argparse.Namespace, ctx: Context) -> None:

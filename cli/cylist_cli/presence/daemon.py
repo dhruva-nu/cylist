@@ -32,6 +32,7 @@ from cylist_cli import endpoints
 from cylist_cli.context import Context
 from cylist_cli.presence import ipc, protocol, supervisor
 from cylist_cli.presence import machine as m
+from cylist_cli.presence import owner as owner_module
 
 logger = logging.getLogger("cylist.presence")
 
@@ -90,11 +91,23 @@ def _clock() -> float:
     return _BOOTTIME() if _BOOTTIME is not None else time.monotonic()
 
 
-def run(ctx: Context, session_id: str, *, connect: Any = None) -> int:
+def run(
+    ctx: Context,
+    session_id: str,
+    *,
+    connect: Any = None,
+    owner: owner_module.Owner | None = None,
+) -> int:
     """Hold one session's socket until it ends. Always returns 0.
 
     ``connect`` is injectable so the loop can be driven in a test against a
     fake connection, with no network and no sleeping.
+
+    ``owner`` is the ``claude`` process this session belongs to, found by the
+    hook that started this daemon and passed on the command line. Given one,
+    the daemon ends when that process does and never on a clock. Given none —
+    a platform that would not say — the idle window in :mod:`.machine` stands,
+    which is what it has always done.
     """
     lock = supervisor.Singleton(session_id)
     if not lock.acquire():
@@ -134,7 +147,7 @@ def run(ctx: Context, session_id: str, *, connect: Any = None) -> int:
     _on_being_asked_to_stop(hang_up)
 
     try:
-        _loop(ctx, session_id, events, state, connect=connect)
+        _loop(ctx, session_id, events, state, connect=connect, owner=owner)
     except Exception:
         logger.exception("The presence daemon stopped on an error")
     finally:
@@ -196,6 +209,7 @@ def _loop(
     state: _Shared,
     *,
     connect: Any = None,
+    owner: owner_module.Owner | None = None,
 ) -> None:
     """Connect, pump events through the reducer, and do what it says."""
     connect = connect or _connect
@@ -204,12 +218,17 @@ def _loop(
         logger.info("No token configured; nothing to report with.")
         return
 
-    # The first event is always the one that started us, so the machine can
-    # be built before anything is read.
-    first = events.get()
-    if isinstance(first, m.HookEnd):
+    watch: owner_module.Watch | None = None
+    if owner is not None:
+        watch = owner_module.Watch(owner, _clock())
+        logger.info("Owned by pid %s, started %s", owner.pid, owner.started or "unknown")
+
+    # The first event is the one after the one that started us, so the machine
+    # can be built before anything else is read.
+    first = _first_event(events, watch)
+    if isinstance(first, m.HookEnd | m.OwnerGone):
         return
-    reducer = _Reducer(_initial(session_id, first), state)
+    reducer = _Reducer(_initial(session_id, first, owned=watch is not None), state)
 
     socket: Any = None
 
@@ -242,7 +261,7 @@ def _loop(
                 socket = None
                 continue
 
-        actions = reducer.feed(_next_event(events))
+        actions = reducer.feed(_next_event(events, watch))
 
         if socket is not None and not _perform(socket, actions):
             _close(socket)
@@ -293,17 +312,45 @@ class _Reducer:
         return _finished(actions)
 
 
-def _next_event(events: queue.Queue[m.Event]) -> m.Event:
-    """What the hooks said next, or a tick if they said nothing for a second."""
+def _first_event(events: queue.Queue[m.Event], watch: owner_module.Watch | None) -> m.Event:
+    """Wait for the event this daemon's machine is built from.
+
+    Polled rather than blocked on, so that the owner check is running before
+    there is a machine to run it for. A daemon is spawned by a hook that has
+    already reported over HTTP and then says nothing more; if the terminal
+    closed in that gap, a blocking ``get`` would leave this process sitting on
+    an empty queue for as long as the machine stayed up.
+    """
+    while True:
+        event = _next_event(events, watch)
+        if not isinstance(event, m.Tick):
+            return event
+
+
+def _next_event(events: queue.Queue[m.Event], watch: owner_module.Watch | None) -> m.Event:
+    """What the hooks said next, or what a second of silence means.
+
+    Silence used to mean only "time has passed". Where the owner is known it
+    is also the moment to ask whether the terminal is still open, which is
+    the question that keeps nine quiet sessions out of ten on the board. It
+    is asked here rather than in the reducer because it is a system call, and
+    only on the quiet path because a hook event is itself proof of life.
+    """
     try:
         return events.get(timeout=TICK)
     except queue.Empty:
-        return m.Tick()
+        pass
+    if watch is not None and watch.gone(_clock()):
+        logger.info("Owner pid %s has gone; ending the session", watch.owner.pid)
+        return m.OwnerGone()
+    return m.Tick()
 
 
-def _initial(session_id: str, first: m.Event) -> m.Machine:
+def _initial(session_id: str, first: m.Event, *, owned: bool) -> m.Machine:
     if isinstance(first, m.HookBind):
-        return m.Machine(session=session_id, task=first.task, client_name=first.client_name)
+        return m.Machine(
+            session=session_id, task=first.task, client_name=first.client_name, owned=owned
+        )
     if isinstance(first, m.HookState):
         # Almost always the real first message: see `HookState.task`.
         return m.Machine(
@@ -312,8 +359,9 @@ def _initial(session_id: str, first: m.Event) -> m.Machine:
             client_name=first.client_name,
             agent=m.Agent.WAITING if first.state == "waiting" else m.Agent.WORKING,
             reason=first.reason,
+            owned=owned,
         )
-    return m.Machine(session=session_id, task="", client_name="")
+    return m.Machine(session=session_id, task="", client_name="", owned=owned)
 
 
 def _perform(socket: Any, actions: list[m.Action]) -> bool:

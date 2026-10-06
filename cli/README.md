@@ -289,11 +289,26 @@ cylist hook stop --session <id>
 ```
 
 One process per bound session, and never for an unbound one. It exits when
-the session ends, when you have left it waiting for five minutes, or when the
-board has been unreachable for half an hour. Its log is one file per run
-under `$XDG_STATE_HOME/cylist/logs` (`%LOCALAPPDATA%\cylist\logs` on
-Windows), truncated each time so it cannot grow. `cylist hook uninstall`
-stops whatever is still running.
+the session ends, when the `claude` it belongs to exits, or when the board
+has been unreachable for half an hour. Its log is one file per run under
+`$XDG_STATE_HOME/cylist/logs` (`%LOCALAPPDATA%\cylist\logs` on Windows),
+truncated each time so it cannot grow. `cylist hook uninstall` stops whatever
+is still running.
+
+Ten sessions open at once is an ordinary day, and they do not interfere with
+each other: each has its own daemon, its own socket and its own row, and the
+only traffic a quiet one makes is a heartbeat a minute. **Leaving a session
+waiting does not take its card off the board.** The daemon watches the
+`claude` process it was started by — found by walking up from the hook, and
+remembered as a pid *and* the moment that pid started, so a recycled pid
+cannot impersonate it — and ends the session when that process does. Closing
+one terminal clears that card within a couple of seconds and touches no
+other.
+
+Where that process cannot be named — Windows today — the daemon falls back to
+the rule it used to use everywhere: five minutes of waiting on you and it
+gives the session up. That is the worse answer, kept only so that a card can
+never stay lit forever.
 
 If you would rather not have a background process at all:
 
@@ -329,11 +344,13 @@ card would sit there looking live until the server's own idle window closed
 it. Termination is still the fallback when the channel is the thing that has
 gone wrong, and what the daemon could not clean up is cleaned up for it.
 
-The idle window is counted from a clock that stops while the machine is
-asleep, because Windows has no `CLOCK_BOOTTIME`. A laptop shut for the night
-comes back and starts the five minutes again rather than ending the session
-on the spot — which is the right answer anyway: you were waiting on it
-before the lid closed and you still are.
+Windows is also where the five-minute fallback still applies, because
+neither `/proc` nor `ps` is there to say which process started the hook or
+when. It is counted from a clock that stops while the machine is asleep,
+Windows having no `CLOCK_BOOTTIME`, so a laptop shut for the night comes back
+and starts the five minutes again rather than ending the session on the spot
+— which is the right answer anyway: you were waiting on it before the lid
+closed and you still are.
 
 You can run that loopback transport anywhere with `CYLIST_IPC=tcp`, which is
 how the test suite exercises it on Linux. `CYLIST_IPC=unix` forces the other

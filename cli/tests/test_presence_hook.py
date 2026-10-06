@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from cylist_cli.main import main
-from cylist_cli.presence import supervisor
+from cylist_cli.presence import owner, supervisor
 from tests import fake_api, fake_daemon
 
 SESSION = "01a08bbf-994b-743b-989c-e07e09e66add"
@@ -37,6 +37,19 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ipc_transport: str
     monkeypatch.setenv("CYLIST_TOKEN", "cyl_" + "a" * 43)
     monkeypatch.setenv("CYLIST_URL", "http://cylist.test")
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def no_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No `claude` above this test, whatever is really above it.
+
+    The suite is usually run from a terminal and sometimes from inside a
+    Claude Code session, and `owner.find` would answer differently in the
+    two — which would make the spawned argv depend on who typed `pytest`.
+    Pinned here, and the owner that is found is tested on its own in
+    `test_presence_owner.py` and asserted deliberately below.
+    """
+    monkeypatch.setattr(owner, "find", lambda *_: None)
 
 
 @pytest.fixture(autouse=True)
@@ -158,6 +171,35 @@ class TestWhenThereIsNot:
         assert recorder.count("PUT", "/agent-sessions/" + SESSION) == 1
         assert len(no_real_processes) == 1
         assert no_real_processes[0]["argv"][-3:] == ["daemon", "--session", SESSION]
+
+    def test_it_tells_the_daemon_which_claude_the_session_belongs_to(
+        self, fire: Fire, monkeypatch: pytest.MonkeyPatch, no_real_processes: list[dict[str, Any]]
+    ) -> None:
+        """Looked up in the hook, because the hook is the last thing that runs
+        inside the harness's own process tree. Once the daemon is detached the
+        ancestry is gone and nobody can ask again."""
+        monkeypatch.setattr(owner, "find", lambda *_: owner.Owner(pid=4242, started="99887"))
+        bind()
+
+        fire(event("Stop"))
+
+        assert no_real_processes[0]["argv"][-4:] == [
+            "--owner-pid",
+            "4242",
+            "--owner-started",
+            "99887",
+        ]
+
+    def test_a_platform_that_will_not_name_one_spawns_without_it(
+        self, fire: Fire, no_real_processes: list[dict[str, Any]]
+    ) -> None:
+        """And the daemon then keeps the five-minute idle window, which is
+        what it has always done."""
+        bind()
+
+        fire(event("Stop"))
+
+        assert "--owner-pid" not in no_real_processes[0]["argv"]
 
     def test_the_child_never_inherits_the_hook_s_stdout(
         self, fire: Fire, no_real_processes: list[dict[str, Any]]

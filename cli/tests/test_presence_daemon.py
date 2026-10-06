@@ -11,6 +11,8 @@ to wait for.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -19,7 +21,7 @@ import pytest
 
 from cylist_cli.config import Config
 from cylist_cli.context import Context
-from cylist_cli.presence import daemon, ipc, protocol, supervisor
+from cylist_cli.presence import daemon, ipc, owner, protocol, supervisor
 
 SESSION = "01a08bbf-994b-743b-989c-e07e09e66add"
 CARD = "ATL-1"
@@ -59,8 +61,12 @@ def a_context() -> Context:
     )
 
 
-def run_in_background(ctx: Context, connect: Any) -> threading.Thread:
-    thread = threading.Thread(target=daemon.run, args=(ctx, SESSION), kwargs={"connect": connect})
+def run_in_background(
+    ctx: Context, connect: Any, owned: owner.Owner | None = None
+) -> threading.Thread:
+    thread = threading.Thread(
+        target=daemon.run, args=(ctx, SESSION), kwargs={"connect": connect, "owner": owned}
+    )
     thread.start()
     return thread
 
@@ -216,3 +222,88 @@ class TestWithoutAToken:
 
         assert daemon.run(ctx, SESSION, connect=lambda *_: FakeConnection()) == 0
         assert supervisor.is_running(SESSION) is False
+
+
+class TestWatchingTheOwner:
+    """A fake `claude`: a real process this test can end on command.
+
+    The daemon is given its pid, so the thing under test is the whole path —
+    the owner is read on the clock the daemon runs on, the reducer is fed
+    `OwnerGone`, the goodbye goes out and the process lets go of its lock.
+    """
+
+    def test_it_ends_the_session_when_the_owner_exits(self) -> None:
+        """Closing one terminal clears one card, within a tick."""
+        harness = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        found = owner.read(harness.pid)
+        assert found is not None, "this platform cannot name a process"
+
+        connection = FakeConnection()
+        thread = run_in_background(
+            a_context(), lambda *_: connection, owner.Owner(harness.pid, found.started)
+        )
+        try:
+            assert tell(protocol.bind_message(SESSION, CARD, CARD)) is not None
+            harness.kill()
+            harness.wait(timeout=5)
+            thread.join(timeout=10)
+
+            assert not thread.is_alive(), "the daemon outlived the session it belonged to"
+            assert {"type": "bye", "reason": "session_ended"} in connection.sent
+            assert supervisor.is_running(SESSION) is False
+        finally:
+            if thread.is_alive():  # pragma: no cover - only on a failure
+                tell(protocol.end_message(SESSION, "session_ended"))
+                thread.join(timeout=3)
+            if harness.poll() is None:  # pragma: no cover - only on a failure
+                harness.kill()
+
+    def test_it_does_not_sit_on_an_empty_queue_when_the_owner_goes(self) -> None:
+        """The gap between being spawned and being spoken to.
+
+        A daemon is started by a hook that has already reported over HTTP and
+        then says nothing more. A terminal closed in that moment used to
+        leave this process blocked on a queue nobody would ever write to —
+        for as long as the machine stayed up.
+        """
+        harness = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        found = owner.read(harness.pid)
+        assert found is not None
+
+        thread = run_in_background(
+            a_context(), lambda *_: FakeConnection(), owner.Owner(harness.pid, found.started)
+        )
+        try:
+            harness.kill()
+            harness.wait(timeout=5)
+            thread.join(timeout=10)
+
+            assert not thread.is_alive()
+            assert supervisor.is_running(SESSION) is False
+        finally:
+            if thread.is_alive():  # pragma: no cover - only on a failure
+                tell(protocol.end_message(SESSION, "session_ended"))
+                thread.join(timeout=3)
+
+    def test_it_stays_while_the_owner_is_there(self) -> None:
+        """The case that was broken: quiet, waiting on a human, and still on
+        the board. Ten of these at once is the ordinary machine."""
+        harness = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        found = owner.read(harness.pid)
+        assert found is not None
+
+        connection = FakeConnection()
+        thread = run_in_background(
+            a_context(), lambda *_: connection, owner.Owner(harness.pid, found.started)
+        )
+        try:
+            tell(protocol.state_message(SESSION, CARD, "waiting", "turn_ended", CARD))
+            threading.Event().wait(2.5)
+
+            assert thread.is_alive()
+            assert {"type": "bye", "reason": "session_ended"} not in connection.sent
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+            harness.kill()
+            harness.wait(timeout=5)
