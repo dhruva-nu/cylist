@@ -48,9 +48,12 @@ import {
   deliveryOutcome,
   describeRule,
   draftOf,
+  groupEvents,
   inputOf,
   isDangling,
+  pickedIn,
   whyIncomplete,
+  withVerbs,
 } from './projectHooks'
 
 export function ProjectHooks() {
@@ -406,13 +409,7 @@ function HookDialog({
   })
 
   const blocked = whyIncomplete(draft, hooks, hook)
-  const toggleVerb = (verb: string, on: boolean) =>
-    set({
-      verbs: on
-        ? events.map((event) => event.verb).filter((v) => v === verb || draft.verbs.includes(v))
-        : draft.verbs.filter((v) => v !== verb),
-    })
-  const moveOnly = draft.verbs.length === 1 && draft.verbs[0] === 'task.moved'
+  const moveOnly = !draft.anyChange && draft.verbs.length === 1 && draft.verbs[0] === 'task.moved'
 
   return (
     <Modal
@@ -454,21 +451,7 @@ function HookDialog({
           </Field>
         </FieldPair>
 
-        <fieldset className={styles.events}>
-          <legend>
-            Events <span className={styles.quiet}>— none ticked fires on every change</span>
-          </legend>
-          {events.map((event) => (
-            <label key={event.verb} className={styles.check}>
-              <input
-                type="checkbox"
-                checked={draft.verbs.includes(event.verb)}
-                onChange={(change) => toggleVerb(event.verb, change.target.checked)}
-              />
-              {event.label}
-            </label>
-          ))}
-        </fieldset>
+        <EventPicker events={events} draft={draft} onChange={set} />
 
         <p className={styles.quiet}>Only for cards that match every filter you set:</p>
         <FieldPair>
@@ -542,6 +525,138 @@ function HookDialog({
         ) : null}
       </ModalBody>
     </Modal>
+  )
+}
+
+/**
+ * Which changes a hook fires on: everything, or the events ticked here.
+ *
+ * Grouped, because twenty-two checkboxes in a wall is a list nobody reads:
+ * the groups down the left say what kinds of change there are, and one
+ * group's events — each with a line on when it happens — fill the right. The
+ * count beside a group is how many of its events are ticked, so a choice made
+ * in a group not on screen is still in sight.
+ */
+function EventPicker({
+  events,
+  draft,
+  onChange,
+}: {
+  events: HookEvent[]
+  draft: HookDraft
+  onChange: (patch: Partial<HookDraft>) => void
+}) {
+  const groups = groupEvents(events)
+  // Opens on the first group with something ticked, so editing a hook starts
+  // where its events are.
+  const [chosenId, setChosenId] = useState<string | null>(null)
+  const active =
+    groups.find((group) => group.id === chosenId) ??
+    groups.find((group) => pickedIn(group, draft.verbs) > 0) ??
+    groups[0]
+  const tick = (verbs: string[], on: boolean) =>
+    onChange({ verbs: withVerbs(draft.verbs, verbs, on, events) })
+
+  return (
+    <fieldset className={styles.when}>
+      <legend className={styles.whenLegend}>When</legend>
+      <div className={styles.mode} role="group" aria-label="Which changes">
+        <button
+          type="button"
+          className={draft.anyChange ? `${styles.seg} ${styles.segOn}` : styles.seg}
+          aria-pressed={draft.anyChange}
+          onClick={() => onChange({ anyChange: true })}
+        >
+          Any change
+        </button>
+        <button
+          type="button"
+          className={draft.anyChange ? styles.seg : `${styles.seg} ${styles.segOn}`}
+          aria-pressed={!draft.anyChange}
+          onClick={() => onChange({ anyChange: false })}
+        >
+          Only these events
+        </button>
+      </div>
+
+      {draft.anyChange ? (
+        <p className={styles.quiet}>
+          Every card, column, template and goal change is sent. Narrow it with the filters below.
+        </p>
+      ) : active === undefined ? (
+        <p className={styles.quiet}>Loading events…</p>
+      ) : (
+        <div className={styles.picker}>
+          <div className={styles.groups}>
+            {groups.map((group) => {
+              const picked = pickedIn(group, draft.verbs)
+              const current = group.id === active.id
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  className={current ? `${styles.group} ${styles.groupOn}` : styles.group}
+                  aria-current={current ? 'true' : undefined}
+                  onClick={() => setChosenId(group.id)}
+                >
+                  <span>{group.name}</span>
+                  <span
+                    className={picked > 0 ? `${styles.badge} ${styles.badgeOn}` : styles.badge}
+                    aria-label={`${picked} of ${group.events.length} ticked`}
+                  >
+                    {picked > 0 ? `${picked}/${group.events.length}` : group.events.length}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <div className={styles.groupPane}>
+            <div className={styles.groupHead}>
+              <h3>{active.name}</h3>
+              <div className={styles.bulk}>
+                <button
+                  type="button"
+                  className={styles.linkish}
+                  onClick={() =>
+                    tick(
+                      active.events.map((event) => event.verb),
+                      true,
+                    )
+                  }
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className={styles.linkish}
+                  onClick={() =>
+                    tick(
+                      active.events.map((event) => event.verb),
+                      false,
+                    )
+                  }
+                >
+                  None
+                </button>
+              </div>
+            </div>
+            {active.events.map((event) => (
+              <label key={event.verb} className={styles.eventRow}>
+                <input
+                  type="checkbox"
+                  checked={draft.verbs.includes(event.verb)}
+                  onChange={(change) => tick([event.verb], change.target.checked)}
+                />
+                <span className={styles.eventText}>
+                  <span className={styles.eventName}>{event.label}</span>
+                  {event.hint ? <span className={styles.eventHint}>{event.hint}</span> : null}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </fieldset>
   )
 }
 

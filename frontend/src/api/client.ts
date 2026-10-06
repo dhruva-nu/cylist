@@ -523,10 +523,17 @@ export interface TemplateInput {
   stages?: { column_id: string; sub_stage_labels: string[]; allowed_outcomes: string[] }[]
 }
 
-/** One change a hook can fire on — `task.moved` — and how the page words it. */
+/**
+ * One change a hook can fire on — `task.moved` — how the page words it, and
+ * the group the picker offers it in. Listed grouped, groups in order.
+ */
 export interface HookEvent {
   verb: string
   label: string
+  /** One line on when it happens. Empty where the label says it all. */
+  hint: string
+  category: string
+  category_name: string
 }
 
 export type DeliveryState = 'pending' | 'delivered' | 'failed'

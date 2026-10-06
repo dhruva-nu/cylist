@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { Hook, HookDelivery, HookEvent } from '../api/client'
 import {
   EMPTY_DRAFT,
+  groupEvents,
+  pickedIn,
+  withVerbs,
   deliveryOutcome,
   describeRule,
   draftOf,
@@ -12,10 +15,20 @@ import {
   whyIncomplete,
 } from './projectHooks'
 
+const event = (verb: string, label: string, category: string, name: string): HookEvent => ({
+  verb,
+  label,
+  hint: '',
+  category,
+  category_name: name,
+})
+
 const EVENTS: HookEvent[] = [
-  { verb: 'task.created', label: 'Card created' },
-  { verb: 'task.moved', label: 'Card moved' },
-  { verb: 'task.commented', label: 'Comment added' },
+  event('task.moved', 'Moved to another column', 'moves', 'Card moves'),
+  event('task.sub_status_moved', 'Sub-status stepped', 'moves', 'Card moves'),
+  event('task.created', 'Card created', 'cards', 'Card changes'),
+  event('task.deleted', 'Card deleted', 'cards', 'Card changes'),
+  event('task.commented', 'Comment added', 'comments', 'Comments'),
 ]
 
 const HOTFIX_TO_STAGING: Hook = {
@@ -56,7 +69,7 @@ const DELIVERY: HookDelivery = {
 describe('describeRule', () => {
   it('reads a hotfix moved into staging the way it was thought of', () => {
     expect(describeRule(HOTFIX_TO_STAGING, EVENTS)).toBe(
-      'Card moved · Hotfix cards · into In staging',
+      'Moved to another column · Hotfix cards · into In staging',
     )
   })
 
@@ -72,11 +85,40 @@ describe('describeRule', () => {
     expect(isDangling(HOTFIX_TO_STAGING)).toBe(false)
   })
 
-  it('counts events past two rather than listing them', () => {
-    expect(eventsPhrase(['task.created', 'task.moved'], EVENTS)).toBe('Card created or Card moved')
-    expect(eventsPhrase(['task.created', 'task.moved', 'task.commented'], EVENTS)).toBe(
-      '3 kinds of change',
+  it('names a group ticked whole by the group, and the rest by label', () => {
+    expect(eventsPhrase(['task.moved', 'task.sub_status_moved'], EVENTS)).toBe('Card moves')
+    expect(eventsPhrase(['task.moved', 'task.created'], EVENTS)).toBe(
+      'Moved to another column or Card created',
     )
+    // A one-event group is named by its event, not by itself.
+    expect(eventsPhrase(['task.commented'], EVENTS)).toBe('Comment added')
+  })
+
+  it('says how many more past two, rather than running on', () => {
+    expect(eventsPhrase(['task.moved', 'task.created', 'task.commented'], EVENTS)).toBe(
+      'Moved to another column, Card created and 1 more',
+    )
+  })
+})
+
+describe('the event picker', () => {
+  it('groups the catalogue in the order it came', () => {
+    const groups = groupEvents(EVENTS)
+    expect(groups.map((group) => group.name)).toEqual(['Card moves', 'Card changes', 'Comments'])
+    expect(groups[0]?.events.map((e) => e.verb)).toEqual(['task.moved', 'task.sub_status_moved'])
+  })
+
+  it('counts what is ticked in a group', () => {
+    const [moves] = groupEvents(EVENTS)
+    expect(moves && pickedIn(moves, ['task.moved', 'task.created'])).toBe(1)
+  })
+
+  it('ticks and unticks in catalogue order, whatever order they were clicked', () => {
+    const ticked = withVerbs(['task.commented'], ['task.created', 'task.moved'], true, EVENTS)
+    expect(ticked).toEqual(['task.moved', 'task.created', 'task.commented'])
+    expect(withVerbs(ticked, ['task.moved', 'task.created'], false, EVENTS)).toEqual([
+      'task.commented',
+    ])
   })
 })
 
@@ -90,14 +132,21 @@ describe('the form', () => {
   })
 
   it('sends a secret only when making a hook, and only if one was typed', () => {
-    const draft = { ...EMPTY_DRAFT, name: 'A', url: 'https://x.dev', secret: '  ' }
+    const draft = { ...EMPTY_DRAFT, name: 'A', url: 'https://x.dev', anyChange: true, secret: '  ' }
     expect(inputOf(draft, true)).not.toHaveProperty('secret')
     expect(inputOf({ ...draft, secret: 'whsec_mine' }, true).secret).toBe('whsec_mine')
   })
 
   it('refuses what the server would', () => {
-    const draft = { ...EMPTY_DRAFT, name: 'Deploy', url: 'https://ci.example.com' }
+    const draft = {
+      ...EMPTY_DRAFT,
+      name: 'Deploy',
+      url: 'https://ci.example.com',
+      verbs: ['task.moved'],
+    }
     expect(whyIncomplete(draft, [], null)).toBeNull()
+    expect(whyIncomplete({ ...draft, verbs: [] }, [], null)).toMatch(/at least one event/)
+    expect(whyIncomplete({ ...draft, verbs: [], anyChange: true }, [], null)).toBeNull()
     expect(whyIncomplete({ ...draft, name: ' ' }, [], null)).toMatch(/name/)
     expect(whyIncomplete({ ...draft, url: 'ftp://x' }, [], null)).toMatch(/http/)
     expect(
@@ -114,6 +163,14 @@ describe('the form', () => {
     expect(
       whyIncomplete({ ...draft, fromColumnId: 'col', verbs: ['task.created'] }, [], null),
     ).toMatch(/only matches moves/)
+  })
+
+  it('sends Any change as no verbs, and keeps what was ticked to switch back to', () => {
+    const draft = draftOf({ ...HOTFIX_TO_STAGING, verbs: [] })
+    expect(draft.anyChange).toBe(true)
+    const ticked = { ...draft, verbs: ['task.moved'] }
+    expect(inputOf({ ...ticked, anyChange: true }, false).verbs).toEqual([])
+    expect(inputOf({ ...ticked, anyChange: false }, false).verbs).toEqual(['task.moved'])
   })
 
   it('knows a URL when it sees one', () => {

@@ -49,37 +49,115 @@ from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
 
-EVENTS: dict[str, str] = {
-    "task.created": "Card created",
-    "task.subtask_created": "Sub-task created",
-    "task.moved": "Card moved",
-    "task.updated": "Card edited",
-    "task.status_changed": "Put on hold, blocked, cancelled or resumed",
-    "task.sub_status_moved": "Sub-status moved",
-    "task.finished": "Sub-task finished or reopened",
-    "task.commented": "Comment added",
-    "task.checklist_added": "Checklist item added",
-    "task.checklist_updated": "Checklist item ticked or changed",
-    "task.checklist_deleted": "Checklist item removed",
-    "task.deleted": "Card deleted",
-    "column.created": "Column added",
-    "column.updated": "Column changed",
-    "column.deleted": "Column deleted",
-    "column.reordered": "Columns reordered",
-    "template.created": "Template added",
-    "template.updated": "Template changed",
-    "template.deleted": "Template deleted",
-    "goal.created": "Goal added",
-    "goal.updated": "Goal changed",
-    "goal.deleted": "Goal deleted",
-}
-"""Every verb a hook may name, with the words the Hooks page shows for it.
+
+@dataclass(frozen=True)
+class EventKind:
+    """One verb a hook may name, and how the Hooks page says it."""
+
+    verb: str
+    label: str
+    hint: str = ""
+    """One line on when it happens, for the picker. Empty where the label
+    already says everything."""
+
+
+@dataclass(frozen=True)
+class EventCategory:
+    """A group of verbs the Hooks page offers together: "Card moves"."""
+
+    id: str
+    name: str
+    events: tuple[EventKind, ...]
+
+
+CATEGORIES: tuple[EventCategory, ...] = (
+    EventCategory(
+        "moves",
+        "Card moves",
+        (
+            EventKind(
+                "task.moved",
+                "Moved to another column",
+                "A card lands somewhere new — the one deploys hang off.",
+            ),
+            EventKind(
+                "task.sub_status_moved",
+                "Sub-status stepped",
+                "Drafted → Reviewed, inside one column.",
+            ),
+        ),
+    ),
+    EventCategory(
+        "cards",
+        "Card changes",
+        (
+            EventKind("task.created", "Card created", "A new card on the board."),
+            EventKind(
+                "task.updated", "Card edited", "Title, description, owner, dates or priority."
+            ),
+            EventKind(
+                "task.status_changed",
+                "Put on hold, blocked or cancelled",
+                "Or picked back up — with the reason given.",
+            ),
+            EventKind(
+                "task.deleted", "Card deleted", "Only the reference is sent; the card is gone."
+            ),
+        ),
+    ),
+    EventCategory(
+        "comments",
+        "Comments",
+        (EventKind("task.commented", "Comment added", "The comment's text is in the payload."),),
+    ),
+    EventCategory(
+        "work",
+        "Sub-tasks & checklists",
+        (
+            EventKind("task.subtask_created", "Sub-task created", "Split out of a card."),
+            EventKind("task.finished", "Sub-task finished", "Or reopened."),
+            EventKind("task.checklist_added", "Checklist item added"),
+            EventKind(
+                "task.checklist_updated", "Checklist item ticked", "Or cancelled, or reopened."
+            ),
+            EventKind("task.checklist_deleted", "Checklist item removed"),
+        ),
+    ),
+    EventCategory(
+        "board",
+        "Board setup",
+        (
+            EventKind("column.created", "Column added"),
+            EventKind("column.updated", "Column changed", "Renamed, re-described or re-sectioned."),
+            EventKind("column.deleted", "Column deleted"),
+            EventKind("column.reordered", "Columns reordered"),
+            EventKind("template.created", "Template added"),
+            EventKind("template.updated", "Template changed"),
+            EventKind("template.deleted", "Template deleted"),
+        ),
+    ),
+    EventCategory(
+        "goals",
+        "Goals",
+        (
+            EventKind("goal.created", "Goal added"),
+            EventKind("goal.updated", "Goal changed", "Renamed, re-dated or marked achieved."),
+            EventKind("goal.deleted", "Goal deleted"),
+        ),
+    ),
+)
+"""Every verb a hook may name, grouped the way the Hooks page offers them.
 
 The board's own changes and nothing else. The trail records more — a vault
 secret revealed, a token issued — but those are about who may do what, not
 about the work, and a URL outside the deployment is the last place their
 existence should be announced.
 """
+
+EVENTS: dict[str, str] = {
+    kind.verb: kind.label for category in CATEGORIES for kind in category.events
+}
+"""The same verbs, flat, in the same order: what matching and validation ask."""
 
 QUEUED = "hooks.queued"
 """The outbox event :func:`app.services.activity.record` publishes when this

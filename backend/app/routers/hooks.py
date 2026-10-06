@@ -130,8 +130,18 @@ def _client(request: Request) -> httpx.AsyncClient:
     summary="List the events a hook can fire on",
 )
 async def list_events(_: Principal = Depends(require(Scope.READ))) -> list[HookEvent]:
-    """Every verb a hook may name, in the order the Hooks page lists them."""
-    return [HookEvent(verb=verb, label=label) for verb, label in hooks.EVENTS.items()]
+    """Every verb a hook may name, grouped and in the order the Hooks page lists them."""
+    return [
+        HookEvent(
+            verb=kind.verb,
+            label=kind.label,
+            hint=kind.hint,
+            category=category.id,
+            category_name=category.name,
+        )
+        for category in hooks.CATEGORIES
+        for kind in category.events
+    ]
 
 
 @router.get(

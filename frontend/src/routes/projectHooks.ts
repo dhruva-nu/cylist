@@ -20,6 +20,12 @@ import type {
 export interface HookDraft {
   name: string
   url: string
+  /**
+   * "Any change" chosen outright. Kept apart from `verbs` so switching to it
+   * and back does not lose what was ticked; the server only ever hears
+   * `verbs`, empty for this.
+   */
+  anyChange: boolean
   verbs: string[]
   toColumnId: string
   fromColumnId: string
@@ -31,6 +37,7 @@ export interface HookDraft {
 export const EMPTY_DRAFT: HookDraft = {
   name: '',
   url: '',
+  anyChange: false,
   verbs: [],
   toColumnId: '',
   fromColumnId: '',
@@ -43,6 +50,7 @@ export function draftOf(hook: Hook): HookDraft {
   return {
     name: hook.name,
     url: hook.url,
+    anyChange: hook.verbs.length === 0,
     verbs: hook.verbs,
     toColumnId: hook.to_column_id ?? '',
     fromColumnId: hook.from_column_id ?? '',
@@ -60,7 +68,7 @@ export function inputOf(draft: HookDraft, creating: boolean): HookInput {
   const input: HookInput = {
     name: draft.name.trim(),
     url: draft.url.trim(),
-    verbs: draft.verbs,
+    verbs: draft.anyChange ? [] : draft.verbs,
     to_column_id: draft.toColumnId || null,
     from_column_id: draft.fromColumnId || null,
     template_id: draft.templateId || null,
@@ -92,18 +100,75 @@ export function whyIncomplete(
     return `This project already has a hook called ${name}.`
   }
   if (!isHookUrl(draft.url)) return 'The URL must start with http:// or https://.'
-  if (draft.fromColumnId !== '' && draft.verbs.length > 0 && !draft.verbs.includes('task.moved')) {
-    return '"Moved from" only matches moves — add Card moved to its events.'
+  if (!draft.anyChange && draft.verbs.length === 0) {
+    return 'Tick at least one event, or choose Any change.'
+  }
+  if (draft.fromColumnId !== '' && !draft.anyChange && !draft.verbs.includes('task.moved')) {
+    return '"Moved from" only matches moves — tick Moved to another column.'
   }
   return null
 }
 
-/** Which change, in the page's words: one event by name, several by count. */
+/** One of the picker's groups — "Card moves" — and the events in it. */
+export interface EventGroup {
+  id: string
+  name: string
+  events: HookEvent[]
+}
+
+/** The catalogue as the picker shows it: groups in the order the server listed them. */
+export function groupEvents(events: HookEvent[]): EventGroup[] {
+  const groups: EventGroup[] = []
+  for (const event of events) {
+    const last = groups[groups.length - 1]
+    if (last?.id === event.category) last.events.push(event)
+    else groups.push({ id: event.category, name: event.category_name, events: [event] })
+  }
+  return groups
+}
+
+/** How many of a group's events are ticked. */
+export function pickedIn(group: EventGroup, verbs: string[]): number {
+  return group.events.filter((event) => verbs.includes(event.verb)).length
+}
+
+/**
+ * The ticked verbs with some switched on or off, kept in catalogue order so
+ * the same set always reads — and saves — the same way.
+ */
+export function withVerbs(
+  verbs: string[],
+  changing: string[],
+  on: boolean,
+  events: HookEvent[],
+): string[] {
+  const wanted = new Set(verbs)
+  for (const verb of changing) {
+    if (on) wanted.add(verb)
+    else wanted.delete(verb)
+  }
+  return events.map((event) => event.verb).filter((verb) => wanted.has(verb))
+}
+
+/**
+ * Which change, in the page's words. A group ticked whole is named as the
+ * group — "Card moves" — and the rest by their own labels; past two, the
+ * line says how many more rather than running on.
+ */
 export function eventsPhrase(verbs: string[], events: HookEvent[]): string {
   if (verbs.length === 0) return 'Any change'
-  const label = (verb: string) => events.find((event) => event.verb === verb)?.label ?? verb
-  if (verbs.length <= 2) return verbs.map(label).join(' or ')
-  return `${verbs.length} kinds of change`
+  const parts: string[] = []
+  for (const group of groupEvents(events)) {
+    const picked = group.events.filter((event) => verbs.includes(event.verb))
+    if (picked.length === 0) continue
+    if (picked.length === group.events.length && group.events.length > 1) parts.push(group.name)
+    else parts.push(...picked.map((event) => event.label))
+  }
+  // A verb the catalogue no longer lists still fired once; name it as stored.
+  const known = new Set(events.map((event) => event.verb))
+  parts.push(...verbs.filter((verb) => !known.has(verb)))
+  if (parts.length <= 2) return parts.join(' or ')
+  return `${parts[0]}, ${parts[1]} and ${parts.length - 2} more`
 }
 
 const TYPE_WORDS: Record<TaskType, string> = { feature: 'Features', bug: 'Bugs', chore: 'Chores' }

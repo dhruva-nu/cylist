@@ -16,6 +16,9 @@ from app.schemas.common import Schema
 class HookEvent(Schema):
     verb: str = Field(description="What a hook names, e.g. `task.moved`.")
     label: str = Field(description="How the Hooks page words it.")
+    hint: str = Field(description="One line on when it happens. Empty if the label says it.")
+    category: str = Field(description="Which group it is offered in, e.g. `moves`.")
+    category_name: str = Field(description="That group's name, e.g. `Card moves`.")
 
 
 class _HookBody(Schema):
