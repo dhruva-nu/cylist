@@ -15,6 +15,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,8 +29,9 @@ from app.db import Database
 from app.mcp import mount_mcp
 from app.realtime.hub import Hub
 from app.routers import api_router
-from app.services import agent_reports
+from app.services import agent_reports, hooks
 from app.services.doc_engine import engine_for
+from app.services.hook_delivery import Courier
 from app.spa import mount_spa
 
 API_PREFIX = "/api/v1"
@@ -70,9 +72,10 @@ def build_lifespan(settings: Settings) -> Lifespan:
         )
         settings.blob_dir.mkdir(parents=True, exist_ok=True)
         app.state.database = Database(settings.database_url, echo=settings.database_echo)
-        # Committed changes reach the boards watching them. The hub was built
-        # in the factory; this is where it starts being listened to.
-        app.state.database.publish_to(app.state.hub.publish)
+        # Committed changes reach the boards watching them, and queued hook
+        # deliveries wake the courier. Both were built in the factory; this is
+        # where they start being listened to.
+        app.state.database.publish_to(_publisher(app))
 
         # One process, just started, holding no sockets: whatever the rows
         # say, nothing is running. Without this a card left mid-turn by a
@@ -81,21 +84,41 @@ def build_lifespan(settings: Settings) -> Lifespan:
             await agent_reports.end_open_sessions(session)
 
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
+        courier = asyncio.create_task(
+            app.state.courier.run(app.state.database, settings.vault_key, app.state.hook_transport),
+            name="cylist-hook-courier",
+        )
         try:
             # The MCP tools at /mcp answer nothing until their session
             # managers are running, and those live for exactly this long.
             async with app.state.mcp.run():
                 yield
         finally:
-            reaper.cancel()
-            with suppress(asyncio.CancelledError):
-                await reaper
+            for task in (reaper, courier):
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             await app.state.database.dispose()
             # Logged after the pool is closed, so the line is a statement that
             # shutdown finished rather than that it was attempted.
             logger.info("Cylist stopped")
 
     return lifespan
+
+
+def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
+    """Where a committed transaction's news goes: hook deliveries to the
+    courier, everything else to the boards."""
+    hub: Hub = app.state.hub
+    courier: Courier = app.state.courier
+
+    def publish(event: dict[str, Any]) -> None:
+        if event.get("type") == hooks.QUEUED:
+            courier.wake()
+        else:
+            hub.publish(event)
+
+    return publish
 
 
 async def _reap_forever(app: FastAPI) -> None:
@@ -159,6 +182,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # reachable from a route whether or not startup ran. The background work
     # that uses it does live in the lifespan, where it belongs.
     app.state.hub = Hub()
+
+    # For the hub's reason too. The courier's loop starts in the lifespan; the
+    # object exists here so a route can wake it. The transport is None — the
+    # real network — except in a test, which answers in a receiver's place.
+    app.state.courier = Courier()
+    app.state.hook_transport = None
 
     # jev-docs: which section answers a question, and where a new fact goes.
     # None without a key, which every caller treats as jev being unavailable.

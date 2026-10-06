@@ -1,0 +1,320 @@
+/* Said in the brand tone rather than as an error: a reader who is not an
+   admin has not done anything wrong, they are just looking. */
+.note {
+  max-width: 62ch;
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-card);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-size: 14px;
+}
+
+/* --- Hooks down the left, one hook on the right --------------------------- */
+
+/* The Roles page's split and its 320px, for the same reason it gives. */
+.split {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (width <= 900px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.listRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.listRow:hover {
+  background: var(--paper-2);
+}
+
+.listRow.selected {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 700;
+}
+
+.listName {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listOff {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* How its last delivery went, at a glance down the list. */
+.dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+
+.dot.delivered {
+  background: var(--ok);
+}
+
+.dot.pending {
+  background: var(--hold);
+}
+
+.dot.failed {
+  background: var(--blocked);
+}
+
+.dot.off {
+  opacity: 0.4;
+}
+
+.pane {
+  min-width: 0;
+}
+
+.detailHead {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.detailHead h2 {
+  overflow-wrap: anywhere;
+  font-size: 20px;
+}
+
+.switch {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 14.5px;
+}
+
+.facts dt {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+@media (width <= 600px) {
+  .facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .facts dd {
+    margin-bottom: 8px;
+  }
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.warn {
+  color: var(--blocked);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quiet {
+  color: var(--ink-3);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
+/* --- The delivery log ----------------------------------------------------- */
+
+.logTitle {
+  margin-top: 10px;
+  font-size: 15px;
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.delivery {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.delivery summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.state {
+  padding: 1px 8px;
+  border-radius: var(--radius-control);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.state.delivered {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.state.pending {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.state.failed {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+.event {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.when {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.outcome {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 0 12px 12px;
+}
+
+.attempts {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.payload,
+.secret {
+  overflow: auto;
+  width: 100%;
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.secret {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: all;
+}
+
+/* --- The form ------------------------------------------------------------- */
+
+.events {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.events legend {
+  padding: 0 6px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.blocked {
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: 13px;
+}
