@@ -3,7 +3,7 @@
  *
  * The bar carries five tabs — Goals, Board, Docs, People, Agents — which are
  * what somebody working a project moves between all day. The sidebar carries
- * every area: those five, and Roles, Files and Vault, which are places you go to
+ * every area: those five, and Roles, Hooks, Files and Vault, which are places you go to
  * fetch or settle something rather than places you work. So the bar stays a
  * short row across the top of the page, and nothing is reachable only by
  * typing its address.
@@ -16,9 +16,9 @@
  * a column of rows with a mark and a name each. Collapsed to its rail it is
  * the marks alone down a 46px column, named by their tooltips and to a screen
  * reader. Under 900px, where the rail is a strip across the top instead, it
- * draws nothing: eight names do not fit across a phone, and the five you use
+ * draws nothing: nine names do not fit across a phone, and the five you use
  * most are in the bar's own row directly beneath it — see `.tabs` in the
- * stylesheet. The other three are one press of the handle away.
+ * stylesheet. The other four are one press of the handle away.
  *
  * Off a project there is nothing to navigate between, and neither draws
  * anything.
@@ -54,6 +54,11 @@ const ICONS = {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <path d="M12 3 5 6v5c0 4.4 3 8.3 7 10 4-1.7 7-5.6 7-10V6z" />
       <path d="m9 12 2 2 4-4" />
+    </svg>
+  ),
+  hooks: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M13 3 6 13h5l-1 8 7-10h-5z" />
     </svg>
   ),
   agents: (
@@ -96,6 +101,7 @@ const AREAS = [
   { to: '/p/$projectKey/docs', name: 'Docs', icon: ICONS.docs, inBar: true },
   { to: '/p/$projectKey/people', name: 'People', icon: ICONS.people, inBar: true },
   { to: '/p/$projectKey/roles', name: 'Roles', icon: ICONS.roles, inBar: false },
+  { to: '/p/$projectKey/hooks', name: 'Hooks', icon: ICONS.hooks, inBar: false },
   { to: '/p/$projectKey/agents', name: 'Agents', icon: ICONS.agents, inBar: true },
   { to: '/p/$projectKey/files', name: 'Files', icon: ICONS.files, inBar: false },
   { to: '/p/$projectKey/vault', name: 'Vault', icon: ICONS.vault, inBar: false },

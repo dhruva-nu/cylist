@@ -28,10 +28,11 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.core.ids import uuid7
 from app.db import publish_into
 from app.models.activity import Activity
 from app.schemas.activity import FieldChange, HistoryEntry
-from app.services import agent_sessions
+from app.services import agent_sessions, hooks
 
 
 async def record(
@@ -56,6 +57,9 @@ async def record(
             ``read`` scope alone.
     """
     entry = Activity(
+        # Drawn now rather than at the flush: a hook delivery queued below
+        # names this row, and has to be able to before either is written.
+        id=uuid7(),
         actor_token_id=principal.token_id,
         actor_person_id=principal.person_id,
         actor_label=principal.label,
@@ -88,6 +92,11 @@ async def record(
                 "verb": verb,
             },
         )
+    # And to anyone outside who asked to be told. Queued in this transaction,
+    # so a change that rolls back is never announced and one that commits is
+    # never lost; the courier is woken once it has.
+    if await hooks.queue_for(session, entry):
+        publish_into(session, {"type": hooks.QUEUED})
     return entry
 
 
@@ -429,6 +438,13 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     ),
     "template.updated": lambda p: f"Changed the task template {_quoted(p.get('name'))}.",
     "template.deleted": lambda p: f"Deleted the task template {_quoted(p.get('name'))}.",
+    # --- Hooks. Never the secret, which is not in the payload to begin with ---
+    "hook.created": lambda p: f"Added the hook {_quoted(p.get('name'))}.",
+    "hook.updated": lambda p: f"Changed the hook {_quoted(p.get('name'))}'s {_worded_fields(p)}.",
+    "hook.secret_rotated": lambda p: (
+        f"Gave the hook {_quoted(p.get('name'))} a new signing secret."
+    ),
+    "hook.deleted": lambda p: f"Deleted the hook {_quoted(p.get('name'))}.",
     # --- Files --------------------------------------------------------------
     "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
     "folder.updated": lambda p: (

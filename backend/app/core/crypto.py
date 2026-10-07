@@ -71,6 +71,11 @@ _AAD_DOMAIN = "cylist.vault.secret"
 """Domain separator, so a ciphertext from some future use of this key cannot
 be replayed into the vault even if the node ids happened to line up."""
 
+HOOK_SECRET_DOMAIN = "cylist.hook.secret"  # noqa: S105 - a label, not a secret
+"""The first such use: a hook's signing secret, sealed under the vault key and
+bound to the hook's id. Its own domain, so a hook's ciphertext copied into a
+``vault_secret`` row — or the other way round — fails its tag check."""
+
 
 class VaultUnavailableError(AppError):
     """``CYLIST_VAULT_KEY`` is missing or unusable.
@@ -102,7 +107,7 @@ class VaultCipher:
     def __init__(self, encoded_key: str) -> None:
         self._aead = AESGCM(_decode_key(encoded_key))
 
-    def seal(self, plaintext: str, *, node_id: UUID) -> bytes:
+    def seal(self, plaintext: str, *, node_id: UUID, domain: str = _AAD_DOMAIN) -> bytes:
         """Encrypt a secret for one node.
 
         Returns the 96-bit nonce followed by the ciphertext and its tag, ready
@@ -111,17 +116,21 @@ class VaultCipher:
         """
         nonce = secrets.token_bytes(_NONCE_BYTES)
         sealed = self._aead.encrypt(
-            nonce, plaintext.encode(), _associated_data(node_id, KEY_VERSION)
+            nonce, plaintext.encode(), _associated_data(node_id, KEY_VERSION, domain)
         )
         return nonce + sealed
 
-    def open(self, sealed: bytes, *, node_id: UUID, key_version: int) -> str:
+    def open(
+        self, sealed: bytes, *, node_id: UUID, key_version: int, domain: str = _AAD_DOMAIN
+    ) -> str:
         """Decrypt a secret, or raise :class:`SecretUnreadableError`.
 
         Args:
             sealed: Exactly what :meth:`seal` returned.
             node_id: The node the row hangs off. A mismatch fails the tag.
             key_version: The version stored with the row.
+            domain: What kind of secret it is — the vault's own unless given.
+                Must be the one it was sealed under.
         """
         if key_version != KEY_VERSION:
             raise SecretUnreadableError(
@@ -134,7 +143,7 @@ class VaultCipher:
         nonce, ciphertext = sealed[:_NONCE_BYTES], sealed[_NONCE_BYTES:]
         try:
             plaintext = self._aead.decrypt(
-                nonce, ciphertext, _associated_data(node_id, key_version)
+                nonce, ciphertext, _associated_data(node_id, key_version, domain)
             )
         except InvalidTag as exc:
             raise SecretUnreadableError(
@@ -155,14 +164,14 @@ def cipher_for(encoded_key: str) -> VaultCipher:
     return VaultCipher(encoded_key)
 
 
-def _associated_data(node_id: UUID, key_version: int) -> bytes:
+def _associated_data(node_id: UUID, key_version: int, domain: str = _AAD_DOMAIN) -> bytes:
     """The context a ciphertext is bound to: this node, under this key version.
 
     Authenticated but not encrypted, which is exactly what is wanted — neither
     value is a secret, and both must be identical on the way back or the tag
     check fails.
     """
-    return f"{_AAD_DOMAIN}.v{key_version}:{node_id}".encode()
+    return f"{domain}.v{key_version}:{node_id}".encode()
 
 
 def _decode_key(encoded: str) -> bytes:

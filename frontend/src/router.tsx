@@ -15,6 +15,7 @@ import { ProjectBoard } from './routes/ProjectBoard'
 import { ProjectFiles } from './routes/ProjectFiles'
 import { ProjectGoals } from './routes/ProjectGoals'
 import { ProjectPeople } from './routes/ProjectPeople'
+import { ProjectHooks } from './routes/ProjectHooks'
 import { ProjectRoles } from './routes/ProjectRoles'
 import { ProjectVault } from './routes/ProjectVault'
 
@@ -101,6 +102,14 @@ const projectRolesRoute = createRoute({
   component: ProjectRoles,
 })
 
+// Where an admin sends the board's changes to a URL. Beside Roles, and admin-only
+// like it: a hook's URL is often a capability in its own right.
+const projectHooksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/p/$projectKey/hooks',
+  component: ProjectHooks,
+})
+
 // A project's area, not the platform's: an agent's token is scoped per
 // project, so what it may do on one board is not what it may do on the next.
 const projectAgentsRoute = createRoute({
@@ -126,6 +135,7 @@ const routeTree = rootRoute.addChildren([
   projectVaultRoute,
   projectPeopleRoute,
   projectRolesRoute,
+  projectHooksRoute,
   projectAgentsRoute,
 ])
 
