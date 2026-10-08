@@ -265,7 +265,11 @@ function ProjectSwitcher({
     >
       {label}
       {withSeparator ? (
-        <span className={`${styles.separator} ${hovered && switchable ? styles.separatorDown : ''}`}>›</span>
+        <span
+          className={`${styles.separator} ${hovered && switchable ? styles.separatorDown : ''}`}
+        >
+          ›
+        </span>
       ) : null}
       {shown ? (
         <div className={styles.switcherMenu} role="menu" aria-label="Switch project">
