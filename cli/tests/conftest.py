@@ -42,6 +42,15 @@ posix_modes_only = pytest.mark.skipif(
     ),
 )
 
+needs_a_process_table = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "owner.read answers None on Windows by design — there is no /proc or ps "
+        "there, so the five-minute idle rule stays. TestOnAPlatformThatWillNotSay "
+        "covers that answer on every platform."
+    ),
+)
+
 
 @pytest.fixture(autouse=True)
 def isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

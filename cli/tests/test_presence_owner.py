@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from cylist_cli.presence import owner
+from tests.conftest import needs_a_process_table
 
 IDLE_CHILD = "import time; time.sleep(60)"
 
@@ -41,6 +42,7 @@ def table(*rows: owner.Process) -> Any:
     return lambda pid: by_pid.get(pid)
 
 
+@needs_a_process_table
 class TestReadingAProcess:
     def test_it_reads_this_one(self) -> None:
         me = owner.read(os.getpid())
@@ -174,6 +176,7 @@ class TestFindingTheOwner:
 
         assert owner.find(depth + 1) is None
 
+    @needs_a_process_table
     def test_this_process_is_walked_by_default(self, monkeypatch: Any) -> None:
         """No argument means "whoever is running me", which is what the hook
         wants and is the only call site in the CLI."""
@@ -185,6 +188,7 @@ class TestFindingTheOwner:
         assert owner.find() == owner.Owner(pid=os.getpid(), started=me.started)
 
 
+@needs_a_process_table
 class TestWatchingTheOwner:
     def test_a_running_process_is_not_gone(self, child: Any) -> None:
         found = owner.read(child.pid)
@@ -246,6 +250,7 @@ class TestWatchingTheOwner:
         assert watch.gone(owner.RECHECK_EVERY * 20) is True
 
 
+@needs_a_process_table
 class TestWhereThereIsNoProc:
     """The macOS and BSD path, driven on Linux.
 

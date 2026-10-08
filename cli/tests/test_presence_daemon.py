@@ -22,6 +22,7 @@ import pytest
 from cylist_cli.config import Config
 from cylist_cli.context import Context
 from cylist_cli.presence import daemon, ipc, owner, protocol, supervisor
+from tests.conftest import needs_a_process_table
 
 SESSION = "01a08bbf-994b-743b-989c-e07e09e66add"
 CARD = "ATL-1"
@@ -224,6 +225,7 @@ class TestWithoutAToken:
         assert supervisor.is_running(SESSION) is False
 
 
+@needs_a_process_table
 class TestWatchingTheOwner:
     """A fake `claude`: a real process this test can end on command.
 
