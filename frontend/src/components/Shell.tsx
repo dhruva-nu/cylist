@@ -4,9 +4,9 @@
  * a project's areas and the sidebar lists all of them — see `ProjectNav.tsx`.
  */
 
-import { Link, Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router'
+import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { type ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { api } from '../api/client'
 import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
@@ -176,8 +176,7 @@ function Breadcrumbs() {
       <span className={styles.separator}>›</span>
       {area ? (
         <>
-          <ProjectSwitcher projectKey={projectKey} areaRoute={areaRoute} />
-          <span className={styles.separator}>›</span>
+          <ProjectSwitcher projectKey={projectKey} areaRoute={areaRoute} withSeparator />
           <b>{area.name}</b>
         </>
       ) : (
@@ -195,56 +194,76 @@ function useProject(projectKey: string) {
 }
 
 /**
- * The project's name in the breadcrumb, doubling as a switcher: picking
- * another project jumps straight to the same area of its board rather than
- * forcing a detour through "All projects". Hidden behind a plain link (or,
- * on the project's own page, plain bold text) once there is only one project
- * to be on — a dropdown with nothing else in it is a control for no reason.
+ * The project's name in the breadcrumb, doubling as a switcher: hovering (or
+ * focusing) it turns the separator after it to point down and drops a list of
+ * the projects, and picking one jumps straight to the same area of that
+ * project rather than forcing a detour through "All projects". With only one
+ * project there is nothing to switch to, so it stays a plain crumb.
  */
 function ProjectSwitcher({
   projectKey,
   areaRoute,
   emphasized,
+  withSeparator,
 }: {
   projectKey: string
   areaRoute: (typeof PROJECT_AREAS)[number]['route']['to'] | '/p/$projectKey/board'
   emphasized?: boolean
+  withSeparator?: boolean
 }) {
   const project = useProject(projectKey)
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
-  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
   const name = project.data?.name ?? projectKey
-  const others = (projects.data ?? []).filter((candidate) => candidate.key !== projectKey)
+  const all = projects.data ?? []
+  const switchable = all.some((candidate) => candidate.key !== projectKey)
+  const shown = switchable && open
 
-  if (!others.length) {
-    return emphasized ? (
-      <b>{name}</b>
-    ) : (
-      <Link to={areaRoute} params={{ projectKey }}>
-        {name}
-      </Link>
-    )
-  }
+  const label = emphasized ? (
+    <b>{name}</b>
+  ) : (
+    <Link to={areaRoute} params={{ projectKey }}>
+      {name}
+    </Link>
+  )
 
   return (
-    <select
-      className={emphasized ? styles.switcherCurrent : styles.switcher}
-      aria-label="Switch project"
-      value={projectKey}
-      onChange={(event) => {
-        const nextKey = event.target.value
-        if (nextKey !== projectKey) {
-          void navigate({ to: areaRoute, params: { projectKey: nextKey } })
-        }
+    <div
+      className={styles.switcher}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setOpen(false)
       }}
     >
-      <option value={projectKey}>{name}</option>
-      {others.map((candidate) => (
-        <option key={candidate.id} value={candidate.key}>
-          {candidate.name}
-        </option>
-      ))}
-    </select>
+      {label}
+      {withSeparator ? (
+        <span className={`${styles.separator} ${shown ? styles.separatorDown : ''}`}>›</span>
+      ) : null}
+      {shown ? (
+        <div className={styles.switcherMenu} role="menu" aria-label="Switch project">
+          <div className={styles.switcherList}>
+            {all.map((candidate) => (
+              <Link
+                key={candidate.id}
+                to={areaRoute}
+                params={{ projectKey: candidate.key }}
+                role="menuitem"
+                className={candidate.key === projectKey ? styles.switcherActive : undefined}
+                aria-current={candidate.key === projectKey ? 'true' : undefined}
+                onClick={() => setOpen(false)}
+              >
+                {candidate.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

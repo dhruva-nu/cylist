@@ -203,31 +203,51 @@
 }
 
 .separator {
+  display: inline-block;
   color: var(--ink-3);
+  transition: transform 0.12s;
 }
 
-/* The project switcher: a native select styled to read as a breadcrumb link,
-   so it costs nothing visually until a reader notices the arrow. */
+/* The project switcher: the name and the separator after it share one box, so
+   hovering either turns the separator down and opens the list beneath. */
 .switcher {
-  padding: 2px 6px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink-2);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
-.switcher:hover {
+.separatorDown {
+  transform: rotate(90deg);
+}
+
+/* Flush against the box with padding for a gap, so the pointer never crosses
+   dead space on its way down and closes the list. */
+.switcherMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 220px;
+  padding-top: 6px;
+}
+
+.switcherList {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: var(--paper);
-  color: var(--ink);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
 }
 
-/* Same control, on the page it already names — bold like the other crumb's
-   current page, rather than the link weight above. */
-.switcherCurrent {
-  composes: switcher;
+.crumbs .switcherList a {
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.crumbs .switcherList a.switcherActive {
   color: var(--ink);
   font-weight: 600;
 }
