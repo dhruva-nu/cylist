@@ -6,7 +6,7 @@
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
@@ -193,10 +193,13 @@ function useProject(projectKey: string) {
   })
 }
 
+/** How long the pointer rests on the project before its list drops. */
+const SWITCHER_DELAY_MS = 600
+
 /**
  * The project's name in the breadcrumb, doubling as a switcher: hovering (or
- * focusing) it turns the separator after it to point down and drops a list of
- * the projects, and picking one jumps straight to the same area of that
+ * focusing) it turns the separator after it to point down, and once the
+ * pointer has rested there for a moment a list of the projects drops, and picking one jumps straight to the same area of that
  * project rather than forcing a detour through "All projects". With only one
  * project there is nothing to switch to, so it stays a plain crumb.
  */
@@ -213,11 +216,26 @@ function ProjectSwitcher({
 }) {
   const project = useProject(projectKey)
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
+  const [hovered, setHovered] = useState(false)
   const [open, setOpen] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
   const name = project.data?.name ?? projectKey
   const all = projects.data ?? []
   const switchable = all.some((candidate) => candidate.key !== projectKey)
   const shown = switchable && open
+
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+
+  const enter = () => {
+    setHovered(true)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setOpen(true), SWITCHER_DELAY_MS)
+  }
+  const leave = () => {
+    window.clearTimeout(timer.current)
+    setHovered(false)
+    setOpen(false)
+  }
 
   const label = emphasized ? (
     <b>{name}</b>
@@ -230,19 +248,24 @@ function ProjectSwitcher({
   return (
     <div
       className={styles.switcher}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+      onFocus={() => {
+        // Keyboard users do not hover, so there is nothing to wait out.
+        window.clearTimeout(timer.current)
+        setHovered(true)
+        setOpen(true)
+      }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false)
+        if (!event.currentTarget.contains(event.relatedTarget)) leave()
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Escape') setOpen(false)
+        if (event.key === 'Escape') leave()
       }}
     >
       {label}
       {withSeparator ? (
-        <span className={`${styles.separator} ${shown ? styles.separatorDown : ''}`}>›</span>
+        <span className={`${styles.separator} ${hovered && switchable ? styles.separatorDown : ''}`}>›</span>
       ) : null}
       {shown ? (
         <div className={styles.switcherMenu} role="menu" aria-label="Switch project">
@@ -255,7 +278,7 @@ function ProjectSwitcher({
                 role="menuitem"
                 className={candidate.key === projectKey ? styles.switcherActive : undefined}
                 aria-current={candidate.key === projectKey ? 'true' : undefined}
-                onClick={() => setOpen(false)}
+                onClick={leave}
               >
                 {candidate.name}
               </Link>
