@@ -581,6 +581,9 @@ async def move_task(
     moved at all: it is not on the board, and `POST /tasks/{ref}/finish` is what
     finishes one.
     """
+    # Taken before the move, which changes it in place. The changes below name
+    # the column the card left; a hook filtering on it needs its id.
+    from_column_id = task.column_id
     moved, changes = await tasks.move(session, task, body)
     await activity.record(
         session,
@@ -592,6 +595,7 @@ async def move_task(
         payload={
             "reference": moved.reference,
             "column_id": str(moved.column_id),
+            "from_column_id": str(from_column_id) if from_column_id else None,
             "position": moved.position,
             "changes": changes,
         },

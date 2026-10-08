@@ -15,13 +15,22 @@ The rules, in one place:
 * While the link is down the level is remembered and nothing is queued. On
   reconnect the *current* level is sent, not the history — see
   ``hello_frame``.
-* The keepalive runs while working and not while waiting. This is the
-  client's half of the idle contract: a tool call can run for twenty minutes
-  without a hook event, and the server must not read that as absence; a human
-  who has walked away must be read as exactly that, after five minutes.
+* The keepalive runs for as long as the link is up, whether the session is
+  working or waiting. Both are a session that is still open, and the only
+  thing silence ever meant was that nobody had asked the better question.
 * Nothing keeps a daemon alive forever. It exits when the session ends, when
-  the server has been unreachable long enough that nobody is coming back, and
-  when it has been waiting on a person for the idle window.
+  the harness process it belongs to exits, when the server has been
+  unreachable long enough that nobody is coming back — and, only where no
+  owner could be found, when it has been waiting on a person for the idle
+  window.
+
+The last of those used to be the main rule and is now the fallback, which is
+the whole of CYLIST-74. Ten sessions open on one machine is ordinary, and at
+most one of them is being typed at; the other nine were waiting on their
+humans, said nothing for five minutes, and had their cards put out while the
+conversations were still on screen. Silence is not absence. The question that
+actually distinguishes them is whether ``claude`` is still running, which
+:mod:`.owner` answers and the daemon feeds in here as :class:`OwnerGone`.
 """
 
 from __future__ import annotations
@@ -32,16 +41,21 @@ from enum import StrEnum
 from cylist_cli.presence import protocol
 
 IDLE_AFTER = 300.0
-"""Seconds waiting on a human before the daemon gives the session up.
+"""Seconds waiting on a human before the daemon gives the session up —
+**only when nobody is watching the harness process**.
 
-Matches ``AGENT_SOCKET_IDLE_AFTER`` on the server, which would close the
-socket at the same moment anyway. Doing it here as well means the session
-ends tidily, with a reason, instead of being timed out.
+The last resort, not the rule. A daemon that knows which ``claude`` it
+belongs to ends when that process does, which is the right answer and has no
+clock in it; this is what is left for a machine that would not say, and it
+exists so that a card can never stay lit forever. Set to match
+``AGENT_SOCKET_IDLE_AFTER`` on the server, which would close the socket at
+the same moment anyway, so the session ends tidily with a reason instead of
+being timed out.
 """
 
 KEEPALIVE_EVERY = 60.0
-"""Seconds between heartbeats while working. A fifth of the idle window, so
-four may be lost before anyone concludes anything."""
+"""Seconds between heartbeats while the link is up. A fifth of the server's
+window, so four may be lost before anyone concludes anything."""
 
 BACKOFF_GIVE_UP = 1800.0
 """Seconds of failing to connect before the daemon stops trying.
@@ -120,11 +134,21 @@ class LinkDown:
 
 
 @dataclass(frozen=True)
+class OwnerGone:
+    """The ``claude`` process this daemon belongs to has exited.
+
+    Fed in by the daemon rather than discovered here, because asking costs a
+    system call and this module owns no clock and makes no system calls. What
+    it decides is what follows: the conversation is over, so the session is.
+    """
+
+
+@dataclass(frozen=True)
 class Tick:
     """Nothing happened; consider whether that is itself news."""
 
 
-Event = HookState | HookBind | HookEnd | LinkUp | LinkDown | Tick
+Event = HookState | HookBind | HookEnd | LinkUp | LinkDown | OwnerGone | Tick
 
 
 # --- Actions ---------------------------------------------------------------
@@ -168,6 +192,15 @@ class Machine:
     reason: str | None = None
     link: Link = Link.CONNECTING
     attempt: int = 0
+    owned: bool = False
+    """Whether somebody is watching the harness process for us.
+
+    True when the hook found the ``claude`` that started it and the daemon is
+    checking that it is still there. It switches off :data:`IDLE_AFTER`,
+    because the two rules answer the same question and only this one answers
+    it correctly: a session waiting on its human has been quiet for an hour
+    and is still open.
+    """
     since_hook: float = 0.0
     """Seconds since the hook last said anything."""
     since_link: float = 0.0
@@ -197,6 +230,8 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
         return _on_link_up(machine)
     if isinstance(event, LinkDown):
         return _on_link_down(machine)
+    if isinstance(event, OwnerGone):
+        return _on_owner_gone(machine)
     return _on_tick(machine)
 
 
@@ -248,23 +283,25 @@ def _on_link_down(machine: Machine) -> tuple[Machine, list[Action]]:
     return machine, [Reconnect(delay)]
 
 
+def _on_owner_gone(machine: Machine) -> tuple[Machine, list[Action]]:
+    """The terminal closed. One card goes out, and only that one."""
+    return machine, _goodbye(machine, bye_reason="session_ended", finish_reason="owner_gone")
+
+
 def _on_tick(machine: Machine) -> tuple[Machine, list[Action]]:
-    if machine.agent is Agent.WAITING and machine.since_hook >= IDLE_AFTER:
-        # Nobody is coming. The server's own window would close the socket at
-        # the same moment; saying goodbye first makes it an ending rather than
-        # a timeout.
+    if not machine.owned and machine.agent is Agent.WAITING and machine.since_hook >= IDLE_AFTER:
+        # Nobody found the harness process, so a clock is all there is. The
+        # server's own window would close the socket at the same moment;
+        # saying goodbye first makes it an ending rather than a timeout.
         return machine, _goodbye(machine, bye_reason="session_ended", finish_reason="idle")
 
     if machine.link is Link.BACKOFF and machine.since_link >= BACKOFF_GIVE_UP:
         return machine, [Finish("backend_gone")]
 
-    if (
-        machine.link is Link.LIVE
-        and machine.agent is Agent.WORKING
-        and machine.since_keepalive >= KEEPALIVE_EVERY
-    ):
-        # Only while working. Silence while waiting is the signal, not a
-        # failure — see the module note.
+    if machine.link is Link.LIVE and machine.since_keepalive >= KEEPALIVE_EVERY:
+        # While waiting as much as while working. The server's five-minute
+        # window means "this daemon has gone", and a session waiting on its
+        # human has not — it is the one that most needs saying so.
         machine = replace(machine, since_keepalive=0.0)
         return machine, [Send(protocol.heartbeat_frame())]
 

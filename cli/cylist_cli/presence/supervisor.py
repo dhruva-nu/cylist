@@ -35,7 +35,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from cylist_cli.presence import ipc, protocol
+from cylist_cli.presence import ipc, owner, protocol
 
 if sys.platform == "win32":
     import msvcrt
@@ -137,11 +137,17 @@ def spawn(command: Sequence[str], session_id: str) -> bool:
     the pipe open for as long as it lived, and *every* hook invocation would
     appear to hang until its three-second timeout — a symptom about as far
     from its cause as it is possible to get.
+
+    Detached but not disowned: the ``claude`` this hook was run by is looked
+    up here and handed down, so that the daemon has something better than a
+    clock to decide by. It is looked up *here* because this is the last code
+    that runs inside the harness's own process tree — once the child is a new
+    session of its own, the ancestry is gone.
     """
     if is_running(session_id):
         return False
     subprocess.Popen(  # noqa: S603 - the command is built from our own argv
-        [*command, "hook", "daemon", "--session", session_id],
+        [*command, "hook", "daemon", "--session", session_id, *_owner_argv()],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -153,6 +159,22 @@ def spawn(command: Sequence[str], session_id: str) -> bool:
         **_detach(),
     )
     return True
+
+
+def _owner_argv() -> list[str]:
+    """``--owner-pid`` and ``--owner-started``, when there is an owner to name.
+
+    Nothing when there is not, and the daemon falls back to the idle window.
+    Never raises: a daemon with no owner is the behaviour this CLI shipped for
+    months, and it is not worth failing a prompt to improve on it.
+    """
+    try:
+        found = owner.find()
+    except Exception:  # pragma: no cover - a /proc that is not there at all
+        return []
+    if found is None:
+        return []
+    return ["--owner-pid", str(found.pid), "--owner-started", found.started]
 
 
 def _detach() -> dict[str, Any]:

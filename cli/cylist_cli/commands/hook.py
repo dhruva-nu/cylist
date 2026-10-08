@@ -153,6 +153,39 @@ column the board keeps for work that is raised and waiting to be deployed —
 work cannot be raised, leave the card where it is and say why.
 """
 
+SETUP_COMMAND_FILE = """\
+---
+description: Teach this repository's CLAUDE.md how to work with a Cylist project
+argument-hint: <PROJECT-KEY>
+---
+Set the repository you are in up to work against Cylist project $ARGUMENTS.
+
+Run `cylist repo setup $ARGUMENTS` from the root of this repository. It checks
+the project exists before it writes anything, reads that project's columns,
+docs and skills off the board, and puts a block into CLAUDE.md fenced by
+`<!-- cylist:begin $ARGUMENTS -->` markers — appending it, or replacing the
+block it wrote last time, so nothing else in the file is touched and running
+it twice changes nothing. Add `--dry-run` to see the block without writing it,
+and `--path` to write a CLAUDE.md somewhere other than the repository root.
+
+Then say in two lines where it was written and what it now tells a session
+about $ARGUMENTS. Write none of the block by hand: it is read live off the
+board, and a version composed from memory is wrong. If `cylist` is not found,
+say that this machine has not had `cylist setup` run on it (or that the
+install is not on PATH) — do not improvise the block instead.
+"""
+
+SLASH_COMMANDS: tuple[tuple[str, str, str], ...] = (
+    ("work.md", WORK_COMMAND_FILE, "type /work <REF> in a session"),
+    ("cylist-setup.md", SETUP_COMMAND_FILE, "type /cylist-setup <KEY> in any repository"),
+)
+"""Every ``~/.claude/commands/*.md`` this installs: file name, body, what to say.
+
+A table rather than a line each inside the installer, so that shipping another
+slash command is a constant and an entry here, and ``uninstall`` cannot forget
+one that ``install`` writes.
+"""
+
 BRIEFED_STARTS = frozenset({"startup", "clear", "compact"})
 """The ``SessionStart`` sources that begin with no memory of the card, and so
 are told what it is and to read its docs. ``resume`` is not one: the
@@ -204,23 +237,30 @@ def register(subparsers: Any) -> None:
 
     install = actions.add_parser(
         "install",
-        help="Add the hook to ~/.claude/settings.json and write the /work command.",
+        help="Add the hook to ~/.claude/settings.json and write the slash commands.",
         description=(
             "Merges the hook into the user-level Claude Code settings (CLAUDE_CONFIG_DIR "
             "honoured), never duplicating it and never touching other hooks, and "
-            "writes ~/.claude/commands/work.md. Safe to run again."
+            "writes ~/.claude/commands/work.md and cylist-setup.md. Safe to run again."
         ),
     )
     install.set_defaults(handler=_install, swallow_errors=False)
 
     uninstall = actions.add_parser(
-        "uninstall", help="Remove the hook and the /work command; leave other hooks alone."
+        "uninstall", help="Remove the hook and its slash commands; leave other hooks alone."
     )
     uninstall.set_defaults(handler=_uninstall, swallow_errors=False)
 
     # Not for people. Started by the hook, and only ever by the hook.
     daemon = actions.add_parser("daemon", help=argparse.SUPPRESS)
     daemon.add_argument("--session", required=True)
+    # The `claude` this session belongs to, found by the hook that spawned us.
+    # Absent on a platform that would not say, and the daemon then keeps the
+    # five-minute idle window instead. `--owner-started` is opaque: whatever
+    # the platform calls the moment that pid began, compared only with another
+    # reading of the same pid.
+    daemon.add_argument("--owner-pid", type=int)
+    daemon.add_argument("--owner-started", default="")
     daemon.set_defaults(handler=_daemon, swallow_errors=True)
 
     status = actions.add_parser(
@@ -260,9 +300,14 @@ def _daemon(args: argparse.Namespace, ctx: Context) -> None:
     common case, since the hooks fire in every project — must not pay for a
     dependency it will never use.
     """
-    from cylist_cli.presence import daemon
+    from cylist_cli.presence import daemon, owner
 
-    daemon.run(ctx, args.session)
+    found = (
+        owner.Owner(pid=args.owner_pid, started=args.owner_started or "")
+        if args.owner_pid
+        else None
+    )
+    daemon.run(ctx, args.session, owner=found)
 
 
 def _status(_: argparse.Namespace, ctx: Context) -> None:
@@ -730,6 +775,16 @@ def _our_entries(groups: list[Any]) -> list[dict[str, Any]]:
 
 
 @dataclass(frozen=True)
+class CommandFile:
+    """One slash command the install wrote, and whether it had to."""
+
+    path: Path
+    wrote: bool
+    hint: str
+    """What to tell the user they can now type."""
+
+
+@dataclass(frozen=True)
 class HookInstall:
     """What installing the hooks changed, for whoever wants to report it.
 
@@ -741,8 +796,7 @@ class HookInstall:
     settings_path: Path
     command: str
     added: list[str]
-    work_command: Path
-    wrote_work_command: bool
+    commands: list[CommandFile]
 
 
 def install_hooks() -> HookInstall:
@@ -779,20 +833,33 @@ def install_hooks() -> HookInstall:
 
     _write_settings(settings_path, settings)
 
-    command_path = claude_config_dir() / "commands" / "work.md"
-    command_path.parent.mkdir(parents=True, exist_ok=True)
-    wrote_command = (
-        not command_path.exists() or command_path.read_text("utf-8") != WORK_COMMAND_FILE
-    )
-    command_path.write_text(WORK_COMMAND_FILE, "utf-8")
-
     return HookInstall(
         settings_path=settings_path,
         command=command,
         added=added,
-        work_command=command_path,
-        wrote_work_command=wrote_command,
+        commands=_write_slash_commands(),
     )
+
+
+def _write_slash_commands() -> list[CommandFile]:
+    """Put every ``SLASH_COMMANDS`` entry in ``commands/``, rewriting only what differs.
+
+    A file whose bytes already match is left alone so that an install says
+    "kept" rather than "wrote" — and so that an editor watching the directory
+    is not woken by a run that changed nothing. One edited by hand *is*
+    overwritten: the contract these carry has to be the one this version of
+    the CLI ships, not whatever somebody tried last month.
+    """
+    directory = claude_config_dir() / "commands"
+    directory.mkdir(parents=True, exist_ok=True)
+    written: list[CommandFile] = []
+    for name, body, hint in SLASH_COMMANDS:
+        path = directory / name
+        differs = not path.exists() or path.read_text("utf-8") != body
+        if differs:
+            path.write_text(body, "utf-8")
+        written.append(CommandFile(path=path, wrote=differs, hint=hint))
+    return written
 
 
 def _install(_: argparse.Namespace, ctx: Context) -> None:
@@ -804,7 +871,7 @@ def _install(_: argparse.Namespace, ctx: Context) -> None:
                 "settings": str(report.settings_path),
                 "command": report.command,
                 "added": report.added,
-                "work_command": str(report.work_command),
+                "commands": [str(command.path) for command in report.commands],
             }
         )
         return
@@ -815,10 +882,8 @@ def _install(_: argparse.Namespace, ctx: Context) -> None:
     else:
         output.echo(f"The Cylist hook was already in {report.settings_path}; nothing to add.")
     output.echo(f"Hook command: {report.command}")
-    output.echo(
-        f"{'Wrote' if report.wrote_work_command else 'Kept'} {report.work_command}"
-        " — type /work <REF> in a session."
-    )
+    for command in report.commands:
+        output.echo(f"{'Wrote' if command.wrote else 'Kept'} {command.path} — {command.hint}.")
     output.echo("Open a new Claude Code session for the hooks to load.")
 
 
@@ -831,9 +896,12 @@ def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
         removed = _remove_our_hooks(hooks)
         _write_settings(settings_path, settings)
 
-    command_path = claude_config_dir() / "commands" / "work.md"
-    had_command = command_path.exists()
-    command_path.unlink(missing_ok=True)
+    directory = claude_config_dir() / "commands"
+    removed_commands = [
+        directory / name for name, _, _ in SLASH_COMMANDS if (directory / name).exists()
+    ]
+    for path in removed_commands:
+        path.unlink(missing_ok=True)
 
     # Uninstalling has to leave nothing running. Nothing would start a daemon
     # again once the hooks are gone, so any still holding a session would sit
@@ -850,6 +918,7 @@ def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
             {
                 "settings": str(settings_path),
                 "removed": sorted(set(removed)),
+                "commands_removed": [str(path) for path in removed_commands],
                 "daemons_stopped": stopped,
             }
         )
@@ -860,8 +929,8 @@ def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
         output.echo(f"Removed the Cylist hook from {settings_path}.")
     else:
         output.echo(f"No Cylist hook in {settings_path}; nothing to remove.")
-    if had_command:
-        output.echo(f"Removed {command_path}.")
+    for path in removed_commands:
+        output.echo(f"Removed {path}.")
 
 
 def _remove_our_hooks(hooks: dict[str, Any]) -> list[str]:

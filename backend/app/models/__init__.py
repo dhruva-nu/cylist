@@ -14,6 +14,7 @@ from app.models.board import BoardColumn
 from app.models.doc import Doc, DocSection, DocTopic
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
+from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.permission import (
     EVERYONE_ELSE,
     ProjectPermission,
@@ -51,6 +52,7 @@ __all__ = [
     "Channel",
     "ChecklistState",
     "CommentKind",
+    "DeliveryState",
     "Doc",
     "DocSection",
     "DocTopic",
@@ -58,6 +60,8 @@ __all__ = [
     "Folder",
     "Goal",
     "GoalStatus",
+    "Hook",
+    "HookDelivery",
     "ItemKind",
     "ItemSource",
     "Person",

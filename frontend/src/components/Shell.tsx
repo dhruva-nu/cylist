@@ -6,7 +6,7 @@
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { type ReactNode } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
@@ -157,7 +157,7 @@ const PROJECT_AREAS = [
 function Breadcrumbs() {
   const matchRoute = useMatchRoute()
   const inProject = matchRoute({ to: '/p/$projectKey', fuzzy: true })
-  const area = PROJECT_AREAS.find((candidate) => matchRoute(candidate.route))?.name ?? null
+  const area = PROJECT_AREAS.find((candidate) => matchRoute(candidate.route)) ?? null
 
   if (!inProject) {
     return (
@@ -168,6 +168,7 @@ function Breadcrumbs() {
   }
 
   const { projectKey } = inProject
+  const areaRoute = area?.route.to ?? '/p/$projectKey/board'
 
   return (
     <div className={styles.crumbs}>
@@ -175,12 +176,11 @@ function Breadcrumbs() {
       <span className={styles.separator}>›</span>
       {area ? (
         <>
-          <ProjectCrumbLink projectKey={projectKey} />
-          <span className={styles.separator}>›</span>
-          <b>{area}</b>
+          <ProjectSwitcher projectKey={projectKey} areaRoute={areaRoute} withSeparator />
+          <b>{area.name}</b>
         </>
       ) : (
-        <ProjectName projectKey={projectKey} />
+        <ProjectSwitcher projectKey={projectKey} areaRoute={areaRoute} emphasized />
       )}
     </div>
   )
@@ -193,19 +193,104 @@ function useProject(projectKey: string) {
   })
 }
 
-function ProjectName({ projectKey }: { projectKey: string }) {
-  const project = useProject(projectKey)
-  return <b>{project.data?.name ?? projectKey}</b>
-}
+/** How long the pointer rests on the project before its list drops. */
+const SWITCHER_DELAY_MS = 600
 
-/** The project's name, as the way to its board: there is no overview page to
- * send it to any more, and the board is what a project's address opens. */
-function ProjectCrumbLink({ projectKey }: { projectKey: string }) {
+/**
+ * The project's name in the breadcrumb, doubling as a switcher: hovering (or
+ * focusing) it turns the separator after it to point down, and once the
+ * pointer has rested there for a moment a list of the projects drops, and picking one jumps straight to the same area of that
+ * project rather than forcing a detour through "All projects". With only one
+ * project there is nothing to switch to, so it stays a plain crumb.
+ */
+function ProjectSwitcher({
+  projectKey,
+  areaRoute,
+  emphasized,
+  withSeparator,
+}: {
+  projectKey: string
+  areaRoute: (typeof PROJECT_AREAS)[number]['route']['to'] | '/p/$projectKey/board'
+  emphasized?: boolean
+  withSeparator?: boolean
+}) {
   const project = useProject(projectKey)
-  return (
-    <Link to="/p/$projectKey/board" params={{ projectKey }}>
-      {project.data?.name ?? projectKey}
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
+  const [hovered, setHovered] = useState(false)
+  const [open, setOpen] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  const name = project.data?.name ?? projectKey
+  const all = projects.data ?? []
+  const switchable = all.some((candidate) => candidate.key !== projectKey)
+  const shown = switchable && open
+
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+
+  const enter = () => {
+    setHovered(true)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setOpen(true), SWITCHER_DELAY_MS)
+  }
+  const leave = () => {
+    window.clearTimeout(timer.current)
+    setHovered(false)
+    setOpen(false)
+  }
+
+  const label = emphasized ? (
+    <b>{name}</b>
+  ) : (
+    <Link to={areaRoute} params={{ projectKey }}>
+      {name}
     </Link>
+  )
+
+  return (
+    <div
+      className={styles.switcher}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+      onFocus={() => {
+        // Keyboard users do not hover, so there is nothing to wait out.
+        window.clearTimeout(timer.current)
+        setHovered(true)
+        setOpen(true)
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) leave()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') leave()
+      }}
+    >
+      {label}
+      {withSeparator ? (
+        <span
+          className={`${styles.separator} ${hovered && switchable ? styles.separatorDown : ''}`}
+        >
+          ›
+        </span>
+      ) : null}
+      {shown ? (
+        <div className={styles.switcherMenu} role="menu" aria-label="Switch project">
+          <div className={styles.switcherList}>
+            {all.map((candidate) => (
+              <Link
+                key={candidate.id}
+                to={areaRoute}
+                params={{ projectKey: candidate.key }}
+                role="menuitem"
+                className={candidate.key === projectKey ? styles.switcherActive : undefined}
+                aria-current={candidate.key === projectKey ? 'true' : undefined}
+                onClick={leave}
+              >
+                {candidate.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

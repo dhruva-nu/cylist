@@ -10,7 +10,7 @@ import pytest
 
 from app.core.errors import UnprocessableRequestError
 from app.services import skill_folders
-from app.services.skill_folders import unpack
+from app.services.skill_folders import FolderFile, unpack
 
 
 def zipped(entries: dict[str, bytes], *, modes: dict[str, int] | None = None) -> bytes:
@@ -173,3 +173,111 @@ class TestSlug:
     )
     def test_is_what_claude_code_accepts(self, given: str, expected: str) -> None:
         assert skill_folders.slug(given) == expected
+
+
+class TestAFolderUploadedAFileAtATime:
+    """``gather`` then ``pack`` is the way in; ``unpack`` is the way out."""
+
+    def test_round_trips_every_file_byte_for_byte(self) -> None:
+        parts = [
+            FolderFile("cylist/SKILL.md", b"---\nname: cylist\n---\nRun scripts/setup.sh\n"),
+            FolderFile("cylist/scripts/setup.sh", b"#!/bin/sh\necho hi\n", executable=True),
+            FolderFile("cylist/reference/logo.png", b"\x89PNG\r\n\x1a\n\x00\xff"),
+        ]
+
+        gathered = skill_folders.gather(parts, "Set the machine up.", folder="cylist")
+        back = unpack("cylist.zip", "Set the machine up.", skill_folders.pack(gathered))
+
+        assert back.name == "cylist"
+        assert [(one.path, one.data, one.executable) for one in back.files] == [
+            ("SKILL.md", gathered.files[0].data, False),
+            ("reference/logo.png", b"\x89PNG\r\n\x1a\n\x00\xff", False),
+            ("scripts/setup.sh", b"#!/bin/sh\necho hi\n", True),
+        ]
+
+    def test_packs_the_same_folder_to_the_same_bytes(self) -> None:
+        parts = [FolderFile("kit/SKILL.md", b"---\nname: kit\n---\nDo it.\n")]
+
+        once = skill_folders.pack(skill_folders.gather(parts, None, folder="kit"))
+        again = skill_folders.pack(skill_folders.gather(parts, None, folder="kit"))
+
+        assert once == again, "a re-upload must land on the blob it already has"
+
+    def test_looks_through_the_folder_that_was_picked(self) -> None:
+        parts = [
+            FolderFile("release-notes/SKILL.md", b"Write them.\n"),
+            FolderFile("release-notes/reference/tone.md", b"Plain.\n"),
+        ]
+
+        gathered = skill_folders.gather(parts, None, folder="release-notes")
+
+        assert gathered.name == "release-notes"
+        assert [one.path for one in gathered.files] == ["SKILL.md", "reference/tone.md"]
+
+    def test_takes_files_picked_from_inside_the_folder(self) -> None:
+        parts = [FolderFile("SKILL.md", b"Do it.\n"), FolderFile("notes.md", b"Context.\n")]
+
+        gathered = skill_folders.gather(parts, None, folder="deploy guide")
+
+        assert gathered.name == "deploy-guide", "its own name: there is no path to read one from"
+
+    def test_fills_in_the_frontmatter_claude_code_reads(self) -> None:
+        parts = [FolderFile("kit/SKILL.md", b"Set it up.\n"), FolderFile("kit/setup.sh", b"x\n")]
+
+        gathered = skill_folders.gather(parts, "Set a machine up.", folder="kit")
+
+        assert text_of(gathered, "SKILL.md") == (
+            '---\nname: "kit"\ndescription: "Set a machine up."\n---\n\nSet it up.\n'
+        )
+
+    def test_drops_what_the_operating_system_added(self) -> None:
+        parts = [
+            FolderFile("kit/SKILL.md", b"Do it.\n"),
+            FolderFile("kit/.DS_Store", b"\x00\x01"),
+        ]
+
+        assert [one.path for one in skill_folders.gather(parts, None, folder="kit").files] == [
+            "SKILL.md"
+        ]
+
+    def test_refuses_a_folder_with_no_skill_md(self) -> None:
+        parts = [FolderFile("kit/README.md", b"Nothing to see.\n")]
+
+        with pytest.raises(UnprocessableRequestError, match=r"no SKILL\.md at its root"):
+            skill_folders.gather(parts, None, folder="kit")
+
+    @pytest.mark.parametrize("path", ["../evil.sh", "kit/../../evil.sh", "/etc/cron.d/evil"])
+    def test_refuses_a_part_that_points_outside_the_folder(self, path: str) -> None:
+        parts = [FolderFile("SKILL.md", b"Do it.\n"), FolderFile(path, b"rm -rf ~\n")]
+
+        with pytest.raises(UnprocessableRequestError, match="points outside"):
+            skill_folders.gather(parts, None, folder="kit")
+
+    def test_refuses_a_folder_with_nothing_in_it(self) -> None:
+        with pytest.raises(UnprocessableRequestError, match="no files in it"):
+            skill_folders.gather([], None, folder="kit")
+
+    def test_refuses_one_with_too_many_files(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(skill_folders, "MAX_FILES", 2)
+        parts = [FolderFile(f"kit/{name}", b"x") for name in ("SKILL.md", "a", "b")]
+
+        with pytest.raises(UnprocessableRequestError, match="more than 2 files"):
+            skill_folders.gather(parts, None, folder="kit")
+
+    def test_refuses_one_that_is_too_large(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(skill_folders, "MAX_UNPACKED_BYTES", 1024)
+        parts = [
+            FolderFile("kit/SKILL.md", b"Do it.\n"),
+            FolderFile("kit/blob.txt", b"0" * 4096),
+        ]
+
+        with pytest.raises(UnprocessableRequestError, match="unpacks to more than"):
+            skill_folders.gather(parts, None, folder="kit")
+
+    def test_names_the_folder_it_is_refusing(self) -> None:
+        with pytest.raises(UnprocessableRequestError, match="'kit' cannot be installed"):
+            skill_folders.gather([FolderFile("kit/a.md", b"x")], None, folder="kit")
+
+    def test_says_which_upload_when_the_folder_was_not_named(self) -> None:
+        with pytest.raises(UnprocessableRequestError, match="the uploaded folder cannot"):
+            skill_folders.gather([FolderFile("a.md", b"x")], None)

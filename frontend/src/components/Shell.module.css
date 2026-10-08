@@ -203,7 +203,74 @@
 }
 
 .separator {
+  display: inline-block;
   color: var(--ink-3);
+  transition: transform 0.18s ease;
+}
+
+/* The project switcher: the name and the separator after it share one box, so
+   hovering either turns the separator down and opens the list beneath. */
+.switcher {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.separatorDown {
+  transform: rotate(90deg);
+}
+
+/* Flush against the box with padding for a gap, so the pointer never crosses
+   dead space on its way down and closes the list. */
+.switcherMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 220px;
+  padding-top: 6px;
+  animation: switcher-in 0.16s ease-out;
+}
+
+@keyframes switcher-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switcherMenu,
+  .separator {
+    animation: none;
+    transition: none;
+  }
+}
+
+.switcherList {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.crumbs .switcherList a {
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.crumbs .switcherList a.switcherActive {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* Where a page longer than the window scrolls, now that `#root` is exactly the

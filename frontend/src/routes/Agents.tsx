@@ -6,11 +6,18 @@
  * pointed at a board still had to be told what it could do by whoever was
  * holding it. These are the two halves of telling it once:
  *
- * **Skills** are files you upload: the procedures somebody has written down
+ * **Skills** are what you upload: the procedures somebody has written down
  * for this project. Uploads work as the file store's do, and share its blob
  * store, with one difference — a name that already exists is *replaced*
  * rather than refused, because the name is the skill and uploading it again
  * means you have a newer version of it.
+ *
+ * A skill is usually more than one file, so there are two buttons rather than
+ * one. *Upload a skill* takes files and makes a skill of each, which is right
+ * for a page of markdown. *Upload a folder* takes a directory and makes **one**
+ * skill of the whole of it — the `SKILL.md` and every script, reference and
+ * asset beside it — because splitting that into a skill per file would lose
+ * the only thing that made it a folder.
  *
  * What an agent learns goes the other way, into the project's **Docs**: a line
  * on the `learned.md` of whichever topic it belongs to. That used to be a
@@ -210,6 +217,7 @@ function Skills({
   const may = usePermissions(projectKey)
   const [problem, setProblem] = useState<string | null>(null)
   const filePicker = useRef<HTMLInputElement>(null)
+  const folderPicker = useRef<HTMLInputElement>(null)
 
   const skills = useQuery({
     queryKey: ['skills', projectKey],
@@ -250,6 +258,34 @@ function Skills({
     onError: (error: Error) => setProblem(error.message),
   })
 
+  const uploadFolder = useMutation({
+    // One skill, not one per file: a folder is a skill precisely because its
+    // SKILL.md points at the other files in it.
+    mutationFn: async (files: File[]) => {
+      const folder = files[0]?.webkitRelativePath.split('/')[0] ?? ''
+      if (!folder) {
+        // Every browser that offers a directory picker fills this in. One
+        // that somehow did not would otherwise send a nameless folder.
+        throw new Error(
+          'This browser did not say which folder those files came from. ' +
+            'Upload a zip of the folder instead.',
+        )
+      }
+      const alreadyThere = skills.data?.some((skill) => skill.name === `${folder}.zip`) ?? false
+      return { skill: await api.uploadSkillFolder(projectKey, folder, files), alreadyThere }
+    },
+    onMutate: () => setProblem(null),
+    onSuccess: async ({ skill, alreadyThere }) => {
+      await refresh()
+      announce(
+        alreadyThere
+          ? `${skill.name} uploaded, replacing the version that was there.`
+          : `${skill.name} uploaded.`,
+      )
+    },
+    onError: (error: Error) => setProblem(error.message),
+  })
+
   const deleteSkill = useMutation({
     mutationFn: ({ id }: { id: string; name: string }) => api.deleteSkill(id),
     onSuccess: async (_gone, { name }) => {
@@ -262,7 +298,7 @@ function Skills({
   return (
     <Section
       title="Skills"
-      blurb="Packaged jobs an agent can be handed. Uploading a name that already exists replaces it — the name is the skill, so a second upload is a new version of it."
+      blurb="Packaged jobs an agent can be handed — a page of markdown, or a whole folder of instructions, scripts and references. Uploading a name that already exists replaces it: the name is the skill, so a second upload is a new version of it."
       count={skills.data?.length}
       actions={
         may('agents') ? (
@@ -282,12 +318,33 @@ function Skills({
                 event.target.value = ''
               }}
             />
+            {/* Directory picking is an attribute, not a mode: the same input
+                with webkitdirectory set opens a folder chooser, and each
+                File it hands back carries its path inside the folder. */}
+            <input
+              ref={folderPicker}
+              type="file"
+              multiple
+              webkitdirectory=""
+              className="visually-hidden"
+              onChange={(event) => {
+                const chosen = Array.from(event.target.files ?? [])
+                if (chosen.length) uploadFolder.mutate(chosen)
+                event.target.value = ''
+              }}
+            />
             <Button
               variant="go"
-              disabled={upload.isPending}
+              disabled={upload.isPending || uploadFolder.isPending}
               onClick={() => filePicker.current?.click()}
             >
               {upload.isPending ? 'Uploading…' : '+ Upload a skill'}
+            </Button>
+            <Button
+              disabled={upload.isPending || uploadFolder.isPending}
+              onClick={() => folderPicker.current?.click()}
+            >
+              {uploadFolder.isPending ? 'Uploading…' : '+ Upload a folder'}
             </Button>
           </>
         ) : null
@@ -302,7 +359,8 @@ function Skills({
         <EmptyState>
           No skills yet.
           <br />
-          Upload the markdown an agent should follow here — a board to tidy, a report to write.
+          Upload the markdown an agent should follow here — a board to tidy, a report to write — or
+          a whole folder, SKILL.md and the scripts it uses, as one skill.
         </EmptyState>
       ) : null}
 

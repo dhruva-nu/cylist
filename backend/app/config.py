@@ -41,11 +41,20 @@ Measured on *application* messages. Protocol pongs are answered below the
 ASGI layer and never reach the handler, which is what makes this mean "the
 agent has nothing to say" rather than "the TCP connection is quiet".
 
-The client's side of the bargain: it keeps the socket warm while it is
-working — a single tool call can run for twenty minutes without a hook event
-— and lets it go quiet once it is waiting on a human. So this window closing
-means one of two things, and the board draws them the same way: the agent is
-gone, or the person is.
+The client's side of the bargain: it keeps the socket warm for as long as the
+session is open, working or waiting alike — a single tool call can run for
+twenty minutes without a hook event, and a person can leave a prompt
+unanswered for an afternoon. So this window closing means one thing only:
+*the daemon has gone*. It is not how the board learns that a human has
+wandered off, and it never was a good way to.
+
+It used to be read as both. The client stopped its keepalive while waiting,
+so a session waiting on its human went quiet, was closed here at five
+minutes, and had its card put out while the conversation was still on screen
+— nine cards in ten, on a machine running ten sessions. The client now ends a
+session when the ``claude`` process it belongs to exits (CYLIST-74), which is
+the question actually being asked, and says ``bye`` on its way out. Nothing
+here changed; it simply stopped being asked to guess.
 
 Comfortably more than the client's sixty-second keepalive, so five missed in
 a row is the threshold rather than one unlucky one.

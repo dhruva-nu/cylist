@@ -93,10 +93,11 @@ async def list_skills(
     "/projects/{project_ref}/skills",
     response_model=SkillRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload a skill",
+    summary="Upload a skill, as one file or as a folder",
     responses={
         200: {"description": "A skill of that name already existed and was replaced."},
-        413: {"description": "The file is larger than the configured upload limit."},
+        413: {"description": "The upload is larger than the configured limit."},
+        422: {"description": "The parts sent are not a skill's folder — see the message."},
     },
 )
 async def upload_skill(
@@ -106,11 +107,40 @@ async def upload_skill(
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
-    file: UploadFile = File(description="The skill file itself."),
+    file: list[UploadFile] = File(
+        description=(
+            "The skill. One part for a single-file skill, or one part per file "
+            "for a folder — each named with the path it has inside the folder, "
+            "'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
+        )
+    ),
+    folder: str | None = Form(
+        default=None,
+        description=(
+            "The name of the folder being uploaded. Send it and every part is "
+            "read as a path inside a folder, even if there is only one."
+        ),
+    ),
+    executable: list[str] = Form(
+        default=[],
+        description=(
+            "Which parts to mark executable, by the same path, repeated once each. "
+            "A browser cannot know; a client walking a directory can."
+        ),
+    ),
     description: str | None = Form(default=None, description="One line on what the skill does."),
     added_by: UUID | None = Form(default=None, description="Which person is uploading it."),
 ) -> SkillRead:
     """Upload a skill as `multipart/form-data`.
+
+    **A skill can be a whole folder.** A skill is usually a `SKILL.md` beside
+    the scripts and references it points an agent at, so send one `file` part
+    per file, each named with its path inside the folder, and `folder` with
+    the folder's own name. The server lays it out, checks it the way it checks
+    an uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,
+    at most 200 files and 20 MB — and stores it as `<folder>.zip`, which
+    `/skills/{skill_id}/folder` unpacks again file for file. A single part with
+    no `folder` is stored exactly as it was sent, as it always was.
 
     **Uploading a name that already exists replaces it** and answers 200 rather
     than 201 — the name is the skill, so sending `board-tidy.md` again means
@@ -127,6 +157,8 @@ async def upload_skill(
         project,
         file,
         description=description,
+        folder=folder,
+        executable=set(executable),
         max_bytes=settings.max_upload_bytes,
         added_by=added_by,
     )
@@ -139,7 +171,7 @@ async def upload_skill(
         entity_type="skill",
         entity_id=skill.id,
         project_id=project.id,
-        payload={"name": skill.name, "size": skill.size},
+        payload={"name": skill.name, "size": skill.size, "files": len(file)},
     )
     return _skill_read(skill)
 

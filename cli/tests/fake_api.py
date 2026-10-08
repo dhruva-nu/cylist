@@ -503,6 +503,56 @@ SKILLS = [
     },
 ]
 TIDY_TEXT = '---\nname: "board-tidy"\ndescription: "Move stale cards."\n---\n\nMove them.\n'
+
+ARCHITECTURE_TOPIC_ID = "0192f3c4-000c-7000-8000-000000000001"
+BILLING_TOPIC_ID = "0192f3c4-000c-7000-8000-000000000002"
+DOC_TREE = {
+    "sections": [
+        {
+            "section": "product",
+            "label": "Product",
+            "topics": [
+                {
+                    "id": BILLING_TOPIC_ID,
+                    "project_id": PROJECT_ID,
+                    "section": "product",
+                    "name": "Billing",
+                    "position": 0,
+                    "doc_count": 1,
+                    "docs": [
+                        {
+                            "id": "0192f3c4-000d-7000-8000-000000000001",
+                            "topic_id": BILLING_TOPIC_ID,
+                            "title": "What a plan change does",
+                            "position": 0,
+                            "author": None,
+                            "created_at": "2026-02-01T09:00:00Z",
+                            "updated_at": "2026-02-01T09:00:00Z",
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            "section": "engineering",
+            "label": "Engineering",
+            "topics": [
+                {
+                    "id": ARCHITECTURE_TOPIC_ID,
+                    "project_id": PROJECT_ID,
+                    "section": "engineering",
+                    "name": "Architecture",
+                    "position": 0,
+                    "doc_count": 2,
+                    "docs": [],
+                }
+            ],
+        },
+    ],
+    "doc_count": 3,
+}
+"""``GET /projects/{ref}/docs``. One section with topics and one topic with
+no docs listed, because the tree is read for its shape and not its bodies."""
 LOGO_BYTES = b"\x89PNG\r\n\x1a\n\x00\xff"
 
 
@@ -780,8 +830,13 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         body = json.loads(request.content)
         return httpx.Response(201, json={**STRIPE_NODE, "name": body["name"]})
 
+    if path.endswith("/docs") and method == "GET":
+        return httpx.Response(200, json=DOC_TREE)
+
     if path.endswith("/skills") and method == "GET":
         return httpx.Response(200, json=SKILLS)
+    if path.endswith("/skills") and method == "POST":
+        return httpx.Response(201, json={**SKILLS[1], "name": "release-kit.zip", "size": 512})
     if path == f"/skills/{TIDY_SKILL_ID}/folder":
         return httpx.Response(200, json=TIDY_FOLDER)
     if path == f"/skills/{KIT_SKILL_ID}/folder":

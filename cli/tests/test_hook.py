@@ -542,6 +542,39 @@ def test_install_writes_every_event_and_the_work_command(
     assert "Open a new Claude Code session" in result.out
 
 
+def test_install_writes_the_cylist_setup_command(
+    run: Runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``/cylist-setup`` runs the command; it does not compose the block itself."""
+    monkeypatch.setattr(hook, "hook_command", lambda: "/opt/cylist/bin/cylist hook")
+
+    result = run("hook", "install")
+
+    assert result.code == 0
+    command = (tmp_path / "claude" / "commands" / "cylist-setup.md").read_text()
+    assert command.startswith("---\ndescription: Teach this repository's CLAUDE.md")
+    assert "argument-hint: <PROJECT-KEY>" in command
+    assert "cylist repo setup $ARGUMENTS" in command
+    assert "Write none of the block by hand" in command
+    assert "type /cylist-setup <KEY> in any repository" in result.out
+
+
+def test_every_slash_command_is_installed_and_removed_together(
+    run: Runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The table is the list, so a new command cannot be half-shipped."""
+    monkeypatch.setattr(hook, "hook_command", lambda: "/opt/cylist/bin/cylist hook")
+    directory = tmp_path / "claude" / "commands"
+
+    run("hook", "install")
+    assert {path.name for path in directory.iterdir()} == {
+        name for name, _, _ in hook.SLASH_COMMANDS
+    }
+
+    run("hook", "uninstall")
+    assert list(directory.iterdir()) == []
+
+
 def test_install_twice_changes_nothing(
     run: Runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -615,6 +648,7 @@ def test_uninstall_removes_only_ours(
     settings = json.loads(_settings(tmp_path).read_text())
     assert settings == {"hooks": {"Stop": [{"hooks": [theirs]}]}}
     assert not (tmp_path / "claude" / "commands" / "work.md").exists()
+    assert not (tmp_path / "claude" / "commands" / "cylist-setup.md").exists()
 
 
 def test_uninstall_with_nothing_installed_is_fine(run: Runner, tmp_path: Path) -> None:

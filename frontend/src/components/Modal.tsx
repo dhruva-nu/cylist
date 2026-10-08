@@ -51,6 +51,7 @@ export function Modal({
   children,
   footer,
   headerActions,
+  wide = false,
 }: {
   title: string
   onClose: () => void
@@ -58,6 +59,13 @@ export function Modal({
   footer: ReactNode
   /** Controls that belong beside the title rather than in the footer. */
   headerActions?: ReactNode
+  /**
+   * Give the panel the wider measure. For a dialog that is a screen rather
+   * than a short form — one with a grid of fields, a list and a conversation
+   * in it — where the default width leaves every row cramped. Opt-in, so the
+   * dozen dialogs that ask two questions stay the size of two questions.
+   */
+  wide?: boolean
 }) {
   const panel = useRef<HTMLDivElement>(null)
   const opener = useRef<Element | null>(null)
@@ -149,7 +157,7 @@ export function Modal({
     >
       <div
         ref={panel}
-        className={styles.modal}
+        className={wide ? `${styles.modal} ${styles.wide}` : styles.modal}
         role="dialog"
         aria-modal="true"
         aria-label={title}
