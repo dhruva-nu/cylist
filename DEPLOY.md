@@ -439,12 +439,13 @@ A slot is the same as staging except for one thing: it is not tied to a branch.
 The workflow is [`.github/workflows/deploy-dev.yml`](.github/workflows/deploy-dev.yml),
 triggered by hand from the Actions tab (`workflow_dispatch`). GitHub's own
 "Run workflow" dropdown lets you pick any branch, and the checkout step follows
-whatever you picked; the one input is the **slot**. So the loop is: push work to
-a branch, run this workflow against that branch into a free slot, poke at it on
-the tailnet, and only once it looks right does it earn a place on `staging`.
+whatever you picked; the inputs are the **slot** and, optionally, the **card**
+to tell. So the loop is: push work to a branch, run this workflow against that
+branch into a free slot, poke at it on the tailnet, and only once it looks right
+does it earn a place on `staging`.
 
 ```bash
-gh workflow run deploy-dev.yml --ref feature/my-branch -f slot=2
+gh workflow run deploy-dev.yml --ref feature/my-branch -f slot=2 -f card=CYLIST-79
 ```
 
 Runs for the same slot queue behind each other — two deploys into one slot
@@ -464,6 +465,46 @@ make dev-logs SLOT=2     # follow it
 make dev-ps SLOT=2       # what is running
 make dev-down SLOT=2     # stop it (volumes kept)
 ```
+
+### Telling the card where it went
+
+`card` is optional. Given a card reference (`CYLIST-79`; anything not shaped
+`KEY-number` is refused before the deploy starts), a successful deploy ends by
+commenting on that card in production Cylist, as **Agent**:
+
+```
+Deployed to dev_2 — https://dnu-home-1.tail222f46.ts.net:9443/dev_2/ — branch feature/my-branch @ 0123456789ab
+```
+
+That is the same line the `deploy-dev` project skill
+([`docs/skills/deploy-dev/SKILL.md`](docs/skills/deploy-dev/SKILL.md)) has an
+agent post through MCP after it moves the card to **Dev**. The workflow posts
+it too, so that a deploy started by hand from the Actions tab is on the card as
+well. An agent reads the card first and posts only if the line isn't already
+there. The step is
+[`scripts/dev-card-comment.sh`](scripts/dev-card-comment.sh):
+`POST /api/v1/tasks/<card>/comments`, with `author_id` set to the directory
+entry flagged `is_agent`, which it looks up from `GET /api/v1/people`.
+
+It needs one secret, **`CYLIST_AGENT_TOKEN`**: a production API token with
+`read` and `write`, minted by someone who can comment on the board. A token
+acts as whoever minted it, so their role decides what it may do. Comments need
+the `comments` permission. To mint one:
+
+```bash
+curl -sX POST https://dnu-home-1.tail222f46.ts.net/api/v1/tokens \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"deploy-dev workflow","scopes":["read","write"]}'
+gh secret set CYLIST_AGENT_TOKEN          # paste the token; add --env dev to scope it to the dev environment
+```
+
+The secret is optional. Without it, the step prints a `::warning::` with the
+line to post by hand, and the agent's own comment is the only record. The step
+never fails the run, because the deploy it reports on has already succeeded.
+An unreachable production, a revoked token (401) or an unknown card (404) are
+all warnings. The token goes to curl in a config file, never on a command line,
+and is never printed. To point the step at a Cylist other than production, set
+the repository variable `CYLIST_URL`.
 
 ### What differs from staging, and why
 
@@ -537,7 +578,7 @@ check as production and staging. Around that,
 Steps 4–6 hold a lock (`~/.cylist-dev.lock`), since the index and the serve
 config are shared by all five slots. The workflow's deploy step also exposes
 `slot`, `url`, `branch` and `sha` as step outputs, for a later step that wants
-to say where a branch went.
+to say where a branch went. The *Comment on the card* step reads them.
 
 ### One-time setup
 
