@@ -9,8 +9,16 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { AgentPresence } from '../api/client'
-import { agentIndicator, hasLiveAgent, nowLine, silentFor, waitingDetail } from './agentState'
+import type { AgentPresence, AgentPrompt } from '../api/client'
+import {
+  agentIndicator,
+  hasLiveAgent,
+  isAnswerable,
+  nowLine,
+  promptLine,
+  silentFor,
+  waitingDetail,
+} from './agentState'
 
 const NOW = new Date('2026-09-08T12:00:00Z')
 
@@ -23,6 +31,33 @@ function presence(overrides: Partial<AgentPresence> = {}): AgentPresence {
     note: null,
     since: '2026-09-08T11:50:00Z',
     last_seen_at: '2026-09-08T11:59:30Z',
+    prompt: null,
+    ...overrides,
+  }
+}
+
+function prompt(overrides: Partial<AgentPrompt> = {}): AgentPrompt {
+  return {
+    id: 'p1',
+    agent_session_id: 's1',
+    task_id: 't1',
+    kind: 'question',
+    text: 'Grey dot, or no dot?',
+    tool: null,
+    options: [
+      { key: '1', label: 'Grey' },
+      { key: '2', label: 'None' },
+    ],
+    allows_reply: true,
+    status: 'open',
+    answer: null,
+    answer_key: null,
+    answered_by: null,
+    answered_at: null,
+    closed_reason: null,
+    asked_at: '2026-09-08T11:58:00Z',
+    expires_at: '2026-09-08T12:28:00Z',
+    closed_at: null,
     ...overrides,
   }
 }
@@ -192,5 +227,46 @@ describe('nowLine', () => {
 
   it('is nothing once the session has ended', () => {
     expect(nowLine({ state: 'done', reason: 'session_ended', note: null })).toBeNull()
+  })
+})
+
+describe('promptLine', () => {
+  it('is nothing without a prompt', () => {
+    expect(promptLine(null)).toBeNull()
+  })
+
+  it('says what an open question asks', () => {
+    expect(promptLine(prompt())).toBe('Asks: Grey dot, or no dot?')
+  })
+
+  it('says what an open permission wants', () => {
+    expect(
+      promptLine(prompt({ kind: 'permission', text: 'Running git push origin staging' })),
+    ).toBe('Permission: Running git push origin staging')
+  })
+
+  it('says what you answered', () => {
+    expect(promptLine(prompt({ status: 'answered', answer: 'Grey', answer_key: '1' }))).toBe(
+      'You: Grey',
+    )
+  })
+
+  it('says when nobody answered in time', () => {
+    expect(promptLine(prompt({ status: 'expired' }))).toBe('Nobody answered in time')
+  })
+
+  it('says when the terminal answered first, and nothing for an interruption', () => {
+    expect(promptLine(prompt({ status: 'withdrawn', closed_reason: 'answered_in_terminal' }))).toBe(
+      'Answered in the terminal',
+    )
+    expect(promptLine(prompt({ status: 'withdrawn', closed_reason: 'interrupted' }))).toBeNull()
+  })
+})
+
+describe('isAnswerable', () => {
+  it('is true only while the prompt is open', () => {
+    expect(isAnswerable(prompt())).toBe(true)
+    expect(isAnswerable(prompt({ status: 'answered' }))).toBe(false)
+    expect(isAnswerable(null)).toBe(false)
   })
 })

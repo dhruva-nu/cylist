@@ -815,7 +815,72 @@ export interface AgentSessionRead {
   last_seen_at: string
   ended_at: string | null
   dismissed_at: string | null
+  /** What the session is waiting on a person for while it is; otherwise the
+   * last prompt it closed since entering its current state, so a card can say
+   * "You: Allow once". Null when neither. */
+  prompt: AgentPrompt | null
 }
+
+/** What an agent is waiting on a person for (CYLIST-85, CYLIST-89). */
+export type AgentPromptKind = 'question' | 'permission'
+
+/**
+ * Where a prompt has got to. Only `open` is waiting on anyone: `answered` was
+ * answered on the board, `expired` ran out of time, `withdrawn` stopped
+ * waiting first — see `closed_reason`.
+ */
+export type AgentPromptStatus = 'open' | 'answered' | 'expired' | 'withdrawn'
+
+/** Why a withdrawn prompt was withdrawn. */
+export type AgentPromptClosedReason =
+  'answered_in_terminal' | 'interrupted' | 'abandoned' | 'session_ended'
+
+/** One choice a prompt offers. */
+export interface AgentPromptOption {
+  /** What an answer names to pick this: `allow_once`, or `1` for a question's first. */
+  key: string
+  /** What the button says. */
+  label: string
+}
+
+/** The keys a permission's options always have, in the order they are offered. */
+export type PermissionAnswerKey = 'allow_once' | 'allow_session' | 'deny'
+
+/**
+ * Something an agent session is waiting on a person for, or was: a question
+ * it asked with `ask_human`, or a permission Claude Code wants before a tool
+ * runs. Mirrors `AgentPromptRead` in `app/schemas/agent_sessions.py`.
+ */
+export interface AgentPrompt {
+  id: string
+  agent_session_id: string
+  task_id: string
+  kind: AgentPromptKind
+  /** The question, or for a permission what the tool wants to do. */
+  text: string
+  /** For a permission, the tool's own name: `Bash`. */
+  tool: string | null
+  /** The choices, in order. A permission's are always the three `PermissionAnswerKey`s. */
+  options: AgentPromptOption[]
+  /** Whether a typed reply is accepted as well as a choice — a question's are. */
+  allows_reply: boolean
+  status: AgentPromptStatus
+  /** What was answered: the chosen option's label, or the reply typed. */
+  answer: string | null
+  /** The chosen option's key; null for a typed reply. */
+  answer_key: string | null
+  /** Who answered, by name. */
+  answered_by: string | null
+  answered_at: string | null
+  closed_reason: AgentPromptClosedReason | null
+  asked_at: string
+  /** After this nobody may answer it. */
+  expires_at: string
+  closed_at: string | null
+}
+
+/** A person's answer: one of the options by key, or — to a question — a typed reply. */
+export type AgentPromptAnswer = { key: string } | { text: string }
 
 export type AgentPresenceState = 'working' | 'waiting' | 'done'
 
@@ -864,6 +929,9 @@ export interface AgentPresence {
   since: string
   /** When the deciding session last reported in. */
   last_seen_at: string
+  /** The deciding session's open question or permission, answerable from the
+   * card — or, once answered, the answer, until the session next changes state. */
+  prompt: AgentPrompt | null
 }
 
 export interface Task {
@@ -1596,6 +1664,19 @@ export const api = {
   /** What the agents on a card have been doing, newest first. */
   getAgentFeed: (taskRef: string, limit = 100) =>
     request<AgentFeedEntry[]>(`/tasks/${taskRef}/agent-feed?limit=${limit}`),
+  /** What the agents on a card have asked, open or not, newest first. */
+  listAgentPrompts: (taskRef: string, limit = 20) =>
+    request<AgentPrompt[]>(`/tasks/${taskRef}/agent-prompts?limit=${limit}`),
+  /**
+   * Answer what an agent on a card is waiting on. The first answer wins: one
+   * already answered, expired or withdrawn comes back as a `conflict` error
+   * saying which. The agent is told at once and the card goes back to working.
+   */
+  answerAgentPrompt: (taskRef: string, promptId: string, answer: AgentPromptAnswer) =>
+    request<AgentPrompt>(`/tasks/${taskRef}/agent-prompts/${promptId}/answer`, {
+      method: 'POST',
+      body: jsonBody(answer),
+    }),
   /** Clear the finished sessions off a card. The ones still running stay. */
   dismissAgentSessions: (taskRef: string) =>
     request<void>(`/tasks/${taskRef}/agent-sessions/dismiss`, { method: 'POST' }),

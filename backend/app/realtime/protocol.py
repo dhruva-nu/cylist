@@ -37,6 +37,24 @@ round trip, and a frame for a card the session is not on is dropped rather
 than refused, because a feed is never a reason to take a session off the
 board.
 
+``prompt`` and ``withdraw`` are a permission (CYLIST-89). Claude Code's
+``PermissionRequest`` hook hands the daemon what a tool wants to do, and the
+daemon puts it on the card with a ``prompt`` frame whose ``id`` it drew
+itself, after a level saying the session is waiting for permission. When a
+person answers on the board, the server sends **down this socket** — the one
+thing it sends that is not a reply::
+
+    {"type": "answer", "prompt_id": "…", "status": "answered",
+     "key": "allow_session", "answer": "Allow for this session"}
+
+``status`` is ``expired`` or ``withdrawn`` when it closed without an answer
+here; the hook then leaves the terminal's own dialog to it. The daemon sends
+``withdraw`` when the terminal won the race (the hook was killed while it
+waited), or its own wait ran out (``expired``). A ``prompt`` re-sent after a
+reconnect is answered with its outcome if it has one, which is how an answer
+given while the link was down still arrives. A question asked with the MCP
+``ask_human`` tool never touches this socket: its tool long-polls over HTTP.
+
 ``heartbeat`` is the client keeping its own socket alive. It exists because
 the server's idle window is measured on application messages — protocol
 pongs are answered below the ASGI layer and never reach a handler — and
@@ -54,11 +72,12 @@ idle timeout, a process killed — arrives as silence and is recorded as
 from __future__ import annotations
 
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import Field, TypeAdapter, ValidationError
 
 from app.core.clock import now
-from app.models.agent_session import AgentSessionReason
+from app.models.agent_session import AgentPromptStatus, AgentSessionReason
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentSessionPut, AgentSessionRead
 from app.schemas.common import Schema
 
@@ -94,6 +113,39 @@ class FeedMessage(Schema):
     entries: list[AgentFeedEntryIn] = Field(max_length=FEED_MAX_ENTRIES)
 
 
+PROMPT_TEXT_MAX = 1000
+"""Longest permission text a frame may carry. The CLI clips far below this."""
+
+
+class PermissionPrompt(Schema):
+    """A permission Claude Code wants, as the session's daemon puts it on the card."""
+
+    id: UUID = Field(
+        description="Drawn by the daemon, so a frame re-sent after a reconnect is the same "
+        "prompt rather than a second one."
+    )
+    kind: Literal["permission"]
+    text: str = Field(min_length=1, max_length=PROMPT_TEXT_MAX)
+    tool: str | None = Field(default=None, max_length=200)
+
+
+class PromptMessage(Schema):
+    """The harness is asking a person something; put it on the card."""
+
+    type: Literal["prompt"]
+    task: str = Field(max_length=200, description="The card the session is on.")
+    prompt: PermissionPrompt
+
+
+class WithdrawMessage(Schema):
+    """The session stopped waiting on a prompt before anybody here answered."""
+
+    type: Literal["withdraw"]
+    task: str = Field(max_length=200)
+    prompt_id: UUID
+    reason: Literal["answered_in_terminal", "interrupted", "expired"]
+
+
 class HeartbeatMessage(Schema):
     """Nothing to report, still here. See the module note on the idle window."""
 
@@ -109,7 +161,9 @@ class ByeMessage(Schema):
     )
 
 
-Incoming = StateMessage | FeedMessage | HeartbeatMessage | ByeMessage
+Incoming = (
+    StateMessage | FeedMessage | PromptMessage | WithdrawMessage | HeartbeatMessage | ByeMessage
+)
 
 AgentMessage = Annotated[Incoming, Field(discriminator="type")]
 
@@ -151,6 +205,33 @@ def ack(session: AgentSessionRead) -> dict[str, object]:
     """
     return {"type": "ack", "session": session.model_dump(mode="json")}
 
+
+def answer(
+    prompt_id: UUID,
+    status: AgentPromptStatus,
+    *,
+    key: str | None = None,
+    answer: str | None = None,
+) -> dict[str, object]:
+    """A permission prompt closed: what the agent's daemon hands back to the hook.
+
+    ``status`` ``answered`` carries the option's ``key`` — ``allow_once``,
+    ``allow_session`` or ``deny`` — and its label as ``answer``. Anything else
+    means nobody here answered, and the hook leaves the terminal to it.
+    """
+    return {
+        "type": "answer",
+        "prompt_id": str(prompt_id),
+        "status": status.value,
+        "key": key,
+        "answer": answer,
+    }
+
+
+PROMPT_CHANGED = "agent.prompt"
+"""The event a prompt opening or closing is published as. Rings the board's
+doorbell, wakes long-polls, and carries a permission's answer to its agent —
+see :mod:`app.realtime.hub`. Never sent down a socket under this name."""
 
 FEED_CHANGED = "agent.feed"
 """The event type a new feed line is published as, and the doorbell it rings."""

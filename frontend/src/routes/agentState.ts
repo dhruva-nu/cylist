@@ -16,7 +16,12 @@
  * rather than with the last fetch.
  */
 
-import type { AgentPresence, AgentSessionRead, AgentSessionReason } from '../api/client'
+import type {
+  AgentPresence,
+  AgentPrompt,
+  AgentSessionRead,
+  AgentSessionReason,
+} from '../api/client'
 
 export type AgentClassName = 'agentWorking' | 'agentWaiting' | 'agentDone' | 'agentStale'
 
@@ -122,6 +127,35 @@ export function nowLine(
     default:
       return 'Waiting for your reply'
   }
+}
+
+/**
+ * The one line a prompt reads as on a card (CYLIST-85, CYLIST-89), or null
+ * when there is nothing worth saying.
+ *
+ * Open, it says what is being asked — the question, or what the tool wants
+ * to do. Answered, it says what the person said, as "You: …", which the card
+ * keeps until the session next changes state. A prompt that closed without an
+ * answer says why only when that is news to the person looking: answered in
+ * the terminal, or nobody answered in time.
+ */
+export function promptLine(prompt: AgentPrompt | null): string | null {
+  if (!prompt) return null
+  switch (prompt.status) {
+    case 'open':
+      return prompt.kind === 'question' ? `Asks: ${prompt.text}` : `Permission: ${prompt.text}`
+    case 'answered':
+      return `You: ${prompt.answer ?? ''}`
+    case 'expired':
+      return 'Nobody answered in time'
+    case 'withdrawn':
+      return prompt.closed_reason === 'answered_in_terminal' ? 'Answered in the terminal' : null
+  }
+}
+
+/** Whether a person can still answer this from the board. */
+export function isAnswerable(prompt: AgentPrompt | null): prompt is AgentPrompt {
+  return prompt !== null && prompt.status === 'open'
 }
 
 /**

@@ -438,7 +438,13 @@ green when the session ends. While it works, the card's agent line says what
 it is doing right now — "Running pytest test_pr_states.py", "Editing
 tasks.py" — from the `PreToolUse` hook, without adding a line to its history.
 Open the card and its Agent feed shows what the agent read, edited, ran and
-said, as its presence daemon finds it in the session's transcript. Nothing the agent does or says is involved:
+said, as its presence daemon finds it in the session's transcript. When the
+agent cannot decide something alone it calls the MCP tool `ask_human`: the
+question and its options go on the card, the session turns amber with reason
+`question`, and the tool waits — long-polling
+`GET /tasks/{ref}/agent-prompts/{id}?wait=20` — until somebody answers with
+`POST /tasks/{ref}/agent-prompts/{id}/answer`, so the agent carries on in the
+same turn. Nothing else the agent does or says is involved:
 Claude Code's own lifecycle hooks report it, so there is nothing for a model to
 remember to call and nothing it can misreport.
 

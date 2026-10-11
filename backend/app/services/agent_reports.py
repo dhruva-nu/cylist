@@ -36,7 +36,7 @@ from app.models.agent_session import AgentSession, AgentSessionReason
 from app.models.api_token import ApiToken
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
-from app.services import activity, agent_sessions
+from app.services import activity, agent_prompts, agent_sessions
 
 
 class OpenRow(NamedTuple):
@@ -72,7 +72,11 @@ async def report(
     board is told — the card's agent line reads it — and the trail is not,
     because a line per tool call would bury everything else on it.
     """
+    # A question the agent is holding its turn open for outranks "working"
+    # from the same turn; an open permission is over once the tool runs.
+    data = await agent_prompts.hold_for_question(session, task, client_session_id, data)
     upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
+    await agent_prompts.withdraw_for_sessions(session, upserted.ended, "session_ended")
     for transition in upserted.transitions:
         await activity.record(
             session,
@@ -204,6 +208,9 @@ async def _end_each(
         return 0
 
     moment = clock_now()
+    await agent_prompts.withdraw_for_sessions(
+        session, [entry.row for entry in rows], "session_ended"
+    )
     for row, project_id, person_id in rows:
         transition = agent_sessions.close(row, reason, project_id, moment, cause=cause)
         await activity.record(

@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -38,10 +39,10 @@ from app.core.clock import now
 from app.core.errors import NotFoundError, UnauthorizedError
 from app.core.logging import bind_request_id, new_request_id, reset_request_id
 from app.db import Database
-from app.models.agent_session import AgentSessionReason
+from app.models.agent_session import AgentPromptStatus, AgentSessionReason
 from app.realtime import auth, protocol
 from app.realtime.hub import AgentLink, Hub, Watcher
-from app.services import agent_feed, agent_reports, projects, tasks
+from app.services import agent_feed, agent_prompts, agent_reports, projects, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -223,16 +224,31 @@ async def _serve_agent(
     The idle window is the receive deadline, rescheduled per message: no
     sweeper, no clock skew, and "connected and then never said anything" is
     the same case as "went quiet after an hour" rather than a special one.
+
+    The socket is also written to between messages, since CYLIST-89: a
+    permission answered on the board arrives on the link's outbox and goes
+    straight down. Waiting on both is what lets an answer reach a daemon that
+    has nothing to say until it hears it.
     """
     loop = asyncio.get_running_loop()
     idle = AGENT_SOCKET_IDLE_AFTER.total_seconds()
+    incoming: asyncio.Future[str] = asyncio.ensure_future(websocket.receive_text())
+    outgoing: asyncio.Future[dict[str, object]] = asyncio.ensure_future(link.outbox.get())
     try:
         # `timeout_at`, not `timeout`: the latter takes a delay, and handing it
         # an absolute time would set the window to roughly the age of the
         # event loop — an idle timeout that never fires and looks like it works.
         async with asyncio.timeout_at(loop.time() + idle) as deadline:
             while True:
-                raw = await websocket.receive_text()
+                either: set[asyncio.Future[Any]] = {incoming, outgoing}
+                done, _ = await asyncio.wait(either, return_when=asyncio.FIRST_COMPLETED)
+                if outgoing in done:
+                    await websocket.send_json(outgoing.result())
+                    outgoing = asyncio.ensure_future(link.outbox.get())
+                if incoming not in done:
+                    continue
+                raw = incoming.result()
+                incoming = asyncio.ensure_future(websocket.receive_text())
                 deadline.reschedule(loop.time() + idle)
 
                 if link.displaced.is_set():
@@ -255,6 +271,14 @@ async def _serve_agent(
                     # protocol's note on `feed`.
                     await _record_feed(database, client_session_id, message)
                     continue
+                if message.type == "prompt":
+                    reply = await _open_prompt(database, client_session_id, message)
+                    if reply is not None:
+                        await websocket.send_json(reply)
+                    continue
+                if message.type == "withdraw":
+                    await _withdraw_prompt(database, message)
+                    continue
                 if message.type == "bye":
                     await _end_row(
                         database,
@@ -274,6 +298,44 @@ async def _serve_agent(
     except TimeoutError:
         await websocket.close(code=auth.IDLE)
         return auth.IDLE, "idle"
+    finally:
+        incoming.cancel()
+        outgoing.cancel()
+
+
+async def _open_prompt(
+    database: Database, client_session_id: str, message: protocol.PromptMessage
+) -> dict[str, object] | None:
+    """Put a permission on the card. Returns a frame to send at once, if any.
+
+    A card that cannot be found is answered as withdrawn, so the hook stops
+    waiting on a board that will never show it and the terminal decides.
+    """
+    async with database.session() as session:
+        try:
+            task = await tasks.resolve(session, message.task)
+        except NotFoundError:
+            return protocol.answer(message.prompt.id, AgentPromptStatus.WITHDRAWN)
+        return await agent_prompts.open_permission(
+            session,
+            task,
+            client_session_id,
+            message.prompt.id,
+            message.prompt.text,
+            message.prompt.tool,
+        )
+
+
+async def _withdraw_prompt(database: Database, message: protocol.WithdrawMessage) -> None:
+    """The daemon stopped waiting. Unacknowledged: there is nothing to say back."""
+    async with database.session() as session:
+        try:
+            task = await tasks.resolve(session, message.task)
+            await agent_prompts.withdraw(session, task, message.prompt_id, message.reason)
+        except NotFoundError:
+            # A prompt this server never kept, or a card since deleted: there
+            # is nothing left waiting to be told.
+            return
 
 
 async def _record_report(

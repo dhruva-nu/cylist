@@ -19,6 +19,7 @@ EXPECTED_TOOLS = {
     "get_project",
     "list_tasks",
     "get_task",
+    "ask_human",
     "read_task_history",
     "create_task",
     "create_subtask",

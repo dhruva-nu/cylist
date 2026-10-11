@@ -7,17 +7,32 @@ bound with.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Path, Query, Response, status
+import asyncio
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.clock import now
 from app.db import SessionDependency
+from app.models.activity import Channel
+from app.models.agent_session import AgentPromptStatus
 from app.models.task import Task
-from app.routers.tasks import resolved_task
-from app.schemas.agent_sessions import AgentFeedEntryRead, AgentSessionPut, AgentSessionRead
-from app.services import agent_feed, agent_reports, agent_sessions
+from app.realtime.hub import Hub
+from app.routers.tasks import WRITE_THIS_CARD, resolved_task
+from app.schemas.agent_sessions import (
+    AgentFeedEntryRead,
+    AgentPromptAnswer,
+    AgentPromptRead,
+    AgentPromptWithdraw,
+    AgentQuestionCreate,
+    AgentSessionPut,
+    AgentSessionRead,
+)
+from app.services import agent_feed, agent_prompts, agent_reports, agent_sessions
 
 router = APIRouter(tags=["agent sessions"])
 
@@ -69,8 +84,11 @@ async def list_agent_sessions(
     session: AsyncSession = SessionDependency,
 ) -> list[AgentSessionRead]:
     """Every session still worth showing: the open ones first, then the
-    finished ones nobody has dismissed. Dismissed sessions are left out."""
-    return [agent_sessions.read(row) for row in await agent_sessions.list_for_task(session, task)]
+    finished ones nobody has dismissed. Dismissed sessions are left out.
+    Each carries the prompt it shows — see `AgentSessionRead.prompt`."""
+    rows = await agent_sessions.list_for_task(session, task)
+    shown = await agent_prompts.shown_for(session, rows)
+    return [agent_sessions.read(row, shown.get(row.id)) for row in rows]
 
 
 @router.get(
@@ -110,3 +128,134 @@ async def dismiss_agent_sessions(
     the web UI does the same thing without the button."""
     await agent_sessions.dismiss(session, task)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Prompts: what an agent is waiting on a person for -----------------------
+
+PromptId = Path(description="The prompt's id, from the card's `agent_session.prompt`.")
+
+
+@router.post(
+    "/tasks/{task_ref}/agent-prompts",
+    response_model=AgentPromptRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ask the person an agent works for a question, on its card",
+    responses={
+        403: {"description": "Not an API token, or one without `write`."},
+        409: {"description": "None of the caller's sessions is open on this card."},
+    },
+)
+async def ask_question(
+    body: AgentQuestionCreate,
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> AgentPromptRead:
+    """What the MCP tool `ask_human` calls. The question and its options go
+    on the card, and the caller's session there turns amber — waiting, with
+    reason `question` — until somebody answers it or it expires.
+
+    The caller then long-polls `GET …/agent-prompts/{id}?wait=20` until the
+    status is no longer `open`. Bookkeeping about the caller rather than a
+    change to the project, so it is fenced by scope alone, like the session
+    report beside it."""
+    return await agent_prompts.ask(session, principal, task, body)
+
+
+@router.get(
+    "/tasks/{task_ref}/agent-prompts",
+    response_model=list[AgentPromptRead],
+    summary="List what the agents on a task have asked, newest first",
+)
+async def list_agent_prompts(
+    task: Task = Depends(resolved_task),
+    limit: int = Query(default=20, ge=1, le=100),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+) -> list[AgentPromptRead]:
+    """Questions and permissions alike, open or not, with what came of each."""
+    return await agent_prompts.recent(session, task, limit=limit)
+
+
+@router.get(
+    "/tasks/{task_ref}/agent-prompts/{prompt_id}",
+    response_model=AgentPromptRead,
+    summary="Read one prompt, waiting for it to close if asked to",
+)
+async def get_agent_prompt(
+    request: Request,
+    task: Task = Depends(resolved_task),
+    prompt_id: UUID = PromptId,
+    wait: int = Query(
+        default=0,
+        ge=0,
+        le=agent_prompts.POLL_WAIT_MAX,
+        description="Seconds to wait for it to stop being `open` before answering. "
+        "An agent's own poll with `wait` also tells the server it is still waiting.",
+    ),
+    principal: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+) -> AgentPromptRead:
+    """A long-poll: returns as soon as the prompt is answered, expires or is
+    withdrawn, or after `wait` seconds with it still `open` — ask again.
+
+    The database connection is let go while it waits, so a hundred agents
+    waiting on their people hold no more of the pool than none do."""
+    hub: Hub = request.app.state.hub
+    polled = wait > 0 and principal.channel is Channel.API
+    with hub.prompt_waiter(prompt_id) as changed:
+        current = await agent_prompts.wait_state(session, task, prompt_id, polled=polled)
+        if wait == 0 or current.status is not AgentPromptStatus.OPEN:
+            return current
+        await session.commit()
+        # Woken early to expire it, rather than late by a whole poll.
+        until_expiry = (current.expires_at - now()).total_seconds()
+        try:
+            async with asyncio.timeout(max(0.0, min(float(wait), until_expiry + 0.5))):
+                await changed.wait()
+        except TimeoutError:
+            pass
+    return await agent_prompts.wait_state(session, task, prompt_id, polled=False)
+
+
+@router.post(
+    "/tasks/{task_ref}/agent-prompts/{prompt_id}/answer",
+    response_model=AgentPromptRead,
+    summary="Answer what an agent on this task is waiting on",
+    responses={409: {"description": "Already answered, expired, withdrawn, or not an option."}},
+)
+async def answer_agent_prompt(
+    body: AgentPromptAnswer,
+    task: Task = Depends(resolved_task),
+    prompt_id: UUID = PromptId,
+    principal: Principal = Depends(WRITE_THIS_CARD),
+    session: AsyncSession = SessionDependency,
+) -> AgentPromptRead:
+    """Pick one of the prompt's options by `key`, or — for a question — type
+    a reply as `text`. The first answer wins: one already closed is a 409
+    saying how. The agent's session goes back to `working`, the answer is
+    kept so the card can say "You: <answer>", and the agent is told — a
+    question's tool returns it, a permission's hook turns it into Claude
+    Code's decision.
+
+    Answering directs the work on the card, so it needs the role's `tasks`
+    permission, like editing the card does."""
+    return await agent_prompts.answer(session, principal, task, prompt_id, body)
+
+
+@router.post(
+    "/tasks/{task_ref}/agent-prompts/{prompt_id}/withdraw",
+    response_model=AgentPromptRead,
+    summary="Stop waiting on a prompt before anybody answers it",
+    responses={403: {"description": "Not an API token, or one without `write`."}},
+)
+async def withdraw_agent_prompt(
+    body: AgentPromptWithdraw,
+    task: Task = Depends(resolved_task),
+    prompt_id: UUID = PromptId,
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> AgentPromptRead:
+    """For the agent: its tool call was cancelled, or the terminal answered
+    first. A prompt already closed is returned as it is."""
+    return await agent_prompts.withdraw(session, task, prompt_id, body.reason, principal=principal)
