@@ -23,6 +23,12 @@ ATLAS = {
 }
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
 
+CARD = {
+    "title": "Stripe webhook idempotency",
+    "description": "Duplicate deliveries create double payments.",
+    "type": "bug",
+}
+
 
 class TestCreating:
     async def test_starts_a_project(self, signed_in: AsyncClient) -> None:
@@ -127,10 +133,12 @@ class TestUpdating:
 
 
 class TestArchiving:
+    """Taking a project off the grid, which is the reversible half of going."""
+
     async def test_archived_projects_drop_out_of_the_grid(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)
 
-        assert (await signed_in.delete("/projects/ATL")).status_code == 200
+        assert (await signed_in.patch("/projects/ATL", json={"archived": True})).status_code == 200
 
         assert (await signed_in.get("/projects")).json() == []
         assert (
@@ -140,18 +148,166 @@ class TestArchiving:
     async def test_an_archived_project_is_still_addressable(self, signed_in: AsyncClient) -> None:
         """Nothing is deleted, so its board, files and vault stay reachable."""
         await signed_in.post("/projects", json=ATLAS)
-        await signed_in.delete("/projects/ATL")
+        await signed_in.patch("/projects/ATL", json={"archived": True})
 
         assert (await signed_in.get("/projects/ATL")).status_code == 200
 
     async def test_it_can_be_brought_back(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)
-        await signed_in.delete("/projects/ATL")
+        await signed_in.patch("/projects/ATL", json={"archived": True})
 
         restored = (await signed_in.patch("/projects/ATL", json={"archived": False})).json()
 
         assert restored["archived_at"] is None
         assert len((await signed_in.get("/projects")).json()) == 1
+
+    async def test_archiving_is_logged_as_itself_not_as_a_field_that_changed(
+        self, signed_in: AsyncClient
+    ) -> None:
+        created = (await signed_in.post("/projects", json=ATLAS)).json()
+        await signed_in.patch("/projects/ATL", json={"archived": True})
+        await signed_in.patch("/projects/ATL", json={"archived": False})
+
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        verbs = [entry["verb"] for entry in entries]
+
+        assert "project.archived" in verbs
+        assert "project.restored" in verbs
+        assert "project.updated" not in verbs
+
+    async def test_a_save_that_archives_and_renames_records_both(
+        self, signed_in: AsyncClient
+    ) -> None:
+        created = (await signed_in.post("/projects", json=ATLAS)).json()
+
+        await signed_in.patch("/projects/ATL", json={"archived": True, "name": "Atlas, parked"})
+
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        updated = next(entry for entry in entries if entry["verb"] == "project.updated")
+
+        assert updated["payload"]["fields"] == ["name"]
+        assert any(entry["verb"] == "project.archived" for entry in entries)
+
+
+class TestDeleting:
+    """The irreversible half. CYLIST-73."""
+
+    async def test_deletes_the_project(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+
+        response = await signed_in.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert response.status_code == 200
+        assert (await signed_in.get("/projects/ATL")).status_code == 404
+        assert (await signed_in.get("/projects", params={"include_archived": True})).json() == []
+
+    async def test_refuses_without_the_key(self, signed_in: AsyncClient) -> None:
+        """A caller written against the old meaning of DELETE is told, not obeyed."""
+        await signed_in.post("/projects", json=ATLAS)
+
+        response = await signed_in.delete("/projects/ATL")
+
+        assert response.status_code == 422
+        assert (await signed_in.get("/projects/ATL")).status_code == 200
+
+    async def test_refuses_the_wrong_key(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.post("/projects", json=HERMES)
+
+        response = await signed_in.delete("/projects/ATL", params={"confirm": "HRM"})
+
+        assert response.status_code == 422
+        assert response.json()["error"]["details"]["project_key"] == "ATL"
+        assert (await signed_in.get("/projects/ATL")).status_code == 200
+
+    async def test_the_confirmation_is_case_insensitive(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+
+        response = await signed_in.delete("/projects/ATL", params={"confirm": " atl "})
+
+        assert response.status_code == 200
+
+    async def test_takes_the_board_with_it(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+        created = await signed_in.post("/projects/ATL/tasks", json=CARD)
+        assert created.status_code == 201, created.text
+
+        await signed_in.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert (await signed_in.get(f"/tasks/{created.json()['reference']}")).status_code == 404
+
+    async def test_an_archived_project_can_still_be_deleted(self, signed_in: AsyncClient) -> None:
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.patch("/projects/ATL", json={"archived": True})
+
+        assert (
+            await signed_in.delete("/projects/ATL", params={"confirm": "ATL"})
+        ).status_code == 200
+
+    async def test_the_key_is_free_again_afterwards(self, signed_in: AsyncClient) -> None:
+        """Unlike a task number: the key is the project's name, not a card's."""
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert (await signed_in.post("/projects", json=ATLAS)).status_code == 201
+
+    async def test_the_log_outlives_the_project(self, signed_in: AsyncClient) -> None:
+        """`activity.project_id` is nulled rather than cascaded, on purpose."""
+        await signed_in.post("/projects", json=ATLAS)
+        await signed_in.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        entries = (await signed_in.get("/activity")).json()
+        deleted = next(entry for entry in entries if entry["verb"] == "project.deleted")
+
+        assert deleted["payload"]["key"] == "ATL"
+        assert deleted["payload"]["name"] == ATLAS["name"]
+        assert deleted["project_id"] is None
+        assert any(entry["verb"] == "project.created" for entry in entries)
+
+    async def test_only_an_admin_may_delete_it(
+        self, signed_in: AsyncClient, settings: Settings, database: Database
+    ) -> None:
+        """The project permission is for tidying a project up, not for ending it."""
+        await signed_in.post("/projects", json=ATLAS)
+        aditi, token = await open_account(signed_in, ADITI, "aditi@cylist.dev")
+        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
+        await signed_in.put(
+            "/projects/ATL/members",
+            json={"person_ids": [person["id"] for person in members] + [aditi["id"]]},
+        )
+
+        async with client_for(settings, database) as hers:
+            await hers.post(
+                "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
+            )
+            response = await hers.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert response.status_code == 403
+        assert (await signed_in.get("/projects/ATL")).status_code == 200
+
+    async def test_a_member_with_the_project_permission_still_may_not(
+        self, signed_in: AsyncClient, settings: Settings, database: Database
+    ) -> None:
+        """Renaming and archiving are what that permission buys. Not this."""
+        await signed_in.post("/projects", json=ATLAS)
+        aditi, token = await open_account(signed_in, ADITI, "aditi@cylist.dev")
+        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
+        await signed_in.put(
+            "/projects/ATL/members",
+            json={"person_ids": [person["id"] for person in members] + [aditi["id"]]},
+        )
+        await signed_in.post("/projects/ATL/roles", json={"name": "Lead"})
+        await signed_in.put(f"/projects/ATL/members/{aditi['id']}/role", json={"role": "Lead"})
+
+        async with client_for(settings, database) as hers:
+            await hers.post(
+                "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
+            )
+            renamed = await hers.patch("/projects/ATL", json={"name": "Atlas II"})
+            deleted = await hers.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert renamed.status_code == 200
+        assert deleted.status_code == 403
 
 
 class TestAuditTrail:

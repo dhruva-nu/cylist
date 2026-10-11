@@ -988,7 +988,7 @@ class TestTheSchema:
     async def test_deleting_a_project_takes_its_folders_with_it(
         self, project: AsyncClient, session: AsyncSession
     ) -> None:
-        """Projects are archived, not deleted, but the foreign key must be sound."""
+        """The cascade the API's own delete leans on, asserted at the row."""
         await make_folder(project, "Architecture")
         project_id = UUID((await project.get("/projects/ATL")).json()["id"])
 
@@ -998,3 +998,72 @@ class TestTheSchema:
         await session.flush()
 
         assert list(await session.scalars(select(Folder))) == []
+
+
+class TestDeletingAProject:
+    """What becomes of uploaded bytes when the project holding them goes.
+
+    The rows are the database's job — every table that belongs to a project
+    cascades off it. The bytes are not: content is shared between every row
+    holding the same content, so a project can only take away what nothing
+    else was pointing at. CYLIST-73.
+    """
+
+    async def test_takes_its_content_off_the_disk(
+        self, project: AsyncClient, settings: Settings
+    ) -> None:
+        folder = await make_folder(project, "Architecture")
+        content = content_of("deleted with its project")
+        await upload(project, folder, "brief.pdf", content)
+
+        deleted = await project.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert deleted.status_code == 200, deleted.text
+        assert not blob_path(settings, content).exists()
+
+    async def test_keeps_content_another_project_still_needs(
+        self, project: AsyncClient, settings: Settings
+    ) -> None:
+        """The same bytes in two projects are one blob. One leaving is not both."""
+        content = content_of("shared across two projects, so kept")
+        await upload(project, await make_folder(project, "Architecture"), "brief.pdf", content)
+        await project.post("/projects", json=HERMES)
+        elsewhere = (await project.get("/projects/HRM/tree")).json()["id"]
+        await upload(project, elsewhere, "brief.pdf", content)
+
+        await project.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert blob_path(settings, content).is_file()
+
+    async def test_keeps_content_a_skill_on_another_project_needs(
+        self, project: AsyncClient, settings: Settings
+    ) -> None:
+        """A skill is the other thing that can hold a blob — see `blobs.REFERRERS`."""
+        content = content_of("filed here, a skill there")
+        await upload(project, await make_folder(project, "Architecture"), "tidy.md", content)
+        await project.post("/projects", json=HERMES)
+        kept = await project.post(
+            "/projects/HRM/skills",
+            files={"file": ("tidy.md", content, "text/markdown")},
+            data={"description": "Move stale cards back to triage."},
+        )
+        assert kept.status_code == 201, kept.text
+
+        await project.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert blob_path(settings, content).is_file()
+
+    async def test_takes_its_own_skills_content_with_it(
+        self, project: AsyncClient, settings: Settings
+    ) -> None:
+        content = content_of("a skill with nothing else behind it")
+        uploaded = await project.post(
+            "/projects/ATL/skills",
+            files={"file": ("tidy.md", content, "text/markdown")},
+            data={"description": "Move stale cards back to triage."},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+
+        await project.delete("/projects/ATL", params={"confirm": "ATL"})
+
+        assert not blob_path(settings, content).exists()

@@ -29,6 +29,7 @@ from typing import Final
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.base_path import route_path
 from app.core.logging import (
     REQUEST_ID_HEADER,
     bind_request_id,
@@ -126,9 +127,12 @@ class RequestLogMiddleware:
             return logging.ERROR
         if status_code >= 400:
             return logging.WARNING
-        if _path(scope) in QUIET_PATHS:
+        # Graded on the path less any base path, so a dev slot's /dev_1/api/v1
+        # is the API and its health check is as quiet as production's.
+        path = route_path(scope)
+        if path in QUIET_PATHS:
             return logging.DEBUG
-        if not _path(scope).startswith(self._api_prefix):
+        if not path.startswith(self._api_prefix):
             # The SPA's own bundle, fonts and icons. Real traffic, but one page
             # load is dozens of them and none is ever the answer to a question.
             return logging.DEBUG

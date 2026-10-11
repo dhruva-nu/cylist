@@ -86,6 +86,8 @@ import {
   type Template,
 } from '../api/client'
 import { silentFor, waitingDetail } from '../routes/agentState'
+import { can } from '../routes/projectPermissions'
+import { mayDelete, type Viewer } from './commentDelete'
 import { localDate } from './dates'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
@@ -277,6 +279,7 @@ function TaskDetailView({
   // A card that owes nothing is never late: once it is done, the day it was
   // wanted done is a fact about the past rather than something outstanding.
   const late = task.next_due_date !== null && isOverdue(task.due_date)
+  const deleting = useCommentDeleting({ projectKey, announce, onDone })
 
   const editButton = (
     <Button variant="ghost" small onClick={onEdit} aria-label="Edit task" title="Edit task">
@@ -412,10 +415,18 @@ function TaskDetailView({
         ) : null}
 
         <ReadField label="Timeline">
+          {deleting.error ? <ErrorBanner>{deleting.error.message}</ErrorBanner> : null}
           <div className={styles.timeline}>
             {task.comments.length ? (
               task.comments.map((entry) => (
-                <TimelineEntry key={entry.id} entry={entry} members={members} files={files} />
+                <TimelineEntry
+                  key={entry.id}
+                  entry={entry}
+                  members={members}
+                  files={files}
+                  onDelete={deleting.deletable(entry) ? () => deleting.remove(entry) : undefined}
+                  deleting={deleting.removingId === entry.id}
+                />
               ))
             ) : (
               <span className={styles.empty}>Nothing has been said about this card yet.</span>
@@ -931,6 +942,7 @@ function TaskForm({
   // auth gate already filled; a card started before it lands falls through to
   // the first member, which is what it used to do for everybody.
   const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const deleting = useCommentDeleting({ projectKey, announce, onDone })
   const [form, setForm] = useState<TaskInput>(
     initialFormFields(task, members, identity.data, defaultGoalId),
   )
@@ -1189,6 +1201,7 @@ function TaskForm({
               onAuthor={setAuthor}
               comment={comment}
               onComment={setComment}
+              deleting={null}
             />
           )}
         </TabPanel>
@@ -1224,6 +1237,7 @@ function TaskForm({
               onAuthor={setAuthor}
               comment={comment}
               onComment={setComment}
+              deleting={deleting}
             />
           </TabPanel>
         ) : null}
@@ -1788,6 +1802,7 @@ function Comments({
   onAuthor,
   comment,
   onComment,
+  deleting,
 }: {
   /** Null while the card is being written, which is the empty timeline. */
   task: TaskDetail | null
@@ -1798,13 +1813,23 @@ function Comments({
   onAuthor: (id: string) => void
   comment: string
   onComment: (text: string) => void
+  /** Null on a card being written: nothing has been said to take back yet. */
+  deleting: CommentDeleting | null
 }) {
   return (
     <Field label="Comments">
+      {deleting?.error ? <ErrorBanner>{deleting.error.message}</ErrorBanner> : null}
       <div className={styles.timeline}>
         {task?.comments.length ? (
           task.comments.map((entry) => (
-            <TimelineEntry key={entry.id} entry={entry} members={members} files={files} />
+            <TimelineEntry
+              key={entry.id}
+              entry={entry}
+              members={members}
+              files={files}
+              onDelete={deleting?.deletable(entry) ? () => deleting.remove(entry) : undefined}
+              deleting={deleting?.removingId === entry.id}
+            />
           ))
         ) : (
           <span className={styles.empty}>No comments yet.</span>
@@ -2130,15 +2155,87 @@ function summariseSave(
   return parts.join(' ')
 }
 
+/** What `useCommentDeleting` hands a timeline. */
+interface CommentDeleting {
+  /** Whether this reader is offered the ✕ on this entry. */
+  deletable: (entry: TaskComment) => boolean
+  remove: (entry: TaskComment) => void
+  /** The entry whose delete is in flight, so its button can go quiet. */
+  removingId: string | null
+  error: Error | null
+}
+
+/**
+ * Taking something said off a card, for whichever half of the dialog is open.
+ *
+ * One hook rather than a copy in each, for the reason `useSubtaskTicking`
+ * below is one: the read view and the form both draw the same timeline, and a
+ * gesture that worked differently depending on which of them you were looking
+ * at would be two gestures.
+ *
+ * It asks the permission grid as well as the session, because the two halves
+ * of the rule are answered in different places — who you are, and what your
+ * role here is. Both queries are ones another screen already holds, so this
+ * adds no fetch the project has not made.
+ */
+function useCommentDeleting({
+  projectKey,
+  announce,
+  onDone,
+}: {
+  projectKey: string
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const queryClient = useQueryClient()
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const grid = useQuery({
+    queryKey: ['permissions', projectKey],
+    queryFn: () => api.getPermissions(projectKey),
+  })
+
+  const viewer: Viewer = {
+    identity: identity.data,
+    // Permissive while in flight, the way `can` is: the server is the fence,
+    // and a button that flickers in after a round trip reads as a glitch.
+    amAdmin: grid.data?.may_manage ?? false,
+    mayComment: can(grid.data?.mine, 'comments'),
+  }
+
+  const remove = useMutation({
+    mutationFn: (entry: TaskComment) => api.deleteComment(entry.id),
+    onSuccess: async (_void, entry) => {
+      announce('Comment deleted.')
+      await queryClient.invalidateQueries({ queryKey: ['task', entry.task_id] })
+      // Deleting one is itself a change to the card, so the history under the
+      // timeline is now a line short.
+      await queryClient.invalidateQueries({ queryKey: ['task-history', entry.task_id] })
+      await onDone()
+    },
+  })
+
+  return {
+    deletable: (entry: TaskComment) => mayDelete(entry, viewer),
+    remove: (entry: TaskComment) => remove.mutate(entry),
+    removingId: remove.isPending ? remove.variables.id : null,
+    error: remove.error,
+  }
+}
+
 /** One timeline entry. System entries are drawn apart from what people wrote. */
 function TimelineEntry({
   entry,
   members,
   files,
+  onDelete,
+  deleting = false,
 }: {
   entry: TaskComment
   members: Person[]
   files: readonly FiledItem[]
+  /** Omitted where this reader may not take this entry off — see `mayDelete`. */
+  onDelete?: (() => void) | undefined
+  deleting?: boolean
 }) {
   const when = new Date(entry.created_at).toLocaleString('en-GB', {
     day: 'numeric',
@@ -2173,12 +2270,37 @@ function TimelineEntry({
       <div className={styles.bubble}>
         <div className={styles.who}>
           {entry.author?.name ?? 'Unattributed'}
-          <span>{when}</span>
+          {/* The time and the ✕ as one end, so the name still sits against the
+              other: `.who` spreads exactly two children. */}
+          <span className={styles.whoEnd}>
+            {when}
+            {onDelete ? (
+              <button
+                type="button"
+                className={styles.retract}
+                disabled={deleting}
+                // Named rather than titled "Delete": one timeline holds several
+                // of these, and a screen reader hearing "Delete, button" six
+                // times has been told nothing about which.
+                aria-label={`Delete the comment ${wordsOf(entry.body)}`}
+                title="Delete this comment"
+                onClick={onDelete}
+              >
+                ✕
+              </button>
+            ) : null}
+          </span>
         </div>
         <Tagged text={entry.body} members={members} files={files} />
       </div>
     </div>
   )
+}
+
+/** The opening of a comment, short enough to sit inside a label. */
+function wordsOf(body: string): string {
+  const flat = body.trim().replace(/\s+/g, ' ')
+  return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat
 }
 
 const CHECKLIST_LABELS: Record<ChecklistState, string> = {

@@ -13,6 +13,7 @@ from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.errors import ForbiddenError, UnprocessableRequestError
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
 from app.models.project import Project
@@ -43,6 +44,7 @@ from app.services import (
     tasks,
     vault,
 )
+from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -79,6 +81,39 @@ CHANGE_PROJECT = guards.on_project(Permission.PROJECT)
 CHANGE_MEMBERSHIP = guards.on_project(Permission.PEOPLE)
 """Saying who is on it. A different question from what the project is called,
 and often a different person's job, so it is a permission of its own."""
+
+
+Confirmation = Query(
+    alias="confirm",
+    description="The project's key, typed again, to confirm a delete that cannot be undone.",
+    examples=["ATL"],
+)
+
+
+async def project_admin(
+    project: Project = Depends(resolved_project),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """Admit only an admin of this project to destroying it.
+
+    Deliberately not :data:`CHANGE_PROJECT`. `Permission.PROJECT` is renaming,
+    rewording and archiving — three things somebody else can put back — and a
+    role carrying it was given the right to tidy the project up, not to end it.
+    Deleting one takes its vault and its uploads with it, and the only person
+    on a board who can hand that right out is the only one who should hold it.
+
+    Written out rather than built from :mod:`app.routers.guards`, because what
+    it asks is not a permission: it is the question
+    :func:`app.services.roles.may_administer` answers, the same one
+    `/projects/{ref}/roles` asks before it lets anybody change a role.
+    """
+    if not await roles.may_administer(session, project, principal):
+        raise ForbiddenError(
+            f"Only an admin of {project.key} can delete it.",
+            details={"project_key": project.key},
+        )
+    return principal
 
 
 @router.get("", response_model=list[ProjectRead], summary="List projects")
@@ -187,41 +222,90 @@ async def update_project(
     principal: Principal = Depends(CHANGE_PROJECT),
     session: AsyncSession = SessionDependency,
 ) -> ProjectRead:
-    """Change any subset of a project's details. Omitted fields are left alone."""
+    """Change any subset of a project's details. Omitted fields are left alone.
+
+    This is also how a project is archived and brought back — `{"archived":
+    true}` takes it off the grid and leaves everything on it where it is,
+    which `DELETE` emphatically does not.
+    """
     updated = await projects.update(session, project, body)
-    await activity.record(
-        session,
-        principal,
-        "project.updated",
-        entity_type="project",
-        entity_id=updated.id,
-        project_id=updated.id,
-        payload={"fields": sorted(body.model_dump(exclude_unset=True))},
-    )
+    # Archiving is written as itself rather than as a field that changed. "Took
+    # the project off the grid" and "renamed it" are not the same event to
+    # anybody reading the log later, and `DELETE` stopped being the archive
+    # route in CYLIST-73, so this is now the only place that says it happened.
+    sent = body.model_dump(exclude_unset=True)
+    described = sorted(field for field in sent if field != "archived")
+    if described:
+        await activity.record(
+            session,
+            principal,
+            "project.updated",
+            entity_type="project",
+            entity_id=updated.id,
+            project_id=updated.id,
+            payload={"fields": described},
+        )
+    if body.archived is not None:
+        await activity.record(
+            session,
+            principal,
+            "project.archived" if body.archived else "project.restored",
+            entity_type="project",
+            entity_id=updated.id,
+            project_id=updated.id,
+            payload={"key": updated.key},
+        )
     return _project_read(updated)
 
 
-@router.delete("/{project_ref}", response_model=Acknowledged, summary="Archive a project")
-async def archive_project(
+@router.delete(
+    "/{project_ref}",
+    response_model=Acknowledged,
+    summary="Delete a project",
+    responses={422: {"description": "`confirm` did not name this project's key."}},
+)
+async def delete_project(
+    confirm: str = Confirmation,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(CHANGE_PROJECT),
+    principal: Principal = Depends(project_admin),
     session: AsyncSession = SessionDependency,
+    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
-    """Archive a project, hiding it from the grid.
+    """Delete a project, and with it everything filed under it.
 
-    Nothing is deleted: its board, files and vault stay exactly as they were. A
-    project holds credentials and uploads, so there is deliberately no way to
-    destroy one through the API. Restore with `PATCH` and `{"archived": false}`.
+    Its board and every card on it, the folders and the uploaded bytes nothing
+    else is holding, the docs, the vault and its secrets, the roles and who
+    wore them. None of it comes back. Only the audit log survives, with the
+    record of what happened on a project that is no longer there.
+
+    Archiving is the reversible answer and is a different call: `PATCH` with
+    `{"archived": true}` takes a project off the grid and leaves all of the
+    above where it is.
+
+    `confirm` has to be the project's own key. It is not ceremony — this path
+    archived a project until CYLIST-73, so a caller written against the old
+    meaning has to say something new before the new one runs, and gets a 422
+    rather than a destroyed board.
     """
-    await projects.archive(session, project)
+    if confirm.strip().upper() != project.key:
+        raise UnprocessableRequestError(
+            f"Name the project to delete it: confirm must be {project.key}.",
+            details={"project_key": project.key},
+        )
+
+    key, name, project_id = project.key, project.name, project.id
+    await projects.delete(session, store, project)
     await activity.record(
         session,
         principal,
-        "project.archived",
+        "project.deleted",
         entity_type="project",
-        entity_id=project.id,
-        project_id=project.id,
-        payload={"key": project.key},
+        entity_id=project_id,
+        # Not `project_id`: the row it would point at has just gone, and the
+        # foreign key would null the column out from under this entry anyway.
+        # The key and name are in the payload so the line still reads.
+        project_id=None,
+        payload={"key": key, "name": name},
     )
     return Acknowledged()
 

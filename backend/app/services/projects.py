@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,8 @@ from app.core.palette import colour_for
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
-from app.services import columns, files, people, permissions, roles
+from app.services import blobs, columns, files, people, permissions, roles
+from app.storage import BlobStore
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -164,6 +166,34 @@ async def archive(session: AsyncSession, project: Project) -> Project:
     return project
 
 
+async def delete(session: AsyncSession, store: BlobStore, project: Project) -> None:
+    """Destroy a project and everything filed under it.
+
+    The rows go in one statement. Every table that belongs to a project holds
+    an ``ON DELETE CASCADE`` to it, so its board and the cards on it, their
+    comments and checklists, the folders, the docs, the vault, the roles and
+    the permission grid all leave with the row that owns them. The audit log is
+    the deliberate exception — ``activity.project_id`` is nulled rather than
+    cascaded, so the record of what happened outlives the project it happened
+    on, which is the whole point of having one.
+
+    What the database cannot do is the bytes. Uploaded content is shared
+    between every row holding the same bytes, so which blobs this project was
+    the last to refer to is only knowable once its rows are gone — hence two
+    steps in this order, for the reason :func:`app.services.blobs.collect_garbage`
+    gives: an unreferenced file on disk is harmless, a row promising content
+    that is no longer there is not.
+
+    Archiving is the reversible answer and stays where it was. This one is
+    not reversible, which is why its endpoint asks the caller to name the
+    project before it runs.
+    """
+    blob_ids = await blobs.ids_on_project(session, project.id)
+    await session.delete(project)
+    await session.flush()
+    await blobs.collect_garbage(session, store, blob_ids)
+
+
 async def set_members(
     session: AsyncSession, project: Project, person_ids: list[UUID]
 ) -> list[Person]:
@@ -198,7 +228,7 @@ async def set_members(
     leaving = current - wanted
     if leaving:
         await session.execute(
-            delete(ProjectMember).where(
+            sql_delete(ProjectMember).where(
                 ProjectMember.project_id == project.id,
                 ProjectMember.person_id.in_(leaving),
             )

@@ -25,7 +25,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import {
   api,
@@ -65,6 +65,7 @@ import {
   withColumnRule,
 } from './projectPermissions'
 import styles from './ProjectRoles.module.css'
+import { confirms } from './projectDelete'
 import { nameIsTaken, whyUndeletable } from './projectRoles'
 
 /** How a line of the grid is addressed, both on the wire and in local state. */
@@ -83,6 +84,7 @@ export function ProjectRoles() {
   const { projectKey } = useParams({ from: '/p/$projectKey/roles' })
   const queryClient = useQueryClient()
   const [addingRole, setAddingRole] = useState(false)
+  const [deletingProject, setDeletingProject] = useState(false)
   const { message, announce } = useAnnouncer()
 
   /**
@@ -269,6 +271,8 @@ export function ProjectRoles() {
         </div>
       </div>
 
+      {amAdmin ? <DeleteProject onOpen={() => setDeletingProject(true)} /> : null}
+
       {addingRole ? (
         <AddRoleDialog
           projectKey={projectKey}
@@ -278,7 +282,93 @@ export function ProjectRoles() {
           onClose={() => setAddingRole(false)}
         />
       ) : null}
+
+      {deletingProject ? (
+        <DeleteProjectDialog projectKey={projectKey} onClose={() => setDeletingProject(false)} />
+      ) : null}
     </>
+  )
+}
+
+/**
+ * The end of a project, offered where the rest of its settings are.
+ *
+ * On this screen rather than on the grid of projects, and only to an admin,
+ * for the reason the server only admits one: a project is a board, a file
+ * store and a vault, and the gesture that ends all three should not be a hover
+ * menu on a tile somebody is trying to click into.
+ *
+ * Archiving is the answer to almost every reason somebody arrives here, so it
+ * is named rather than left to be discovered — most projects people want gone
+ * are projects they want out of the way.
+ */
+function DeleteProject({ onOpen }: { onOpen: () => void }) {
+  return (
+    <section className={`${cardStyles.card} ${styles.ending}`}>
+      <div>
+        <h2>Delete this project</h2>
+        <p>
+          Its board and every card on it, its files, its docs and its vault go with it. Nothing here
+          comes back. Only the activity log keeps a record that it existed.
+        </p>
+      </div>
+      <Button danger onClick={onOpen}>
+        Delete project
+      </Button>
+    </section>
+  )
+}
+
+/** Naming the project, which is what turns the button on — and what the server asks for. */
+function DeleteProjectDialog({ projectKey, onClose }: { projectKey: string; onClose: () => void }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [typed, setTyped] = useState('')
+  const named = confirms(projectKey, typed)
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteProject(projectKey, typed.trim()),
+    onSuccess: async () => {
+      // Away from the project before the cache is cleared: every query on this
+      // screen is about a project that is no longer there, and a refetch would
+      // paint the page with 404s on the way out.
+      await navigate({ to: '/' })
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+
+  return (
+    <Modal
+      title={`Delete ${projectKey}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button danger disabled={!named || remove.isPending} onClick={() => remove.mutate()}>
+            {remove.isPending ? 'Deleting…' : `Delete ${projectKey}`}
+          </Button>
+        </>
+      }
+    >
+      <ModalBody>
+        {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
+        <p className={styles.warning}>
+          This deletes the board and every card on it, the files and what was uploaded, the docs,
+          and the vault with every secret in it. It cannot be undone. To put the project away
+          without losing any of that, archive it instead.
+        </p>
+        <Field label={`Type ${projectKey} to confirm`} required>
+          <input
+            value={typed}
+            autoFocus
+            spellCheck={false}
+            aria-invalid={typed.trim() !== '' && !named}
+            onChange={(event) => setTyped(event.target.value)}
+            placeholder={projectKey}
+          />
+        </Field>
+      </ModalBody>
+    </Modal>
   )
 }
 

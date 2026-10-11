@@ -990,6 +990,40 @@ async def comment(session: AsyncSession, task: Task, data: CommentCreate) -> Tas
     return entry
 
 
+async def get_comment(session: AsyncSession, comment_id: UUID) -> TaskComment:
+    """One timeline entry by id.
+
+    Raises:
+        NotFoundError: if nothing matches.
+    """
+    entry = await session.get(TaskComment, comment_id)
+    if entry is None:
+        raise NotFoundError("No comment with that id.")
+    return entry
+
+
+async def delete_comment(session: AsyncSession, entry: TaskComment) -> None:
+    """Remove something somebody said from a card's timeline.
+
+    Only that. A status change sits on the same timeline and in the same table,
+    but it is not a remark — it is the card's own record of when it stopped,
+    why, and who it was waiting on, written by Cylist rather than typed by
+    anybody. A board where that could be taken off the card would be a board
+    whose history is an account of what is still convenient, so it is refused
+    here rather than left to the caller's judgement.
+
+    Raises:
+        UnprocessableRequestError: if the entry is a status change.
+    """
+    if entry.kind != CommentKind.COMMENT:
+        raise UnprocessableRequestError(
+            "A status change is part of the card's history and cannot be deleted.",
+            details={"kind": entry.kind.value},
+        )
+    await session.delete(entry)
+    await session.flush()
+
+
 async def comment_counts(session: AsyncSession, task_ids: list[UUID]) -> dict[UUID, int]:
     """How long each task's timeline is, in one query.
 

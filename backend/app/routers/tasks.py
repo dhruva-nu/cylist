@@ -16,6 +16,7 @@ from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.errors import ForbiddenError, NotFoundError
 from app.db import SessionDependency
 from app.models.board import BoardColumn
 from app.models.person import Person
@@ -44,7 +45,15 @@ from app.schemas.tasks import (
     TaskStatusChange,
     TaskUpdate,
 )
-from app.services import activity, agent_sessions, columns, permissions, tasks, templates
+from app.services import (
+    activity,
+    agent_sessions,
+    columns,
+    permissions,
+    roles,
+    tasks,
+    templates,
+)
 
 router = APIRouter(tags=["tasks"])
 
@@ -78,6 +87,20 @@ async def _project_of_checklist_item(session: AsyncSession, item: TaskChecklistI
     out rather than read off the row.
     """
     task = await tasks.resolve(session, str(item.task_id))
+    return task.project_id
+
+
+async def resolved_comment(
+    comment_id: UUID,
+    session: AsyncSession = SessionDependency,
+) -> TaskComment:
+    """Turn the path segment into a timeline entry, 404-ing if nothing matches."""
+    return await tasks.get_comment(session, comment_id)
+
+
+async def _project_of_comment(session: AsyncSession, entry: TaskComment) -> UUID:
+    """Which project a comment is on, by way of the card it was said about."""
+    task = await tasks.resolve(session, str(entry.task_id))
     return task.project_id
 
 
@@ -263,6 +286,40 @@ COMMENT_ON_THIS_CARD = guards.for_entity(Permission.COMMENTS, resolved_task)
 A client who should never move a card is often exactly the person whose
 comment you want. The reason a status change carries is not this — that is
 part of making the change, and goes with it."""
+
+
+async def may_delete_this_comment(
+    entry: TaskComment = Depends(resolved_comment),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    """Admit whoever said it, or an admin of the board it was said on.
+
+    One verb over two different acts. Taking back what you said yourself is
+    the other half of saying it, and is fenced with it — :attr:`COMMENTS`,
+    the permission that put the words there. Removing what somebody *else*
+    said is moderation: it is not commenting, and no amount of permission to
+    comment makes it so, so it belongs to whoever administers the board. The
+    same three callers :func:`app.services.roles.may_administer` admits
+    everywhere else are the ones who may.
+
+    An entry with no author belongs to nobody — Cylist wrote it, or an agent
+    that did not say whose behalf it was speaking on — so only the second path
+    reaches those.
+    """
+    project_id = await _project_of_comment(session, entry)
+    if entry.author_id is not None and entry.author_id == principal.person_id:
+        return await permissions.enforce_on(session, project_id, principal, Permission.COMMENTS)
+
+    project = await session.get(Project, project_id)
+    if project is None:  # pragma: no cover - a resolved comment's project exists
+        raise NotFoundError("That project no longer exists.")
+    if not await roles.may_administer(session, project, principal):
+        raise ForbiddenError(
+            f"Only an admin of {project.key} can delete a comment somebody else wrote.",
+            details={"project_key": project.key},
+        )
+    return principal
 
 
 async def may_write_this_card(
@@ -947,3 +1004,38 @@ async def add_comment(
         },
     )
     return _comment_read(entry)
+
+
+@router.delete("/comments/{comment_id}", response_model=Acknowledged, summary="Delete a comment")
+async def delete_comment(
+    entry: TaskComment = Depends(resolved_comment),
+    principal: Principal = Depends(may_delete_this_comment),
+    session: AsyncSession = SessionDependency,
+) -> Acknowledged:
+    """Delete a comment off a card's timeline.
+
+    Its author may take back what they said; an admin of the board may take
+    off anybody's. A status change on the same timeline is the card's history
+    rather than a remark, and is refused with a 422.
+
+    The words survive in the card's history, which is the point of having one:
+    the line saying the comment was added quoted it when it was written, and
+    this writes a second line saying it was taken off.
+    """
+    task = await tasks.resolve(session, str(entry.task_id))
+    comment_id, said = entry.id, entry.body
+    await tasks.delete_comment(session, entry)
+    await activity.record(
+        session,
+        principal,
+        "task.comment_deleted",
+        entity_type="task",
+        entity_id=task.id,
+        project_id=task.project_id,
+        payload={
+            "reference": task.reference,
+            "comment_id": str(comment_id),
+            "comment": activity.excerpt(said),
+        },
+    )
+    return Acknowledged()
