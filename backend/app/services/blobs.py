@@ -26,7 +26,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.errors import PayloadTooLargeError
 from app.models.agent import Skill
-from app.models.file import Blob, FileItem
+from app.models.file import Blob, FileItem, Folder
 from app.storage import BlobStore, BlobTooLargeError
 
 CHUNK_BYTES = 1 << 20
@@ -148,3 +148,24 @@ async def collect_garbage(session: AsyncSession, store: BlobStore, blob_ids: set
     await session.flush()
     for blob in orphaned:
         await store.remove(blob.path)
+
+
+async def ids_on_project(session: AsyncSession, project_id: UUID) -> set[UUID]:
+    """Every blob this project's rows point at, read before those rows go.
+
+    Beside :data:`REFERRERS` because it is the same fact asked a different way,
+    and keeping the two apart is how one of them gets forgotten: a new table
+    that can hold a blob needs an entry there *and* a clause here.
+
+    Not derived from ``REFERRERS`` itself, because the two referrers reach a
+    project differently — a file item knows its folder and the folder knows the
+    project, while a skill says so on its own row — and a generic join over a
+    column alone cannot know which.
+    """
+    filed = await session.scalars(
+        select(FileItem.blob_id)
+        .join(Folder, Folder.id == FileItem.folder_id)
+        .where(Folder.project_id == project_id, FileItem.blob_id.is_not(None))
+    )
+    from_skills = await session.scalars(select(Skill.blob_id).where(Skill.project_id == project_id))
+    return {blob_id for blob_id in (*filed, *from_skills) if blob_id is not None}

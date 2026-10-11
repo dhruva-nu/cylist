@@ -1279,6 +1279,18 @@ export const api = {
     ),
   createProject: (input: ProjectInput) =>
     request<Project>('/projects', { method: 'POST', body: jsonBody(input) }),
+  /**
+   * Destroy a project: its board, its files, its docs, its vault, all of it.
+   *
+   * `confirm` is the project's own key, and the server checks it rather than
+   * trusting us to have asked. The screen asks for it typed out for the same
+   * reason the server insists on it — this is the one call in the client that
+   * nobody can undo.
+   */
+  deleteProject: (projectKey: string, confirm: string) =>
+    request<void>(`/projects/${projectKey}?${new URLSearchParams({ confirm })}`, {
+      method: 'DELETE',
+    }),
 
   listMembers: (projectKey: string) =>
     request<{ members: Member[] }>(`/projects/${projectKey}/members`),
@@ -1575,6 +1587,15 @@ export const api = {
       method: 'POST',
       body: jsonBody({ body: text, author_id: authorId }),
     }),
+  /**
+   * Take a comment off a card's timeline.
+   *
+   * Its author may take back their own; an admin of the project may take off
+   * anybody's. A status change is on the same timeline and is refused — it is
+   * the card's history rather than something somebody said.
+   */
+  deleteComment: (commentId: string) =>
+    request<void>(`/comments/${commentId}`, { method: 'DELETE' }),
 
   listPeople: () => request<Person[]>('/people'),
   createPerson: (input: PersonInput) =>

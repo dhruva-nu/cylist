@@ -171,6 +171,35 @@
   font-weight: 400;
 }
 
+.whoEnd {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Always drawn rather than revealed on hover: a control that only exists
+   while the pointer is over it is one a touch screen never offers and a
+   keyboard reaches by surprise. Quiet until it is wanted instead. */
+.retract {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.retract:hover:not(:disabled),
+.retract:focus-visible {
+  color: var(--blocked);
+}
+
+.retract:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
 .when {
   color: var(--ink-3);
   font-size: 13px;
