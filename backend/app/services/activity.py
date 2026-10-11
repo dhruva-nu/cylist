@@ -284,6 +284,9 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     if entry.verb == "task.commented":
         said = str(payload.get("comment") or "").strip()
         return f"Commented: {_quoted(said)}" if said else "Added a comment."
+    if entry.verb == "task.comment_deleted":
+        said = str(payload.get("comment") or "").strip()
+        return f"Deleted the comment {_quoted(said)}." if said else "Deleted a comment."
     if entry.verb == "task.checklist_added":
         return f"Added {_quoted(payload.get('title'))} to the checklist."
     if entry.verb == "task.checklist_updated":
@@ -409,6 +412,8 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "project.created": lambda p: f"Started the project {p.get('name') or p.get('key')}.",
     "project.updated": lambda p: f"Changed the project's {_worded_fields(p)}.",
     "project.archived": lambda p: "Archived the project.",
+    "project.restored": lambda p: "Brought the project back out of the archive.",
+    "project.deleted": lambda p: f"Deleted the project {p.get('name') or p.get('key')}.",
     "project.members_changed": lambda p: (
         f"Set the project's membership to {p.get('member_count', 0)} "
         f"{'person' if p.get('member_count') == 1 else 'people'}."

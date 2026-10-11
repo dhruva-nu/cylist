@@ -426,3 +426,44 @@
   color: var(--blocked);
   font-size: 13px;
 }
+
+/* --- The end of a project ------------------------------------------------ */
+
+/* Apart from the grid above it rather than inside the pane: what is on this
+   screen is how a project is set up, and this is not a setting. Blocked's
+   colour, which is the one the board already uses for "stop and read this". */
+.ending {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 28px;
+  padding: 18px 22px;
+  border-color: var(--blocked);
+}
+
+.ending h2 {
+  margin: 0 0 4px;
+  color: var(--blocked);
+  font-size: 15px;
+}
+
+.ending p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+/* The warning inside the dialog. Not `.note`, which is the brand-soft box this
+   page tells a non-admin they are only looking in. */
+.warning {
+  max-width: 62ch;
+  margin: 0 0 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--blocked);
+  border-radius: var(--radius-card);
+  background: var(--blocked-soft);
+  color: var(--ink);
+  font-size: 14px;
+}
