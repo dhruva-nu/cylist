@@ -48,11 +48,15 @@ from app.models.project import Project
 from app.models.template import TaskTemplate
 
 REF_MAX_LENGTH = 200
-"""How wide a Jira or pull-request reference is stored.
+"""How wide a Jira or pull-request reference may be.
 
 Wide enough for a whole URL off the browser bar, because that is what people
 paste. A short form like ``ATL-41`` or ``#212`` is equally valid — the field is
 free text, and the frontend shortens whichever shape it is given for display.
+
+A column width on ``jira_ref``; a schema rule on a pull request's ``url``,
+which lives inside a JSON document where a column cannot measure it. Same
+number either way, so neither field can be the odd one out.
 """
 
 MAX_PR_REFS = 20
@@ -130,6 +134,41 @@ class TaskPriority(StrEnum):
     P3 = "p3"
     """Some time in the future. The default: nothing is marked urgent by not
     having been asked about yet."""
+
+
+class PrState(StrEnum):
+    """How far one of a card's pull requests has got.
+
+    Three states and no more, because these are the three a reader of the board
+    asks about: is it up, has anybody said yes, is it in. Everything a forge
+    reports in between — draft, changes requested, checks failing — is a
+    question for the pull request itself, which the reference links to.
+
+    Not stored as a column of its own: a state belongs to the pull request it
+    is on, so the two travel together in one JSON object — see
+    :attr:`Task.pr_refs`.
+    """
+
+    RAISED = "raised"
+    """Up, and nobody has reviewed it yet. Every reference starts here."""
+
+    APPROVED = "approved"
+    """Somebody has read it and said yes. Cleared to land, and not landed."""
+
+    MERGED = "merged"
+    """In. The branch carries the work, and the card waits on it no longer."""
+
+    @property
+    def label(self) -> str:
+        """How this state is worded where it is spelled out rather than drawn."""
+        return _PR_STATE_LABELS[self]
+
+
+_PR_STATE_LABELS = {
+    PrState.RAISED: "Raised",
+    PrState.APPROVED: "Approved",
+    PrState.MERGED: "Merged",
+}
 
 
 class ChecklistState(StrEnum):
@@ -226,10 +265,24 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # position along a bar, not so many that a segment on a board card is
         # too narrow to point at.
         CheckConstraint("cardinality(sub_statuses) <= 4", name="sub_status_max_four"),
+        # A list of pull requests, even when there are none of them: an object
+        # or a bare string here would read as a card with one unnamed pull
+        # request everywhere the column is looped over.
+        CheckConstraint("jsonb_typeof(pr_refs) = 'array'", name="pr_refs_array"),
         # A card may name several pull requests — a change that took a backend
         # PR and a frontend one is one piece of work — but not without bound.
+        #
+        # The CASE is what keeps this constraint from being the one that reports
+        # a document which is not a list at all: `jsonb_array_length` *errors*
+        # on anything but an array, Postgres may evaluate two constraints in
+        # either order, and an error beats a violation — so without it a stray
+        # object is refused with "cannot get array length of a non-array"
+        # instead of by name. Counting something that is not an array as empty
+        # here is safe: `pr_refs_array` above is what refuses it.
         CheckConstraint(
-            f"cardinality(pr_refs) <= {MAX_PR_REFS}",
+            "jsonb_array_length("
+            "CASE WHEN jsonb_typeof(pr_refs) = 'array' THEN pr_refs ELSE '[]'::jsonb END"
+            f") <= {MAX_PR_REFS}",
             name="pr_ref_max_count",
         ),
         # The pointer exists exactly when there is something for it to point
@@ -425,29 +478,40 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     jira_ref: Mapped[str | None] = mapped_column(String(REF_MAX_LENGTH))
     """The issue this card tracks in Jira, if any: a key or the whole URL."""
 
-    pr_refs: Mapped[list[str]] = mapped_column(
-        postgresql.ARRAY(String(REF_MAX_LENGTH)),
+    pr_refs: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB,
         nullable=False,
         default=list,
-        server_default=sql_text("'{}'"),
+        server_default=sql_text("'[]'::jsonb"),
     )
     """The pull requests that carry this card's work, in the order they were
     added — usually none, often one, sometimes several.
 
-    A list rather than the single ``pr_ref`` it replaced in ``0034``, because
-    one card's work routinely lands as more than one pull request: a backend
-    change and the frontend that calls it, or a fix and the follow-up that
-    tidied it. Storing only the last of them lost the rest, and storing them
-    comma-separated in one string made every reader parse it.
+    Each entry is ``{"url": …, "state": …}``: where the pull request is, and
+    how far it got — one of :class:`PrState`. The pair is one value because a
+    state means nothing apart from the pull request it is on; stored as two
+    parallel arrays, a writer could change one and forget the other and leave
+    a card reporting that the wrong pull request had landed.
 
-    An array column rather than rows of its own, the same choice
-    ``sub_statuses`` and :attr:`app.models.board.BoardColumn.outcomes` make:
-    the values are short strings owned entirely by this row, read on every
-    board query, and never pointed at from anywhere. A child table would buy
+    A list rather than the single ``pr_ref`` of ``0033``, because one card's
+    work routinely lands as more than one pull request: a backend change and
+    the frontend that calls it, or a fix and the follow-up that tidied it.
+
+    A document on the row rather than rows of its own, which is the choice
+    ``0034`` made for the same data when it was a list of strings and the same
+    reasoning still holds: these are values owned entirely by this row, read on
+    every board query, and pointed at from nowhere. A child table would buy
     nothing here but another SELECT on the board's hottest path.
 
+    What the database holds is that this is an array and how long it may be —
+    ``pr_refs_array`` and ``pr_ref_max_count``. What is *inside* each entry is
+    held by ``PrRefInput`` in ``app/schemas/tasks.py``, because a CHECK cannot
+    reach inside a document element by element without a subquery, which a
+    CHECK may not contain. Everything that writes this column goes through that
+    schema.
+
     Empty is a card with no pull request yet, which most cards are for most of
-    their lives. Never null — see ``pr_ref_max_count`` for the ceiling.
+    their lives. Never null — there is one way to say "none".
     """
 
     parent_id: Mapped[UUID | None] = mapped_column(

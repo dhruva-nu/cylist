@@ -73,7 +73,7 @@ from app.models.file import Blob, FileItem, Folder, ItemSource
 from app.models.goal import GoalStatus
 from app.models.person import Person, PersonKind
 from app.models.project import Project
-from app.models.task import ChecklistState, Task, TaskStatus, TaskType
+from app.models.task import ChecklistState, PrState, Task, TaskStatus, TaskType
 from app.models.vault import VaultNodeKind, VaultSecret, VaultTree
 from app.schemas.columns import ColumnCreate, ColumnUpdate
 from app.schemas.files import FolderCreate, LinkCreate
@@ -84,6 +84,7 @@ from app.schemas.tasks import (
     ChecklistItemCreate,
     ChecklistItemUpdate,
     CommentCreate,
+    PrRef,
     TaskCreate,
     TaskMove,
     TaskStatusChange,
@@ -166,9 +167,15 @@ class TaskSpec:
     assignee: str
     column: int
     jira_ref: str | None = None
-    pr_refs: tuple[str, ...] = ()
-    """The pull requests this card landed as. A tuple rather than a list so
-    the spec stays hashable and no two cards can share one by accident."""
+    pr_refs: tuple[tuple[str, PrState], ...] = ()
+    """The pull requests this card landed as, each with how far it got. A tuple
+    rather than a list so the spec stays hashable and no two cards can share
+    one by accident.
+
+    The states are picked to match where each card sits: a card in Done was
+    carried by pull requests that merged, one in Review by one somebody has
+    approved. A board seeded entirely at `raised` would show one colour and
+    teach a reader nothing about the other two."""
 
     goal: str | None = None
     """The goal this card is written under, by name. None stands on its own —
@@ -426,7 +433,7 @@ ATLAS = ProjectSpec(
             assignee="ak",
             column=1,
             jira_ref="ATL-35",
-            pr_refs=("#212", "#219"),
+            pr_refs=(("#212", PrState.APPROVED), ("#219", PrState.RAISED)),
             comments=(("dn", "Repro is in the ticket, happens on retries after 5xx."),),
             # Two kinds of sub-task on one card, which is the point of them:
             # the dedupe store needs an owner and a date, telling support does
@@ -479,7 +486,7 @@ ATLAS = ProjectSpec(
             assignee="rs",
             column=1,
             jira_ref="ATL-30",
-            pr_refs=("#207",),
+            pr_refs=(("#207", PrState.RAISED),),
             status=TaskStatus.BLOCKED,
             reason="Font licence for the invoice template hasn't been approved by legal.",
             waiting_on=("lw", "sf"),
@@ -494,7 +501,7 @@ ATLAS = ProjectSpec(
             assignee="dn",
             column=2,
             jira_ref="ATL-27",
-            pr_refs=("#204",),
+            pr_refs=(("#204", PrState.APPROVED),),
         ),
         TaskSpec(
             goal="Billing service foundations",
@@ -506,7 +513,7 @@ ATLAS = ProjectSpec(
             assignee="dn",
             column=3,
             jira_ref="ATL-22",
-            pr_refs=("#198",),
+            pr_refs=(("#198", PrState.MERGED),),
         ),
         TaskSpec(
             goal="Billing service foundations",
@@ -518,7 +525,7 @@ ATLAS = ProjectSpec(
             assignee="ak",
             column=3,
             jira_ref="ATL-19",
-            pr_refs=("#191",),
+            pr_refs=(("#191", PrState.MERGED),),
         ),
     ),
     root_items=(
@@ -758,7 +765,7 @@ HERMES = ProjectSpec(
             assignee="rs",
             column=1,
             jira_ref="HRM-9",
-            pr_refs=("#44",),
+            pr_refs=(("#44", PrState.RAISED),),
         ),
         TaskSpec(
             number=7,
@@ -1176,7 +1183,7 @@ async def _write_task(
             assignee_id=directory[spec.assignee],
             goal_id=goal_ids.get(spec.goal) if spec.goal else None,
             jira_ref=spec.jira_ref,
-            pr_refs=list(spec.pr_refs),
+            pr_refs=[PrRef(url=url, state=state) for url, state in spec.pr_refs],
         ),
     )
     if task.number != spec.number:

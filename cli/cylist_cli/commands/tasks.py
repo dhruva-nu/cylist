@@ -77,7 +77,7 @@ def register(subparsers: Any) -> None:
         "--pr",
         metavar="REF",
         action="append",
-        help="A pull request this card lands as. Repeat it for several.",
+        help="A pull request this card lands as, raised. Repeat it for several.",
     )
     new.set_defaults(handler=_new)
 
@@ -251,11 +251,26 @@ def _render_task(task: dict[str, Any], ctx: Context) -> None:
 
 
 def _pr_refs(task: dict[str, Any]) -> list[str]:
-    """A task's pull-request references as strings, in the order it lists them."""
+    """A task's pull requests as strings, in the order it lists them.
+
+    Each one reads ``#212 (merged)``: where it is, and how far it got. The
+    state is in brackets rather than in a column of its own because a terminal
+    row of them is read left to right, and a card's pull requests are usually
+    one or two.
+    """
     refs = task.get("pr_refs")
     if not isinstance(refs, list):
         return []
-    return [str(ref) for ref in refs]
+    return [_pr_ref(ref) for ref in refs]
+
+
+def _pr_ref(ref: Any) -> str:
+    """One pull request, said in full where the server gave a state for it."""
+    if not isinstance(ref, dict):
+        return str(ref)
+    url = str(ref.get("url", ""))
+    state = ref.get("state")
+    return f"{url} ({state})" if state else url
 
 
 def _column_name(task: dict[str, Any], ctx: Context) -> str:
@@ -410,7 +425,10 @@ def _new(args: argparse.Namespace, ctx: Context) -> None:
     if args.jira:
         body["jira_ref"] = args.jira
     if args.pr:
-        body["pr_refs"] = args.pr
+        # The URL alone: a pull request a card is being written around has
+        # just been opened, so the server's own default — raised — is the
+        # answer, and `task new` has no business asking for it.
+        body["pr_refs"] = [{"url": ref} for ref in args.pr]
 
     task = ctx.client.post(f"/projects/{args.project}/tasks", body)
     if ctx.as_json:
