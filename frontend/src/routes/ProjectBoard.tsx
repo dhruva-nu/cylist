@@ -92,7 +92,14 @@ import {
   type Suggestion,
 } from './boardSearch'
 import { hidesCancelled, hidesHold, isCancelled, splitOnHold } from './boardHiding'
-import { agentIndicator, hasLiveAgent, isAnswerable } from './agentState'
+import {
+  agentCounts,
+  agentIndicator,
+  hasLiveAgent,
+  isAnswerable,
+  passesAgentFilter,
+  type AgentFilter,
+} from './agentState'
 import { BoardAnnounce, CardPromptPopover, useCardPopover } from './CardPromptPopover'
 import { useBoardSocket } from './useBoardSocket'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
@@ -644,6 +651,7 @@ interface BoardFilters {
   search: string
   quickGoal: QuickGoal
   quickStatus: QuickStatus
+  quickAgent: AgentFilter
   showCancelled: boolean
 }
 
@@ -663,7 +671,7 @@ interface BoardFilters {
  */
 function narrowBoard(
   tasks: Task[],
-  { search, quickGoal, quickStatus, showCancelled }: BoardFilters,
+  { search, quickGoal, quickStatus, quickAgent, showCancelled }: BoardFilters,
   columns: BoardColumn[],
   members: Person[],
 ) {
@@ -692,8 +700,17 @@ function narrowBoard(
    */
   const hidingCancelled = hidesCancelled(showCancelled, quickStatus, parsed)
   const cancelledCount = narrowed.filter(isCancelled).length
-  const visibleTasks = hidingCancelled ? narrowed.filter((task) => !isCancelled(task)) : narrowed
-  return { visibleTasks, cancelledCount, hidingCancelled, parsed }
+  const unhidden = hidingCancelled ? narrowed.filter((task) => !isCancelled(task)) : narrowed
+  /**
+   * The agent chips, last of all. Their counts are taken from the board as
+   * everything else has narrowed it but before the chip itself has, so the
+   * number on a chip is exactly how many cards pressing it leaves — and both
+   * chips keep their numbers while either is pressed.
+   */
+  const agentTally = agentCounts(unhidden)
+  const visibleTasks =
+    quickAgent === 'all' ? unhidden : unhidden.filter((task) => passesAgentFilter(task, quickAgent))
+  return { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally }
 }
 
 /** The cards to draw, sorted into their columns in the order they arrived. */
@@ -756,6 +773,8 @@ export function ProjectBoard() {
    */
   const [quickGoal, setQuickGoal] = useState<QuickGoal>('all')
   const [quickStatus, setQuickStatus] = useState<QuickStatus>('all')
+  /** The agent chips (CYLIST-90): every card, the ones that need you, or the busy ones. */
+  const [quickAgent, setQuickAgent] = useState<AgentFilter>('all')
   /** The goal a card written from a lane starts on. */
   const [newTaskGoalId, setNewTaskGoalId] = useState<string | null>(null)
   /**
@@ -830,9 +849,9 @@ export function ProjectBoard() {
     )
   }
 
-  const { visibleTasks, cancelledCount, hidingCancelled, parsed } = narrowBoard(
+  const { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally } = narrowBoard(
     tasks.data,
-    { search, quickGoal, quickStatus, showCancelled },
+    { search, quickGoal, quickStatus, quickAgent, showCancelled },
     columns,
     memberList,
   )
@@ -1039,7 +1058,7 @@ export function ProjectBoard() {
     // `hidesHold`. Passed in rather than read inside `Column` because the
     // search box and the status filter are the board's, and a column that
     // reached for them would be reaching past its own props for them.
-    hidingHold: hidesHold(holdShown.includes(column.id), quickStatus, parsed),
+    hidingHold: hidesHold(holdShown.includes(column.id), quickStatus, parsed, quickAgent !== 'all'),
     onToggleHold: () => toggleHold(column.id),
   })
 
@@ -1073,6 +1092,12 @@ export function ProjectBoard() {
           goals={goalList}
         />
         <div className={styles.tools}>
+          <AgentChips
+            value={quickAgent}
+            onChange={setQuickAgent}
+            needsYou={agentTally.needsYou}
+            working={agentTally.working}
+          />
           {/* A toggle rather than a second page: lanes are the same board read
               by goal instead of by column, and a board you have to leave to
               group is one you group once and then stop using. */}
@@ -1619,6 +1644,78 @@ function QuickFilters({
         ⏷ Filters
         {active ? <span className={styles.filterDot} aria-hidden="true" /> : null}
       </Button>
+    </div>
+  )
+}
+
+/**
+ * "Needs you" and "Agents working" (CYLIST-90): the two questions a board with
+ * agents on it gets asked most, as a pair of chips with live counts.
+ *
+ * Chips rather than two more options in the Filters drawer: the drawer is shut
+ * by default, and a count of cards waiting on you is worth nothing if it is
+ * behind a button. Pressing one narrows the board to those cards, ANDed with
+ * the search box and the drawer like every other filter; pressing it again,
+ * or the other one, lets go. One at a time, because "needs you or working" is
+ * just "has a live agent", which the borders already show.
+ *
+ * The counts move with the board's own socket: a `board.changed` refetches the
+ * cards and these are counted off them, so there is no polling of their own.
+ */
+function AgentChips({
+  value,
+  onChange,
+  needsYou,
+  working,
+}: {
+  value: AgentFilter
+  onChange: (value: AgentFilter) => void
+  needsYou: number
+  working: number
+}) {
+  const chips = [
+    {
+      key: 'needs_you' as const,
+      label: 'Needs you',
+      count: needsYou,
+      title: 'Only the cards whose agent is waiting on a person',
+      className: styles.needsChip,
+    },
+    {
+      key: 'working' as const,
+      label: 'Agents working',
+      count: working,
+      title: 'Only the cards whose agent is working',
+      className: styles.workingChip,
+    },
+  ]
+
+  return (
+    <div className={styles.agentChips} role="group" aria-label="Agent filters">
+      {chips.map((chip) => {
+        const on = value === chip.key
+        return (
+          <Button
+            key={chip.key}
+            small
+            aria-pressed={on}
+            className={[
+              styles.agentChip,
+              chip.className,
+              chip.count > 0 ? styles.agentChipLive : '',
+              on ? styles.agentChipOn : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            title={on ? 'Show every card again' : chip.title}
+            onClick={() => onChange(on ? 'all' : chip.key)}
+          >
+            <span className={styles.agentChipDot} aria-hidden="true" />
+            {chip.label}
+            <span className={styles.agentChipCount}>{chip.count}</span>
+          </Button>
+        )
+      })}
     </div>
   )
 }

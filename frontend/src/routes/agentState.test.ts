@@ -11,9 +11,13 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentPresence, AgentPrompt, AgentSessionRead } from '../api/client'
 import {
+  agentBusy,
+  agentCounts,
   agentIndicator,
   hasLiveAgent,
   isAnswerable,
+  needsYou,
+  passesAgentFilter,
   nowLine,
   promptLine,
   sessionPill,
@@ -312,6 +316,39 @@ describe('isAnswerable', () => {
   it('is false past its expiry, before the server has said so', () => {
     expect(isAnswerable(prompt({ expires_at: '2026-09-08T12:30:00Z' }), NOW)).toBe(true)
     expect(isAnswerable(prompt({ expires_at: '2026-09-08T11:59:59Z' }), NOW)).toBe(false)
+  })
+})
+
+describe('the agent filters', () => {
+  const idle = { agent_session: null }
+  const working = { agent_session: presence() }
+  const asking = { agent_session: presence({ state: 'waiting', reason: 'question' }) }
+  const turnOver = { agent_session: presence({ state: 'waiting', reason: 'turn_ended' }) }
+  const finished = { agent_session: presence({ state: 'done' }) }
+
+  it('says a card needs you whatever its agent is waiting for', () => {
+    expect([asking, turnOver].every(needsYou)).toBe(true)
+    expect([idle, working, finished].some(needsYou)).toBe(false)
+  })
+
+  it('counts only a working agent as busy', () => {
+    expect(agentBusy(working)).toBe(true)
+    expect([idle, asking, finished].some(agentBusy)).toBe(false)
+  })
+
+  it('passes everything with no chip pressed, and only its own cards with one', () => {
+    const cards = [idle, working, asking, turnOver, finished]
+    expect(cards.filter((card) => passesAgentFilter(card, 'all'))).toHaveLength(5)
+    expect(cards.filter((card) => passesAgentFilter(card, 'needs_you'))).toEqual([asking, turnOver])
+    expect(cards.filter((card) => passesAgentFilter(card, 'working'))).toEqual([working])
+  })
+
+  it('counts what each chip would show', () => {
+    expect(agentCounts([idle, working, asking, turnOver, finished, working])).toEqual({
+      needsYou: 2,
+      working: 2,
+    })
+    expect(agentCounts([])).toEqual({ needsYou: 0, working: 0 })
   })
 })
 

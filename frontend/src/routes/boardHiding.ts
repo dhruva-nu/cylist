@@ -62,8 +62,19 @@ export function hidesCancelled(
  * a status filter on "On hold", or `hld:` in the search box, is a reader asking
  * for precisely these cards, and every column shows them.
  */
-export function hidesHold(expanded: boolean, status: StatusChoice, parsed: ParsedSearch): boolean {
-  if (expanded) return false
+export function hidesHold(
+  expanded: boolean,
+  status: StatusChoice,
+  parsed: ParsedSearch,
+  /**
+   * Whether one of the agent chips is pressed (CYLIST-90). A reader asking for
+   * the cards that need them is asking for every one, and a card on hold with
+   * a question waiting is still a question waiting — folded into a column's
+   * foot it would be counted on the chip and nowhere to be seen.
+   */
+  agentFilterOn = false,
+): boolean {
+  if (expanded || agentFilterOn) return false
   if (status === 'hold') return false
   return !parsed.hold
 }

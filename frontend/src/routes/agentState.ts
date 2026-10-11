@@ -238,6 +238,52 @@ export function isAnswerable(
   return now === undefined || new Date(prompt.expires_at).getTime() > now.getTime()
 }
 
+/** The agent-filter chips on the board (CYLIST-90): everything, or one of the two. */
+export type AgentFilter = 'all' | 'needs_you' | 'working'
+
+/**
+ * Whether a card is waiting on a person — a question, a permission, or a turn
+ * that ended for a reply. The card's presence already says waiting wins over
+ * working, so a card with one of each is a card that needs you.
+ */
+export function needsYou(task: { agent_session: AgentPresence | null }): boolean {
+  return task.agent_session?.state === 'waiting'
+}
+
+/** Whether a card's agent is working, and nothing on it is waiting on anyone. */
+export function agentBusy(task: { agent_session: AgentPresence | null }): boolean {
+  return task.agent_session?.state === 'working'
+}
+
+/** Whether a card passes the board's agent filter. */
+export function passesAgentFilter(
+  task: { agent_session: AgentPresence | null },
+  filter: AgentFilter,
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true
+    case 'needs_you':
+      return needsYou(task)
+    case 'working':
+      return agentBusy(task)
+  }
+}
+
+/** The two numbers on the chips. */
+export function agentCounts(tasks: readonly { agent_session: AgentPresence | null }[]): {
+  needsYou: number
+  working: number
+} {
+  let waiting = 0
+  let working = 0
+  for (const task of tasks) {
+    if (needsYou(task)) waiting += 1
+    else if (agentBusy(task)) working += 1
+  }
+  return { needsYou: waiting, working }
+}
+
 /**
  * A card as it reads the moment its prompt was answered, before the board has
  * refetched: working again, saying "You: …". Exactly what the server does to
