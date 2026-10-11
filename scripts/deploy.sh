@@ -8,15 +8,17 @@
 #
 #   scripts/deploy.sh            production, on :8000   (the default)
 #   scripts/deploy.sh staging    staging, on :8001
-#   scripts/deploy.sh dev        dev, on :8002
+#   scripts/deploy.sh dev N      dev slot N (1-5), on :801N, served at :9443/dev_N
 #
 # One script rather than three, because the interesting part is the order of
 # the steps and that order is not something staging or dev should get their own,
-# drifting copy of. Only the four values below differ between the environments.
+# drifting copy of. Only the four values below differ between the environments,
+# plus what a dev slot does around them — see scripts/dev-slot.sh.
 #
 # Reads the secrets that must not live in the repository from
 # CYLIST_PROD_DIR (default ~/cylist-prod), CYLIST_STAGING_DIR
-# (default ~/cylist-staging), or CYLIST_DEV_DIR (default ~/cylist-dev):
+# (default ~/cylist-staging), or, for dev slot N, ~/cylist-dev-N (under
+# CYLIST_DEV_ROOT if that is set, rather than $HOME):
 #
 #   $SECRETS_DIR/app.env       CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH,
 #                              CYLIST_VAULT_KEY
@@ -34,6 +36,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ENVIRONMENT="${1:-prod}"
+# Set only for a dev slot. Cleared first so a SLOT in the caller's environment
+# never turns a staging or production deploy into a dev one.
+SLOT=""
 case "$ENVIRONMENT" in
   prod)
     COMPOSE_FILE="docker-compose.prod.yml"
@@ -48,13 +53,25 @@ case "$ENVIRONMENT" in
     PORT=8001
     ;;
   dev)
+    SLOT="${2:-}"
+    if [[ ! "$SLOT" =~ ^[1-5]$ ]]; then
+      echo "usage: ${BASH_SOURCE[0]##*/} dev <slot 1-5>" >&2
+      exit 2
+    fi
     COMPOSE_FILE="docker-compose.dev.yml"
     SECRETS_VAR="CYLIST_DEV_DIR"
-    DEFAULT_SECRETS_DIR="$HOME/cylist-dev"
-    PORT=8002
+    # Set outright rather than defaulted, so a CYLIST_DEV_DIR left exported
+    # from the days of the single dev stack cannot point every slot at one
+    # directory.
+    CYLIST_DEV_DIR="${CYLIST_DEV_ROOT:-$HOME}/cylist-dev-$SLOT"
+    DEFAULT_SECRETS_DIR="$CYLIST_DEV_DIR"
+    PORT=$((8010 + SLOT))
+    # The compose file takes everything else about the slot from this.
+    export CYLIST_DEV_SLOT="$SLOT"
+    ENVIRONMENT="dev-$SLOT"
     ;;
   *)
-    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging|dev]" >&2
+    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging|dev <slot 1-5>]" >&2
     exit 2
     ;;
 esac
@@ -70,6 +87,16 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:$PORT/api/v1/health}"
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 step() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
+# A line in the log, and an annotation on the run when this is CI.
+warn() {
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::warning::$1"; else echo "   warning: $1" >&2; fi
+}
+
+if [[ -n "$SLOT" ]]; then
+  # shellcheck source=scripts/dev-slot.sh
+  source "$ROOT/scripts/dev-slot.sh"
+  dev_slot_prepare
+fi
 
 for f in app.env postgres.env; do
   [[ -f "$SECRETS_DIR/$f" ]] ||
@@ -126,6 +153,10 @@ for attempt in $(seq 1 30); do
   fi
   sleep 2
 done
+
+if [[ -n "$SLOT" ]]; then
+  dev_slot_publish
+fi
 
 step "Tidying up"
 # Only the layers nothing references. Named images and volumes are untouched.

@@ -15,7 +15,7 @@ UV       := uv --project $(BACKEND)
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
         up down logs image deploy prod-logs prod-ps staging-deploy \
         staging-refresh staging-logs staging-ps staging-down \
-        dev-deploy dev-logs dev-ps dev-down dashboard-sync migrate-check \
+        dev-slot-given dev-deploy dev-logs dev-ps dev-down dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key \
         agent clean
 
@@ -124,24 +124,33 @@ staging-down: ## Stop the staging stack and remove its containers (volumes kept)
 	$(STAGING) down
 
 # --- Dev, on the same machine ------------------------------------------------
-# Not tied to any branch: its GitHub Actions workflow is workflow_dispatch, so
-# you pick whichever branch you are currently building in the "Run workflow"
-# dropdown. It listens on :8002, starts with its own empty database, and is
-# never restored from production — see docker-compose.dev.yml.
+# Five slots, not one stack, so five branches can be up side by side. None is
+# tied to a branch: the "Deploy dev" workflow is workflow_dispatch, so you pick
+# the branch in the "Run workflow" dropdown and the slot as its input. Slot N
+# listens on :801N, is served at :9443/dev_N, keeps its secrets in
+# ~/cylist-dev-N and starts with its own empty database — see
+# docker-compose.dev.yml. Every target here names the slot:
+#
+#   make dev-deploy SLOT=2
+#   make dev-logs SLOT=2
 
-CYLIST_DEV_DIR ?= $(HOME)/cylist-dev
-DEV := CYLIST_DEV_DIR=$(CYLIST_DEV_DIR) docker compose -f docker-compose.dev.yml
+SLOT ?=
+DEV = CYLIST_DEV_SLOT=$(SLOT) CYLIST_DEV_DIR=$(or $(CYLIST_DEV_ROOT),$(HOME))/cylist-dev-$(SLOT) \
+      docker compose -f docker-compose.dev.yml
 
-dev-deploy: ## Build, migrate and restart the dev stack on this machine
-	scripts/deploy.sh dev
+dev-slot-given:
+	@case "$(SLOT)" in [1-5]) ;; *) echo "say which dev slot: SLOT=1 to SLOT=5" >&2; exit 2;; esac
 
-dev-logs: ## Follow the dev app's logs
+dev-deploy: dev-slot-given ## Build, migrate and restart dev slot SLOT on this machine
+	scripts/deploy.sh dev $(SLOT)
+
+dev-logs: dev-slot-given ## Follow dev slot SLOT's app logs
 	$(DEV) logs -f app
 
-dev-ps: ## Show what the dev stack is running
+dev-ps: dev-slot-given ## Show what dev slot SLOT is running
 	$(DEV) ps
 
-dev-down: ## Stop the dev stack and remove its containers (volumes kept)
+dev-down: dev-slot-given ## Stop dev slot SLOT and remove its containers (volumes kept)
 	$(DEV) down
 
 dashboard-sync: ## Copy the status dashboard to where its systemd service runs it from
