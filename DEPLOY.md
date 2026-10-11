@@ -156,10 +156,10 @@ token):
 CYLIST_CLIENT_URLS: '["http://localhost:8000","https://dnu-home-1.tail222f46.ts.net"]'
 ```
 
-| | production | staging | dev |
+| | production | staging | dev slot N |
 |---|---|---|---|
-| local | `http://localhost:8000` | `http://localhost:8001` | `http://localhost:8002` |
-| remote | `…ts.net` | `…ts.net:8443` | `…ts.net:9443` |
+| local | `http://localhost:8000` | `http://localhost:8001` | `http://localhost:801N` |
+| remote | `…ts.net` | `…ts.net:8443` | `…ts.net:9443/dev_N` |
 | off the tailnet | yes, via Funnel | no | no |
 
 `cylist setup` stores every address it is given, and the CLI and the MCP server
@@ -428,16 +428,29 @@ nowhere else.
 
 ## Dev
 
-Dev runs on the same machine, on **:8002**, served at
-<https://dnu-home-1.tail222f46.ts.net:9443>, tailnet only — the same as
-staging, except for one thing: it is not tied to a branch.
+Dev is **five slots**, `dev_1` to `dev_5`, on the same machine — so five
+branches can be up side by side instead of taking turns on one stack. Slot N
+listens on **:801N** and is served at
+`https://dnu-home-1.tail222f46.ts.net:9443/dev_N/`, tailnet only. The root,
+<https://dnu-home-1.tail222f46.ts.net:9443/>, is a small index of which branch
+and commit is in each slot and when it went there.
 
+A slot is the same as staging except for one thing: it is not tied to a branch.
 The workflow is [`.github/workflows/deploy-dev.yml`](.github/workflows/deploy-dev.yml),
 triggered by hand from the Actions tab (`workflow_dispatch`). GitHub's own
-"Run workflow" dropdown lets you pick any branch, and the checkout step
-follows whatever you picked — so the loop is: push work to a branch, run this
-workflow against that branch, poke at it on the tailnet, and only once it
-looks right does it earn a place on `staging`.
+"Run workflow" dropdown lets you pick any branch, and the checkout step follows
+whatever you picked; the one input is the **slot**. So the loop is: push work to
+a branch, run this workflow against that branch into a free slot, poke at it on
+the tailnet, and only once it looks right does it earn a place on `staging`.
+
+```bash
+gh workflow run deploy-dev.yml --ref feature/my-branch -f slot=2
+```
+
+Runs for the same slot queue behind each other — two deploys into one slot
+would fight over its containers — while different slots never wait on each
+other. Deploying into a slot replaces whatever branch was there; the index says
+what that was.
 
 It does not wait on CI's test jobs the way the `main` deploy does. That is
 deliberate — dev exists so half-finished work can be looked at before it is
@@ -446,24 +459,36 @@ own deploy does not wait on them either, but for a different reason: the push
 to `staging` has already run them.)
 
 ```bash
-make dev-deploy   # build, migrate, restart          (scripts/deploy.sh dev)
-make dev-logs     # follow it
-make dev-ps       # what is running
-make dev-down     # stop it (volumes kept)
+make dev-deploy SLOT=2   # build, migrate, restart       (scripts/deploy.sh dev 2)
+make dev-logs SLOT=2     # follow it
+make dev-ps SLOT=2       # what is running
+make dev-down SLOT=2     # stop it (volumes kept)
 ```
 
 ### What differs from staging, and why
 
-| | staging | dev |
+| | staging | dev slot N |
 | --- | --- | --- |
-| compose project | `cylist-staging` | `cylist-dev` |
-| image tag | `cylist:staging` | `cylist:dev` |
-| port | `127.0.0.1:8001` | `127.0.0.1:8002` |
-| served at | `:8443` | `:9443` |
-| secrets | `~/cylist-staging` | `~/cylist-dev` |
-| deploy trigger | manual, `staging` only | manual, any branch |
+| compose project | `cylist-staging` | `cylist-dev-N` |
+| image tag | `cylist:staging` | `cylist:dev-N` |
+| port | `127.0.0.1:8001` | `127.0.0.1:801N` |
+| served at | `:8443` | `:9443/dev_N` |
+| secrets | `~/cylist-staging` | `~/cylist-dev-N` |
+| deploy trigger | manual, `staging` only | manual, any branch, pick a slot |
 | data | copied from production | its own, empty to start |
 | `CYLIST_ENVIRONMENT` | `staging` | `preview` |
+| `CYLIST_BASE_PATH` | unset | `/dev_N` |
+
+All five come from one file, [`docker-compose.dev.yml`](docker-compose.dev.yml),
+which takes the slot from `CYLIST_DEV_SLOT` and has no default for it — a
+command that forgot which slot it meant fails instead of acting on another.
+
+**`CYLIST_BASE_PATH=/dev_N`.** Five slots share one HTTPS port and are told
+apart by path. `tailscale serve --set-path /dev_N` strips the prefix before
+proxying, so the app receives `/api/v1/…` as it always has; `CYLIST_BASE_PATH`
+is how it knows the prefix the browser sees, for the links and assets it hands
+out. It is set at runtime and passed as a build argument too, for the SPA's
+build.
 
 **`CYLIST_ENVIRONMENT=preview`, not `dev`.** `CYLIST_ENVIRONMENT` already means
 something in the app: the literal value `"dev"` is what `Settings` defaults to
@@ -475,30 +500,95 @@ that matters, a deployment: one container behind `tailscale serve`, reached
 over HTTPS. `"preview"` gets it into `is_deployed` alongside staging and
 production without touching what `"dev"` means anywhere else.
 
+### What a slot deploy does beyond the usual
+
+`scripts/deploy.sh dev N` runs the same build, dump, migrate, restart and health
+check as production and staging. Around that,
+[`scripts/dev-slot.sh`](scripts/dev-slot.sh):
+
+1. **Creates the slot's secrets** on its first deploy, if `~/cylist-dev-N` has
+   neither file: a random database password, a fresh vault key, and the
+   bootstrap password hash copied from the old single dev stack's
+   `~/cylist-dev/app.env` (override with `CYLIST_DEV_TEMPLATE=<path to an
+   app.env>`). Files that already exist are never touched. With no hash to
+   copy the deploy warns, and nobody can sign in to the slot until one is added
+   (`make hash-password`) and it is deployed again.
+2. **Copies production's `JEV_API_KEY`** into the slot's `app.env`, on every
+   deploy — jev is a paid API, not per-environment state, so a key that exists
+   once is rotated once.
+3. **Records what it deployed** in `~/cylist-dev-N/deployed`, one `key=value`
+   per line: `branch`, `sha`, `time` (UTC).
+4. **Retires the old single dev stack** if its containers are still there (see
+   below).
+5. **Regenerates the index** at `~/cylist-dev-index/index.html` from the five
+   `deployed` files. It is a static file, so it is only as current as the last
+   slot deploy.
+6. **Points tailscale at the slot**, re-applying both mappings every time:
+
+   ```bash
+   tailscale serve --bg --https 9443 --set-path /dev_N http://127.0.0.1:801N
+   tailscale serve --bg --https 9443 ~/cylist-dev-index
+   ```
+
+7. **Checks the slot answers through tailscale** at
+   `…:9443/dev_N/api/v1/health`, and fails the deploy if it never does — up on
+   loopback but not served is not deployed.
+
+Steps 4–6 hold a lock (`~/.cylist-dev.lock`), since the index and the serve
+config are shared by all five slots. The workflow's deploy step also exposes
+`slot`, `url`, `branch` and `sha` as step outputs, for a later step that wants
+to say where a branch went.
+
 ### One-time setup
 
+Nothing per slot — the first deploy into a slot creates its directory:
+
 ```
-~/cylist-dev/
+~/cylist-dev-N/
   app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
                  JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  backups/       the dumps dev deploys leave behind
+  deployed       branch, sha, time of the last deploy
+  backups/       the dumps slot deploys leave behind
 ```
 
-Both files `chmod 600`. Dev starts from an empty database — it is never
+Both env files `chmod 600`. A slot starts from an empty database — it is never
 restored from production, so unlike staging's `app.env` it needs only its own
-`CYLIST_VAULT_KEY` (`make vault-key`), not production's.
+`CYLIST_VAULT_KEY`, not production's.
+
+What does need doing once is letting the runner's user change tailscale's serve
+config, which otherwise wants root:
 
 ```bash
-sudo tailscale serve --bg --https 9443 http://127.0.0.1:8002
+sudo tailscale set --operator=dnu2
 ```
 
-`serve`, not `funnel`, exactly as staging: reachable from your devices, and
-from nowhere else.
+Without it a slot deploy gets as far as a running, healthy slot on loopback and
+then fails at *Serving slot N*, saying exactly that.
+
+`serve`, not `funnel`, exactly as staging: reachable from your devices, and from
+nowhere else. Only the index directory is served as files; the slot
+directories hold secrets and are never what tailscale points at.
+
+### The old single dev stack
+
+Before the slots, dev was one stack: compose project `cylist-dev`, image
+`cylist:dev`, `127.0.0.1:8002`, served at the root of `:9443`. The first slot
+deploy retires it — removes its containers and network and the `cylist:dev`
+image — and the index takes over `:9443/`, which replaces its serve mapping.
+Every later deploy finds nothing left to do.
+
+Its data is left alone. Once nothing in it is wanted (and once the slots have
+taken their bootstrap password hash from it):
+
+```bash
+docker volume rm cylist-dev_postgres-data cylist-dev_cylist-data
+rm -r ~/cylist-dev
+```
 
 ## Dashboard
 
-A one-page status view of all three environments, at
+A one-page status view of production, staging and the five dev slots, at
 <https://dnu-home-1.tail222f46.ts.net:7443> — tailnet only, same as staging and
 dev.
 
@@ -506,13 +596,14 @@ dev.
 Python: no dependencies to install, no build step. It answers `/` with a
 static page and `/api/status` with, per environment:
 
-* **container state and uptime** — `docker inspect` on `cylist-<env>-app-1`.
+* **container state and uptime** — `docker inspect` on `cylist-<env>-app-1`
+  (`cylist-dev-N-app-1` for a slot).
 * **health and request counts** — the app's own `/api/v1/health` and
   `/api/v1/health/requests` (added in `backend/app/routers/health.py`,
   counted by an in-process middleware that resets on every restart — see
   `backend/app/core/metrics.py`), read over loopback. That is also why there
   is no CORS to configure: the browser only ever talks to this process, never
-  to the three apps directly.
+  to the apps directly.
 * **whether it is actually being served** — a real HTTP round trip to the
   address a browser would use, not a proxy for it. For staging and dev that
   is a direct request to their `tailscale serve` address; for production it

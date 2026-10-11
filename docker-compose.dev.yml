@@ -1,40 +1,49 @@
-# The dev stack, alongside production and staging on dnu-home-1.
+# One dev slot, alongside production and staging on dnu-home-1. There are five,
+# all built from this one file.
 #
-#   scripts/deploy.sh dev     builds, migrates and restarts it
-#   make dev-logs             follows it
+#   scripts/deploy.sh dev 2       builds, migrates and restarts slot 2
+#   make dev-logs SLOT=2          follows it
 #
 # The same two containers as production and staging, and deliberately the same
 # shape: one image serving the API and the built SPA, Postgres with no
 # published port.
 #
-# Unlike staging, dev is not tied to any one branch. Its deploy workflow is
+# Unlike staging, a slot is not tied to any one branch. The deploy workflow is
 # workflow_dispatch — you pick the branch in GitHub's "Run workflow" dropdown
-# each time, so it can hold whatever you are currently building, tested with
-# real infrastructure, before that work earns a place on the `staging` branch.
-# It starts with an empty database of its own; it is never restored from
-# production the way staging is, so it never needs the production vault key.
+# and the slot (1–5) as its input, so five branches can be looked at side by
+# side, tested with real infrastructure, before that work earns a place on the
+# `staging` branch. Each slot starts with an empty database of its own; none is
+# ever restored from production the way staging is, so none ever needs the
+# production vault key.
 #
-# What differs from docker-compose.staging.yml is only what has to:
+# Everything slot-specific comes from CYLIST_DEV_SLOT, which deploy.sh and the
+# Make targets set; there is no default, so a command that forgot which slot it
+# meant fails here instead of acting on some other slot. What differs from
+# docker-compose.staging.yml is only what has to:
 #
-#   * the compose project name, so this stack's containers and volumes never
-#     collide with production's or staging's on a machine that runs all three;
-#   * the image tag — `cylist:dev`, not `cylist:latest` or `cylist:staging`,
-#     for the same reason staging has its own tag: building dev must not move
-#     the tag another environment restarts from;
-#   * port 8002, because production holds 8000 and staging holds 8001;
+#   * the compose project name, `cylist-dev-N`, so each slot's containers and
+#     volumes never collide with production's, staging's or another slot's;
+#   * the image tag — `cylist:dev-N`, for the same reason staging has its own
+#     tag: building one slot must not move the tag another environment, or
+#     another slot, restarts from;
+#   * port 801N, because production holds 8000 and staging 8001;
+#   * CYLIST_BASE_PATH=/dev_N, because every slot is served under its own path
+#     on :9443 (`tailscale serve --set-path /dev_N`) rather than a port of its
+#     own. It is passed as a build argument as well as at runtime, so it reaches
+#     the SPA's build if that is where it is needed;
 #   * CYLIST_ENVIRONMENT=preview, which Settings.is_deployed treats as
 #     deployed (Secure session cookie, make seed refused) without touching
 #     what CYLIST_ENVIRONMENT=dev means for someone's own machine — see the
 #     docstring on that property.
 
-name: cylist-dev
+name: cylist-dev-${CYLIST_DEV_SLOT:?set CYLIST_DEV_SLOT to the dev slot, 1-5}
 
 services:
   postgres:
     image: postgres:16-alpine
     env_file:
       # POSTGRES_PASSWORD, and the user and database the app connects as.
-      - ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the directory holding app.env and postgres.env}/postgres.env
+      - ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the slot directory holding app.env and postgres.env}/postgres.env
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -55,33 +64,40 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       target: runtime
-    # Not cylist:latest or cylist:staging. See the note at the top of this file.
-    image: cylist:dev
+      args:
+        # Harmless if the Dockerfile declares no such ARG; there for when the
+        # SPA has to know its prefix at build time.
+        CYLIST_BASE_PATH: /dev_${CYLIST_DEV_SLOT}
+    # Not cylist:latest, cylist:staging or another slot's tag. See the note at
+    # the top of this file.
+    image: cylist:dev-${CYLIST_DEV_SLOT}
     env_file:
       # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY.
       #
       # Raw, because an argon2 hash is full of `$` and compose would otherwise
       # read `$argon2id$v=19$...` as three empty variables and blank the
       # password out from under you.
-      - path: ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the directory holding app.env and postgres.env}/app.env
+      - path: ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the slot directory holding app.env and postgres.env}/app.env
         format: raw
     environment:
       # Not "dev" — see the note at the top of this file and the docstring on
       # Settings.is_deployed.
       CYLIST_ENVIRONMENT: preview
+      CYLIST_BASE_PATH: /dev_${CYLIST_DEV_SLOT}
       CYLIST_DATA_DIR: /data
       CYLIST_WEB_DIR: /app/web
       # Empty on purpose, as in production and staging: the SPA is served by
       # this same process, so every request is same-origin and no CORS
       # middleware is installed at all.
       CYLIST_CORS_ORIGINS: "[]"
-      # As production and staging, for :8002. Tailnet only.
-      CYLIST_CLIENT_URLS: '["http://localhost:8002","https://dnu-home-1.tail222f46.ts.net:9443"]'
+      # As production and staging, for this slot. Tailnet only. Loopback reaches
+      # the container directly, so it has no prefix; :9443 needs the slot's.
+      CYLIST_CLIENT_URLS: '["http://localhost:801${CYLIST_DEV_SLOT}","https://dnu-home-1.tail222f46.ts.net:9443/dev_${CYLIST_DEV_SLOT}"]'
     ports:
-      # Loopback only, and 8002 rather than production's 8000 or staging's
-      # 8001. `tailscale serve --https 9443` terminates HTTPS in front of it;
-      # nothing else should reach it directly.
-      - "127.0.0.1:8002:8000"
+      # Loopback only, 8011–8015. `tailscale serve --https 9443 --set-path
+      # /dev_N` terminates HTTPS in front of it, stripping the prefix on the
+      # way; nothing else should reach it directly.
+      - "127.0.0.1:801${CYLIST_DEV_SLOT}:8000"
     volumes:
       - cylist-data:/data
     depends_on:
@@ -90,7 +106,8 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Named for this project (cylist-dev), so production's and staging's data are
-  # different volumes entirely and no dev command can reach them.
+  # Named for the slot's project (cylist-dev-N), so production's, staging's and
+  # every other slot's data are different volumes entirely and no command run
+  # against one slot can reach them.
   postgres-data:
   cylist-data:
