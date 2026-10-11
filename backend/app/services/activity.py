@@ -19,9 +19,11 @@ all told the same story in the same words.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, func, select
@@ -305,9 +307,22 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
 
 
 def _describe_update(payload: Mapping[str, Any], changes: list[dict[str, Any]]) -> str:
-    """The sentence for a save to a card's fields: which of them it changed."""
+    """The sentence for a save to a card's fields: which of them it changed.
+
+    Pull requests are the exception, and say what happened to them rather than
+    that they changed: "Pull request #212 merged." is the line a day's report
+    is read for, and "Changed the pull requests." is the same line whether a
+    pull request landed or a typo in its link was fixed.
+    """
     if changes:
-        return f"Changed the {_listed(str(change['label']) for change in changes)}."
+        pr_change = _change_to(changes, "pr_refs")
+        said = _describe_pr_change(pr_change) if pr_change is not None else []
+        # A save that left every pull request where it was — one reordered,
+        # say — has nothing to report about them but that they changed.
+        others = [change for change in changes if change is not pr_change or not said]
+        if others:
+            said.insert(0, f"Changed the {_listed(str(change['label']) for change in others)}.")
+        return " ".join(said)
     # Entries written before old and new values were recorded still name the
     # fields a save touched. Older ones than that say only that a save
     # happened, which is worth more than a gap in the record.
@@ -315,6 +330,64 @@ def _describe_update(payload: Mapping[str, Any], changes: list[dict[str, Any]]) 
     if not fields:
         return "Updated."
     return f"Changed the {_listed(str(field) for field in fields)}."
+
+
+def _describe_pr_change(change: Mapping[str, Any]) -> list[str]:
+    """A sentence for each pull request a save did something to, in card order.
+
+    Read back from the ``#212 (merged)`` strings the change was recorded as —
+    see ``_describe_pr_refs`` in :mod:`app.services.tasks` — matched up by
+    link, so a pull request that moved along is told apart from one that was
+    swapped for another. Entries written before CYLIST-76 recorded the links
+    alone, and still say which were added and which removed.
+    """
+    was = dict(_pr_ref_read(said) for said in change.get("from") or [])
+    now = dict(_pr_ref_read(said) for said in change.get("to") or [])
+    said: list[str] = []
+    for url, state in now.items():
+        name = _pr_named(url)
+        if url not in was:
+            said.append(_PR_ADDED.get(state or "", "Added pull request {name}.").format(name=name))
+        elif state != was[url] and state is not None:
+            backwards = _PR_ORDER.index(state) < _PR_ORDER.index(was[url] or "raised")
+            said.append(f"Pull request {name} {'back to ' if backwards else ''}{state}.")
+    said += [f"Removed pull request {_pr_named(url)}." for url in was if url not in now]
+    return said
+
+
+_PR_ORDER = ["raised", "approved", "merged"]
+"""How far a pull request has got, nearest to landed last — see ``PrState``."""
+
+_PR_ADDED = {
+    "raised": "Raised pull request {name}.",
+    "approved": "Added pull request {name}, already approved.",
+    "merged": "Added pull request {name}, already merged.",
+}
+
+_PR_REF_SAID = re.compile(r"(?P<url>.+) \((?P<state>raised|approved|merged)\)")
+
+
+def _pr_ref_read(said: Any) -> tuple[str, str | None]:
+    """A recorded ``url (state)`` back as its two halves; a bare link has no state."""
+    matched = _PR_REF_SAID.fullmatch(str(said))
+    return (matched["url"], matched["state"]) if matched else (str(said), None)
+
+
+def _pr_named(url: str) -> str:
+    """A pull request the way the card names it: ``#212``.
+
+    The same reading as ``prRefLabel`` on the frontend, so the history and the
+    card call one pull request the same thing. Anything not a link is already
+    what somebody chose to call it.
+    """
+    if not re.match(r"https?://", url, re.IGNORECASE):
+        return url
+    parts = urlsplit(url)
+    # GitHub and Bitbucket say `pull`/`pull-requests`, GitLab `merge_requests`.
+    number = re.search(r"/(?:pull|pull-requests|merge_requests)/(\d+)", parts.path, re.IGNORECASE)
+    if number:
+        return f"#{number[1]}"
+    return next((part for part in reversed(parts.path.split("/")) if part), parts.hostname or url)
 
 
 def _describe_move(

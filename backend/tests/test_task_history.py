@@ -266,6 +266,83 @@ class TestWhatChanged:
         ]
 
 
+class TestPullRequests:
+    """CYLIST-83. A save to a card's pull requests says what happened to them:
+    "Changed the pull requests." reads the same whether one landed or a typo
+    in its link was fixed, and the first is what a day's report is read for."""
+
+    PR = "https://github.com/acme/atlas/pull/212"
+
+    async def _saved(
+        self, client: AsyncClient, before: list[dict[str, str]], after: list[dict[str, str]]
+    ) -> str:
+        aditi, _ = await _setup(client)
+        task = await _create(client, aditi, pr_refs=before)
+        await client.patch(f"/tasks/{task['reference']}", json={"pr_refs": after})
+        return str((await _history(client, task["reference"]))[0]["summary"])
+
+    async def test_one_merging_is_said_as_merged(self, signed_in: AsyncClient) -> None:
+        summary = await self._saved(
+            signed_in, [{"url": self.PR}], [{"url": self.PR, "state": "merged"}]
+        )
+        assert summary == "Pull request #212 merged."
+
+    async def test_one_approved_is_said_as_approved(self, signed_in: AsyncClient) -> None:
+        summary = await self._saved(
+            signed_in, [{"url": "#212"}], [{"url": "#212", "state": "approved"}]
+        )
+        assert summary == "Pull request #212 approved."
+
+    async def test_a_step_back_says_so(self, signed_in: AsyncClient) -> None:
+        """Marked merged by mistake and put back: the history says it went back
+        rather than that it moved forward to an earlier state."""
+        summary = await self._saved(
+            signed_in, [{"url": "#212", "state": "merged"}], [{"url": "#212", "state": "raised"}]
+        )
+        assert summary == "Pull request #212 back to raised."
+
+    async def test_one_added_is_raised(self, signed_in: AsyncClient) -> None:
+        summary = await self._saved(signed_in, [], [{"url": self.PR}])
+        assert summary == "Raised pull request #212."
+
+    async def test_one_added_already_merged_says_so(self, signed_in: AsyncClient) -> None:
+        summary = await self._saved(signed_in, [], [{"url": self.PR, "state": "merged"}])
+        assert summary == "Added pull request #212, already merged."
+
+    async def test_one_taken_off_is_removed(self, signed_in: AsyncClient) -> None:
+        summary = await self._saved(
+            signed_in, [{"url": "#212"}, {"url": "#219"}], [{"url": "#219"}]
+        )
+        assert summary == "Removed pull request #212."
+
+    async def test_each_pull_request_gets_its_own_sentence(self, signed_in: AsyncClient) -> None:
+        summary = await self._saved(
+            signed_in,
+            [{"url": "#212", "state": "approved"}, {"url": "#219"}],
+            [{"url": "#212", "state": "merged"}, {"url": "#219", "state": "approved"}],
+        )
+        assert summary == "Pull request #212 merged. Pull request #219 approved."
+
+    async def test_other_fields_are_still_named(self, signed_in: AsyncClient) -> None:
+        aditi, _ = await _setup(signed_in)
+        task = await _create(signed_in, aditi, pr_refs=[{"url": "#212"}])
+
+        await signed_in.patch(
+            f"/tasks/{task['reference']}",
+            json={"title": "Renamed", "pr_refs": [{"url": "#212", "state": "merged"}]},
+        )
+
+        entry = (await _history(signed_in, task["reference"]))[0]
+        assert entry["summary"] == "Changed the title. Pull request #212 merged."
+
+    async def test_a_reorder_still_reads_as_a_change(self, signed_in: AsyncClient) -> None:
+        """Nothing happened to either pull request, but the card did change."""
+        summary = await self._saved(
+            signed_in, [{"url": "#212"}, {"url": "#219"}], [{"url": "#219"}, {"url": "#212"}]
+        )
+        assert summary == "Changed the pull requests."
+
+
 class TestMoving:
     async def test_names_both_columns(self, signed_in: AsyncClient) -> None:
         aditi, _ = await _setup(signed_in)
