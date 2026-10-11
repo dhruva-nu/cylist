@@ -381,7 +381,10 @@ staging's code.
 wherever being *deployed* is what matters — `Settings.is_deployed`. It issues
 the session cookie `Secure`, because both sit behind `tailscale serve` and are
 reached over HTTPS; and `make seed` refuses to run, because staging holds real
-rows.
+rows. It also names the cookie `cylist_session_staging` rather than
+production's `cylist_session`: both are on the same host, a browser does not
+separate cookies by port, and with one name signing in to either signed you out
+of the other (CYLIST-81).
 
 > A `Secure` cookie is dropped by the browser over plain HTTP, and the symptom
 > is a login that returns 200 and then does not stick. Reach staging through
