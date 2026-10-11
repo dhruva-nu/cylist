@@ -13,7 +13,7 @@
 # One script rather than three, because the interesting part is the order of
 # the steps and that order is not something staging or dev should get their own,
 # drifting copy of. Only the four values below differ between the environments,
-# plus what a dev slot does around them — see "Dev slots" further down.
+# plus what a dev slot does around them — see scripts/dev-slot.sh.
 #
 # Reads the secrets that must not live in the repository from
 # CYLIST_PROD_DIR (default ~/cylist-prod), CYLIST_STAGING_DIR
@@ -36,6 +36,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ENVIRONMENT="${1:-prod}"
+# Set only for a dev slot. Cleared first so a SLOT in the caller's environment
+# never turns a staging or production deploy into a dev one.
+SLOT=""
 case "$ENVIRONMENT" in
   prod)
     COMPOSE_FILE="docker-compose.prod.yml"
@@ -89,7 +92,7 @@ warn() {
   if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::warning::$1"; else echo "   warning: $1" >&2; fi
 }
 
-if [[ -n "${SLOT:-}" ]]; then
+if [[ -n "$SLOT" ]]; then
   # shellcheck source=scripts/dev-slot.sh
   source "$ROOT/scripts/dev-slot.sh"
   dev_slot_prepare
@@ -151,7 +154,7 @@ for attempt in $(seq 1 30); do
   sleep 2
 done
 
-if [[ -n "${SLOT:-}" ]]; then
+if [[ -n "$SLOT" ]]; then
   dev_slot_publish
 fi
 
