@@ -94,6 +94,53 @@ class TestLogin:
         assert ("secure" in response.headers["set-cookie"].lower()) is secure
 
 
+class TestOneHostManyDeployments:
+    """Production, staging and the dev slots share a host; a browser sends each
+    of them every cookie the others set, whatever the port (CYLIST-81)."""
+
+    @pytest.mark.parametrize(
+        ("environment", "base_path", "name"),
+        [
+            ("prod", "", "cylist_session"),
+            ("dev", "", "cylist_session"),
+            ("test", "", "cylist_session"),
+            ("staging", "", "cylist_session_staging"),
+            ("preview", "", "cylist_session_preview"),
+            ("preview", "/dev_1", "cylist_session_dev_1"),
+        ],
+    )
+    def test_each_deployment_names_its_own_cookie(
+        self, environment: str, base_path: str, name: str
+    ) -> None:
+        """Production keeps the bare name, so its sessions outlive the change."""
+        configured = Settings(environment=environment, base_path=base_path)  # type: ignore[arg-type]
+
+        assert configured.session_cookie_name == name
+
+    @pytest.mark.parametrize(
+        ("signed_in_at", "visiting"), [("prod", "staging"), ("staging", "prod")]
+    )
+    async def test_one_deployments_cookie_does_not_sign_in_to_another(
+        self, settings: Settings, database: Database, signed_in_at: str, visiting: str
+    ) -> None:
+        """The two apps share a database here, so the token itself is good in
+        both: only the cookie's name keeps them apart, as it must on one host."""
+        home = settings.model_copy(update={"environment": signed_in_at})
+        away = settings.model_copy(update={"environment": visiting})
+
+        async with client_for(home, database) as http:
+            login = await http.post("/auth/login", json={"password": OWNER_PASSWORD})
+            name, _, rest = login.headers["set-cookie"].partition("=")
+            token = rest.split(";", 1)[0]
+            assert name == home.session_cookie_name
+            assert (await http.get("/me", headers={"cookie": f"{name}={token}"})).status_code == 200
+
+        async with client_for(away, database) as http:
+            response = await http.get("/me", headers={"cookie": f"{name}={token}"})
+
+        assert response.status_code == 401
+
+
 class TestIdentity:
     async def test_describes_the_current_session(self, signed_in: AsyncClient) -> None:
         response = await signed_in.get("/me")
