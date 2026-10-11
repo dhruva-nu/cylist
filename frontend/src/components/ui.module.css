@@ -370,6 +370,28 @@
   align-items: center;
 }
 
+/* The state of a pull request, worn by its mark alone — see `PrIcon`. The
+   identifier beside it stays `--link`, because that is the part you click.
+
+   A wrapper rather than a class on the svg: `Glyph` paints from
+   `currentColor`, so what the state sets is the colour this span hands down. */
+.prMark {
+  display: inline-flex;
+  color: var(--pr-raised);
+}
+
+.pr_raised {
+  color: var(--pr-raised);
+}
+
+.pr_approved {
+  color: var(--pr-approved);
+}
+
+.pr_merged {
+  color: var(--pr-merged);
+}
+
 .refLabel {
   font-family: var(--font-mono);
   font-size: 11px;

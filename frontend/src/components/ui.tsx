@@ -8,6 +8,7 @@ import {
   type FiledItem,
   type Person,
   type PersonKind,
+  type PrState,
   type Role,
   type Sensitivity,
   type TaskPriority,
@@ -585,8 +586,51 @@ function JiraIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/** A branch rejoining its trunk: the shape every forge draws a PR as. */
-function PrIcon({ size = 14 }: { size?: number }) {
+/**
+ * A pull request, drawn by how far it got (CYLIST-76).
+ *
+ * Three drawings rather than one in three colours. The mark is 14px on a card
+ * that may be tinted amber or red, and a reader who cannot tell the green from
+ * the violet would otherwise be reading a row of identical glyphs — so the
+ * shape says it too, and the weight on top of that: merged is the only one
+ * with its nodes filled in.
+ *
+ * All three keep the branch-and-trunk silhouette every forge draws a pull
+ * request as, because on a board the mark alone has to say *what kind of fact
+ * this is* before it says anything about its state. A bare tick in the state's
+ * place would have been read as a finished sub-task.
+ */
+function PrIcon({ state, size = 14 }: { state: PrState; size?: number }) {
+  if (state === 'approved') {
+    return (
+      <Glyph size={size}>
+        {/* The branch ends in the tick rather than carrying one as a badge: a
+            badge at this size is four pixels across and reads as a smudge. */}
+        <circle cx="4.7" cy="4" r="1.7" />
+        <circle cx="4.7" cy="12" r="1.7" />
+        <path d="M4.7 5.7v4.6M11.3 9.4V8.4a2.1 2.1 0 0 0-2.1-2.1H6.4" />
+        <path d="M9 11.9 10.7 13.6 13.6 10.7" />
+      </Glyph>
+    )
+  }
+
+  if (state === 'merged') {
+    return (
+      <Glyph size={size}>
+        {/* The branch meets the trunk and the trunk carries on past the join,
+            which is what "it is in" looks like drawn. The nodes are painted
+            solid — `fill` and `stroke` per circle, because a Glyph is one or
+            the other — so the mark is heavier as well as a different shape. */}
+        <circle cx="4.7" cy="12" r="1.7" fill="currentColor" stroke="none" />
+        <circle cx="11.3" cy="4" r="1.7" fill="currentColor" stroke="none" />
+        <path d="M4.7 3v7.3" />
+        <path d="M11.3 5.7v0.6a2.1 2.1 0 0 1-2.1 2.1H4.7" />
+      </Glyph>
+    )
+  }
+
+  // Raised: the mark as it was drawn before there were states, because this is
+  // the state every reference the board already had is now in.
   return (
     <Glyph size={size}>
       <circle cx="4.7" cy="4" r="1.7" />
@@ -793,21 +837,41 @@ export function LiveRegion({ message }: { message: string }) {
  * thirteen monospace characters that begin the same way on every card in the
  * project were the widest thing on the row carrying the least. Everywhere with
  * room to say it, the dialog above all, still says it.
+ *
+ * `state` is a pull request's own (CYLIST-76), and it is drawn on the icon
+ * rather than said beside it: the whole point of the marks is that a column of
+ * cards reports where its work stands without being read word by word. The
+ * identifier keeps `--link` whatever the state, because it is the part you can
+ * click and the only thing on the row that should look clickable. The state is
+ * spelled out in the tooltip and the accessible name, where colour and shape
+ * are no use at all.
  */
 export function TaskRef({
   kind,
   value,
+  state = 'raised',
   compact = false,
 }: {
   kind: 'jira' | 'pr'
   value: string
+  /** How far the pull request got. Ignored for a Jira reference, which has no state. */
+  state?: PrState
   compact?: boolean
 }) {
   const { label, href } = kind === 'jira' ? jiraRefDisplay(value) : prRefDisplay(value)
-  const icon = kind === 'jira' ? <JiraIcon /> : <PrIcon />
+  const icon =
+    kind === 'jira' ? (
+      <JiraIcon />
+    ) : (
+      <span className={`${styles.prMark} ${styles[`pr_${state}`]}`}>
+        <PrIcon state={state} />
+      </span>
+    )
   // The icon is decoration and the label is an abbreviation, so neither says
-  // on its own what the reference is of.
-  const accessibleName = `${kind === 'jira' ? 'Jira' : 'Pull request'} ${label}`
+  // on its own what the reference is of — nor, for a pull request, how far it
+  // got, which is the one thing here that is carried by colour alone.
+  const accessibleName =
+    kind === 'jira' ? `Jira ${label}` : `Pull request ${label}, ${PR_STATE_WORDS[state]}`
 
   // Hidden rather than dropped: what compact takes off the card it keeps for
   // the reader who is not looking at the card.
@@ -846,6 +910,14 @@ export function TaskRef({
   )
 }
 
+const PR_STATE_WORDS: Record<PrState, string> = {
+  raised: 'raised',
+  approved: 'approved',
+  merged: 'merged',
+}
+/** How each state is said in a tooltip and read out. Lower case: it finishes a
+ * sentence that starts "Pull request #212". */
+
 /** What :func:`TaskRef` renders: the text to show, and where it points. */
 interface RefDisplay {
   label: string
@@ -880,6 +952,17 @@ function jiraRefDisplay(value: string): RefDisplay {
   // link people copy, but a board hands out `?selectedIssue=ATL-41`.
   const key = /[A-Z][A-Z0-9]*-\d+/i.exec(`${url.pathname} ${url.search}`)
   return { label: key ? key[0].toUpperCase() : lastSegment(url), href: value }
+}
+
+/**
+ * How a stored pull-request reference reads as an identifier: `#212`.
+ *
+ * Exported because a control *about* one has to name it — the select on the
+ * card's detail view is labelled "State of pull request #212" — and the whole
+ * URL in an accessible name is a sentence nobody can listen to.
+ */
+export function prRefLabel(value: string): string {
+  return prRefDisplay(value).label
 }
 
 function prRefDisplay(value: string): RefDisplay {

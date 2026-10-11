@@ -13,6 +13,7 @@ from app.models.task import (
     REF_MAX_LENGTH,
     ChecklistState,
     CommentKind,
+    PrState,
     TaskPriority,
     TaskStatus,
     TaskType,
@@ -31,27 +32,70 @@ def _blank_to_none(value: str | None) -> str | None:
     return stripped or None
 
 
-def _clean_pr_refs(value: list[str]) -> list[str]:
+class PrRef(Schema):
+    """One pull request carrying a card's work: where it is, and how far it got.
+
+    The state is the whole of what this schema adds over the bare string the
+    field used to hold, and it is optional on the way in because ``raised`` is
+    where a pull request's life starts: somebody pasting a link has just opened
+    it, and asking them to say so would be a question with one answer. On the
+    way out it is always set — a stored entry has a state or it is not a stored
+    entry.
+
+    This is the only shape that reaches :attr:`app.models.task.Task.pr_refs`,
+    which is why it is the thing holding what an entry may contain: the column
+    is JSON, and a CHECK cannot reach inside a document without a subquery.
+    """
+
+    url: str = Field(
+        max_length=REF_MAX_LENGTH,
+        description=(
+            "Where the pull request is — a URL, or a short form such as `#212`. "
+            "Free text, as the Jira reference is: a URL is the more useful of "
+            "the two because it can be followed, and the frontend shortens "
+            "whichever shape it is given."
+        ),
+    )
+    state: PrState = Field(
+        default=PrState.RAISED,
+        description=(
+            "How far it got: `raised` while nobody has reviewed it, `approved` "
+            "once somebody has said yes, `merged` once it is in. Omitted it is "
+            "`raised`, which is where every pull request starts."
+        ),
+    )
+
+    def stored(self) -> dict[str, str]:
+        """This entry as the column holds it: two strings, no enum instance."""
+        return {"url": self.url, "state": self.state.value}
+
+
+def _clean_pr_refs(value: list[PrRef]) -> list[PrRef]:
     """Tidy a list of pull-request references into what is worth storing.
 
-    Each entry is stripped; blanks are dropped rather than refused, because an
+    Each URL is stripped; blanks are dropped rather than refused, because an
     empty row in the dialog's list is a box somebody has not filled in yet, not
     a mistake to reject the whole save over — the same reading `_blank_to_none`
-    gives the Jira box. Duplicates are dropped too, keeping the first of each:
-    the same pull request named twice is one pull request, and showing it twice
-    on the card would only invite the reader to look for a difference.
+    gives the Jira box. Duplicates are dropped too, keeping the first of each
+    and the state it came with: the same pull request named twice is one pull
+    request, and showing it twice on the card would only invite the reader to
+    look for a difference between them — which, now that each one carries a
+    state, there could genuinely be.
 
     Order is kept, because it is the order somebody put them in and there is no
     better one to impose — a card's first pull request is usually its main one.
     """
-    seen: list[str] = []
+    kept: list[PrRef] = []
+    seen: set[str] = set()
     for entry in value:
-        stripped = entry.strip()
-        if stripped and stripped not in seen:
-            seen.append(stripped)
-    if len(seen) > MAX_PR_REFS:
+        url = entry.url.strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        kept.append(PrRef(url=url, state=entry.state))
+    if len(kept) > MAX_PR_REFS:
         raise ValueError(f"a card may name at most {MAX_PR_REFS} pull requests")
-    return seen
+    return kept
 
 
 def _clean_sub_statuses(value: list[str]) -> list[str]:
@@ -171,13 +215,14 @@ class TaskCreate(Schema):
         max_length=REF_MAX_LENGTH,
         description="The Jira issue this card tracks — a key such as `ATL-41`, or the whole URL.",
     )
-    pr_refs: list[str] = Field(
+    pr_refs: list[PrRef] = Field(
         default_factory=list,
         description=(
             "The pull requests this card's work lands as — each a URL or a short "
-            "form such as `#212`. Several are expected: a change that took a "
-            "backend pull request and a frontend one is still one card. Blank "
-            "and repeated entries are dropped, and the order is kept."
+            "form such as `#212`, and how far it got. Several are expected: a "
+            "change that took a backend pull request and a frontend one is still "
+            "one card. A state left off is `raised`. Blank and repeated entries "
+            "are dropped, and the order is kept."
         ),
     )
 
@@ -206,7 +251,7 @@ class TaskCreate(Schema):
 
     @field_validator("pr_refs")
     @classmethod
-    def _clean_prs(cls, value: list[str]) -> list[str]:
+    def _clean_prs(cls, value: list[PrRef]) -> list[PrRef]:
         return _clean_pr_refs(value)
 
 
@@ -333,13 +378,14 @@ class TaskUpdate(Schema):
             "`due_date`, null here means clear rather than leave alone."
         ),
     )
-    pr_refs: list[str] | None = Field(
+    pr_refs: list[PrRef] | None = Field(
         default=None,
         description=(
             "The whole list of pull requests this card is carried by, replacing "
-            "whatever it had: this is how one is added and how one is removed. "
-            "An empty list takes them all off, and leaving the field out leaves "
-            "them alone — which is why null is not how they are cleared here."
+            "whatever it had: this is how one is added, how one is removed, and "
+            "how one is moved from `raised` to `approved` to `merged`. An empty "
+            "list takes them all off, and leaving the field out leaves them "
+            "alone — which is why null is not how they are cleared here."
         ),
     )
 
@@ -362,7 +408,7 @@ class TaskUpdate(Schema):
 
     @field_validator("pr_refs")
     @classmethod
-    def _clean_prs(cls, value: list[str] | None) -> list[str] | None:
+    def _clean_prs(cls, value: list[PrRef] | None) -> list[PrRef] | None:
         return None if value is None else _clean_pr_refs(value)
 
 
@@ -523,9 +569,10 @@ class TaskRead(Schema):
         "when the card is on no goal, and the board draws its status colour instead."
     )
     jira_ref: str | None
-    pr_refs: list[str] = Field(
+    pr_refs: list[PrRef] = Field(
         description="The pull requests this card's work lands as, in the order they were "
-        "added. Empty on a card that has none yet, which most cards are for most of their lives."
+        "added, each with how far it got. Empty on a card that has none yet, which most cards "
+        "are for most of their lives."
     )
     waiting_on: list[PersonRead] = Field(
         description="Who this is waiting on. Empty unless the task is on hold or blocked."

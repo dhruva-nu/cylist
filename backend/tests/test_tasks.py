@@ -67,6 +67,25 @@ async def _columns(client: AsyncClient, key: str = "ATL") -> list[dict[str, Any]
     return list((await client.get(f"/projects/{key}/columns")).json()["columns"])
 
 
+def _pr(url: str, state: str = "raised") -> dict[str, str]:
+    """One pull request on a card, as the API both takes it and gives it back.
+
+    Spelled out rather than left as a bare string: a reference carries how far
+    it got as well as where it is — see `app.models.task.PrState` — and the
+    default here is the default the schema applies, so a test that says nothing
+    about a state is testing the shape rather than restating it.
+    """
+    return {"url": url, "state": state}
+
+
+async def _pr_history(client: AsyncClient, task: dict[str, Any]) -> list[dict[str, Any]]:
+    """What a card's history says changed about its pull requests, newest first."""
+    history = (await client.get(f"/tasks/{task['id']}/history")).json()["entries"]
+    return [
+        change for entry in history for change in entry["changes"] if change["field"] == "pr_refs"
+    ]
+
+
 class TestCreating:
     async def test_creates_a_card(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -227,7 +246,7 @@ class TestCreating:
         """An untouched form field must not become an empty Jira reference."""
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, jira_ref="  ", pr_refs=["", "   "])
+        task = await _create(signed_in, person, jira_ref="  ", pr_refs=[_pr(""), _pr("   ")])
 
         assert task["jira_ref"] is None
         assert task["pr_refs"] == []
@@ -1253,53 +1272,135 @@ class TestCascade:
 
 
 class TestThePullRequestsOnACard:
-    """CYLIST-63. One card's work routinely lands as more than one pull request.
+    """CYLIST-63, CYLIST-76. One card's work routinely lands as more than one
+    pull request, and the reader wants to know which of them have landed.
 
     The list is sent whole, the way ``sub_statuses`` and ``column_due_dates``
-    are: adding one is a longer list, removing one is a shorter list, and
-    clearing them is the empty list. There is no add-one endpoint because
-    there is no ordering question a client cannot already answer for itself.
+    are: adding one is a longer list, removing one is a shorter list, moving
+    one along is the same list with one state changed, and clearing them is the
+    empty list. There is no add-one endpoint because there is no ordering
+    question a client cannot already answer for itself.
     """
 
     async def test_a_card_can_be_created_naming_several(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, pr_refs=["#212", "#219"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212"), _pr("#219")])
 
-        assert task["pr_refs"] == ["#212", "#219"]
+        assert task["pr_refs"] == [_pr("#212"), _pr("#219")]
+
+    async def test_a_pull_request_nobody_has_said_anything_about_is_raised(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """The state is optional on the way in: somebody pasting a link has
+        just opened it, and asking them to say so is a question with one
+        answer."""
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person, pr_refs=[{"url": "#212"}])
+
+        assert task["pr_refs"] == [{"url": "#212", "state": "raised"}]
+
+    async def test_a_state_can_be_named_on_creation(self, signed_in: AsyncClient) -> None:
+        """A card written up after the fact names pull requests that have
+        already landed."""
+        person = await _setup(signed_in)
+
+        task = await _create(signed_in, person, pr_refs=[_pr("#198", "merged")])
+
+        assert task["pr_refs"] == [_pr("#198", "merged")]
+
+    async def test_each_one_carries_its_own_state(self, signed_in: AsyncClient) -> None:
+        """The point of the states: a card half landed says so."""
+        person = await _setup(signed_in)
+
+        task = await _create(
+            signed_in,
+            person,
+            pr_refs=[_pr("#212", "merged"), _pr("#219", "approved"), _pr("#231")],
+        )
+
+        assert task["pr_refs"] == [
+            _pr("#212", "merged"),
+            _pr("#219", "approved"),
+            _pr("#231", "raised"),
+        ]
+
+    async def test_a_state_that_is_not_one_of_the_three_is_refused(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Three states and no more — everything a forge reports in between is
+        a question for the pull request itself."""
+        person = await _setup(signed_in)
+
+        response = await signed_in.post(
+            "/projects/ATL/tasks",
+            json=_task(person, pr_refs=[_pr("#212", "draft")]),
+        )
+
+        assert response.status_code == 422, response.text
+
+    async def test_one_can_be_moved_along_without_touching_the_rest(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """CYLIST-76's whole gesture: the select on a pull request's row."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, pr_refs=[_pr("#212"), _pr("#219")])
+
+        updated = (
+            await signed_in.patch(
+                f"/tasks/{task['id']}",
+                json={"pr_refs": [_pr("#212", "merged"), _pr("#219")]},
+            )
+        ).json()
+
+        assert updated["pr_refs"] == [_pr("#212", "merged"), _pr("#219", "raised")]
 
     async def test_the_order_they_were_given_in_is_kept(self, signed_in: AsyncClient) -> None:
         """A card's first pull request is usually its main one, and no other
         order is better than the one somebody chose."""
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, pr_refs=["#9", "#1", "#5"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#9"), _pr("#1"), _pr("#5")])
 
-        assert task["pr_refs"] == ["#9", "#1", "#5"]
+        assert [ref["url"] for ref in task["pr_refs"]] == ["#9", "#1", "#5"]
 
     async def test_one_can_be_added_to_a_card_that_has_one(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
-        task = await _create(signed_in, person, pr_refs=["#212"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212")])
 
         updated = (
-            await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": ["#212", "#219"]})
+            await signed_in.patch(
+                f"/tasks/{task['id']}", json={"pr_refs": [_pr("#212"), _pr("#219")]}
+            )
         ).json()
 
-        assert updated["pr_refs"] == ["#212", "#219"]
+        assert updated["pr_refs"] == [_pr("#212"), _pr("#219")]
 
-    async def test_one_can_be_removed_and_the_rest_stay(self, signed_in: AsyncClient) -> None:
+    async def test_one_can_be_removed_and_the_rest_keep_their_states(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """The list arithmetic that can go wrong quietly: the survivors must
+        come back with the states they went in with, not shifted by one."""
         person = await _setup(signed_in)
-        task = await _create(signed_in, person, pr_refs=["#212", "#219", "#231"])
+        task = await _create(
+            signed_in,
+            person,
+            pr_refs=[_pr("#212", "merged"), _pr("#219"), _pr("#231", "approved")],
+        )
 
         updated = (
-            await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": ["#212", "#231"]})
+            await signed_in.patch(
+                f"/tasks/{task['id']}",
+                json={"pr_refs": [_pr("#212", "merged"), _pr("#231", "approved")]},
+            )
         ).json()
 
-        assert updated["pr_refs"] == ["#212", "#231"]
+        assert updated["pr_refs"] == [_pr("#212", "merged"), _pr("#231", "approved")]
 
     async def test_they_can_all_be_taken_off(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
-        task = await _create(signed_in, person, pr_refs=["#212", "#219"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212"), _pr("#219")])
 
         updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": []})).json()
 
@@ -1308,13 +1409,13 @@ class TestThePullRequestsOnACard:
     async def test_leaving_the_field_out_leaves_them_alone(self, signed_in: AsyncClient) -> None:
         """A PATCH of the title must not quietly drop the card's pull requests."""
         person = await _setup(signed_in)
-        task = await _create(signed_in, person, pr_refs=["#212"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212", "merged")])
 
         updated = (
             await signed_in.patch(f"/tasks/{task['id']}", json={"title": "Dedupe webhooks"})
         ).json()
 
-        assert updated["pr_refs"] == ["#212"]
+        assert updated["pr_refs"] == [_pr("#212", "merged")]
 
     async def test_a_null_is_read_as_an_echo_rather_than_as_clear_them(
         self, signed_in: AsyncClient
@@ -1322,20 +1423,27 @@ class TestThePullRequestsOnACard:
         """Unlike ``jira_ref``: the empty list already says "none", so a null
         here is a client sending back a field it never filled in."""
         person = await _setup(signed_in)
-        task = await _create(signed_in, person, pr_refs=["#212"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212")])
 
         updated = (await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": None})).json()
 
-        assert updated["pr_refs"] == ["#212"]
+        assert updated["pr_refs"] == [_pr("#212")]
 
-    async def test_the_same_one_twice_is_stored_once(self, signed_in: AsyncClient) -> None:
+    async def test_the_same_one_twice_is_stored_once_with_the_first_state(
+        self, signed_in: AsyncClient
+    ) -> None:
         """Showing it twice would only invite the reader to look for a
-        difference between them."""
+        difference between them — and with a state on each, there could be
+        one. The first wins, as it does for the order."""
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, pr_refs=["#212", "#219", "#212"])
+        task = await _create(
+            signed_in,
+            person,
+            pr_refs=[_pr("#212", "merged"), _pr("#219"), _pr("#212", "raised")],
+        )
 
-        assert task["pr_refs"] == ["#212", "#219"]
+        assert task["pr_refs"] == [_pr("#212", "merged"), _pr("#219", "raised")]
 
     async def test_a_blank_entry_is_dropped_rather_than_refused(
         self, signed_in: AsyncClient
@@ -1344,9 +1452,9 @@ class TestThePullRequestsOnACard:
         yet, not a reason to refuse the whole save."""
         person = await _setup(signed_in)
 
-        task = await _create(signed_in, person, pr_refs=["#212", "   ", ""])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212"), _pr("   "), _pr("")])
 
-        assert task["pr_refs"] == ["#212"]
+        assert task["pr_refs"] == [_pr("#212")]
 
     async def test_a_pasted_pull_request_url_survives_whole(self, signed_in: AsyncClient) -> None:
         """The board shows `#219`, but it can only link somewhere it still has
@@ -1354,9 +1462,9 @@ class TestThePullRequestsOnACard:
         person = await _setup(signed_in)
         link = "https://github.com/acme-engineering/atlas-billing/pull/219"
 
-        task = await _create(signed_in, person, pr_refs=[link])
+        task = await _create(signed_in, person, pr_refs=[_pr(link)])
 
-        assert task["pr_refs"] == [link]
+        assert task["pr_refs"] == [_pr(link)]
 
     async def test_refuses_more_than_twenty(self, signed_in: AsyncClient) -> None:
         """A card that took twenty pull requests was more than one card."""
@@ -1364,20 +1472,21 @@ class TestThePullRequestsOnACard:
 
         response = await signed_in.post(
             "/projects/ATL/tasks",
-            json=_task(person, pr_refs=[f"#{number}" for number in range(21)]),
+            json=_task(person, pr_refs=[_pr(f"#{number}") for number in range(21)]),
         )
 
         assert response.status_code == 422, response.text
 
     async def test_the_card_carries_them_on_the_board_listing(self, signed_in: AsyncClient) -> None:
         """Read back off the list query as well as the card, because the board
-        draws a mark per pull request without opening anything."""
+        draws a mark per pull request — in its own colour — without opening
+        anything."""
         person = await _setup(signed_in)
-        await _create(signed_in, person, pr_refs=["#212", "#219"])
+        await _create(signed_in, person, pr_refs=[_pr("#212", "merged"), _pr("#219")])
 
         listed = (await signed_in.get("/projects/ATL/tasks")).json()
 
-        assert [task["pr_refs"] for task in listed] == [["#212", "#219"]]
+        assert [task["pr_refs"] for task in listed] == [[_pr("#212", "merged"), _pr("#219")]]
 
     async def test_a_sub_task_can_name_its_own(self, signed_in: AsyncClient) -> None:
         """A sub-task is work with a reference of its own, so it has its own
@@ -1387,26 +1496,45 @@ class TestThePullRequestsOnACard:
 
         response = await signed_in.post(
             f"/tasks/{parent['id']}/subtasks",
-            json=_task(person, pr_refs=["#44"]),
+            json=_task(person, pr_refs=[_pr("#44", "approved")]),
         )
 
         assert response.status_code == 201, response.text
-        assert response.json()["pr_refs"] == ["#44"]
+        assert response.json()["pr_refs"] == [_pr("#44", "approved")]
 
     async def test_adding_one_is_written_on_the_cards_history(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
-        task = await _create(signed_in, person, pr_refs=["#212"])
+        task = await _create(signed_in, person, pr_refs=[_pr("#212")])
 
-        await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": ["#212", "#219"]})
-        history = (await signed_in.get(f"/tasks/{task['id']}/history")).json()["entries"]
+        await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": [_pr("#212"), _pr("#219")]})
+        changed = await _pr_history(signed_in, task)
 
-        changed = [
-            change
-            for entry in history
-            for change in entry["changes"]
-            if change["field"] == "pr_refs"
-        ]
         assert changed, "the change is reported"
         assert changed[0]["label"] == "pull requests"
-        assert changed[0]["from"] == ["#212"]
-        assert changed[0]["to"] == ["#212", "#219"]
+        assert changed[0]["from"] == ["#212 (raised)"]
+        assert changed[0]["to"] == ["#212 (raised)", "#219 (raised)"]
+
+    async def test_moving_one_along_is_written_on_the_cards_history(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """The state is the half of this a card's history most often has to
+        answer for: who said it had merged, and when."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, pr_refs=[_pr("#212")])
+
+        await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": [_pr("#212", "merged")]})
+        changed = await _pr_history(signed_in, task)
+
+        assert changed, "the change is reported"
+        assert changed[0]["from"] == ["#212 (raised)"]
+        assert changed[0]["to"] == ["#212 (merged)"]
+
+    async def test_resending_the_same_list_is_not_a_change(self, signed_in: AsyncClient) -> None:
+        """A dialog saving every field must not write a history entry saying
+        the pull requests moved when they did not."""
+        person = await _setup(signed_in)
+        task = await _create(signed_in, person, pr_refs=[_pr("#212", "approved")])
+
+        await signed_in.patch(f"/tasks/{task['id']}", json={"pr_refs": [_pr("#212", "approved")]})
+
+        assert await _pr_history(signed_in, task) == []

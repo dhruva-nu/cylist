@@ -24,15 +24,42 @@ import json
 import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, TextContent
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from cylist_mcp import __version__, resolve
 from cylist_mcp.client import Api
 from cylist_mcp.errors import CylistError
+
+
+class PullRequest(BaseModel):
+    """One pull request on a card: where it is, and how far it got.
+
+    A model rather than a bare string, because a reference carries a state as
+    well as an address and the two belong together — a card says that its
+    backend pull request merged and its frontend one is still waiting on a
+    reviewer. Declared with the state's three values, so a model calling these
+    tools is told what they are rather than finding out from a 422.
+    """
+
+    url: Annotated[
+        str,
+        Field(description="Where it is: a URL, or a short form such as '#212'."),
+    ]
+    state: Annotated[
+        Literal["raised", "approved", "merged"],
+        Field(
+            description=(
+                "How far it got: 'raised' while nobody has reviewed it, "
+                "'approved' once somebody has said yes, 'merged' once it is in. "
+                "Defaults to 'raised', which is where one starts."
+            )
+        ),
+    ] = "raised"
+
 
 VAULT_REVEAL = "vault:reveal"
 
@@ -328,13 +355,14 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
         pr_refs: Annotated[
-            list[str] | None,
+            list[PullRequest] | None,
             Field(
                 description=(
                     "The pull requests this card's work lands as, each a URL or a "
-                    "short form such as '#212'. Pass several when the work took "
-                    "several — a backend pull request and the frontend one that "
-                    "calls it are still one card. Omit for a card with none yet."
+                    "short form such as '#212' plus how far it got. Pass several "
+                    "when the work took several — a backend pull request and the "
+                    "frontend one that calls it are still one card. Omit for a "
+                    "card with none yet."
                 )
             ),
         ] = None,
@@ -356,7 +384,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             if jira_ref:
                 body["jira_ref"] = jira_ref
             if pr_refs:
-                body["pr_refs"] = pr_refs
+                body["pr_refs"] = [ref.model_dump() for ref in pr_refs]
             return {"task": await client.post(f"/projects/{project}/tasks", body)}
 
         return await _as_tool_result(call)
@@ -398,13 +426,14 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
         ] = None,
         jira_ref: Annotated[str | None, Field(description="Jira issue key, if any.")] = None,
         pr_refs: Annotated[
-            list[str] | None,
+            list[PullRequest] | None,
             Field(
                 description=(
                     "The pull requests this card's work lands as, each a URL or a "
-                    "short form such as '#212'. Pass several when the work took "
-                    "several — a backend pull request and the frontend one that "
-                    "calls it are still one card. Omit for a card with none yet."
+                    "short form such as '#212' plus how far it got. Pass several "
+                    "when the work took several — a backend pull request and the "
+                    "frontend one that calls it are still one card. Omit for a "
+                    "card with none yet."
                 )
             ),
         ] = None,
@@ -427,7 +456,7 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
             if jira_ref:
                 body["jira_ref"] = jira_ref
             if pr_refs:
-                body["pr_refs"] = pr_refs
+                body["pr_refs"] = [ref.model_dump() for ref in pr_refs]
             return {"task": await client.post(f"/tasks/{task}/subtasks", body)}
 
         return await _as_tool_result(call)

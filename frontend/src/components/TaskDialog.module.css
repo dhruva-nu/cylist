@@ -899,6 +899,33 @@
   list-style: none;
 }
 
+/* The reference, then the state that belongs to it, hard against the right —
+   so the states line up down the list however long the references are, and
+   the column of them can be read on its own. */
+.prRefRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.prRefRow .prStateSelect {
+  margin-left: auto;
+}
+
+/* Quieter than the form's own selects: on the detail view this is the only
+   control among a page of text, and it has to look like somewhere you *may*
+   press rather than somewhere you are being asked to. */
+.prStateSelect {
+  flex-shrink: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  padding: 3px 8px;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
 /* The same column of rows as the stage editor, with the add button under it. */
 .prRefEditor {
   display: flex;

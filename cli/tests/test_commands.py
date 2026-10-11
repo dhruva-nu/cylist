@@ -245,6 +245,16 @@ def test_task_finish_reopens_one(run: Runner, recorder: fake_api.Recorder) -> No
     assert recorder.body("POST", "/tasks/ATL-2-1/finish") == {"finished": False}
 
 
+def test_task_show_says_how_far_each_pull_request_got(run: Runner) -> None:
+    """CYLIST-76. A card naming two pull requests is usually naming one that
+    landed and one that has not, and the terminal has no colour to say which."""
+    result = run("task", "show", "ATL-2")
+
+    assert result.code == 0
+    assert "#212 (merged)" in result.out
+    assert "https://github.com/acme/atlas/pull/219 (raised)" in result.out
+
+
 def test_task_show_marks_an_open_subtask(run: Runner) -> None:
     result = run("task", "show", "ATL-2")
     assert result.code == 0
@@ -653,8 +663,8 @@ def test_task_new_takes_several_pull_requests(run: Runner, recorder: fake_api.Re
     )
     assert result.code == 0
     assert recorder.body("POST", "/tasks")["pr_refs"] == [
-        "#212",
-        "https://github.com/acme/atlas/pull/219",
+        {"url": "#212"},
+        {"url": "https://github.com/acme/atlas/pull/219"},
     ]
 
 
@@ -674,7 +684,9 @@ def test_task_new_takes_one_pull_request(run: Runner, recorder: fake_api.Recorde
         "#212",
     )
     assert result.code == 0
-    assert recorder.body("POST", "/tasks")["pr_refs"] == ["#212"]
+    # No state: a pull request named on a new card has just been opened, and
+    # the server reads a missing state as `raised`.
+    assert recorder.body("POST", "/tasks")["pr_refs"] == [{"url": "#212"}]
 
 
 def test_task_new_without_a_pull_request_says_nothing_about_one(
