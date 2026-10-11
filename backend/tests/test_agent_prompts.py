@@ -19,7 +19,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentSession, AgentSessionReason, AgentSessionState
+from app.models import AgentSession, AgentSessionReason, AgentSessionState, Person
 from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead
 from app.services import agent_prompts, tasks
 from app.services.agent_sessions import presence
@@ -178,7 +178,7 @@ class TestAsking:
 
 class TestAnswering:
     async def test_an_answer_frees_the_agent_and_is_kept_for_the_card(
-        self, signed_in: AsyncClient, agent: dict[str, str]
+        self, signed_in: AsyncClient, agent: dict[str, str], owner: Person
     ) -> None:
         ref = await a_card(signed_in)
         await _report(signed_in, agent, ref, "working")
@@ -189,7 +189,9 @@ class TestAnswering:
         assert answered["status"] == "answered"
         assert answered["answer"] == "None"
         assert answered["answer_key"] == "2"
-        assert answered["answered_by"]
+        assert answered["answered_by"] == owner.name
+        # By id as well, so a viewer can tell "You: None" from "Ada: None".
+        assert answered["answered_by_id"] == str(owner.id)
         assert answered["answered_at"] is not None
         card = (await _card(signed_in, ref))["agent_session"]
         assert card["state"] == "working"
@@ -197,6 +199,7 @@ class TestAnswering:
         # Still shown, answered, until the session next changes state.
         assert card["prompt"]["status"] == "answered"
         assert card["prompt"]["answer"] == "None"
+        assert card["prompt"]["answered_by_id"] == str(owner.id)
         assert (await _verbs(signed_in))[0] == "agent_session.answered"
 
     async def test_a_question_takes_a_typed_reply(
@@ -687,6 +690,7 @@ class TestPresence:
             answer=None,
             answer_key=None,
             answered_by=None,
+            answered_by_id=None,
             answered_at=None,
             closed_reason=None,
             asked_at=asking.state_changed_at,

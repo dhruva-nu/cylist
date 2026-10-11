@@ -871,6 +871,12 @@ export interface AgentPrompt {
   answer_key: string | null
   /** Who answered, by name. */
   answered_by: string | null
+  /**
+   * Who answered, as a person id — compared with `api.me()`'s to say "You: …"
+   * rather than the name. Null when unanswered, or answered with a token that
+   * is nobody's.
+   */
+  answered_by_id: string | null
   answered_at: string | null
   closed_reason: AgentPromptClosedReason | null
   asked_at: string

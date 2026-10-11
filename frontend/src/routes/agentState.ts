@@ -64,7 +64,11 @@ export function waitingDetail(reason: AgentSessionReason | null): string {
  * one session reads as, and "1 agent working" makes every card sound like a
  * head-count.
  */
-export function agentIndicator(presence: AgentPresence | null, now: Date): AgentIndicator | null {
+export function agentIndicator(
+  presence: AgentPresence | null,
+  now: Date,
+  viewerId: string | null = null,
+): AgentIndicator | null {
   if (!presence) return null
   const many = presence.count > 1
   const agents = many ? `${presence.count} agents` : 'Agent'
@@ -74,7 +78,7 @@ export function agentIndicator(presence: AgentPresence | null, now: Date): Agent
       // A question or a permission says what it is about, which is the one
       // thing a person deciding whether to stop what they are doing needs:
       // "Asks: keep the cookie name per environment?" rather than "needs you".
-      const asking = isAnswerable(presence.prompt) ? promptLine(presence.prompt) : null
+      const asking = isAnswerable(presence.prompt) ? promptLine(presence.prompt, viewerId) : null
       if (asking) {
         return many
           ? { className: 'agentWaiting', label: `${agents} · one needs you`, detail: asking }
@@ -87,10 +91,12 @@ export function agentIndicator(presence: AgentPresence | null, now: Date): Agent
       }
     }
     case 'working': {
-      // Just answered: the card says what you said — "You: Allow once" — for as
-      // long as the server keeps the answer on it, which is until the session
-      // next changes state. The agent's own action, once it has one, follows.
-      const answered = presence.prompt?.status === 'answered' ? promptLine(presence.prompt) : null
+      // Just answered: the card says what was said — "You: Allow once", or
+      // "Aditi: Allow once" to everyone else — for as long as the server keeps
+      // the answer on it, which is until the session next changes state. The
+      // agent's own action, once it has one, follows.
+      const answered =
+        presence.prompt?.status === 'answered' ? promptLine(presence.prompt, viewerId) : null
       if (answered) {
         if (many) return { className: 'agentWorking', label: `${agents} working`, detail: answered }
         return presence.note
@@ -204,23 +210,38 @@ export function sessionPill(session: AgentSessionRead): SessionPill {
  * when there is nothing worth saying.
  *
  * Open, it says what is being asked — the question, or what the tool wants
- * to do. Answered, it says what the person said, as "You: …", which the card
- * keeps until the session next changes state. A prompt that closed without an
- * answer says why only when that is news to the person looking: answered in
- * the terminal, or nobody answered in time.
+ * to do. Answered, it says what the person said — "You: …" to the person who
+ * answered (`viewerId` is theirs, from `api.me()`), and "Aditi: …" to anyone
+ * else — which the card keeps until the session next changes state. A prompt
+ * that closed without an answer says why only when that is news to the person
+ * looking: answered in the terminal, or nobody answered in time.
  */
-export function promptLine(prompt: AgentPrompt | null): string | null {
+export function promptLine(
+  prompt: AgentPrompt | null,
+  viewerId: string | null = null,
+): string | null {
   if (!prompt) return null
   switch (prompt.status) {
     case 'open':
       return prompt.kind === 'question' ? `Asks: ${prompt.text}` : `Permission: ${prompt.text}`
     case 'answered':
-      return `You: ${prompt.answer ?? ''}`
+      return `${answeredBy(prompt, viewerId)}: ${prompt.answer ?? ''}`
     case 'expired':
       return 'Nobody answered in time'
     case 'withdrawn':
       return prompt.closed_reason === 'answered_in_terminal' ? 'Answered in the terminal' : null
   }
+}
+
+/**
+ * Who answered a prompt, as the person looking says it: "You" when it was
+ * them, their name otherwise. An answer with no name — a token that is
+ * nobody's — reads as "Answered", never as "You", since the viewer cannot have
+ * been the one who gave it.
+ */
+export function answeredBy(prompt: AgentPrompt, viewerId: string | null): string {
+  if (viewerId !== null && prompt.answered_by_id === viewerId) return 'You'
+  return prompt.answered_by ?? 'Answered'
 }
 
 /**

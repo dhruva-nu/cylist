@@ -557,6 +557,7 @@ def read(prompt: AgentPrompt) -> AgentPromptRead:
         answer=prompt.answer,
         answer_key=prompt.answer_key,
         answered_by=prompt.answered_by_label,
+        answered_by_id=prompt.answered_by_id,
         answered_at=prompt.answered_at,
         closed_reason=prompt.closed_reason,
         asked_at=prompt.asked_at,

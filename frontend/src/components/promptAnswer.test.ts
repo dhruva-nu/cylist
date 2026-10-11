@@ -44,6 +44,7 @@ function prompt(overrides: Partial<AgentPrompt> = {}): AgentPrompt {
     answer: null,
     answer_key: null,
     answered_by: null,
+    answered_by_id: null,
     answered_at: null,
     closed_reason: null,
     asked_at: '2026-10-12T11:55:00Z',

@@ -125,6 +125,7 @@ import {
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
 import { usePermissions } from './usePermissions'
+import { useViewerId } from './useViewerId'
 
 /**
  * Which keys drive a keyboard drag.
@@ -2420,7 +2421,8 @@ function TaskCard({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
   const now = new Date()
-  const agent = agentIndicator(task.agent_session, now)
+  const viewerId = useViewerId()
+  const agent = agentIndicator(task.agent_session, now, viewerId)
   // A question or permission waiting on this card opens a popover under it on
   // hover (CYLIST-86) — never while anything on the board is being dragged.
   const prompt = task.agent_session?.prompt ?? null
@@ -2610,7 +2612,8 @@ function TaskCardBody({
  * waiting on, and this one is waiting on you.
  */
 function AgentLine({ session }: { session: AgentPresence | null }) {
-  const agent = agentIndicator(session, new Date())
+  const viewerId = useViewerId()
+  const agent = agentIndicator(session, new Date(), viewerId)
   if (!agent) return null
 
   return (

@@ -101,6 +101,11 @@ class AgentPromptRead(Schema):
     )
     answer_key: str | None = Field(description="The chosen option's key; null for a reply.")
     answered_by: str | None = Field(description="Who answered, by name.")
+    answered_by_id: UUID | None = Field(
+        description="Who answered, as a person id: what a viewer compares with their own "
+        "to say 'You: …' rather than the name. Null when unanswered, or answered with a "
+        "token that is nobody's."
+    )
     answered_at: datetime | None
     closed_reason: str | None = Field(
         description="For `withdrawn`: `answered_in_terminal`, `interrupted`, `abandoned` "

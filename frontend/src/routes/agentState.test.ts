@@ -26,6 +26,8 @@ import {
 } from './agentState'
 
 const NOW = new Date('2026-09-08T12:00:00Z')
+/** The person looking at the board. */
+const ME = 'person-me'
 
 function presence(overrides: Partial<AgentPresence> = {}): AgentPresence {
   return {
@@ -58,6 +60,7 @@ function prompt(overrides: Partial<AgentPrompt> = {}): AgentPrompt {
     answer: null,
     answer_key: null,
     answered_by: null,
+    answered_by_id: null,
     answered_at: null,
     closed_reason: null,
     asked_at: '2026-09-08T11:58:00Z',
@@ -168,14 +171,34 @@ describe('agentIndicator', () => {
   })
 
   it('says what you answered once the agent is working again', () => {
-    const answered = prompt({ status: 'answered', answer: 'Grey', answer_key: '1' })
-    expect(agentIndicator(presence({ prompt: answered }), NOW)).toEqual({
+    const answered = prompt({
+      status: 'answered',
+      answer: 'Grey',
+      answer_key: '1',
+      answered_by: 'Dhruva',
+      answered_by_id: ME,
+    })
+    expect(agentIndicator(presence({ prompt: answered }), NOW, ME)).toEqual({
       className: 'agentWorking',
       label: 'You: Grey',
     })
     expect(
-      agentIndicator(presence({ prompt: answered, note: 'Editing BoardCard.tsx' }), NOW),
+      agentIndicator(presence({ prompt: answered, note: 'Editing BoardCard.tsx' }), NOW, ME),
     ).toEqual({ className: 'agentWorking', label: 'You: Grey', detail: 'Editing BoardCard.tsx' })
+  })
+
+  it('says who answered when it was somebody else', () => {
+    const answered = prompt({
+      status: 'answered',
+      answer: 'Grey',
+      answer_key: '1',
+      answered_by: 'Aditi K',
+      answered_by_id: 'person-aditi',
+    })
+    expect(agentIndicator(presence({ prompt: answered }), NOW, ME)).toEqual({
+      className: 'agentWorking',
+      label: 'Aditi K: Grey',
+    })
   })
 
   it('draws a lost connection as an outline, not as a finish', () => {
@@ -289,10 +312,32 @@ describe('promptLine', () => {
     ).toBe('Permission: Running git push origin staging')
   })
 
-  it('says what you answered', () => {
-    expect(promptLine(prompt({ status: 'answered', answer: 'Grey', answer_key: '1' }))).toBe(
-      'You: Grey',
-    )
+  describe('once answered', () => {
+    const answered = (by: string | null, byId: string | null) =>
+      prompt({
+        status: 'answered',
+        answer: 'Grey',
+        answer_key: '1',
+        answered_by: by,
+        answered_by_id: byId,
+      })
+
+    it('says "You" to the person who answered', () => {
+      expect(promptLine(answered('Dhruva', ME), ME)).toBe('You: Grey')
+    })
+
+    it('names whoever answered to everyone else', () => {
+      expect(promptLine(answered('Aditi K', 'person-aditi'), ME)).toBe('Aditi K: Grey')
+    })
+
+    it('names them while it does not yet know who is looking', () => {
+      expect(promptLine(answered('Aditi K', 'person-aditi'))).toBe('Aditi K: Grey')
+      expect(promptLine(answered('Dhruva', ME), null)).toBe('Dhruva: Grey')
+    })
+
+    it('never says "You" for an answer that is nobody\'s', () => {
+      expect(promptLine(answered(null, null), ME)).toBe('Answered: Grey')
+    })
   })
 
   it('says when nobody answered in time', () => {

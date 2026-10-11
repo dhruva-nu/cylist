@@ -31,7 +31,15 @@ import { useId } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, type AgentPrompt, type AgentSessionRead } from '../api/client'
-import { isAnswerable, nowLine, promptLine, sessionPill, silentFor } from '../routes/agentState'
+import {
+  answeredBy,
+  isAnswerable,
+  nowLine,
+  promptLine,
+  sessionPill,
+  silentFor,
+} from '../routes/agentState'
+import { useViewerId } from '../routes/useViewerId'
 import { feedClock, feedLabel, isCodeLike } from './agentFeed'
 import { AgentPromptAnswer } from './AgentPromptAnswer'
 import { Button, ErrorBanner } from './ui'
@@ -161,11 +169,13 @@ function NowLine({ session }: { session: AgentSessionRead }) {
  * same as the "You: …" on the card.
  */
 function ClosedPrompt({ prompt, working }: { prompt: AgentPrompt; working: boolean }) {
+  const viewerId = useViewerId()
   if (prompt.status === 'answered') {
+    const who = answeredBy(prompt, viewerId)
     return (
       <div className={styles.answered} role="status">
         <span className={styles.answeredLabel}>
-          {prompt.answered_by ? `${prompt.answered_by} answered:` : 'Answered:'}
+          {who === 'Answered' ? 'Answered:' : `${who} answered:`}
         </span>{' '}
         {prompt.answer}
         <div className={styles.answeredNote}>
@@ -174,7 +184,7 @@ function ClosedPrompt({ prompt, working }: { prompt: AgentPrompt; working: boole
       </div>
     )
   }
-  const line = promptLine(prompt)
+  const line = promptLine(prompt, viewerId)
   return line ? <div className={styles.quiet}>{line}</div> : null
 }
 
