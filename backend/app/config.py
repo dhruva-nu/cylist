@@ -78,8 +78,8 @@ REAP_EVERY = timedelta(seconds=60)
 """How often to go looking. Cheap — one indexed query over the open rows."""
 
 SESSION_COOKIE = "cylist_session"
-"""The session cookie's name at the site root. Under a base path it carries a
-suffix — see :attr:`Settings.session_cookie_name`."""
+"""The session cookie's name in production. Every other deployment on the host
+carries a suffix — see :attr:`Settings.session_cookie_name`."""
 
 
 class Settings(BaseSettings):
@@ -243,16 +243,24 @@ class Settings(BaseSettings):
 
     @property
     def session_cookie_name(self) -> str:
-        """The session cookie's name, which differs per base path.
+        """The session cookie's name, which differs per deployment on a host.
 
-        The dev slots share one host, and a browser keys cookies on host and
-        name, not port — staging's ``cylist_session`` on :8443 is sent to
-        :9443 too. A name per slot is what lets you be signed in to two slots
-        at once, and what stops one slot reading another's token as its own.
+        Production (:443), staging (:8443) and the dev slots (:9443) share one
+        host, and a browser keys cookies on host and name, not port — a cookie
+        set on :8443 is sent to :443 too. With one name between them, signing
+        in to staging overwrote production's session and the other way round
+        (CYLIST-81). So a dev slot is named for its base path, staging and a
+        root-served preview for their environment, and only production — and
+        someone's own machine — keeps the bare name, so production sessions
+        survive the change.
         """
-        if not self.base_path:
+        if self.base_path:
+            suffix = re.sub(r"[^A-Za-z0-9]+", "_", self.base_path).strip("_")
+        elif self.environment in ("staging", "preview"):
+            suffix = self.environment
+        else:
             return SESSION_COOKIE
-        return f"{SESSION_COOKIE}_{re.sub(r'[^A-Za-z0-9]+', '_', self.base_path).strip('_')}"
+        return f"{SESSION_COOKIE}_{suffix}"
 
     @property
     def session_cookie_path(self) -> str:

@@ -17,7 +17,9 @@
 #     compose up` in production would silently adopt staging's code;
 #   * port 8001, because production holds 8000;
 #   * CYLIST_ENVIRONMENT=staging, which the app treats as deployed: the session
-#     cookie is issued Secure, and `make seed` refuses to run.
+#     cookie is issued Secure, and `make seed` refuses to run. It also names
+#     the cookie `cylist_session_staging`: production is on the same host, and
+#     a browser does not separate cookies by port;
 #
 # Staging is restored from production dumps, so it holds real vault ciphertext
 # and needs the *production* vault key to read it. Its secrets are no less
