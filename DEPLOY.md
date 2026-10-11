@@ -563,12 +563,15 @@ check as production and staging. Around that,
    below).
 5. **Regenerates the index** at `~/cylist-dev-index/index.html` from the five
    `deployed` files. It is a static file, so it is only as current as the last
-   slot deploy.
+   slot deploy. A `busybox httpd` container, `cylist-dev-index`, serves that
+   directory read-only on `127.0.0.1:8010`; the deploy starts it if it is not
+   running. tailscale will not serve a directory itself for an operator who
+   cannot also run `sudo tailscale`, which is why it proxies to a port instead.
 6. **Points tailscale at the slot**, re-applying both mappings every time:
 
    ```bash
    tailscale serve --bg --https 9443 --set-path /dev_N http://127.0.0.1:801N
-   tailscale serve --bg --https 9443 ~/cylist-dev-index
+   tailscale serve --bg --https 9443 http://127.0.0.1:8010
    ```
 
 7. **Checks the slot answers through tailscale** at
@@ -608,8 +611,9 @@ Without it a slot deploy gets as far as a running, healthy slot on loopback and
 then fails at *Serving slot N*, saying exactly that.
 
 `serve`, not `funnel`, exactly as staging: reachable from your devices, and from
-nowhere else. Only the index directory is served as files; the slot
-directories hold secrets and are never what tailscale points at.
+nowhere else. Only the index directory is served as files, by the
+`cylist-dev-index` container; the slot directories hold secrets and are never
+mounted into it.
 
 ### The old single dev stack
 

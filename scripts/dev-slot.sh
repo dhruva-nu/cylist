@@ -25,9 +25,15 @@ DEV_ROOT="${CYLIST_DEV_ROOT:-$HOME}"
 DEV_HOST="${CYLIST_DEV_HOST:-dnu-home-1.tail222f46.ts.net}"
 DEV_HTTPS_PORT=9443
 DEV_SLOTS=(1 2 3 4 5)
-# Only index.html lives here, because tailscale serves the whole directory. The
-# slot directories hold secrets and must never be what it serves.
+# Only index.html lives here, because the index server serves the whole
+# directory. The slot directories hold secrets and must never be what it serves.
 DEV_INDEX_DIR="${CYLIST_DEV_INDEX_DIR:-$DEV_ROOT/cylist-dev-index}"
+# tailscale will not serve a directory for an operator who cannot also run
+# `sudo tailscale`, so the index is served over loopback by a busybox httpd
+# container and tailscale proxies `/` to it, as it does each slot.
+DEV_INDEX_PORT=8010
+DEV_INDEX_CONTAINER=cylist-dev-index
+DEV_INDEX_IMAGE=busybox:stable
 DEV_LOCK="$DEV_ROOT/.cylist-dev.lock"
 DEV_REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-dhruva-nu/cylist}"
 
@@ -146,6 +152,7 @@ _dev_slot_publish_shared() {
   step "Regenerating the index at https://$DEV_HOST:$DEV_HTTPS_PORT/"
   dev_index_write
   echo "   $DEV_INDEX_DIR/index.html"
+  _dev_index_server
   _dev_slot_serve
 }
 
@@ -185,13 +192,27 @@ _dev_slot_serve() {
   if tailscale serve --help 2>&1 | grep -q -- '--yes'; then yes=(--yes); fi
   if ! _dev_ts serve --bg "${yes[@]}" --https "$DEV_HTTPS_PORT" \
          --set-path "/dev_$SLOT" "http://127.0.0.1:$PORT" ||
-     ! _dev_ts serve --bg "${yes[@]}" --https "$DEV_HTTPS_PORT" "$DEV_INDEX_DIR"; then
+     ! _dev_ts serve --bg "${yes[@]}" --https "$DEV_HTTPS_PORT" \
+         "http://127.0.0.1:$DEV_INDEX_PORT"; then
     echo "   tailscale would not change its serve config. Once, on this machine:" >&2
     echo "     sudo tailscale set --operator=$(id -un)" >&2
     echo "   and deploy again. The slot itself is up on 127.0.0.1:$PORT." >&2
     exit 1
   fi
-  echo "   :$DEV_HTTPS_PORT/dev_$SLOT → 127.0.0.1:$PORT, :$DEV_HTTPS_PORT/ → $DEV_INDEX_DIR"
+  echo "   :$DEV_HTTPS_PORT/dev_$SLOT → 127.0.0.1:$PORT, :$DEV_HTTPS_PORT/ → 127.0.0.1:$DEV_INDEX_PORT"
+}
+
+# Starts the index's httpd if it is not already running. It mounts the index
+# directory read-only, so rewriting index.html needs no restart.
+_dev_index_server() {
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$DEV_INDEX_CONTAINER" 2> /dev/null)" == true ]]; then
+    return 0
+  fi
+  docker rm --force "$DEV_INDEX_CONTAINER" > /dev/null 2>&1 || true
+  docker run -d --name "$DEV_INDEX_CONTAINER" --restart unless-stopped \
+    -p "127.0.0.1:$DEV_INDEX_PORT:8000" -v "$DEV_INDEX_DIR:/srv:ro" \
+    "$DEV_INDEX_IMAGE" httpd -f -p 8000 -h /srv > /dev/null
+  echo "   index served on 127.0.0.1:$DEV_INDEX_PORT ($DEV_INDEX_CONTAINER)"
 }
 
 # The loopback health check has already passed; this one goes the way a browser
