@@ -8,7 +8,10 @@ name: Deploy dev
 # https://dnu-home-1.tail222f46.ts.net:9443/dev_N/, and the root of :9443 lists
 # which branch and commit is in each.
 #
-#   gh workflow run deploy-dev.yml --ref <branch> -f slot=2
+#   gh workflow run deploy-dev.yml --ref <branch> -f slot=2 -f card=CYLIST-79
+#
+# `card` is optional. Given one, a successful deploy comments on that card in
+# production Cylist which slot its branch is in — see the last step.
 #
 # Unlike CI's deploy jobs, this does not `needs:` the test jobs. Dev exists so
 # you can put work here before it is finished, not after it has already passed
@@ -21,6 +24,11 @@ on:
         required: true
         type: choice
         options: ["1", "2", "3", "4", "5"]
+      card:
+        description: Card to tell where it went, e.g. CYLIST-79 (optional)
+        required: false
+        type: string
+        default: ""
 
 # One deploy per slot at a time, and never a half-finished one: two runs of
 # scripts/deploy.sh against the same slot would fight over its containers, and a
@@ -42,6 +50,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # A mistyped card is caught here, before the deploy, rather than after it
+      # as a comment that went nowhere.
+      - name: Check card
+        if: inputs.card != ''
+        env:
+          CARD: ${{ inputs.card }}
+        run: scripts/dev-card-comment.sh check
+
       # Creates the slot's secrets on its first deploy and copies production's
       # jev key into them, builds the image, dumps the database, migrates,
       # restarts the slot and waits for /api/v1/health — the same script
@@ -58,3 +74,21 @@ jobs:
         env:
           SLOT: ${{ inputs.slot }}
         run: scripts/deploy.sh dev "$SLOT"
+
+      # Tells the card which slot its branch is in, as Agent: the same line the
+      # deploy-dev skill has an agent post, so a deploy started by hand from
+      # GitHub is on the card too. CYLIST_AGENT_TOKEN is a production API token
+      # (read + write) kept as an Actions secret; without it this step warns and
+      # the agent's own comment is all there is. It never fails the run — the
+      # deploy it reports on has already succeeded. See scripts/dev-card-comment.sh.
+      - name: Comment on the card
+        if: inputs.card != ''
+        env:
+          CARD: ${{ inputs.card }}
+          SLOT: ${{ steps.deploy.outputs.slot }}
+          URL: ${{ steps.deploy.outputs.url }}
+          BRANCH: ${{ steps.deploy.outputs.branch }}
+          SHA: ${{ steps.deploy.outputs.sha }}
+          CYLIST_AGENT_TOKEN: ${{ secrets.CYLIST_AGENT_TOKEN }}
+          CYLIST_URL: ${{ vars.CYLIST_URL || 'https://dnu-home-1.tail222f46.ts.net' }}
+        run: scripts/dev-card-comment.sh post
