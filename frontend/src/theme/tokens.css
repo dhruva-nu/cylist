@@ -60,6 +60,27 @@
   --agent: #0e7c86;
   --agent-soft: #d9f0f2;
 
+  /*
+   * How far a pull request on a card got. Two of the three are inks the card
+   * already owns — the quiet grey it counts comments in, and the green that
+   * means done — because a pull request nobody has looked at yet should read
+   * as quietly as a count, and one that is approved is good news of exactly
+   * the kind `--ok` already says. Only `merged` is a hue of its own: the
+   * violet every forge has taught people to read as "it landed", and a hue
+   * nothing else in Cylist uses, so it cannot be mistaken for a status.
+   *
+   * Aliases rather than copies, so the two that are borrowed keep flipping
+   * with what they borrow from and cannot drift from it.
+   *
+   * Contrast, as drawn marks: 4.7:1 or better on a plain card in either
+   * theme. The worst case is 4.3:1, on the red of a blocked card, where the
+   * bar for a graphic is 3:1 — and the identifier beside the mark is
+   * `--link`, not these, because it is text.
+   */
+  --pr-raised: var(--ink-3);
+  --pr-approved: var(--ok);
+  --pr-merged: #6a4fa3;
+
   --scrim: rgb(40 60 70 / 50%);
   --shadow: 0 1px 3px rgb(40 60 70 / 8%), 0 10px 30px -18px rgb(40 60 70 / 25%);
   --shadow-lg: 0 2px 6px rgb(40 60 70 / 8%), 0 24px 60px -24px rgb(40 60 70 / 35%);
@@ -151,6 +172,7 @@
   --dark-blocked-soft: #472222;
   --dark-agent: #4fc3cf;
   --dark-agent-soft: #16383c;
+  --dark-pr-merged: #b79ce8;
   --dark-scrim: rgb(0 0 0 / 62%);
   --dark-focus: #f7c948;
   --dark-shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
@@ -204,6 +226,7 @@
     --blocked-soft: var(--dark-blocked-soft);
     --agent: var(--dark-agent);
     --agent-soft: var(--dark-agent-soft);
+    --pr-merged: var(--dark-pr-merged);
     --priority-p0: var(--dark-priority-p0);
     --priority-p1: var(--dark-priority-p1);
     --priority-p2: var(--dark-priority-p2);
@@ -241,6 +264,7 @@
   --blocked-soft: var(--dark-blocked-soft);
   --agent: var(--dark-agent);
   --agent-soft: var(--dark-agent-soft);
+  --pr-merged: var(--dark-pr-merged);
   --priority-p0: var(--dark-priority-p0);
   --priority-p1: var(--dark-priority-p1);
   --priority-p2: var(--dark-priority-p2);

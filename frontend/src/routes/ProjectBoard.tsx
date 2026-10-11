@@ -2618,7 +2618,7 @@ function StripAccumulated({
           click away — see `TaskRef`. */}
       {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
       {task.pr_refs.map((ref) => (
-        <TaskRef key={ref} kind="pr" value={ref} compact />
+        <TaskRef key={ref.url} kind="pr" value={ref.url} state={ref.state} compact />
       ))}
       {/* Sits on the line rather than above it. The stage bar and these dots
           are drawn as different things because they are different things —

@@ -278,6 +278,29 @@ export type TaskStatus = 'active' | 'hold' | 'blocked' | 'cancelled'
 export type ChecklistState = 'open' | 'done' | 'cancelled'
 export type CommentKind = 'comment' | 'status_change'
 
+/**
+ * How far one of a card's pull requests got.
+ *
+ * Three states and no more: is it up, has anybody said yes, is it in.
+ * Everything a forge reports in between — draft, changes requested, checks
+ * failing — is a question for the pull request itself, which the reference
+ * links to.
+ */
+export type PrState = 'raised' | 'approved' | 'merged'
+
+/**
+ * One pull request on a card: where it is, and how far it got.
+ *
+ * One object rather than two parallel lists, because a state means nothing
+ * apart from the pull request it is on — see the same reasoning on the column
+ * itself in `app/models/task.py`.
+ */
+export interface PrRef {
+  /** A URL, or a short form such as `#212`. Free text, as `jira_ref` is. */
+  url: string
+  state: PrState
+}
+
 /** Whether a goal is still being worked towards, and if not, how it ended. */
 export type GoalStatus = 'open' | 'achieved' | 'dropped'
 
@@ -874,11 +897,12 @@ export interface Task {
   goal_colour: string | null
   jira_ref: string | null
   /**
-   * The pull requests this card's work lands as, in the order they were added.
-   * Empty on a card that has none yet, which most cards are for most of their
-   * lives — never null, so there is one way to say "none" rather than two.
+   * The pull requests this card's work lands as, in the order they were added,
+   * each with how far it got. Empty on a card that has none yet, which most
+   * cards are for most of their lives — never null, so there is one way to say
+   * "none" rather than two.
    */
-  pr_refs: string[]
+  pr_refs: PrRef[]
   waiting_on: Person[]
   comment_count: number
   checklist: ChecklistItem[]
@@ -971,10 +995,11 @@ export interface TaskInput {
   jira_ref: string | null
   /**
    * Every pull request the card names, sent whole: adding one is a longer
-   * list, removing one a shorter list, and `[]` takes them all off. Blank and
-   * repeated entries are dropped by the server, so the form need not.
+   * list, removing one a shorter list, moving one along is the same list with
+   * one `state` changed, and `[]` takes them all off. Blank and repeated
+   * entries are dropped by the server, so the form need not.
    */
-  pr_refs: string[]
+  pr_refs: PrRef[]
 }
 
 /**
@@ -1235,6 +1260,8 @@ export const api = {
   bootstrapSignIn: (password: string) =>
     request<Identity>('/auth/login', { method: 'POST', body: jsonBody({ password }) }),
   me: () => request<Identity>('/me'),
+  /** Revoke this browser's session and clear its cookie. */
+  signOut: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   /** Turn an invitation link into an account, and sign in with it. */
   acceptInvite: (token: string, password: string) =>

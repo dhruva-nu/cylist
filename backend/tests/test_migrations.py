@@ -13,6 +13,7 @@ the fixtures that truncate and recreate the test schema.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -2134,3 +2135,150 @@ class TestUndoingTheManyPullRequests:
 
         with pytest.raises(RuntimeError, match="name more than one pull request"):
             await rewind(ONE_PR)
+
+
+# --- How far each pull request got -----------------------------------------
+
+WITH_PR_STATES = "0036"
+
+
+async def pr_refs_with_states(connection: AsyncConnection) -> dict[int, list[dict[str, str]]]:
+    """Each card's pull requests as the JSON document holds them.
+
+    Cast to text and parsed here rather than handed to asyncpg's own JSON
+    decoding: a ``text()`` query carries no type information, so what comes
+    back depends on which codecs happen to be registered on the connection.
+    """
+    rows = await connection.execute(text("SELECT number, pr_refs::text FROM task ORDER BY number"))
+    return {number: json.loads(document) for number, document in rows}
+
+
+async def set_pr_refs(connection: AsyncConnection, number: int, refs: list[dict[str, str]]) -> None:
+    await connection.execute(
+        text("UPDATE task SET pr_refs = CAST(:refs AS jsonb) WHERE number = :number"),
+        {"number": number, "refs": json.dumps(refs)},
+    )
+
+
+class TestAPullRequestSaysHowFarItGot:
+    """Revision 0036 against a database whose cards name pull requests already."""
+
+    async def test_every_reference_arrives_as_raised(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Raised is true of a reference nobody has said anything else about,
+        and it is the state a new one starts in."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None, None)
+        await migrate(MANY_PRS)
+        await add_pr_refs(connection, 1, ["#212", "#219"])
+        await add_pr_refs(connection, 2, ["https://github.com/acme/atlas/pull/231"])
+
+        await migrate(WITH_PR_STATES)
+
+        assert await pr_refs_with_states(connection) == {
+            1: [
+                {"url": "#212", "state": "raised"},
+                {"url": "#219", "state": "raised"},
+            ],
+            2: [{"url": "https://github.com/acme/atlas/pull/231", "state": "raised"}],
+        }
+
+    async def test_the_order_a_card_named_them_in_survives(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """A card's first pull request is usually its main one, and an
+        aggregate left to itself may return the objects in any order."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+        await migrate(MANY_PRS)
+        await add_pr_refs(connection, 1, ["#9", "#1", "#5"])
+
+        await migrate(WITH_PR_STATES)
+
+        assert [ref["url"] for ref in (await pr_refs_with_states(connection))[1]] == [
+            "#9",
+            "#1",
+            "#5",
+        ]
+
+    async def test_a_card_with_none_keeps_an_empty_list_not_a_null(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Most cards name no pull request, and every reader loops over the
+        column — so it has to be an array even when it is empty."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+
+        await migrate(WITH_PR_STATES)
+
+        shapes = await connection.execute(text("SELECT jsonb_typeof(pr_refs) FROM task"))
+        assert shapes.scalars().all() == ["array"]
+        assert await pr_refs_with_states(connection) == {1: []}
+
+    async def test_refuses_a_document_that_is_not_a_list(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """One object here would read as a card with one unnamed pull request
+        everywhere the column is looped over."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+        await migrate(WITH_PR_STATES)
+
+        with pytest.raises(IntegrityError, match="pr_refs_array"):
+            await connection.execute(
+                text("""UPDATE task SET pr_refs = '{"url": "#212", "state": "raised"}'::jsonb""")
+            )
+
+    async def test_refuses_more_than_the_ceiling(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The cap survives the change of type: counted with
+        ``jsonb_array_length`` now, and still the database's own."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None)
+        await migrate(WITH_PR_STATES)
+
+        with pytest.raises(IntegrityError, match="pr_ref_max_count"):
+            await set_pr_refs(
+                connection,
+                1,
+                [{"url": f"#{number}", "state": "raised"} for number in range(21)],
+            )
+
+
+class TestUndoingThePullRequestStates:
+    async def test_puts_every_reference_back_and_drops_the_states(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Unlike 0034's own downgrade, this one does not refuse a card with
+        several: no pull request is lost on the way back, only the states that
+        0034's shape has nowhere to put."""
+        await migrate(ONE_PR)
+        await seed_cards_with_prs(connection, None, None)
+        await migrate(WITH_PR_STATES)
+        await set_pr_refs(
+            connection,
+            1,
+            [
+                {"url": "#212", "state": "merged"},
+                {"url": "#219", "state": "approved"},
+            ],
+        )
+
+        await rewind(MANY_PRS)
+
+        assert await pr_refs_by_number(connection) == {1: ["#212", "#219"], 2: []}

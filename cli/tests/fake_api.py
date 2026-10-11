@@ -226,6 +226,12 @@ TASK_TWO = {
     **_task(
         TASK_TWO_ID, 2, DOING_ID, "Switch the invoice job over", status="blocked", waiting_on=[LENA]
     ),
+    # Two pull requests at two different states, which is the shape `task show`
+    # has to be able to print: one landed, one still waiting on a reviewer.
+    "pr_refs": [
+        {"url": "#212", "state": "merged"},
+        {"url": "https://github.com/acme/atlas/pull/219", "state": "raised"},
+    ],
     # A card with an agent on it that has stopped to ask something — the state
     # the board and the terminal both have to be able to show.
     "agent_session": {

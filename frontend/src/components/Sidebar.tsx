@@ -47,6 +47,7 @@
  * showing.
  */
 
+import { useQuery } from '@tanstack/react-query'
 import {
   useCallback,
   useEffect,
@@ -55,11 +56,14 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
+import { withBase } from '../api/basePath'
+import { ApiError, api } from '../api/client'
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
 import { DayReportPanel } from './DayReport'
 import { ProjectNav } from './ProjectNav'
 import { SidebarSection } from './SidebarSection'
 import { Today, TodayCount } from './Today'
+import { Button } from './ui'
 import styles from './Sidebar.module.css'
 
 const THEME_LABELS: Record<ThemeChoice, string> = {
@@ -279,8 +283,7 @@ function Handle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
 }
 
 /**
- * What you can set. One thing so far, and the shape is what matters: a labelled
- * row per preference, so the second one is a row rather than a redesign.
+ * What you can set, a labelled row per preference, and last the way out.
  */
 function SettingsSection() {
   return (
@@ -291,7 +294,53 @@ function SettingsSection() {
       >
         <ThemeChoiceGroup />
       </Setting>
+      <SignOut />
     </div>
+  )
+}
+
+/**
+ * Who you are signed in as, and the button that stops you being.
+ *
+ * Signing out ends in a full load of the app's root rather than handing the
+ * gate a fresh `/me`. Everything the last person could see is sitting in the
+ * query cache and in open sockets, and a reload is the one way to be sure
+ * none of it is still there for whoever signs in next — it also lands them on
+ * the list of projects rather than on a card that may not be theirs to open.
+ * It is also why this is not a `useMutation`: a successful one invalidates
+ * every query, and every one of them would go off to fail with a 401 on the
+ * way out.
+ */
+function SignOut() {
+  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const person = identity.data?.person ?? null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function signOut() {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.signOut()
+      window.location.assign(withBase('/'))
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Something went wrong.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Setting
+      label="Account"
+      hint={
+        error ??
+        (person ? `Signed in as ${person.name}.` : 'Signed in with the deployment password.')
+      }
+    >
+      <Button small disabled={busy} onClick={() => void signOut()}>
+        {busy ? 'Logging out…' : 'Log out'}
+      </Button>
+    </Setting>
   )
 }
 

@@ -1207,7 +1207,10 @@ async def test_create_task_takes_several_pull_requests(
     server: MCPServer, recorder: fake_api.Recorder
 ) -> None:
     """CYLIST-63. An agent that opened a backend pull request and a frontend
-    one names both on the card rather than choosing between them."""
+    one names both on the card rather than choosing between them.
+
+    CYLIST-76: and says how far each got. A state left off is `raised`, which
+    is what an agent that has just opened one wants said."""
     result = await call(
         server,
         "create_task",
@@ -1215,13 +1218,34 @@ async def test_create_task_takes_several_pull_requests(
         title="Stripe webhook idempotency",
         description="Dedupe on event id.",
         task_type="bug",
-        pr_refs=["#212", "https://github.com/acme/atlas/pull/219"],
+        pr_refs=[
+            {"url": "#212", "state": "merged"},
+            {"url": "https://github.com/acme/atlas/pull/219"},
+        ],
     )
     assert not result.is_error
     assert recorder.body("POST", "/tasks")["pr_refs"] == [
-        "#212",
-        "https://github.com/acme/atlas/pull/219",
+        {"url": "#212", "state": "merged"},
+        {"url": "https://github.com/acme/atlas/pull/219", "state": "raised"},
     ]
+
+
+async def test_create_task_refuses_a_pull_request_state_that_is_not_one_of_the_three(
+    server: MCPServer,
+) -> None:
+    """The three states are declared on the tool rather than checked inside it,
+    so the SDK refuses a fourth before the call is made and the model is told
+    which three it may use — see the `PullRequest` model."""
+    with pytest.raises(Exception, match="'raised', 'approved' or 'merged'"):
+        await call(
+            server,
+            "create_task",
+            project="ATL",
+            title="Stripe webhook idempotency",
+            description="Dedupe on event id.",
+            task_type="bug",
+            pr_refs=[{"url": "#212", "state": "draft"}],
+        )
 
 
 async def test_create_task_without_pull_requests_says_nothing_about_them(
@@ -1253,7 +1277,10 @@ async def test_create_subtask_takes_several_pull_requests(
         title="Dedupe store",
         description="Event ids, with a TTL.",
         task_type="chore",
-        pr_refs=["#44", "#48"],
+        pr_refs=[{"url": "#44", "state": "approved"}, {"url": "#48"}],
     )
     assert not result.is_error
-    assert recorder.body("POST", "/tasks/ATL-2/subtasks")["pr_refs"] == ["#44", "#48"]
+    assert recorder.body("POST", "/tasks/ATL-2/subtasks")["pr_refs"] == [
+        {"url": "#44", "state": "approved"},
+        {"url": "#48", "state": "raised"},
+    ]

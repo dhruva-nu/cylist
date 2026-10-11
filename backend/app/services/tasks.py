@@ -257,7 +257,7 @@ async def create(
         goal_id=data.goal_id,
         status=TaskStatus.ACTIVE,
         jira_ref=data.jira_ref,
-        pr_refs=data.pr_refs,
+        pr_refs=[ref.stored() for ref in data.pr_refs],
     )
     session.add(task)
     await session.flush()
@@ -424,6 +424,13 @@ async def update(
     fields.pop("column_due_dates", None)
     if data.column_due_dates is not None:
         await set_column_due_dates(session, task, data.column_due_dates)
+
+    # The list arrives as `PrRef` models, and the column holds plain JSON: a
+    # `model_dump()` leaves the state as an enum member, which is not a thing
+    # JSONB can store. Read back off `data` rather than converted in place, so
+    # the one shape the column is written in has one owner — `PrRef.stored`.
+    if "pr_refs" in fields:
+        fields["pr_refs"] = [ref.stored() for ref in data.pr_refs or []]
 
     await _refuse_invalid_references(session, task, fields)
 
@@ -1306,10 +1313,20 @@ async def _describe_changes(
         elif field == "sub_status_index":
             was = _stage_label(before["sub_statuses"], was)
             now = _stage_label(after["sub_statuses"], now)
+        elif field == "pr_refs":
+            # Said the way the card says it — "#212 (merged)" — because a
+            # history entry holding two JSON objects says which fields a pull
+            # request has rather than what changed about one.
+            was, now = _describe_pr_refs(was), _describe_pr_refs(now)
         changes.append(
             {"field": field, "label": label, "from": _json_ready(was), "to": _json_ready(now)}
         )
     return changes
+
+
+def _describe_pr_refs(refs: list[dict[str, str]]) -> list[str]:
+    """A card's pull requests as a reader reads them, state and all."""
+    return [f"{ref['url']} ({ref['state']})" for ref in refs]
 
 
 def _stage_label(labels: list[str], index: int | None) -> str | None:

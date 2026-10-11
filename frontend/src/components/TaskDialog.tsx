@@ -11,12 +11,14 @@
  * of your place on the board. A new task has nothing to read yet, so it opens
  * straight on the form.
  *
- * The one control on the detail view that is not Edit or Close is the tick box
- * beside a sub-task, and the line it sits on the right side of is *what a
- * control changes*, not whether one exists: ticking a sub-task off settles a
- * different item, and making that go through the pencil would mean opening a
- * form over every field of the parent to finish something that is not the
- * parent.
+ * Two controls on the detail view are not Edit or Close, and the line they sit
+ * on the right side of is *what a control changes*, not whether one exists.
+ * Ticking a sub-task off settles a different item, and making that go through
+ * the pencil would mean opening a form over every field of the parent to
+ * finish something that is not the parent. The select beside a pull request
+ * (CYLIST-76) is there on the same ground: a pull request is raised, reviewed
+ * and merged somewhere else, and what the select records is what happened over
+ * there. Everything that is a field *of this card* is still text here.
  *
  * The form is tabbed. Basics holds what the card *is* — its name, what done
  * looks like, how urgent, what kind, and which template it follows; Details
@@ -75,6 +77,8 @@ import {
   type Identity,
   isMe,
   type Person,
+  type PrRef,
+  type PrState,
   type Task,
   type TaskComment,
   type TaskDetail,
@@ -92,13 +96,14 @@ import { localDate } from './dates'
 import { GoalChip } from './GoalMarks'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { MentionBox } from './Mentions'
-import { addPrRef, cleanPrRefs, removePrRefAt, setPrRefAt } from './prRefs'
+import { addPrRef, cleanPrRefs, removePrRefAt, setPrRefAt, setPrStateAt } from './prRefs'
 import { useProjectFiles } from './projectFiles'
 import {
   Avatar,
   Button,
   ErrorBanner,
   PriorityIcon,
+  prRefLabel,
   SubStatusBar,
   Tagged,
   TaskRef,
@@ -114,6 +119,36 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
 ]
 
 const TYPES: TaskType[] = ['feature', 'bug', 'chore']
+
+/**
+ * How far a pull request got, in the order it gets there (CYLIST-76).
+ *
+ * One list for both places a state is picked — the detail view's row and the
+ * editor's — so the two cannot offer different words for the same thing.
+ */
+const PR_STATES: { value: PrState; label: string }[] = [
+  { value: 'raised', label: 'Raised' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'merged', label: 'Merged' },
+]
+
+/** The same three, lower case, to finish a spoken sentence about one. */
+const PR_STATE_WORDS: Record<PrState, string> = {
+  raised: 'raised',
+  approved: 'approved',
+  merged: 'merged',
+}
+
+/**
+ * The state a `<select>` just reported, as one of the three.
+ *
+ * A lookup rather than a cast: the value can only be one of the options this
+ * file rendered, and saying so by finding it costs nothing and cannot go stale
+ * if the list gains a member.
+ */
+function prStateNamed(value: string): PrState {
+  return PR_STATES.find((option) => option.value === value)?.value ?? 'raised'
+}
 
 /**
  * The four levels, and what each one asks of whoever picks the card up.
@@ -250,13 +285,15 @@ function TaskPanel(
 }
 
 /**
- * The detail view of a card: read it, and tick its sub-tasks off.
+ * The detail view of a card: read it, tick its sub-tasks off, and say how far
+ * its pull requests got.
  *
  * Deliberately plain markup: a card's own fields are text here, not disabled
  * inputs. A disabled input still looks like somewhere to type and still has to
  * be kept in sync with a form; text cannot be saved by mistake at all. Nothing
- * on this view can alter a field of this card — Edit, Close, and the sub-task
- * list, which finishes work that belongs to other cards. See `SubtasksRead`.
+ * on this view can alter a field of this card — Edit, Close, the sub-task
+ * list, which finishes work that belongs to other cards, and the pull-request
+ * list, which records what a forge did. See `SubtasksRead` and `PrRefsRead`.
  */
 function TaskDetailView({
   projectKey,
@@ -377,15 +414,7 @@ function TaskDetailView({
                 missing some. */}
             <ReadField label={task.pr_refs.length > 1 ? 'Pull requests' : 'Pull request'}>
               {task.pr_refs.length ? (
-                <ul className={styles.prRefs}>
-                  {/* Keyed by the reference: the server stores no duplicates,
-                      so it is the stable identity an index is not. */}
-                  {task.pr_refs.map((ref) => (
-                    <li key={ref}>
-                      <TaskRef kind="pr" value={ref} />
-                    </li>
-                  ))}
-                </ul>
+                <PrRefsRead task={task} announce={announce} onDone={onDone} />
               ) : (
                 '—'
               )}
@@ -1986,8 +2015,8 @@ function PrRefListEditor({
   value,
   onChange,
 }: {
-  value: string[]
-  onChange: (value: string[]) => void
+  value: PrRef[]
+  onChange: (value: PrRef[]) => void
 }) {
   return (
     <div className={styles.prRefEditor}>
@@ -1998,12 +2027,29 @@ function PrRefListEditor({
         <div key={index} className={styles.prRefEditorRow}>
           <input
             className={styles.grow}
-            value={ref}
+            value={ref.url}
             maxLength={200}
             placeholder="#000 or a URL"
             aria-label={`Pull request ${index + 1}`}
             onChange={(event) => onChange(setPrRefAt(value, index, event.target.value))}
           />
+          {/* Counted rather than named here, unlike the detail view's: the
+              address beside it is being typed, so there may not be one to
+              name yet. */}
+          <select
+            className={styles.prStateSelect}
+            aria-label={`State of pull request ${index + 1}`}
+            value={ref.state}
+            onChange={(event) =>
+              onChange(setPrStateAt(value, index, prStateNamed(event.target.value)))
+            }
+          >
+            {PR_STATES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <Button
             variant="ghost"
             small
@@ -2591,6 +2637,90 @@ function SubtasksRead({
 
       <OpenSubtasksGate outstanding={task.open_subtask_count} />
     </div>
+  )
+}
+
+/**
+ * The card's pull requests, read: each one a link, and how far it got.
+ *
+ * The state is a select rather than a word, which makes this the second
+ * control on a view whose whole discipline is that a card's fields are text
+ * here. It sits on the right side of the same line the sub-task tick box sits
+ * on — *what* a control changes, not whether one exists. A pull request is
+ * somebody else's object: it is raised, reviewed and merged on a forge, and
+ * what this says is what happened over there, the same way a tick box settles
+ * a different item. Putting it behind the pencil would mean opening a form
+ * over every field of the card to record that a reviewer said yes.
+ *
+ * Saved on choosing, with no Save button, because a select that only takes
+ * effect when you remember to press Save is a select that lies — the reasoning
+ * the tick box is built on, and the assignee badge on a board card.
+ *
+ * Keyed by the URL: the server stores no duplicates, so it is the stable
+ * identity an index is not. The index is still what the edit is made by, since
+ * two rows could hold the same address for as long as one is being typed.
+ */
+function PrRefsRead({
+  task,
+  announce,
+  onDone,
+}: {
+  task: TaskDetail
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const queryClient = useQueryClient()
+
+  const move = useMutation({
+    mutationFn: ({ refs }: { refs: PrRef[]; label: string; state: PrState }) =>
+      api.updateTask(task.id, { pr_refs: refs }),
+    onSuccess: async (_updated, { label, state }) => {
+      announce(`Pull request ${label} is ${PR_STATE_WORDS[state]}.`)
+      await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+      // Moving one along is a change to the card, so the history under it is
+      // now one entry out of date.
+      await queryClient.invalidateQueries({ queryKey: ['task-history', task.id] })
+      // The board behind the dialog draws a mark per pull request, in the
+      // state's own colour, so it has to hear about this too.
+      await onDone()
+    },
+  })
+
+  return (
+    <>
+      {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
+      <ul className={styles.prRefs}>
+        {task.pr_refs.map((ref, index) => (
+          <li key={ref.url} className={styles.prRefRow}>
+            <TaskRef kind="pr" value={ref.url} state={ref.state} />
+            <select
+              className={styles.prStateSelect}
+              // Named by the reference rather than by its position, because
+              // the row above it has just been read out as "#212, merged" and
+              // "pull request 1" is a different way of counting.
+              aria-label={`State of pull request ${prRefLabel(ref.url)}`}
+              value={ref.state}
+              disabled={move.isPending}
+              onChange={(event) => {
+                const state = prStateNamed(event.target.value)
+                if (state === ref.state) return
+                move.mutate({
+                  refs: setPrStateAt(task.pr_refs, index, state),
+                  label: prRefLabel(ref.url),
+                  state,
+                })
+              }}
+            >
+              {PR_STATES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 
