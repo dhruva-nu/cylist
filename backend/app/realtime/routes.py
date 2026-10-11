@@ -41,7 +41,7 @@ from app.db import Database
 from app.models.agent_session import AgentSessionReason
 from app.realtime import auth, protocol
 from app.realtime.hub import AgentLink, Hub, Watcher
-from app.services import agent_reports, projects, tasks
+from app.services import agent_feed, agent_reports, projects, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +53,10 @@ async def board_socket(websocket: WebSocket, project_ref: str) -> None:
     """Nudge a browser whenever the board it is looking at changes.
 
     Sends ``{"type": "ready"}`` once the socket is good, then a
-    ``{"type": "board.changed"}`` for each committed change to this project.
-    Reads nothing: a client with something to say has the HTTP API for it.
+    ``{"type": "board.changed"}`` for each committed change to this project,
+    and an ``{"type": "agent.feed", "task_id": …}`` when an agent's feed on
+    one of its cards grows. Reads nothing: a client with something to say has
+    the HTTP API for it.
     """
     settings: Settings = websocket.app.state.settings
     hub: Hub = websocket.app.state.hub
@@ -116,7 +118,7 @@ async def _forward_nudges_until_closed(websocket: WebSocket, watcher: Watcher) -
     until the next nudge failed to send — which on a quiet board could be
     hours, and on a busy one is a send to nowhere per change.
     """
-    nudges = asyncio.ensure_future(watcher.queue.get())
+    nudges = asyncio.ensure_future(watcher.next())
     incoming = asyncio.ensure_future(websocket.receive())
     try:
         while True:
@@ -131,7 +133,7 @@ async def _forward_nudges_until_closed(websocket: WebSocket, watcher: Watcher) -
                 incoming = asyncio.ensure_future(websocket.receive())
             if nudges in done:
                 await websocket.send_json(nudges.result())
-                nudges = asyncio.ensure_future(watcher.queue.get())
+                nudges = asyncio.ensure_future(watcher.next())
     finally:
         nudges.cancel()
         incoming.cancel()
@@ -248,6 +250,11 @@ async def _serve_agent(
                     # Nothing to write. The deadline has already moved, which
                     # is the entire purpose of the message.
                     continue
+                if message.type == "feed":
+                    # Unacknowledged, and never a reason to close: see the
+                    # protocol's note on `feed`.
+                    await _record_feed(database, client_session_id, message)
+                    continue
                 if message.type == "bye":
                     await _end_row(
                         database,
@@ -291,6 +298,20 @@ async def _record_report(
         )
     await websocket.send_json(protocol.ack(applied))
     return None
+
+
+async def _record_feed(
+    database: Database,
+    client_session_id: str,
+    message: protocol.FeedMessage,
+) -> None:
+    """Keep the lines a session sent. A card that cannot be found keeps none."""
+    async with database.session() as session:
+        try:
+            task = await tasks.resolve(session, message.task)
+        except NotFoundError:
+            return
+        await agent_feed.append(session, task, client_session_id, message.entries)
 
 
 async def _end_row(

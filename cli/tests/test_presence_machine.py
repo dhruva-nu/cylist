@@ -310,3 +310,45 @@ class TestEnding:
         _, actions = m.step(live(), m.Tick(), elapsed=m.IDLE_AFTER * 10)
 
         assert finishes(actions) == []
+
+
+FEED_LINE: dict[str, Any] = {
+    "at": "2026-10-12T14:31:02Z",
+    "kind": "run",
+    "tool": "Bash",
+    "text": "pytest",
+}
+
+
+class TestTheFeed:
+    def test_lines_go_out_as_they_are_found(self) -> None:
+        _, actions = m.step(live(), m.FeedLines((FEED_LINE,)))
+
+        assert frames(actions) == [{"type": "feed", "task": "ATL-1", "entries": [FEED_LINE]}]
+
+    def test_lines_found_while_down_are_held_and_sent_after_the_level(self) -> None:
+        machine, _ = m.step(live(), m.LinkDown())
+        machine, actions = m.step(machine, m.FeedLines((FEED_LINE,)))
+        assert frames(actions) == []
+
+        _, actions = m.step(machine, m.LinkUp())
+
+        sent = frames(actions)
+        assert [frame["type"] for frame in sent] == ["state", "feed"]
+        assert sent[1]["entries"] == [FEED_LINE]
+
+    def test_only_the_newest_are_held(self) -> None:
+        machine, _ = m.step(START, m.LinkDown())
+        lines = tuple({**FEED_LINE, "text": f"step {n}"} for n in range(m.FEED_HELD + 10))
+
+        machine, _ = m.step(machine, m.FeedLines(lines))
+
+        assert len(machine.held) == m.FEED_HELD
+        assert machine.held[0]["text"] == "step 10"
+
+    def test_many_lines_are_several_frames(self) -> None:
+        lines = tuple({**FEED_LINE, "text": f"step {n}"} for n in range(45))
+
+        _, actions = m.step(live(), m.FeedLines(lines))
+
+        assert [len(frame["entries"]) for frame in frames(actions)] == [20, 20, 5]

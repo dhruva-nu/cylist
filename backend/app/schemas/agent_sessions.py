@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
-from app.models.agent_session import AgentSessionReason, AgentSessionState
+from app.models.agent_session import AgentFeedKind, AgentSessionReason, AgentSessionState
 from app.schemas.common import Schema
 
 NOTE_MAX = 300
@@ -106,3 +106,31 @@ class AgentPresence(Schema):
     )
     since: datetime = Field(description="When the deciding session entered its state.")
     last_seen_at: datetime = Field(description="When the deciding session last reported in.")
+
+
+FEED_TEXT_MAX = 2000
+"""Longest line the feed keeps. The CLI clips well below this; the ceiling is
+here so that a client which does not cannot fill a row with a whole file."""
+
+
+class AgentFeedEntryIn(Schema):
+    """One line of a session's feed, as its daemon sends it."""
+
+    at: datetime = Field(description="When the agent did it, by the transcript's clock.")
+    kind: AgentFeedKind
+    tool: str | None = Field(
+        default=None, max_length=200, description="The tool's own name, for every kind but `said`."
+    )
+    text: str = Field(min_length=1, max_length=FEED_TEXT_MAX)
+
+
+class AgentFeedEntryRead(Schema):
+    """One line of what an agent read, edited, ran or said on a card."""
+
+    id: UUID
+    agent_session_id: UUID
+    client_name: str | None = Field(description="The session's display name, if known.")
+    at: datetime
+    kind: AgentFeedKind
+    tool: str | None
+    text: str

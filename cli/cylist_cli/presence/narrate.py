@@ -195,3 +195,55 @@ def _host(url: str) -> str:
 
 def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
+
+
+# --- The feed ------------------------------------------------------------------
+
+READ_TOOLS = frozenset({"Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "NotebookRead"})
+EDIT_TOOLS = frozenset({"Edit", "MultiEdit", "Write", "NotebookEdit"})
+
+
+def kind_of(tool: str) -> str:
+    """Which line of the feed a tool call is: ``read``, ``edit``, ``run`` or ``tool``."""
+    if tool in READ_TOOLS:
+        return "read"
+    if tool in EDIT_TOOLS:
+        return "edit"
+    if tool == "Bash":
+        return "run"
+    return "tool"
+
+
+def feed_subject(tool: str, tool_input: Any, cwd: str = "") -> str:
+    """What a tool call acted on, for a feed line that already says how.
+
+    The feed labels each line READ, EDIT or RAN, so the line itself is the
+    object: ``backend/app/models/task.py`` rather than "Reading task.py", a
+    path made relative to where the session is working so a reader sees the
+    repository rather than somebody's home directory. Redacted, like
+    everything else that leaves the machine.
+    """
+    arguments: dict[str, Any] = tool_input if isinstance(tool_input, dict) else {}
+    path = _text(arguments.get("file_path") or arguments.get("notebook_path"))
+    if tool == "Bash":
+        line = shorten_command(_text(arguments.get("command"))) or "a command"
+    elif path:
+        line = _relative(path, cwd)
+    elif tool == "WebFetch":
+        line = _text(arguments.get("url"))
+    else:
+        line = _describe(tool, arguments)
+    return clip(redact(line), FEED_LINE_MAX)
+
+
+FEED_LINE_MAX = 300
+"""Longest feed line for a tool call or its output."""
+
+SAID_MAX = 1500
+"""Longest feed line for something the agent wrote. A paragraph, not a page."""
+
+
+def _relative(path: str, cwd: str) -> str:
+    if cwd and path.startswith(cwd.rstrip("/\\") + ("\\" if "\\" in cwd else "/")):
+        return path[len(cwd.rstrip("/\\")) + 1 :]
+    return path

@@ -255,6 +255,17 @@ The line is redacted before it leaves the machine (tokens, `password=…`,
 row in the card's history. A hook installed before this was added has no
 `PreToolUse` entry: run `cylist hook install` again to add it.
 
+An open card also carries the session's **feed**: what the agent read, edited,
+ran and said, line by line. The daemon below follows the session's Claude Code
+transcript (every hook event names it) from the moment it starts, and sends
+the agent's text, a one-line subject for each tool call, and — for shell
+commands and failures only — the last or first line of what came back. Never
+a file's contents or a whole command's output, never your prompts or the
+model's thinking, and everything through the same redaction as the note. The
+server keeps the newest 200 lines of each session, so a card opened halfway
+through shows how it got there. The feed needs the daemon: with
+`CYLIST_PRESENCE=http` the card still shows its state and note, but no feed.
+
 Two ways to bind a session, and nothing else binds one:
 
 ```

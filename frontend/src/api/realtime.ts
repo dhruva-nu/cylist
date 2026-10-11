@@ -20,10 +20,19 @@
 
 import { BASE_PATH, withBase } from './basePath'
 
-/** What the server may send down a board socket. */
+/**
+ * What the server may send down a board socket.
+ *
+ * `agent.feed` is the second doorbell (CYLIST-88): an agent on the named card
+ * has read, edited, run or said something. Only a browser with that card open
+ * has anything to refetch, which is why it is not folded into `board.changed`
+ * — an agent writes a line every few seconds, and the board should not
+ * rebuild every card for each.
+ */
 export type BoardEvent =
   | { type: 'ready' }
   | { type: 'board.changed'; at: string }
+  | { type: 'agent.feed'; task_id: string; at: string }
   | { type: 'error'; code: string; message: string }
 
 /**
@@ -89,6 +98,12 @@ export function parseEvent(data: unknown): BoardEvent | null {
   if (type === 'board.changed') {
     const at = (parsed as { at?: unknown }).at
     return { type: 'board.changed', at: typeof at === 'string' ? at : '' }
+  }
+  if (type === 'agent.feed') {
+    const { task_id: taskId, at } = parsed as { task_id?: unknown; at?: unknown }
+    // A feed nudge that does not say which card is one nobody can act on.
+    if (typeof taskId !== 'string' || !taskId) return null
+    return { type: 'agent.feed', task_id: taskId, at: typeof at === 'string' ? at : '' }
   }
   if (type === 'error') {
     const { code, message } = parsed as { code?: unknown; message?: unknown }

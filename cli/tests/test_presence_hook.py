@@ -133,6 +133,14 @@ class TestWhenThereIsADaemon:
         assert daemon.received[0]["state"] == "working"
         assert daemon.received[0]["note"] == "Editing tasks.py"
 
+    def test_the_daemon_is_told_which_transcript_to_follow(self, fire: Fire) -> None:
+        """Every hook event names it, and it is how the card's feed is found."""
+        bind()
+        with fake_daemon.FakeDaemon(SESSION) as daemon:
+            fire(event("Stop", transcript_path="/home/somebody/.claude/projects/x/abc.jsonl"))
+
+        assert daemon.received[0]["transcript"] == "/home/somebody/.claude/projects/x/abc.jsonl"
+
     def test_walking_to_another_card_is_a_bind(
         self, fire: Fire, recorder: fake_api.Recorder
     ) -> None:

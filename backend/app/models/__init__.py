@@ -7,7 +7,13 @@ to the imports below.
 
 from app.models.activity import Activity, Channel
 from app.models.agent import Skill
-from app.models.agent_session import AgentSession, AgentSessionReason, AgentSessionState
+from app.models.agent_session import (
+    AgentFeedEntry,
+    AgentFeedKind,
+    AgentSession,
+    AgentSessionReason,
+    AgentSessionState,
+)
 from app.models.api_token import ApiToken, TokenKind
 from app.models.base import Base
 from app.models.board import BoardColumn
@@ -42,6 +48,8 @@ from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 __all__ = [
     "EVERYONE_ELSE",
     "Activity",
+    "AgentFeedEntry",
+    "AgentFeedKind",
     "AgentSession",
     "AgentSessionReason",
     "AgentSessionState",

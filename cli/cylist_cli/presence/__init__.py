@@ -9,7 +9,7 @@ The point is not the saved handshakes. It is that a connection can *end*: a
 socket closing tells the board the session is over, where a PUT that stops
 coming tells it nothing at all and left the server guessing from a clock.
 
-The six modules, smallest first:
+The modules, smallest first:
 
 * :mod:`.protocol` — the two wire formats. Pure.
 * :mod:`.owner` — which ``claude`` a session belongs to, and whether it is
@@ -17,6 +17,8 @@ The six modules, smallest first:
   clock that could not tell a waiting human from a closed terminal.
 * :mod:`.machine` — every rule about when to send, keepalive and give up.
   Pure, and where to look first.
+* :mod:`.narrate` and :mod:`.transcript` — what the agent is doing, as a
+  card's one-line note and as its feed, redacted before either leaves.
 * :mod:`.ipc` — the unix socket between hook and daemon.
 * :mod:`.supervisor` — one daemon per session, started and stopped.
 * :mod:`.daemon` — the process. Deliberately dull; it decides nothing.
@@ -63,6 +65,7 @@ def report(
     *,
     bind: bool = False,
     note: str | None = None,
+    transcript: str | None = None,
 ) -> bool:
     """Tell the daemon where the session is. False means "fall back to HTTP".
 
@@ -76,9 +79,9 @@ def report(
         return False
 
     line = (
-        protocol.bind_message(session_id, task, client_name)
+        protocol.bind_message(session_id, task, client_name, transcript)
         if bind
-        else protocol.state_message(session_id, task, state, reason, client_name, note)
+        else protocol.state_message(session_id, task, state, reason, client_name, note, transcript)
     )
     if ipc.send(session_id, line) is not None:
         return True

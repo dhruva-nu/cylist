@@ -1,9 +1,10 @@
 """The process that holds the socket.
 
-Two threads and a queue. The main thread owns the WebSocket exclusively and
-runs the reducer; a second thread accepts on the hook socket and pushes
-what the hooks say onto the queue. Nothing else is shared, so there is no
-lock anywhere in here.
+Three threads and a queue. The main thread owns the WebSocket exclusively
+and runs the reducer; a second thread accepts on the hook socket and pushes
+what the hooks say onto the queue; a third follows the session's transcript
+and pushes what the agent did onto the same queue, for the card's feed.
+Nothing else is shared, so there is no lock anywhere in here.
 
 Synchronous, not asyncio. ``websockets.sync`` is a real client with real
 ping/pong, and choosing it means the CLI gains no event loop, no
@@ -30,7 +31,7 @@ from typing import Any
 
 from cylist_cli import endpoints
 from cylist_cli.context import Context
-from cylist_cli.presence import ipc, protocol, supervisor
+from cylist_cli.presence import ipc, protocol, supervisor, transcript
 from cylist_cli.presence import machine as m
 from cylist_cli.presence import owner as owner_module
 
@@ -44,6 +45,10 @@ noticing that a connection has died without saying so."""
 
 TICK = 1.0
 """How often the reducer is given a chance to notice that time has passed."""
+
+FOLLOW_EVERY = 0.5
+"""How often the transcript is looked at. Fast enough that a feed reads as
+live; slow enough that a stat a half-second is all a quiet session costs."""
 
 
 def log_path(session_id: str) -> Path:
@@ -141,6 +146,15 @@ def run(
     )
     accepting.start()
 
+    stopped = threading.Event()
+    following = threading.Thread(
+        target=_follow,
+        args=(state, events, stopped),
+        name="cylist-transcript",
+        daemon=True,
+    )
+    following.start()
+
     def hang_up(*_: object) -> None:
         events.put(m.HookEnd("session_ended"))
 
@@ -151,6 +165,7 @@ def run(
     except Exception:
         logger.exception("The presence daemon stopped on an error")
     finally:
+        stopped.set()
         listener.close()
         supervisor.clear_pid(session_id)
         lock.release()
@@ -169,6 +184,9 @@ class _Shared:
         self.session_id = session_id
         self.task: str | None = None
         self.link: str = m.Link.CONNECTING.value
+        self.transcript: str | None = None
+        """Written by the IPC thread, read by the follower: the one exception
+        to "written by the main thread", and still a single string."""
 
 
 def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Event]) -> str:
@@ -178,6 +196,10 @@ def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Even
         # check, and the alternative is one conversation's state landing on
         # another's card.
         return protocol.refusal("wrong_session")
+
+    transcript = message.get("transcript")
+    if isinstance(transcript, str) and transcript:
+        state.transcript = transcript
 
     kind = message.get("t")
     if kind == "state":
@@ -201,6 +223,35 @@ def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Even
         events.put(m.HookEnd(str(message.get("reason") or "session_ended")))
     # "ping" asks for the ack and nothing else.
     return protocol.ack(state.link, state.task, os.getpid())
+
+
+def _follow(state: _Shared, events: queue.Queue[m.Event], stopped: threading.Event) -> None:
+    """Follow the session's transcript, and queue what the agent did.
+
+    Waits for a hook to say which file — every event carries it — and starts
+    at that file's end. A different path later (a ``/clear`` keeps the
+    daemon's session id only if it keeps the conversation, so in practice
+    this is a resumed one) is followed from *its* end in turn. Nothing here
+    can stop the daemon: a transcript that cannot be read is a feed that
+    stays empty, which is what a card had before this existed.
+    """
+    tail: transcript.Tail | None = None
+    narrator = transcript.Narrator()
+    while not stopped.wait(FOLLOW_EVERY):
+        path = state.transcript
+        if path is None:
+            continue
+        if tail is None or tail.path != path:
+            tail = transcript.Tail(path)
+            logger.info("Following %s", path)
+            continue
+        try:
+            found = [entry.wire() for line in tail.read() for entry in narrator.read_line(line)]
+        except Exception:  # pragma: no cover - defensive; see the docstring
+            logger.exception("Could not read the transcript")
+            continue
+        if found:
+            events.put(m.FeedLines(tuple(found)))
 
 
 def _note(value: object) -> str | None:

@@ -33,7 +33,17 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Identity,
+    Index,
+    String,
+    Text,
+)
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
@@ -197,3 +207,86 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     """When a finished session was cleared off the card, by the Dismiss button
     or by a person touching the card in the web UI. A dismissed row is history;
     the board no longer draws it."""
+
+
+class AgentFeedKind(StrEnum):
+    """What one line of a session's feed is."""
+
+    SAID = "said"
+    """Something the agent wrote to the person it is working for."""
+
+    READ = "read"
+    """A tool call that looks: reading a file, searching, fetching a page."""
+
+    EDIT = "edit"
+    """A tool call that changes a file."""
+
+    RUN = "run"
+    """A shell command."""
+
+    TOOL = "tool"
+    """Any other tool call — an MCP tool, a subagent, a to-do list."""
+
+    OUTPUT = "output"
+    """The last line a shell command printed, as the agent saw it."""
+
+    ERROR = "error"
+    """A tool call that failed, with the first line of why."""
+
+
+class AgentFeedEntry(Base, UUIDPrimaryKeyMixin):
+    """One line of what a session read, edited, ran and said — CYLIST-88.
+
+    Written by the agent's presence daemon, which follows the session's
+    Claude Code transcript and sends what it finds down the socket the
+    session already holds. Kept rather than only pushed past, so that a card
+    opened halfway through a session shows how it got there, and so that the
+    feed survives a reload — but only the newest
+    :data:`app.services.agent_feed.KEEP_PER_SESSION` lines of each session:
+    this is a window on the work, not an archive of it, and the activity trail
+    is still the record.
+
+    The text is redacted on the agent's machine before it is sent (see the
+    CLI's ``presence/narrate.py``). Nothing here is a plaintext secret by
+    design; nothing here is guaranteed not to be one, which is why it is
+    readable only by people who can already read the card.
+
+    Ordered by ``seq`` rather than by ``at`` or ``id``: ``at`` is the agent's
+    clock, and a UUIDv7 orders only across milliseconds — the lines of one
+    frame are written in the same one and must still come back in the order
+    they were sent.
+    """
+
+    __tablename__ = "agent_feed_entry"
+    __table_args__ = (Index("ix_agent_feed_entry_task_id_seq", "task_id", "seq"),)
+
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False, unique=True)
+    """Insertion order, drawn by the database."""
+
+    agent_session_id: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("agent_session.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    task_id: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    """The session's card, copied here so a card's feed is one index scan
+    rather than a join through every session that was ever on it."""
+
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    """When the agent did it, by the transcript's clock."""
+
+    kind: Mapped[AgentFeedKind] = mapped_column(
+        _enum(AgentFeedKind, "agent_feed_kind"), nullable=False
+    )
+
+    tool: Mapped[str | None] = mapped_column(String(200))
+    """The tool's own name — ``Bash``, ``Edit``, ``mcp__cylist__get_task`` —
+    for every kind but ``said``."""
+
+    text: Mapped[str] = mapped_column(Text, nullable=False)

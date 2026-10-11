@@ -549,6 +549,11 @@ class Hook:
         ref = str(arguments.get("task") or "").strip().upper()
         return ref if REFERENCE.match(ref) else None
 
+    def _transcript(self) -> str | None:
+        """The file the daemon follows for the card's feed, as the harness named it."""
+        path = self.event.get("transcript_path")
+        return path if isinstance(path, str) and path else None
+
     def _report_end(self, reason: str) -> None:
         """The session is over. Tell whichever channel is listening.
 
@@ -594,6 +599,7 @@ class Hook:
             self._client_name(),
             bind=bind,
             note=note,
+            transcript=self._transcript(),
         ):
             return
         self._http_put(state, reason=reason, note=note)

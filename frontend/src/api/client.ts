@@ -819,6 +819,27 @@ export interface AgentSessionRead {
 
 export type AgentPresenceState = 'working' | 'waiting' | 'done'
 
+/** What one line of an agent's feed is. */
+export type AgentFeedKind = 'said' | 'read' | 'edit' | 'run' | 'tool' | 'output' | 'error'
+
+/**
+ * One line of what an agent read, edited, ran or said on a card (CYLIST-88).
+ * Written by the agent's presence daemon from its transcript, redacted on the
+ * agent's machine; each session keeps its newest 200.
+ */
+export interface AgentFeedEntry {
+  id: string
+  agent_session_id: string
+  /** The session's display name, if known. */
+  client_name: string | null
+  /** When the agent did it, by its own clock. */
+  at: string
+  kind: AgentFeedKind
+  /** The tool's own name — `Bash`, `Edit` — for every kind but `said`. */
+  tool: string | null
+  text: string
+}
+
 /**
  * What a card says about the agents on it, reduced to the one state its border
  * shows. `waiting` wins over `working` wins over `done`.
@@ -1572,6 +1593,9 @@ export const api = {
    */
   getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
     request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
+  /** What the agents on a card have been doing, newest first. */
+  getAgentFeed: (taskRef: string, limit = 100) =>
+    request<AgentFeedEntry[]>(`/tasks/${taskRef}/agent-feed?limit=${limit}`),
   /** Clear the finished sessions off a card. The ones still running stay. */
   dismissAgentSessions: (taskRef: string) =>
     request<void>(`/tasks/${taskRef}/agent-sessions/dismiss`, { method: 'POST' }),

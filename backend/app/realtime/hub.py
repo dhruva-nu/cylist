@@ -15,13 +15,20 @@ one property is what makes the rest of this module simple enough to trust:
 
 * :meth:`Hub.publish` never awaits a socket, so a browser on a bad connection
   cannot slow down the transaction that is telling it something.
-* A queue that is already full is left alone rather than grown, because a
-  second "the board changed" adds nothing to the first.
+* A nudge already waiting is not queued again, because a second "the board
+  changed" adds nothing to the first.
 * A dropped event costs a refetch that the next event will trigger anyway.
 
 The cost is one HTTP round trip per nudge. The thing it buys is that there is
 exactly one piece of code that knows how to build a card — ``read_tasks()`` —
 and no second, drifting copy of it here.
+
+There are two doorbells, not one. ``board.changed`` is the board's; an
+``agent.feed`` names one card whose agent feed has grown (CYLIST-88), and only
+a browser with that card open does anything about it. They are kept apart
+rather than folded into one because an agent writes a feed line every few
+seconds, and a board that refetched every card for each would be paying for
+a dialog it may not have open.
 """
 
 from __future__ import annotations
@@ -29,26 +36,31 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from app.core.clock import now
+from app.realtime import protocol
 
 logger = logging.getLogger(__name__)
 
-_PENDING = 1
-"""How many nudges a watcher may have waiting.
+_PENDING = 16
+"""How many distinct nudges a watcher may have waiting.
 
-One, because they are identical. A watcher with a nudge already queued has
-everything a second one would tell it, so the second is dropped rather than
-buffered — which is coalescing, and is the reason a slow client cannot make
-this grow without bound.
+Nudges are keyed — ``board.changed`` is one key, each card's ``agent.feed``
+another — and a key already waiting is not queued twice: a watcher with a
+nudge pending has everything a second one would tell it, so the second is
+dropped rather than buffered. That is coalescing, and with the cap it is the
+reason a slow client cannot make this grow without bound. The board's own
+nudge is always let in; past the cap, it is the feed nudges that wait for the
+next one, and a board nudge refetches the open card's feed anyway.
 
 Only messages that are safe to drop and safe to duplicate may go through
 :meth:`Hub.publish`. Anything else needs its own path.
 """
+
+BOARD_CHANGED = "board.changed"
 
 
 @dataclass(eq=False)
@@ -60,9 +72,25 @@ class Watcher:
     """
 
     project_id: UUID
-    queue: asyncio.Queue[dict[str, Any]] = field(
-        default_factory=lambda: asyncio.Queue(maxsize=_PENDING)
-    )
+    _pending: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _ready: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def offer(self, key: str, nudge: dict[str, Any]) -> None:
+        """Queue a nudge unless one like it is already waiting. Never blocks."""
+        if key in self._pending:
+            return
+        if key != BOARD_CHANGED and len(self._pending) >= _PENDING:
+            return
+        self._pending[key] = nudge
+        self._ready.set()
+
+    async def next(self) -> dict[str, Any]:
+        """The oldest waiting nudge, once there is one."""
+        while not self._pending:
+            self._ready.clear()
+            await self._ready.wait()
+        key = next(iter(self._pending))
+        return self._pending.pop(key)
 
 
 @dataclass(eq=False)
@@ -114,11 +142,16 @@ class Hub:
         if not watchers:
             return
 
-        nudge = {"type": "board.changed", "at": now().isoformat()}
+        task_id = event.get("task_id")
+        if event.get("type") == protocol.FEED_CHANGED and isinstance(task_id, UUID):
+            key = f"{protocol.FEED_CHANGED}:{task_id}"
+            nudge = protocol.feed_changed(str(task_id))
+        else:
+            key = BOARD_CHANGED
+            nudge = protocol.board_changed()
         for watcher in watchers:
-            # A watcher with one queued already has everything this would say.
-            with suppress(asyncio.QueueFull):
-                watcher.queue.put_nowait(nudge)
+            # A watcher with one waiting already has everything this would say.
+            watcher.offer(key, nudge)
 
     # --- Agents ------------------------------------------------------------
 

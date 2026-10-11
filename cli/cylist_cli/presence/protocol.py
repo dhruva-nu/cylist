@@ -8,10 +8,15 @@ connection, and one reply::
 
     {"v": 1, "t": "state", "session": "…", "task": "ATL-41",
      "state": "working", "reason": null, "client_name": "ATL-41",
-     "note": "Running pytest test_pr_states.py"}
-    {"v": 1, "t": "bind",  "session": "…", "task": "ATL-42", "client_name": "ATL-42"}
+     "note": "Running pytest test_pr_states.py", "transcript": "/…/abc.jsonl"}
+    {"v": 1, "t": "bind",  "session": "…", "task": "ATL-42", "client_name": "ATL-42",
+     "transcript": "/…/abc.jsonl"}
     {"v": 1, "t": "end",   "session": "…", "reason": "session_ended"}
     {"v": 1, "ok": true, "link": "live", "task": "ATL-41", "pid": 12345}
+
+``transcript`` is the path Claude Code gives every hook event, and how the
+daemon learns which file to follow for the card's feed (CYLIST-88). Optional:
+a daemon told none simply sends no feed.
 
 The session id is echoed in every message and checked by the daemon. It costs
 nothing and it means a reused runtime directory, or a hash collision in a
@@ -61,6 +66,7 @@ def state_message(
     reason: str | None,
     name: str,
     note: str | None = None,
+    transcript: str | None = None,
 ) -> str:
     return _line(
         {
@@ -71,12 +77,21 @@ def state_message(
             "reason": reason,
             "client_name": name,
             "note": note,
+            "transcript": transcript,
         }
     )
 
 
-def bind_message(session: str, task: str, name: str) -> str:
-    return _line({"t": "bind", "session": session, "task": task, "client_name": name})
+def bind_message(session: str, task: str, name: str, transcript: str | None = None) -> str:
+    return _line(
+        {
+            "t": "bind",
+            "session": session,
+            "task": task,
+            "client_name": name,
+            "transcript": transcript,
+        }
+    )
 
 
 def end_message(session: str, reason: str) -> str:
@@ -147,6 +162,23 @@ def hello_frame(
             "report": {"state": state, "reason": reason, "client_name": name, "note": note},
         }
     )
+
+
+FEED_BATCH = 20
+"""Most lines per ``feed`` frame. The server takes up to 50; at twenty, with
+every line clipped, a frame stays far inside its 64 KiB ceiling."""
+
+
+def feed_frames(task: str, entries: list[dict[str, Any]]) -> list[str]:
+    """What the session did, as as many ``feed`` frames as it takes.
+
+    Not acknowledged by the server, and not part of the level: a feed line is
+    sent once, while the link is up, and a reconnect does not replay them.
+    """
+    return [
+        json.dumps({"type": "feed", "task": task, "entries": entries[i : i + FEED_BATCH]})
+        for i in range(0, len(entries), FEED_BATCH)
+    ]
 
 
 def heartbeat_frame() -> str:

@@ -9,11 +9,14 @@ broken socket but a wedged process.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack
+from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 
+from app.realtime.hub import Watcher
 from tests import ws
 
 BOARD = "/api/v1/projects/ATL/board/ws"
@@ -264,3 +267,48 @@ class TestWhatASocketCosts:
         # The handler's `finally` has run by the time the context exits.
         assert hub.stats()["board_watchers"] == 0
         assert hub.stats()["projects_watched"] == 0
+
+
+class TestTheHubsDoorbells:
+    """Two kinds of nudge share one queue per browser without drowning each other."""
+
+    async def test_a_feed_nudge_does_not_crowd_out_the_board_s(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        watcher.offer("agent.feed:a", {"type": "agent.feed", "task_id": "a"})
+        watcher.offer("board.changed", {"type": "board.changed"})
+
+        assert (await watcher.next())["type"] == "agent.feed"
+        assert (await watcher.next())["type"] == "board.changed"
+
+    async def test_the_same_nudge_twice_is_waiting_once(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        for _ in range(3):
+            watcher.offer("agent.feed:a", {"type": "agent.feed", "task_id": "a"})
+        watcher.offer("board.changed", {"type": "board.changed"})
+
+        assert (await watcher.next())["type"] == "agent.feed"
+        assert (await watcher.next())["type"] == "board.changed"
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):
+                await watcher.next()
+
+    async def test_many_cards_cannot_grow_it_without_bound_or_lock_the_board_out(
+        self,
+    ) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        for n in range(100):
+            watcher.offer(f"agent.feed:{n}", {"type": "agent.feed", "task_id": str(n)})
+        watcher.offer("board.changed", {"type": "board.changed"})
+
+        seen = []
+        while True:
+            try:
+                async with asyncio.timeout(0.01):
+                    seen.append((await watcher.next())["type"])
+            except TimeoutError:
+                break
+        assert seen.count("agent.feed") == 16
+        assert seen[-1] == "board.changed"

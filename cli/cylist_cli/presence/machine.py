@@ -19,6 +19,11 @@ The rules, in one place:
 * The keepalive runs for as long as the link is up, whether the session is
   working or waiting. Both are a session that is still open, and the only
   thing silence ever meant was that nobody had asked the better question.
+* Feed lines (CYLIST-88) are sent as they are found while the link is up,
+  and held — the newest :data:`FEED_HELD` of them — while it is not, then
+  sent after the level on reconnect. Unlike the level they are history, so
+  they are worth holding; unlike the activity trail they are a window, so a
+  long outage costs the oldest of them rather than memory.
 * Nothing keeps a daemon alive forever. It exits when the session ends, when
   the harness process it belongs to exits, when the server has been
   unreachable long enough that nobody is coming back — and, only where no
@@ -38,6 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import Any
 
 from cylist_cli.presence import protocol
 
@@ -65,6 +71,9 @@ Half an hour of a backend that is not there means it is not coming back
 inside this session. The next hook event starts a fresh daemon, so nothing
 is lost but the process.
 """
+
+FEED_HELD = 100
+"""Most feed lines held while the link is down. The server keeps 200 a session."""
 
 _BACKOFF = (0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
 
@@ -128,6 +137,17 @@ class HookEnd:
 
 
 @dataclass(frozen=True)
+class FeedLines:
+    """The transcript grew: what the agent did since the last look.
+
+    Each line is the wire shape — see :class:`.transcript.FeedEntry` — so
+    this module needs to know nothing about what is in one.
+    """
+
+    entries: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
 class LinkUp:
     """The socket connected."""
 
@@ -152,7 +172,7 @@ class Tick:
     """Nothing happened; consider whether that is itself news."""
 
 
-Event = HookState | HookBind | HookEnd | LinkUp | LinkDown | OwnerGone | Tick
+Event = HookState | HookBind | HookEnd | FeedLines | LinkUp | LinkDown | OwnerGone | Tick
 
 
 # --- Actions ---------------------------------------------------------------
@@ -211,6 +231,8 @@ class Machine:
     since_link: float = 0.0
     """Seconds since the link last changed state."""
     since_keepalive: float = 0.0
+    held: tuple[dict[str, Any], ...] = ()
+    """Feed lines found while the link was down, oldest first."""
 
 
 def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine, list[Action]]:
@@ -231,6 +253,8 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
         return _on_hook_bind(machine, event)
     if isinstance(event, HookEnd):
         return _on_hook_end(machine, event)
+    if isinstance(event, FeedLines):
+        return _on_feed(machine, event)
     if isinstance(event, LinkUp):
         return _on_link_up(machine)
     if isinstance(event, LinkDown):
@@ -284,9 +308,25 @@ def _on_hook_end(machine: Machine, event: HookEnd) -> tuple[Machine, list[Action
     return machine, _goodbye(machine, bye_reason=event.reason, finish_reason=event.reason)
 
 
+def _on_feed(machine: Machine, event: FeedLines) -> tuple[Machine, list[Action]]:
+    if machine.link is Link.LIVE and machine.task:
+        return machine, _feed(machine.task, event.entries)
+    held = (machine.held + event.entries)[-FEED_HELD:]
+    return replace(machine, held=held), []
+
+
 def _on_link_up(machine: Machine) -> tuple[Machine, list[Action]]:
-    machine = replace(machine, link=Link.LIVE, attempt=0, since_link=0.0, since_keepalive=0.0)
-    return machine, [Send(_level(machine))]
+    held = machine.held
+    machine = replace(
+        machine, link=Link.LIVE, attempt=0, since_link=0.0, since_keepalive=0.0, held=()
+    )
+    # The level first: the server keeps feed lines only for a session it
+    # already has on the card.
+    return machine, [Send(_level(machine)), *_feed(machine.task, held)]
+
+
+def _feed(task: str, entries: tuple[dict[str, Any], ...]) -> list[Action]:
+    return [Send(frame) for frame in protocol.feed_frames(task, list(entries))]
 
 
 def _on_link_down(machine: Machine) -> tuple[Machine, list[Action]]:

@@ -91,6 +91,7 @@ import {
 } from '../api/client'
 import { nowLine, silentFor, waitingDetail } from '../routes/agentState'
 import { can } from '../routes/projectPermissions'
+import { feedClock, feedLabel, isCodeLike } from './agentFeed'
 import { mayDelete, type Viewer } from './commentDelete'
 import { localDate } from './dates'
 import { GoalChip } from './GoalMarks'
@@ -443,6 +444,16 @@ function TaskDetailView({
           </ReadField>
         ) : null}
 
+        {task.agent_sessions.length ? (
+          <ReadField label="Agent feed">
+            <AgentFeed
+              taskRef={task.reference}
+              taskId={task.id}
+              live={task.agent_sessions.some((session) => session.ended_at === null)}
+            />
+          </ReadField>
+        ) : null}
+
         <ReadField label="Timeline">
           {deleting.error ? <ErrorBanner>{deleting.error.message}</ErrorBanner> : null}
           <div className={styles.timeline}>
@@ -652,6 +663,55 @@ function NowLine({ session }: { session: AgentSessionRead }) {
       <span className={styles.agentNowLabel}>Now</span>
       <span className={styles.agentNowText}>{line}</span>
     </div>
+  )
+}
+
+const FEED_POLL_MS = 10_000
+
+/**
+ * What the agents on this card read, edited, ran and said, newest first.
+ *
+ * Each line was written by a session's presence daemon as it followed the
+ * Claude Code transcript, and the board socket says `agent.feed` for this card
+ * when there is a new one — `useBoardSocket` turns that into a refetch of this
+ * query, so the feed moves while the agent works without this dialog polling.
+ * Kept on the server, so a card opened halfway through a session shows how it
+ * got there.
+ */
+function AgentFeed({ taskRef, taskId, live }: { taskRef: string; taskId: string; live: boolean }) {
+  const feed = useQuery({
+    queryKey: ['agent-feed', taskId],
+    queryFn: () => api.getAgentFeed(taskRef),
+    // Opened from Today or a goal's page there is no board socket to ring,
+    // so while an agent is still on the card the feed asks for itself — at
+    // the board's own fallback pace, and not at all once every session is over.
+    refetchInterval: live ? FEED_POLL_MS : false,
+  })
+
+  if (feed.error) return <ErrorBanner>{feed.error.message}</ErrorBanner>
+  if (!feed.data) return <span className={styles.empty}>Loading…</span>
+  if (!feed.data.length) {
+    return (
+      <span className={styles.empty}>
+        Nothing yet. Lines appear here as the agent reads, edits, runs and says things.
+      </span>
+    )
+  }
+
+  return (
+    <ol className={styles.agentFeed}>
+      {feed.data.map((entry) => (
+        <li key={entry.id} className={`${styles.agentFeedLine} ${styles[`feed_${entry.kind}`]}`}>
+          <time className={styles.agentFeedTime} dateTime={entry.at}>
+            {feedClock(entry.at)}
+          </time>
+          <span className={styles.agentFeedKind}>{feedLabel(entry.kind)}</span>
+          <span className={isCodeLike(entry.kind) ? styles.agentFeedCode : styles.agentFeedText}>
+            {entry.text}
+          </span>
+        </li>
+      ))}
+    </ol>
   )
 }
 

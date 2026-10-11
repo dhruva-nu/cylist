@@ -62,6 +62,17 @@ describe('parseEvent', () => {
     })
   })
 
+  it("reads an agent feed's doorbell, which names its card", () => {
+    expect(parseEvent('{"type":"agent.feed","task_id":"t-1","at":"2026-10-12T14:31:02Z"}')).toEqual(
+      { type: 'agent.feed', task_id: 't-1', at: '2026-10-12T14:31:02Z' },
+    )
+  })
+
+  it('ignores a feed doorbell that does not say which card', () => {
+    expect(parseEvent('{"type":"agent.feed"}')).toBeNull()
+    expect(parseEvent('{"type":"agent.feed","task_id":""}')).toBeNull()
+  })
+
   it('ignores anything it does not recognise rather than throwing', () => {
     // A newer server may send messages this build has never heard of, and a
     // board that crashed on one would be a board that cannot be deployed to

@@ -100,6 +100,62 @@ class TestTheLoop:
             tell(protocol.end_message(SESSION, "session_ended"))
             thread.join(timeout=3)
 
+    def test_what_the_agent_does_reaches_the_wire_as_a_feed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CYLIST-88, end to end through the daemon: a hook names the
+        transcript, the agent appends to it, and the card's feed hears."""
+        monkeypatch.setattr(daemon, "FOLLOW_EVERY", 0.02)
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text('{"type": "assistant", "message": {"content": []}}\n')
+        connection = FakeConnection()
+        thread = run_in_background(a_context(), lambda *_: connection)
+        try:
+            tell(
+                protocol.state_message(
+                    SESSION, CARD, "working", None, CARD, transcript=str(transcript)
+                )
+            )
+            threading.Event().wait(0.2)
+            with transcript.open("a") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": "2026-10-12T14:31:02Z",
+                            "message": {
+                                "content": [
+                                    {"type": "text", "text": "Running the tests now."},
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_1",
+                                        "name": "Bash",
+                                        "input": {"command": "uv run pytest -q"},
+                                    },
+                                ]
+                            },
+                        }
+                    )
+                    + "\n"
+                )
+
+            feeds: list[dict[str, Any]] = []
+            for _ in range(100):
+                feeds = [f for f in connection.sent if f["type"] == "feed"]
+                if feeds:
+                    break
+                threading.Event().wait(0.02)
+
+            assert feeds, connection.sent
+            assert feeds[0]["task"] == CARD
+            assert [(e["kind"], e["text"]) for e in feeds[0]["entries"]] == [
+                ("said", "Running the tests now."),
+                ("run", "pytest -q"),
+            ]
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+
     def test_the_first_message_is_a_state_and_it_still_knows_the_card(self) -> None:
         """The sequence a real session actually produces.
 

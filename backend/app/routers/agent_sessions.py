@@ -7,7 +7,7 @@ bound with.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Path, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
@@ -16,8 +16,8 @@ from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.task import Task
 from app.routers.tasks import resolved_task
-from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
-from app.services import agent_reports, agent_sessions
+from app.schemas.agent_sessions import AgentFeedEntryRead, AgentSessionPut, AgentSessionRead
+from app.services import agent_feed, agent_reports, agent_sessions
 
 router = APIRouter(tags=["agent sessions"])
 
@@ -71,6 +71,27 @@ async def list_agent_sessions(
     """Every session still worth showing: the open ones first, then the
     finished ones nobody has dismissed. Dismissed sessions are left out."""
     return [agent_sessions.read(row) for row in await agent_sessions.list_for_task(session, task)]
+
+
+@router.get(
+    "/tasks/{task_ref}/agent-feed",
+    response_model=list[AgentFeedEntryRead],
+    summary="Read what the agents on a task have been reading, editing, running and saying",
+)
+async def list_agent_feed(
+    task: Task = Depends(resolved_task),
+    limit: int = Query(default=100, ge=1, le=agent_feed.KEEP_PER_SESSION),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+) -> list[AgentFeedEntryRead]:
+    """The card's agent feed, newest first, across every session that was on it.
+
+    Written by each session's presence daemon, which follows the Claude Code
+    transcript and sends the agent's text and tool calls — redacted on the
+    agent's machine before they leave it. Each session keeps its newest 200
+    lines. A board socket says `agent.feed` with this card's id when it grows.
+    """
+    return await agent_feed.recent(session, task, limit=limit)
 
 
 @router.post(

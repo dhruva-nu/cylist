@@ -13,6 +13,9 @@ The agent's side, in the order a session sends them:
     {"type": "state", "task": "ATL-41",
      "report": {"state": "working", "reason": null, "client_name": "ATL-41",
                 "note": "Running pytest test_pr_states.py"}}
+    {"type": "feed", "task": "ATL-41",
+     "entries": [{"at": "2026-10-12T14:31:02Z", "kind": "run",
+                  "tool": "Bash", "text": "pytest test_pr_states.py"}]}
     {"type": "heartbeat"}
     {"type": "bye", "reason": "session_ended"}
 
@@ -24,6 +27,15 @@ on every tool call; a report without one clears it.
 The task is in the message rather than in the path because a session walks
 the board: it binds to another card by naming it here, and the server ends
 the row it left with ``moved``, which is what the PUT route has always done.
+
+``feed`` is what the session read, edited, ran and said since the last one —
+CYLIST-88. The daemon follows the session's transcript and sends the lines it
+finds, already redacted on the agent's machine; the server keeps them against
+the session's open row on that card and rings an ``agent.feed`` doorbell for
+whoever has the card open. It is not acknowledged: a line is not worth a
+round trip, and a frame for a card the session is not on is dropped rather
+than refused, because a feed is never a reason to take a session off the
+board.
 
 ``heartbeat`` is the client keeping its own socket alive. It exists because
 the server's idle window is measured on application messages — protocol
@@ -45,8 +57,9 @@ from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter, ValidationError
 
+from app.core.clock import now
 from app.models.agent_session import AgentSessionReason
-from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
+from app.schemas.agent_sessions import AgentFeedEntryIn, AgentSessionPut, AgentSessionRead
 from app.schemas.common import Schema
 
 MAX_FRAME_BYTES = 64 * 1024
@@ -68,6 +81,19 @@ class StateMessage(Schema):
     )
 
 
+FEED_MAX_ENTRIES = 50
+"""Most lines one ``feed`` frame may carry. The daemon sends fewer; the
+ceiling keeps one frame inside :data:`MAX_FRAME_BYTES` whatever it sends."""
+
+
+class FeedMessage(Schema):
+    """What a session did since its last ``feed``, line by line."""
+
+    type: Literal["feed"]
+    task: str = Field(max_length=200, description="The card the session is on.")
+    entries: list[AgentFeedEntryIn] = Field(max_length=FEED_MAX_ENTRIES)
+
+
 class HeartbeatMessage(Schema):
     """Nothing to report, still here. See the module note on the idle window."""
 
@@ -83,15 +109,14 @@ class ByeMessage(Schema):
     )
 
 
-AgentMessage = Annotated[
-    StateMessage | HeartbeatMessage | ByeMessage,
-    Field(discriminator="type"),
-]
+Incoming = StateMessage | FeedMessage | HeartbeatMessage | ByeMessage
 
-_incoming: TypeAdapter[StateMessage | HeartbeatMessage | ByeMessage] = TypeAdapter(AgentMessage)
+AgentMessage = Annotated[Incoming, Field(discriminator="type")]
+
+_incoming: TypeAdapter[Incoming] = TypeAdapter(AgentMessage)
 
 
-def parse(raw: str) -> StateMessage | HeartbeatMessage | ByeMessage | None:
+def parse(raw: str) -> Incoming | None:
     """Read one frame, or ``None`` if it is not one we understand.
 
     Returning ``None`` rather than raising because the caller's answer to
@@ -125,6 +150,25 @@ def ack(session: AgentSessionRead) -> dict[str, object]:
     session without a second request.
     """
     return {"type": "ack", "session": session.model_dump(mode="json")}
+
+
+FEED_CHANGED = "agent.feed"
+"""The event type a new feed line is published as, and the doorbell it rings."""
+
+
+def board_changed() -> dict[str, object]:
+    """The board socket's doorbell: something on this board committed."""
+    return {"type": "board.changed", "at": now().isoformat()}
+
+
+def feed_changed(task_id: str) -> dict[str, object]:
+    """The board socket's doorbell for a card's feed: refetch it if it is open.
+
+    Sent down *board* sockets, not agent ones. Carries the card and nothing
+    else, for the reason every board message is a doorbell — see
+    :mod:`app.realtime.hub`.
+    """
+    return {"type": FEED_CHANGED, "task_id": task_id, "at": now().isoformat()}
 
 
 def error(code: str, message: str) -> dict[str, object]:
