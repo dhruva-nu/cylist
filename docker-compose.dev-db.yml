@@ -1,0 +1,43 @@
+# The one Postgres every dev slot uses. The five slots (docker-compose.dev.yml)
+# are separate compose projects, so this is a project of its own,
+# `cylist-dev-db`, which they reach over the `cylist-dev` network by the alias
+# `cylist-dev-db`.
+#
+#   scripts/deploy.sh dev N       starts this before it backs up and migrates
+#   make dev-db-logs              follows it
+#
+# One database rather than five, so whatever was set up on one slot — projects,
+# cards, people, files — is there on every other: the slots differ in the code
+# they run, not in the data they show. Its secrets are in ~/cylist-dev-shared
+# (postgres.env, beside the app.env every slot reads), which the first slot
+# deploy creates.
+#
+# Its port is not published. Nothing outside the slots' network reaches it.
+
+name: cylist-dev-db
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      # POSTGRES_PASSWORD, and the user and database the slots connect as.
+      - ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the shared dev directory holding app.env and postgres.env}/postgres.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      dev:
+        aliases: [cylist-dev-db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  # Created here, joined as external by every slot.
+  dev:
+    name: cylist-dev
+
+volumes:
+  postgres-data:

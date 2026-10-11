@@ -15,7 +15,7 @@ UV       := uv --project $(BACKEND)
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
         up down logs image deploy prod-logs prod-ps staging-deploy \
         staging-refresh staging-logs staging-ps staging-down \
-        dev-slot-given dev-deploy dev-logs dev-ps dev-down dashboard-sync migrate-check \
+        dev-slot-given dev-deploy dev-logs dev-ps dev-down dev-db-logs dev-db-ps dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key \
         agent clean
 
@@ -127,16 +127,17 @@ staging-down: ## Stop the staging stack and remove its containers (volumes kept)
 # Five slots, not one stack, so five branches can be up side by side. None is
 # tied to a branch: the "Deploy dev" workflow is workflow_dispatch, so you pick
 # the branch in the "Run workflow" dropdown and the slot as its input. Slot N
-# listens on :801N, is served at :9443/dev_N, keeps its secrets in
-# ~/cylist-dev-N and starts with its own empty database — see
-# docker-compose.dev.yml. Every target here names the slot:
+# listens on :801N and is served at :9443/dev_N. All five share one database
+# (docker-compose.dev-db.yml) and its secrets in ~/cylist-dev-shared — see
+# docker-compose.dev.yml. Every slot target here names the slot:
 #
 #   make dev-deploy SLOT=2
 #   make dev-logs SLOT=2
 
 SLOT ?=
-DEV = CYLIST_DEV_SLOT=$(SLOT) CYLIST_DEV_DIR=$(or $(CYLIST_DEV_ROOT),$(HOME))/cylist-dev-$(SLOT) \
-      docker compose -f docker-compose.dev.yml
+DEV_SHARED = $(or $(CYLIST_DEV_ROOT),$(HOME))/cylist-dev-shared
+DEV = CYLIST_DEV_SLOT=$(SLOT) CYLIST_DEV_DIR=$(DEV_SHARED) docker compose -f docker-compose.dev.yml
+DEV_DB = CYLIST_DEV_DIR=$(DEV_SHARED) docker compose -f docker-compose.dev-db.yml
 
 dev-slot-given:
 	@case "$(SLOT)" in [1-5]) ;; *) echo "say which dev slot: SLOT=1 to SLOT=5" >&2; exit 2;; esac
@@ -152,6 +153,12 @@ dev-ps: dev-slot-given ## Show what dev slot SLOT is running
 
 dev-down: dev-slot-given ## Stop dev slot SLOT and remove its containers (volumes kept)
 	$(DEV) down
+
+dev-db-logs: ## Follow the Postgres every dev slot shares
+	$(DEV_DB) logs -f postgres
+
+dev-db-ps: ## Show the Postgres every dev slot shares
+	$(DEV_DB) ps
 
 dashboard-sync: ## Copy the status dashboard to where its systemd service runs it from
 	mkdir -p $(HOME)/cylist-dashboard

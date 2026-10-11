@@ -435,6 +435,10 @@ listens on **:801N** and is served at
 <https://dnu-home-1.tail222f46.ts.net:9443/>, is a small index of which branch
 and commit is in each slot and when it went there.
 
+The slots differ in the code they run, not in the data they show: all five use
+**one Postgres** and **one blob volume**, so a project, card or file made on
+one slot is there on every other. See *One database for every slot* below.
+
 A slot is the same as staging except for one thing: it is not tied to a branch.
 The workflow is [`.github/workflows/deploy-dev.yml`](.github/workflows/deploy-dev.yml),
 triggered by hand from the Actions tab (`workflow_dispatch`). GitHub's own
@@ -514,9 +518,9 @@ the repository variable `CYLIST_URL`.
 | image tag | `cylist:staging` | `cylist:dev-N` |
 | port | `127.0.0.1:8001` | `127.0.0.1:801N` |
 | served at | `:8443` | `:9443/dev_N` |
-| secrets | `~/cylist-staging` | `~/cylist-dev-N` |
+| secrets | `~/cylist-staging` | `~/cylist-dev-shared`, the same for every slot |
 | deploy trigger | manual, `staging` only | manual, any branch, pick a slot |
-| data | copied from production | its own, empty to start |
+| data | copied from production | shared by all five slots, empty to start |
 | `CYLIST_ENVIRONMENT` | `staging` | `preview` |
 | `CYLIST_BASE_PATH` | unset | `/dev_N` |
 
@@ -547,20 +551,21 @@ production without touching what `"dev"` means anywhere else.
 check as production and staging. Around that,
 [`scripts/dev-slot.sh`](scripts/dev-slot.sh):
 
-1. **Creates the slot's secrets** on its first deploy, if `~/cylist-dev-N` has
-   neither file: a random database password, a fresh vault key, and the
+1. **Creates the shared secrets** on the first deploy of any slot, if
+   `~/cylist-dev-shared` has neither file, and the shared blob volume
+   `cylist-dev-blobs`: a random database password, a fresh vault key, and the
    bootstrap password hash copied from the old single dev stack's
    `~/cylist-dev/app.env` (override with `CYLIST_DEV_TEMPLATE=<path to an
    app.env>`). Files that already exist are never touched. With no hash to
-   copy the deploy warns, and nobody can sign in to the slot until one is added
+   copy the deploy warns, and nobody can sign in to the slots until one is added
    (`make hash-password`) and it is deployed again.
-2. **Copies production's `JEV_API_KEY`** into the slot's `app.env`, on every
+2. **Copies production's `JEV_API_KEY`** into the shared `app.env`, on every
    deploy — jev is a paid API, not per-environment state, so a key that exists
    once is rotated once.
 3. **Records what it deployed** in `~/cylist-dev-N/deployed`, one `key=value`
    per line: `branch`, `sha`, `time` (UTC).
-4. **Retires the old single dev stack** if its containers are still there (see
-   below).
+4. **Retires the slot's own Postgres and the old single dev stack** if their
+   containers are still there (see below).
 5. **Regenerates the index** at `~/cylist-dev-index/index.html` from the five
    `deployed` files. It is a static file, so it is only as current as the last
    slot deploy. A `busybox httpd` container, `cylist-dev-index`, serves that
@@ -585,18 +590,20 @@ to say where a branch went. The *Comment on the card* step reads them.
 
 ### One-time setup
 
-Nothing per slot — the first deploy into a slot creates its directory:
+Nothing by hand — the first slot deploy creates the shared directory, and each
+slot's first deploy its own:
 
 ```
-~/cylist-dev-N/
+~/cylist-dev-shared/
   app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
                  JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  deployed       branch, sha, time of the last deploy
   backups/       the dumps slot deploys leave behind
+~/cylist-dev-N/
+  deployed       branch, sha, time of slot N's last deploy
 ```
 
-Both env files `chmod 600`. A slot starts from an empty database — it is never
+Both env files `chmod 600`. The shared database starts empty — it is never
 restored from production, so unlike staging's `app.env` it needs only its own
 `CYLIST_VAULT_KEY`, not production's.
 
@@ -614,6 +621,48 @@ then fails at *Serving slot N*, saying exactly that.
 nowhere else. Only the index directory is served as files, by the
 `cylist-dev-index` container; the slot directories hold secrets and are never
 mounted into it.
+
+### One database for every slot
+
+[`docker-compose.dev-db.yml`](docker-compose.dev-db.yml) is the one Postgres,
+compose project `cylist-dev-db`, with no published port. It makes the docker
+network `cylist-dev`; every slot joins it and reaches the database as
+`cylist-dev-db`. Each slot mounts the shared volume `cylist-dev-blobs` at
+`/data/blobs`, since a file is a database row plus bytes on disk; its logs stay
+in its own volume. `make dev-db-ps` and `make dev-db-logs` look at the
+database.
+
+Every slot deploy dumps the shared database to `~/cylist-dev-shared/backups`
+and then runs `alembic upgrade head` against it. So **a branch with a new
+migration changes the schema under every slot.** If the database is already at
+a revision the deploying branch does not have — another slot's branch added a
+migration and got there first — the deploy warns and starts the slot on that
+schema unmigrated, rather than failing: an older branch on a newer schema
+mostly works, and dev is for looking. Two branches whose migrations fork from
+the same parent cannot both be migrated; whichever deploys second runs
+unmigrated until one of them is rebased.
+
+What one process per slot means against one database, and is accepted for dev:
+
+* **Live board updates stay within a slot.** The WebSocket fan-out is
+  in-process, so a change made on dev_2 reaches boards open on dev_2 at once,
+  and boards open on dev_4 on their next load.
+* **A slot restarting ends open agent sessions** — every process ends them at
+  start-up, believing itself the only one — and each slot's reaper can end a
+  session whose socket is held by another slot.
+* **Every slot runs a hook courier**, so a queued hook delivery may be picked
+  up by any of them.
+
+Before the database was shared, each slot had a Postgres of its own. A slot's
+first deploy after the change removes that container; its volume is kept, as
+are the old per-slot `app.env` and `postgres.env` in `~/cylist-dev-N`, which
+nothing reads any more:
+
+```bash
+docker volume rm cylist-dev-N_postgres-data
+rm ~/cylist-dev-N/app.env ~/cylist-dev-N/postgres.env
+rm -r ~/cylist-dev-N/backups
+```
 
 ### The old single dev stack
 

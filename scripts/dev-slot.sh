@@ -4,7 +4,9 @@
 #
 # Dev is five slots rather than one stack, so that five branches can be looked
 # at side by side. Slot N is its own compose project (cylist-dev-N), with its own
-# image tag, port 801N, secrets in ~/cylist-dev-N and an empty database. All
+# image tag and port 801N. All five share one database (docker-compose.dev-db.yml)
+# and one blob volume, so they show the same data, with the secrets for both in
+# ~/cylist-dev-shared; ~/cylist-dev-N holds only what slot N is running. All
 # five share one HTTPS port, :9443, and are told apart by path:
 #
 #   https://<host>:9443/          an index: which branch and commit is in each slot
@@ -13,11 +15,13 @@
 #
 # Around deploy.sh's ordinary build-migrate-restart, a slot deploy:
 #
-#   before   creates the slot's secrets if it has none, and copies production's
-#            jev key into them (dev_slot_prepare)
-#   after    writes what it deployed into the slot directory, retires the old
-#            single dev stack, regenerates the index, points tailscale at the
-#            slot and checks the slot answers through it (dev_slot_publish)
+#   before   creates the shared secrets if there are none yet, copies
+#            production's jev key into them, and makes the shared blob volume
+#            (dev_slot_prepare)
+#   after    writes what it deployed into the slot directory, retires the
+#            slot's own Postgres and the old single dev stack, regenerates the
+#            index, points tailscale at the slot and checks the slot answers
+#            through it (dev_slot_publish)
 #
 # shellcheck shell=bash
 
@@ -35,6 +39,7 @@ DEV_INDEX_PORT=8010
 DEV_INDEX_CONTAINER=cylist-dev-index
 DEV_INDEX_IMAGE=busybox:stable
 DEV_LOCK="$DEV_ROOT/.cylist-dev.lock"
+DEV_BLOB_VOLUME=cylist-dev-blobs
 DEV_REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-dhruva-nu/cylist}"
 
 dev_slot_dir() { printf '%s/cylist-dev-%s' "$DEV_ROOT" "$1"; }
@@ -45,12 +50,14 @@ dev_slot_url() { printf 'https://%s:%s/dev_%s/' "$DEV_HOST" "$DEV_HTTPS_PORT" "$
 dev_slot_prepare() {
   _dev_slot_provision
   _dev_slot_jev_key
+  # Idempotent: makes it the first time, and is a no-op every time after.
+  docker volume create "$DEV_BLOB_VOLUME" > /dev/null
 }
 
-# A slot that has never been deployed has no secrets yet, and a dev slot's are
+# Until some slot has been deployed there are no shared secrets, and dev's are
 # nothing anyone needs to choose: an empty database behind no published port,
-# and a vault with nothing in it. So the first deploy makes them, rather than
-# five directories having to be made by hand on the server. Files that already
+# and a vault with nothing in it. So the first slot deploy makes them, rather
+# than a directory having to be made by hand on the server. Files that already
 # exist are never touched — an operator's own app.env wins.
 #
 # The one value that cannot be made up is the bootstrap password hash, since
@@ -66,14 +73,14 @@ _dev_slot_provision() {
   # What `make vault-key` prints: 32 random bytes, URL-safe base64.
   vault_key="$(head -c 32 /dev/urandom | base64 | tr '+/' '-_')"
 
-  step "Creating slot $SLOT's secrets in $dir"
+  step "Creating the shared dev secrets in $dir"
   (
     umask 077
     mkdir -p "$dir"
     printf 'POSTGRES_USER=cylist\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=cylist\n' \
       "$password" > "$dir/postgres.env"
     {
-      printf 'CYLIST_DATABASE_URL=postgresql+asyncpg://cylist:%s@postgres:5432/cylist\n' "$password"
+      printf 'CYLIST_DATABASE_URL=postgresql+asyncpg://cylist:%s@cylist-dev-db:5432/cylist\n' "$password"
       printf 'CYLIST_VAULT_KEY=%s\n' "$vault_key"
       grep -m1 '^CYLIST_PASSWORD_HASH=.' "$template" 2>/dev/null || true
     } > "$dir/app.env"
@@ -81,7 +88,7 @@ _dev_slot_provision() {
   if grep -q '^CYLIST_PASSWORD_HASH=.' "$dir/app.env"; then
     echo "   new database password and vault key; bootstrap password hash from $template"
   else
-    warn "dev slot $SLOT has no CYLIST_PASSWORD_HASH, so nobody can sign in to open its first account. Add one to $dir/app.env (make hash-password) and deploy again."
+    warn "the dev slots have no CYLIST_PASSWORD_HASH, so nobody can sign in to open the first account. Add one to $dir/app.env (make hash-password) and deploy again."
   fi
 }
 
@@ -119,10 +126,15 @@ dev_slot_publish() {
   step "Recording what is in slot $SLOT"
   # One `key=value` per line, so a shell (or the index below) can read it back
   # with sed and nothing else.
+  local slot_dir
+  slot_dir="$(dev_slot_dir "$SLOT")"
+  mkdir -p "$slot_dir"
   printf 'branch=%s\nsha=%s\ntime=%s\n' "$branch" "$sha" "$deployed_at" \
-    > "$SECRETS_DIR/deployed.new"
-  mv "$SECRETS_DIR/deployed.new" "$SECRETS_DIR/deployed"
+    > "$slot_dir/deployed.new"
+  mv "$slot_dir/deployed.new" "$slot_dir/deployed"
   echo "   $branch @ ${sha:0:12}, $deployed_at"
+
+  _dev_retire_slot_postgres
 
   # Two slots can deploy at once (by hand, or two runners), and the index and
   # tailscale's serve config are each one thing shared by all five: read,
@@ -154,6 +166,23 @@ _dev_slot_publish_shared() {
   echo "   $DEV_INDEX_DIR/index.html"
   _dev_index_server
   _dev_slot_serve
+}
+
+# Before the slots shared a database, each had a Postgres of its own in its
+# compose project. The app no longer uses it once it is up on the shared one, so
+# it goes here; its volume (cylist-dev-N_postgres-data) is left alone, as the
+# old stack's are — see DEPLOY.md.
+_dev_retire_slot_postgres() {
+  local ids
+  ids="$(docker ps -aq \
+    --filter "label=com.docker.compose.project=cylist-dev-$SLOT" \
+    --filter label=com.docker.compose.service=postgres)"
+  [[ -n "$ids" ]] || return 0
+  step "Retiring slot $SLOT's own Postgres"
+  # shellcheck disable=SC2086  # one id per word, on purpose
+  docker rm --force $ids > /dev/null
+  docker network rm "cylist-dev-${SLOT}_default" > /dev/null 2>&1 || true
+  echo "   container removed; its volume cylist-dev-${SLOT}_postgres-data is kept"
 }
 
 # Before the slots there was one dev stack: project cylist-dev, :8002, served

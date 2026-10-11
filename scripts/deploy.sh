@@ -17,8 +17,9 @@
 #
 # Reads the secrets that must not live in the repository from
 # CYLIST_PROD_DIR (default ~/cylist-prod), CYLIST_STAGING_DIR
-# (default ~/cylist-staging), or, for dev slot N, ~/cylist-dev-N (under
-# CYLIST_DEV_ROOT if that is set, rather than $HOME):
+# (default ~/cylist-staging), or, for every dev slot alike, ~/cylist-dev-shared
+# (under CYLIST_DEV_ROOT if that is set, rather than $HOME) — the slots share
+# one database, so they share its secrets and its backups too:
 #
 #   $SECRETS_DIR/app.env       CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH,
 #                              CYLIST_VAULT_KEY
@@ -42,12 +43,14 @@ SLOT=""
 case "$ENVIRONMENT" in
   prod)
     COMPOSE_FILE="docker-compose.prod.yml"
+    DB_COMPOSE_FILE="$COMPOSE_FILE"
     SECRETS_VAR="CYLIST_PROD_DIR"
     DEFAULT_SECRETS_DIR="$HOME/cylist-prod"
     PORT=8000
     ;;
   staging)
     COMPOSE_FILE="docker-compose.staging.yml"
+    DB_COMPOSE_FILE="$COMPOSE_FILE"
     SECRETS_VAR="CYLIST_STAGING_DIR"
     DEFAULT_SECRETS_DIR="$HOME/cylist-staging"
     PORT=8001
@@ -59,11 +62,15 @@ case "$ENVIRONMENT" in
       exit 2
     fi
     COMPOSE_FILE="docker-compose.dev.yml"
+    # Every slot's Postgres is the one shared Postgres, a compose project of
+    # its own.
+    DB_COMPOSE_FILE="docker-compose.dev-db.yml"
     SECRETS_VAR="CYLIST_DEV_DIR"
     # Set outright rather than defaulted, so a CYLIST_DEV_DIR left exported
-    # from the days of the single dev stack cannot point every slot at one
-    # directory.
-    CYLIST_DEV_DIR="${CYLIST_DEV_ROOT:-$HOME}/cylist-dev-$SLOT"
+    # from the days of the single dev stack cannot point the slots at its
+    # directory. What is the slot's own (what it is running) is in
+    # ~/cylist-dev-N; see dev-slot.sh.
+    CYLIST_DEV_DIR="${CYLIST_DEV_ROOT:-$HOME}/cylist-dev-shared"
     DEFAULT_SECRETS_DIR="$CYLIST_DEV_DIR"
     PORT=$((8010 + SLOT))
     # The compose file takes everything else about the slot from this.
@@ -86,6 +93,8 @@ KEEP_BACKUPS="${KEEP_BACKUPS:-10}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:$PORT/api/v1/health}"
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# Where Postgres is: the same project as the app, except for dev.
+db_compose() { docker compose -f "$DB_COMPOSE_FILE" "$@"; }
 step() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
 # A line in the log, and an annotation on the run when this is CI.
 warn() {
@@ -111,14 +120,14 @@ step "Building the image"
 compose build app
 
 step "Starting Postgres"
-compose up -d --wait postgres
+db_compose up -d --wait postgres
 
 step "Backing up the database"
 # Inside the container, so this needs no pg_dump on the host and no published
 # port. Custom format, because that is what `pg_restore` wants.
 mkdir -p "$BACKUPS"
 DUMP="$BACKUPS/cylist-$(date -u +%Y%m%dT%H%M%SZ).dump"
-if compose exec -T postgres sh -c \
+if db_compose exec -T postgres sh -c \
      'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$DUMP"; then
   echo "   $DUMP ($(du -h "$DUMP" | cut -f1))"
 else
@@ -135,7 +144,22 @@ step "Applying migrations"
 # A one-off container rather than the app's own start-up, so a migration that
 # fails fails the deploy here — visibly — instead of leaving a container
 # restarting in a loop against a schema it does not match.
-compose run --rm -T app alembic upgrade head
+#
+# A dev slot shares its database with four others, so the database can already
+# be at a revision this branch has never heard of — another slot's branch added
+# a migration and got there first. That slot owns the schema now; this one is
+# started on it as it is, with a warning, rather than refused, since an older
+# branch on a newer schema mostly works and dev is for looking.
+if ! migrate_log="$(compose run --rm -T app alembic upgrade head 2>&1)"; then
+  echo "$migrate_log" >&2
+  if [[ -n "$SLOT" ]] && grep -q "Can't locate revision" <<< "$migrate_log"; then
+    warn "the shared dev database is at a migration this branch does not have (another slot's branch put it there), so slot $SLOT starts on that schema unmigrated"
+  else
+    exit 1
+  fi
+else
+  echo "$migrate_log"
+fi
 
 step "Starting the app"
 compose up -d --wait app
