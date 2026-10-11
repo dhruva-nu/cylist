@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
+from app.db import publish_into
 from app.models.activity import Channel
 from app.models.agent_session import AgentSession, AgentSessionReason
 from app.models.api_token import ApiToken
@@ -66,6 +67,10 @@ async def report(
     The single path. A heartbeat produces no transitions and therefore no
     trail entries, which is the whole reason ``upsert`` reports them
     separately rather than logging as it goes.
+
+    A new note is the one change that is news without being history: the
+    board is told — the card's agent line reads it — and the trail is not,
+    because a line per tool call would bury everything else on it.
     """
     upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
     for transition in upserted.transitions:
@@ -77,6 +82,18 @@ async def report(
             entity_id=transition.task_id,
             project_id=transition.project_id,
             payload=transition.payload,
+        )
+    if upserted.note_changed and not upserted.transitions:
+        # A transition above has already rung the board's doorbell.
+        publish_into(
+            session,
+            {
+                "type": "board.changed",
+                "project_id": task.project_id,
+                "entity_type": "task",
+                "entity_id": task.id,
+                "verb": "agent_session.noted",
+            },
         )
     return agent_sessions.read(upserted.row)
 

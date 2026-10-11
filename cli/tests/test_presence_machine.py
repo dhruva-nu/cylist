@@ -47,7 +47,12 @@ class TestSaying:
             {
                 "type": "state",
                 "task": "ATL-1",
-                "report": {"state": "working", "reason": None, "client_name": "ATL-1"},
+                "report": {
+                    "state": "working",
+                    "reason": None,
+                    "client_name": "ATL-1",
+                    "note": None,
+                },
             }
         ]
 
@@ -72,6 +77,37 @@ class TestSaying:
         _, actions = m.step(machine, m.HookState("waiting", "permission", "ATL-1"))
 
         assert frames(actions)[0]["report"]["reason"] == "permission"
+
+    def test_a_new_note_is_sent(self) -> None:
+        """Each tool call is a new line on the card, and so a new frame."""
+        machine, _ = m.step(live(), m.HookState("working", None, "ATL-1", note="Reading a.py"))
+
+        _, actions = m.step(machine, m.HookState("working", None, "ATL-1", note="Editing a.py"))
+
+        assert frames(actions)[0]["report"]["note"] == "Editing a.py"
+
+    def test_the_same_note_twice_is_sent_once(self) -> None:
+        machine, _ = m.step(live(), m.HookState("working", None, "ATL-1", note="Editing a.py"))
+
+        _, actions = m.step(machine, m.HookState("working", None, "ATL-1", note="Editing a.py"))
+
+        assert frames(actions) == []
+
+    def test_a_reconnect_sends_the_note_it_had(self) -> None:
+        """The level is the whole of the state, and the note is part of it."""
+        machine, _ = m.step(live(), m.HookState("working", None, "ATL-1", note="Running pytest"))
+        machine, _ = m.step(machine, m.LinkDown())
+
+        _, actions = m.step(machine, m.LinkUp())
+
+        assert frames(actions)[0]["report"]["note"] == "Running pytest"
+
+    def test_walking_to_another_card_leaves_the_note_behind(self) -> None:
+        machine, _ = m.step(live(), m.HookState("working", None, "ATL-1", note="Editing a.py"))
+
+        _, actions = m.step(machine, m.HookBind("ATL-2", "ATL-2"))
+
+        assert frames(actions)[0]["report"]["note"] is None
 
     def test_walking_to_another_card_names_it(self) -> None:
         _, actions = m.step(live(), m.HookBind("ATL-2", "ATL-2"))

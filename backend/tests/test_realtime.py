@@ -180,6 +180,52 @@ class TestBeingTold:
             assert (await socket.receive_json())["type"] == "board.changed"
 
 
+class TestWhatTheAgentIsDoing:
+    """A note is not history, but a board showing the card still has to hear of it."""
+
+    async def test_a_new_note_rings_the_doorbell(self, signed_in: AsyncClient) -> None:
+        person = await make_project(signed_in)
+        await make_task(signed_in, person)
+        agent = await _agent_headers(signed_in)
+        await _report(signed_in, agent, note="Reading tasks.py")
+
+        async with ws.connect(signed_in.app, BOARD, cookies=cookie_of(signed_in)) as socket:
+            await socket.receive_json()
+
+            await _report(signed_in, agent, note="Editing tasks.py")
+
+            assert (await socket.receive_json())["type"] == "board.changed"
+
+    async def test_the_same_note_again_says_nothing(self, signed_in: AsyncClient) -> None:
+        person = await make_project(signed_in)
+        await make_task(signed_in, person)
+        agent = await _agent_headers(signed_in)
+        await _report(signed_in, agent, note="Editing tasks.py")
+
+        async with ws.connect(signed_in.app, BOARD, cookies=cookie_of(signed_in)) as socket:
+            await socket.receive_json()
+
+            await _report(signed_in, agent, note="Editing tasks.py")
+
+            with pytest.raises(TimeoutError):
+                await socket.receive_json()
+
+
+async def _agent_headers(client: AsyncClient) -> dict[str, str]:
+    issued = await client.post("/tokens", json={"name": "hook", "scopes": ["read", "write"]})
+    assert issued.status_code in (200, 201), issued.text
+    return {"Authorization": f"Bearer {issued.json()['token']}"}
+
+
+async def _report(client: AsyncClient, agent: dict[str, str], *, note: str) -> None:
+    response = await client.put(
+        "/tasks/ATL-1/agent-sessions/sess-note",
+        json={"state": "working", "note": note},
+        headers=agent,
+    )
+    assert response.status_code == 200, response.text
+
+
 class TestWhatASocketCosts:
     async def test_many_open_sockets_leave_the_api_answering(self, signed_in: AsyncClient) -> None:
         """The regression guard for the whole design.

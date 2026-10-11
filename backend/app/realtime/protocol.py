@@ -10,17 +10,20 @@ The agent's side, in the order a session sends them:
 
 .. code-block:: json
 
-    {"type": "state", "task": "ATL-41", "state": "working",
-     "reason": null, "client_name": "ATL-41"}
+    {"type": "state", "task": "ATL-41",
+     "report": {"state": "working", "reason": null, "client_name": "ATL-41",
+                "note": "Running pytest test_pr_states.py"}}
     {"type": "heartbeat"}
     {"type": "bye", "reason": "session_ended"}
 
-``state`` carries exactly the three fields of :class:`AgentSessionPut`, and
+``state`` carries exactly the fields of :class:`AgentSessionPut`, and
 carries them *as* one, so a report cannot mean one thing over HTTP and
-another over a socket. The task is in the message rather than in the path
-because a session walks the board: it binds to another card by naming it
-here, and the server ends the row it left with ``moved``, which is what the
-PUT route has always done.
+another over a socket. Its ``note`` is the session's current action, sent
+on every tool call; a report without one clears it.
+
+The task is in the message rather than in the path because a session walks
+the board: it binds to another card by naming it here, and the server ends
+the row it left with ``moved``, which is what the PUT route has always done.
 
 ``heartbeat`` is the client keeping its own socket alive. It exists because
 the server's idle window is measured on application messages — protocol

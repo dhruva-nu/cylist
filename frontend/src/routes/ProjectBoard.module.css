@@ -690,7 +690,20 @@
    this only adds the mark in front, coloured by the same variable the border
    is, so the line and the ring can never disagree about what state it is. */
 .agentLine {
+  flex-wrap: nowrap;
   gap: 6px;
+  min-width: 0;
+}
+
+/* What a working agent is doing changes with every tool call, and a line that
+   wrapped to two whenever the command was long would make the column jump. One
+   line, cut to fit; the title carries the rest. */
+.agentLine .at,
+.agentLine .agentDetail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agentDot {
@@ -712,6 +725,7 @@
 
 /* How many sessions the one border stands for. Only drawn past one. */
 .agentCount {
+  flex: none;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--agent-soft);

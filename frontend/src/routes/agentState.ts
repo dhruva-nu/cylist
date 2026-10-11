@@ -16,7 +16,7 @@
  * rather than with the last fetch.
  */
 
-import type { AgentPresence, AgentSessionReason } from '../api/client'
+import type { AgentPresence, AgentSessionRead, AgentSessionReason } from '../api/client'
 
 export type AgentClassName = 'agentWorking' | 'agentWaiting' | 'agentDone' | 'agentStale'
 
@@ -72,6 +72,15 @@ export function agentIndicator(presence: AgentPresence | null, now: Date): Agent
         detail: waitingDetail(presence.reason),
       }
     case 'working':
+      // What it is doing, when it has said: "Running pytest test_pr_states.py"
+      // tells a person more than "Agent working" does, and the dot and the
+      // border already say it is an agent. With several on the card the count
+      // is the headline and the deciding session's action the detail.
+      if (presence.note) {
+        return many
+          ? { className: 'agentWorking', label: `${agents} working`, detail: presence.note }
+          : { className: 'agentWorking', label: presence.note }
+      }
       return { className: 'agentWorking', label: `${agents} working` }
     case 'done':
       // A session that was cut off is finished, but not in the way finishing
@@ -86,6 +95,32 @@ export function agentIndicator(presence: AgentPresence | null, now: Date): Agent
         }
       }
       return { className: 'agentDone', label: many ? `${agents} finished` : 'Agent finished' }
+  }
+}
+
+/**
+ * The task's Now line for one session: what it is doing this moment, or null
+ * once it has stopped doing anything.
+ *
+ * The session's own note when it sent one — the hook sums up every tool call
+ * as it starts, and passes the harness's words on when it stops to ask — and
+ * otherwise the plainest thing that is still true.
+ */
+export function nowLine(
+  session: Pick<AgentSessionRead, 'state' | 'reason' | 'note'>,
+): string | null {
+  if (session.state === 'done') return null
+  if (session.note) return session.note
+  if (session.state === 'working') return 'Working'
+  switch (session.reason) {
+    case 'permission':
+      return 'Waiting for permission'
+    case 'question':
+      return 'Waiting for an answer'
+    case 'idle':
+      return 'Idle'
+    default:
+      return 'Waiting for your reply'
   }
 }
 

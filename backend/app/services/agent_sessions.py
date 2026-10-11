@@ -56,6 +56,11 @@ class Upserted:
 
     row: AgentSession
     transitions: list[Transition] = field(default_factory=list)
+    note_changed: bool = False
+    """Whether the report changed what the card says the agent is doing.
+
+    Not a transition — a note changes on every tool call, and the trail is
+    not for that — but it is still news to a board looking at the card."""
 
 
 async def upsert(
@@ -92,6 +97,7 @@ async def upsert(
 
     row, created = await _find_or_create_row(session, principal, task, client_session_id, data, now)
     state_before = None if created else row.state
+    note_before = None if created else row.note
     was_open = row.ended_at is None
     if data.client_name is not None:
         row.client_name = data.client_name
@@ -109,7 +115,7 @@ async def upsert(
     # in the same request — the router records these transitions next — sees
     # the row it is about to refresh.
     await session.flush()
-    return Upserted(row=row, transitions=transitions)
+    return Upserted(row=row, transitions=transitions, note_changed=row.note != note_before)
 
 
 async def _walk_off_other_cards(
@@ -180,8 +186,11 @@ def _apply_reported_state(row: AgentSession, data: AgentSessionPut, now: datetim
     """Set a row to the state a hook reported.
 
     ``working`` and ``waiting`` both reopen a finished row and undo its
-    dismissal; ``done`` ends it.
+    dismissal; ``done`` ends it. The note is replaced outright — a report that
+    does not say what the session is doing says it is doing nothing in
+    particular, and a stale "Running pytest" is worse than none.
     """
+    row.note = data.note
     if data.state is AgentSessionState.WORKING:
         row.state = AgentSessionState.WORKING
         row.reason = None
@@ -201,6 +210,7 @@ def _finish(row: AgentSession, reason: AgentSessionReason, now: datetime) -> Non
         row.state_changed_at = now
     row.state = AgentSessionState.DONE
     row.reason = reason
+    row.note = None  # what it was doing is over too
     row.ended_at = row.ended_at or now
     row.last_seen_at = now
 
@@ -434,6 +444,7 @@ def _summary(state: PresenceState, deciding: AgentSession, count: int) -> AgentP
         count=count,
         reason=deciding.reason,
         client_name=deciding.client_name,
+        note=deciding.note,
         since=deciding.state_changed_at,
         last_seen_at=deciding.last_seen_at,
     )

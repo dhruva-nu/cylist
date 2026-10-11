@@ -89,7 +89,7 @@ import {
   type TaskType,
   type Template,
 } from '../api/client'
-import { silentFor, waitingDetail } from '../routes/agentState'
+import { nowLine, silentFor, waitingDetail } from '../routes/agentState'
 import { can } from '../routes/projectPermissions'
 import { mayDelete, type Viewer } from './commentDelete'
 import { localDate } from './dates'
@@ -608,6 +608,7 @@ function AgentSessions({
             </span>
             <span className={styles.agentSessionState}>{sessionState(session, now)}</span>
           </div>
+          <NowLine session={session} />
           <div className={styles.agentSessionWhen}>
             {/* The record is what says a person did not do this — the same
                 wording the history below uses. */}
@@ -633,6 +634,23 @@ function AgentSessions({
           </span>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * What an open session is doing this moment — "Running pytest
+ * test_pr_states.py" — which changes with every tool call it makes. Nothing
+ * for a session that has ended: it is not doing anything now.
+ */
+function NowLine({ session }: { session: AgentSessionRead }) {
+  const line = nowLine(session)
+  if (line === null) return null
+
+  return (
+    <div className={styles.agentNow}>
+      <span className={styles.agentNowLabel}>Now</span>
+      <span className={styles.agentNowText}>{line}</span>
     </div>
   )
 }

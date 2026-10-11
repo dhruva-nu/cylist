@@ -11,6 +11,9 @@ from pydantic import Field, field_validator
 from app.models.agent_session import AgentSessionReason, AgentSessionState
 from app.schemas.common import Schema
 
+NOTE_MAX = 300
+"""Longest note a report may carry. A line on a card, not a log."""
+
 
 class AgentSessionPut(Schema):
     """One report from a harness hook: what the session is doing now.
@@ -33,8 +36,18 @@ class AgentSessionPut(Schema):
         max_length=200,
         description="The session's display name, if the harness knows it.",
     )
+    note: str | None = Field(
+        default=None,
+        max_length=NOTE_MAX,
+        description=(
+            "One line on what the session is doing right now — 'Running pytest "
+            "test_pr_states.py', 'Editing tasks.py' — or what it is waiting on. "
+            "Every report replaces it, so a report without one clears it. Never "
+            "written to the activity trail: it changes on every tool call."
+        ),
+    )
 
-    @field_validator("client_name")
+    @field_validator("client_name", "note")
     @classmethod
     def _blank_to_none(cls, value: str | None) -> str | None:
         if value is None:
@@ -51,7 +64,7 @@ class AgentSessionRead(Schema):
     client_name: str | None = Field(description="The session's display name, if known.")
     state: AgentSessionState
     reason: AgentSessionReason | None
-    note: str | None
+    note: str | None = Field(description="What the session is doing right now, if it said.")
     started_at: datetime
     state_changed_at: datetime = Field(description="When `state` last changed.")
     last_seen_at: datetime = Field(
@@ -88,5 +101,8 @@ class AgentPresence(Schema):
     )
     reason: AgentSessionReason | None = Field(description="The deciding session's reason.")
     client_name: str | None = Field(description="The deciding session's name.")
+    note: str | None = Field(
+        description="What the deciding session is doing right now — its current tool call."
+    )
     since: datetime = Field(description="When the deciding session entered its state.")
     last_seen_at: datetime = Field(description="When the deciding session last reported in.")

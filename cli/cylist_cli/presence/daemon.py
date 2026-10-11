@@ -187,6 +187,7 @@ def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Even
                 reason=message.get("reason"),
                 client_name=str(message.get("client_name") or ""),
                 task=str(message.get("task") or ""),
+                note=_note(message.get("note")),
             )
         )
     elif kind == "bind":
@@ -200,6 +201,11 @@ def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Even
         events.put(m.HookEnd(str(message.get("reason") or "session_ended")))
     # "ping" asks for the ack and nothing else.
     return protocol.ack(state.link, state.task, os.getpid())
+
+
+def _note(value: object) -> str | None:
+    """A note off the IPC line: a non-empty string, or nothing."""
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _loop(
@@ -359,6 +365,7 @@ def _initial(session_id: str, first: m.Event, *, owned: bool) -> m.Machine:
             client_name=first.client_name,
             agent=m.Agent.WAITING if first.state == "waiting" else m.Agent.WORKING,
             reason=first.reason,
+            note=first.note,
             owned=owned,
         )
     return m.Machine(session=session_id, task="", client_name="", owned=owned)

@@ -62,6 +62,7 @@ def report(
     client_name: str,
     *,
     bind: bool = False,
+    note: str | None = None,
 ) -> bool:
     """Tell the daemon where the session is. False means "fall back to HTTP".
 
@@ -77,7 +78,7 @@ def report(
     line = (
         protocol.bind_message(session_id, task, client_name)
         if bind
-        else protocol.state_message(session_id, task, state, reason, client_name)
+        else protocol.state_message(session_id, task, state, reason, client_name, note)
     )
     if ipc.send(session_id, line) is not None:
         return True

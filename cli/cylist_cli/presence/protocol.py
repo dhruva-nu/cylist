@@ -7,7 +7,8 @@ arguments, which is what makes the lifecycle testable without a network.
 connection, and one reply::
 
     {"v": 1, "t": "state", "session": "…", "task": "ATL-41",
-     "state": "working", "reason": null, "client_name": "ATL-41"}
+     "state": "working", "reason": null, "client_name": "ATL-41",
+     "note": "Running pytest test_pr_states.py"}
     {"v": 1, "t": "bind",  "session": "…", "task": "ATL-42", "client_name": "ATL-42"}
     {"v": 1, "t": "end",   "session": "…", "reason": "session_ended"}
     {"v": 1, "ok": true, "link": "live", "task": "ATL-41", "pid": 12345}
@@ -53,7 +54,14 @@ def ws_url(base: str, session_id: str) -> str:
 # --- Hook to daemon --------------------------------------------------------
 
 
-def state_message(session: str, task: str, state: str, reason: str | None, name: str) -> str:
+def state_message(
+    session: str,
+    task: str,
+    state: str,
+    reason: str | None,
+    name: str,
+    note: str | None = None,
+) -> str:
     return _line(
         {
             "t": "state",
@@ -62,6 +70,7 @@ def state_message(session: str, task: str, state: str, reason: str | None, name:
             "state": state,
             "reason": reason,
             "client_name": name,
+            "note": note,
         }
     )
 
@@ -119,18 +128,23 @@ def parse_ack(raw: str) -> dict[str, Any] | None:
 # --- Daemon to server ------------------------------------------------------
 
 
-def hello_frame(task: str, name: str, state: str, reason: str | None) -> str:
+def hello_frame(
+    task: str, name: str, state: str, reason: str | None, note: str | None = None
+) -> str:
     """The full current level, sent on connect and on every reconnect.
 
     A resync, never a replay: the server is told where the session *is*, not
     the sequence of states it passed through while the socket was down. That
     is the whole reconnection protocol.
+
+    ``note`` is what the session is doing right now — its current tool call —
+    and goes with every level, because the server replaces it on every report.
     """
     return json.dumps(
         {
             "type": "state",
             "task": task,
-            "report": {"state": state, "reason": reason, "client_name": name},
+            "report": {"state": state, "reason": reason, "client_name": name, "note": note},
         }
     )
 

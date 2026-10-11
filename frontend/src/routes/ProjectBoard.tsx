@@ -2482,7 +2482,11 @@ function AgentLine({ session }: { session: AgentPresence | null }) {
   if (!agent) return null
 
   return (
-    <div className={`${styles.waiting} ${styles.agentLine}`}>
+    <div
+      className={`${styles.waiting} ${styles.agentLine}`}
+      // The line is cut to the card's width; the whole of it is a hover away.
+      title={agent.detail ? `${agent.label} · ${agent.detail}` : agent.label}
+    >
       <span className={styles.agentDot} aria-hidden="true" />
       <span className={styles.at}>{agent.label}</span>
       {agent.detail ? <span className={styles.agentDetail}>· {agent.detail}</span> : null}

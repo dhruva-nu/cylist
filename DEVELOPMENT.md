@@ -434,7 +434,9 @@ curl -X POST localhost:8000/api/v1/tokens -b cookies \
 A Claude Code session bound to a card appears on the board while it runs. The
 card's border pulses teal while the agent is working, turns amber the moment it
 is waiting on you — a permission prompt, or simply the end of its turn — and
-green when the session ends. Nothing the agent does or says is involved:
+green when the session ends. While it works, the card's agent line says what
+it is doing right now — "Running pytest test_pr_states.py", "Editing
+tasks.py" — from the `PreToolUse` hook, without adding a line to its history. Nothing the agent does or says is involved:
 Claude Code's own lifecycle hooks report it, so there is nothing for a model to
 remember to call and nothing it can misreport.
 
@@ -443,7 +445,7 @@ Set it up once per machine, pointed at the board you actually use:
 ```bash
 uv tool install ./cli        # puts `cylist` on your PATH — see below for why that matters
 cylist login --url https://dnu-home-1.tail222f46.ts.net
-cylist hook install          # six hooks in ~/.claude/settings.json, plus a /work command
+cylist hook install          # seven hooks in ~/.claude/settings.json, plus a /work command
 ```
 
 `cylist login` asks for an API token, hidden rather than typed as an argument.

@@ -235,7 +235,7 @@ same documents.
 
 `cylist setup` does this along with everything else; `cylist hook install` is
 the same step on its own. Either adds one command — `cylist hook` — to Claude
-Code's user-level `settings.json`, on six lifecycle events, and writes the
+Code's user-level `settings.json`, on seven lifecycle events, and writes the
 `/work` and `/cylist-setup` slash commands beside it. It never touches hooks
 you already have, and running it again only points it at wherever the binary
 is now.
@@ -245,6 +245,15 @@ it runs: the card's border pulses while the agent is working, turns amber the
 moment it is waiting on you — a permission prompt, or just the end of its turn
 — and green when the session ends. Nothing the model does or says is involved;
 the harness's own hooks report it.
+
+While it works, the card also says *what* it is doing: each tool call's
+`PreToolUse` hook sums the call up in one line — "Running pytest
+test_pr_states.py", "Editing tasks.py", "Reading models.py" — and sends it as
+the session's note, which the card's agent line and the task's Now line show.
+The line is redacted before it leaves the machine (tokens, `password=…`,
+`Bearer …`, keys in URLs), and it is one line that each call replaces, never a
+row in the card's history. A hook installed before this was added has no
+`PreToolUse` entry: run `cylist hook install` again to add it.
 
 Two ways to bind a session, and nothing else binds one:
 

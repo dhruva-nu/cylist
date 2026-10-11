@@ -805,6 +805,8 @@ export interface AgentSessionRead {
   client_name: string | null
   state: AgentSessionState
   reason: AgentSessionReason | null
+  /** What the session is doing right now — "Running pytest test_pr_states.py" —
+   * from its latest tool call, or what it is waiting on. Null when it has not said. */
   note: string | null
   started_at: string
   /** When `state` last changed. */
@@ -835,6 +837,8 @@ export interface AgentPresence {
   reason: AgentSessionReason | null
   /** The deciding session's name. */
   client_name: string | null
+  /** What the deciding session is doing right now — its current tool call. */
+  note: string | null
   /** When the deciding session entered its state. */
   since: string
   /** When the deciding session last reported in. */

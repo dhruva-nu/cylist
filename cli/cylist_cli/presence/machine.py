@@ -11,7 +11,8 @@ The rules, in one place:
 
 * A state the server already has is not sent again. Two ``Stop`` events in a
   row cost one frame; a ``Stop`` then a permission prompt cost two, because
-  the reason differs.
+  the reason differs. The note — what the session is doing right now — counts
+  as part of the state, so each new tool call is one frame.
 * While the link is down the level is remembered and nothing is queued. On
   reconnect the *current* level is sent, not the history — see
   ``hello_frame``.
@@ -95,6 +96,9 @@ class HookState:
     reason: str | None
     client_name: str
     task: str = ""
+    note: str | None = None
+    """What the session is doing right now: "Editing tasks.py". Replaced by
+    every report, so ``None`` clears it rather than leaving it alone."""
     """Which card, when the hook says so — and it always does on the wire.
 
     It matters most for the *first* message a daemon ever gets. The hook
@@ -190,6 +194,7 @@ class Machine:
     client_name: str
     agent: Agent = Agent.WORKING
     reason: str | None = None
+    note: str | None = None
     link: Link = Link.CONNECTING
     attempt: int = 0
     owned: bool = False
@@ -238,12 +243,18 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
 def _on_hook_state(machine: Machine, event: HookState) -> tuple[Machine, list[Action]]:
     agent = Agent.WAITING if event.state == "waiting" else Agent.WORKING
     moved = bool(event.task) and event.task != machine.task
-    unchanged = agent is machine.agent and event.reason == machine.reason and not moved
+    unchanged = (
+        agent is machine.agent
+        and event.reason == machine.reason
+        and event.note == machine.note
+        and not moved
+    )
     machine = replace(
         machine,
         task=event.task or machine.task,
         agent=agent,
         reason=event.reason,
+        note=event.note,
         client_name=event.client_name or machine.client_name,
         since_hook=0.0,
     )
@@ -261,6 +272,7 @@ def _on_hook_bind(machine: Machine, event: HookBind) -> tuple[Machine, list[Acti
         client_name=event.client_name or machine.client_name,
         agent=Agent.WORKING,
         reason=None,
+        note=None,
         since_hook=0.0,
     )
     if machine.link is not Link.LIVE:
@@ -320,5 +332,5 @@ def _goodbye(machine: Machine, *, bye_reason: str, finish_reason: str) -> list[A
 def _level(machine: Machine) -> str:
     """The one frame that says where the session is now."""
     return protocol.hello_frame(
-        machine.task, machine.client_name, machine.agent.value, machine.reason
+        machine.task, machine.client_name, machine.agent.value, machine.reason, machine.note
     )

@@ -169,8 +169,10 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     """Why it is waiting, or why it is done. Null while working."""
 
     note: Mapped[str | None] = mapped_column(Text)
-    """Free text — the question an agent asked, once there is a tool to ask
-    one with. Nothing writes it today."""
+    """One line on what the session is doing right now, as its last report
+    said: "Running pytest test_pr_states.py", "Editing tasks.py". The hook
+    writes it on every tool call, and every report replaces it — so it is
+    current or it is absent, never history. Cleared when the session ends."""
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

@@ -898,6 +898,34 @@
   white-space: nowrap;
 }
 
+/* The session's current action. Mono, because it is usually a command or a
+   file name, and on a tinted ground so it reads as live rather than as one more
+   line of the record around it. */
+.agentNow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 4px 0 2px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--agent-soft);
+  font-size: 13px;
+}
+
+.agentNowLabel {
+  flex: none;
+  color: var(--agent);
+  font-weight: 700;
+}
+
+.agentNowText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
 .agentSessionWhen {
   display: flex;
   flex-wrap: wrap;

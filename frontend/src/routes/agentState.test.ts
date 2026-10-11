@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AgentPresence } from '../api/client'
-import { agentIndicator, hasLiveAgent, silentFor, waitingDetail } from './agentState'
+import { agentIndicator, hasLiveAgent, nowLine, silentFor, waitingDetail } from './agentState'
 
 const NOW = new Date('2026-09-08T12:00:00Z')
 
@@ -20,6 +20,7 @@ function presence(overrides: Partial<AgentPresence> = {}): AgentPresence {
     count: 1,
     reason: null,
     client_name: 'CYLIST-37',
+    note: null,
     since: '2026-09-08T11:50:00Z',
     last_seen_at: '2026-09-08T11:59:30Z',
     ...overrides,
@@ -36,6 +37,29 @@ describe('agentIndicator', () => {
       className: 'agentWorking',
       label: 'Agent working',
     })
+  })
+
+  it('says what a working agent is doing, when it has said', () => {
+    expect(agentIndicator(presence({ note: 'Running pytest test_pr_states.py' }), NOW)).toEqual({
+      className: 'agentWorking',
+      label: 'Running pytest test_pr_states.py',
+    })
+  })
+
+  it('keeps the count first when several are working, and the action after', () => {
+    expect(agentIndicator(presence({ count: 2, note: 'Editing tasks.py' }), NOW)).toEqual({
+      className: 'agentWorking',
+      label: '2 agents working',
+      detail: 'Editing tasks.py',
+    })
+  })
+
+  it('does not let a waiting agent read as busy', () => {
+    const found = agentIndicator(
+      presence({ state: 'waiting', reason: 'permission', note: 'Claude needs your permission' }),
+      NOW,
+    )
+    expect(found?.label).toBe('Agent needs you')
   })
 
   it('counts when more than one is working', () => {
@@ -133,5 +157,40 @@ describe('hasLiveAgent', () => {
 
   it('is false once every session is over', () => {
     expect(hasLiveAgent([{ agent_session: presence({ state: 'done' }) }])).toBe(false)
+  })
+})
+
+describe('nowLine', () => {
+  it('is the note while the session is working', () => {
+    expect(nowLine({ state: 'working', reason: null, note: 'Editing tasks.py' })).toBe(
+      'Editing tasks.py',
+    )
+  })
+
+  it('still says something true before the first tool call', () => {
+    expect(nowLine({ state: 'working', reason: null, note: null })).toBe('Working')
+  })
+
+  it('says what a waiting session is waiting for', () => {
+    expect(nowLine({ state: 'waiting', reason: 'turn_ended', note: null })).toBe(
+      'Waiting for your reply',
+    )
+    expect(nowLine({ state: 'waiting', reason: 'permission', note: null })).toBe(
+      'Waiting for permission',
+    )
+  })
+
+  it("prefers the harness's own words for a prompt", () => {
+    expect(
+      nowLine({
+        state: 'waiting',
+        reason: 'permission',
+        note: 'Claude needs your permission to use Bash',
+      }),
+    ).toBe('Claude needs your permission to use Bash')
+  })
+
+  it('is nothing once the session has ended', () => {
+    expect(nowLine({ state: 'done', reason: 'session_ended', note: null })).toBeNull()
   })
 })

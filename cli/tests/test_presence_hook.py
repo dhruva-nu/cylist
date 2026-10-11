@@ -121,6 +121,18 @@ class TestWhenThereIsADaemon:
         assert daemon.received[0]["state"] == "waiting"
         assert daemon.received[0]["reason"] == "turn_ended"
 
+    def test_a_tool_call_sends_its_line_down_the_socket(
+        self, fire: Fire, recorder: fake_api.Recorder
+    ) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION) as daemon:
+            fire(event("PreToolUse", tool_name="Edit", tool_input={"file_path": "/r/a/tasks.py"}))
+
+        assert recorder.paths() == []
+        assert daemon.received[0]["t"] == "state"
+        assert daemon.received[0]["state"] == "working"
+        assert daemon.received[0]["note"] == "Editing tasks.py"
+
     def test_walking_to_another_card_is_a_bind(
         self, fire: Fire, recorder: fake_api.Recorder
     ) -> None:

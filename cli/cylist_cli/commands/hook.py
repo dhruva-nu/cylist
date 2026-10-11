@@ -30,8 +30,10 @@ Four rules shape everything here, and they are worth more than any feature:
   prompt. The socket gets a quarter of a second and the HTTP fallback a
   second and a half — all of the addresses the server answers on, between
   them, not each — so the worst case is under two, well inside the three
-  Claude Code allows. An ordinary tool call now costs nothing at all: it
-  used to send a keepalive once a minute to prove the process was alive, and
+  Claude Code allows. A tool call costs one line on that socket: its
+  ``PreToolUse`` says what the agent is about to do — "Running pytest
+  test_pr_states.py" — which the card shows as the session's note. It used
+  to send a keepalive once a minute instead, to prove the process was alive;
   a held connection proves that by existing.
 * **It never leaves anything behind it cannot show you.** The daemon it
   starts is one process per bound session, visible in ``cylist hook status``,
@@ -65,6 +67,7 @@ import httpx
 from cylist_cli import output, presence, system
 from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
+from cylist_cli.presence import narrate
 
 HTTP_TIMEOUT = httpx.Timeout(1.5)
 """Total. A down backend costs a prompt this much and no more."""
@@ -120,6 +123,7 @@ TITLE_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
 HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
+    "PreToolUse",
     "PostToolUse",
     "Stop",
     "Notification",
@@ -421,6 +425,21 @@ class Hook:
         if self.task:
             self._report_state("working")
 
+    def _on_PreToolUse(self) -> None:  # noqa: N802
+        """Say what the agent is about to do, as the session's note.
+
+        *Pre*, not post: "Running pytest" is true while pytest runs, and a
+        note sent after it finished would always be one step behind. Not an
+        entry in the activity trail — the server keeps one note per session
+        and replaces it, so a hundred tool calls are a hundred updates to one
+        line rather than a hundred lines.
+        """
+        if self.task:
+            note = narrate.describe_tool(
+                str(self.event.get("tool_name") or ""), self.event.get("tool_input")
+            )
+            self._report_state("working", note=note)
+
     def _on_PostToolUse(self) -> None:  # noqa: N802
         target = self._cylist_write_target()
         if target and self.task and target != self.task:
@@ -455,7 +474,10 @@ class Hook:
         if reason is None:
             message = str(self.event.get("message") or "").lower()
             reason = "permission" if "permission" in message else "idle"
-        self._report_state("waiting", reason=reason)
+        # The harness's own words — "Claude needs your permission to use
+        # Bash" — are the best line the card has for what it is waiting on.
+        said = narrate.clip(narrate.redact(str(self.event.get("message") or "")), narrate.NOTE_MAX)
+        self._report_state("waiting", reason=reason, note=said or None)
 
     def _on_SessionEnd(self) -> None:  # noqa: N802
         if not self.task:
@@ -541,7 +563,14 @@ class Hook:
         # process left behind to time itself out.
         self._http_put("done", reason=reason)
 
-    def _report_state(self, state: str, *, reason: str | None = None, bind: bool = False) -> None:
+    def _report_state(
+        self,
+        state: str,
+        *,
+        reason: str | None = None,
+        bind: bool = False,
+        note: str | None = None,
+    ) -> None:
         """Report to the board, or silently do not.
 
         The daemon first — it is holding a connection already, so this is a
@@ -564,11 +593,12 @@ class Hook:
             reason,
             self._client_name(),
             bind=bind,
+            note=note,
         ):
             return
-        self._http_put(state, reason=reason)
+        self._http_put(state, reason=reason, note=note)
 
-    def _http_put(self, state: str, *, reason: str | None = None) -> None:
+    def _http_put(self, state: str, *, reason: str | None = None, note: str | None = None) -> None:
         """The original path, kept as the one that always works.
 
         Not a temporary crutch. It is what a machine with no unix sockets, a
@@ -585,6 +615,8 @@ class Hook:
         body: dict[str, Any] = {"state": state, "client_name": self._client_name()}
         if reason:
             body["reason"] = reason
+        if note:
+            body["note"] = note
         with self.ctx.build_client(token, timeout=HTTP_TIMEOUT, budget=HTTP_BUDGET) as client:
             client.put(f"/tasks/{self.task}/agent-sessions/{self.session_id}", body)
 
