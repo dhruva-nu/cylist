@@ -19,8 +19,12 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.principal import Principal
+from app.auth.scopes import Scope
+from app.db import Database
 from app.models import AgentSession, AgentSessionReason, AgentSessionState, Person
-from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead
+from app.models.activity import Channel
+from app.schemas.agent_sessions import AgentPromptAnswer, AgentPromptOption, AgentPromptRead
 from app.services import agent_prompts, tasks
 from app.services.agent_sessions import presence
 from tests import ws
@@ -228,6 +232,41 @@ class TestAnswering:
 
         assert again.status_code == 409
         assert "Already answered" in again.json()["error"]["message"]
+
+    async def test_two_answers_at_once_the_second_waits_and_is_told(
+        self, signed_in: AsyncClient, agent: dict[str, str], database: Database, owner: Person
+    ) -> None:
+        """The first answer holds the prompt until it commits; the second,
+        arriving meanwhile, waits for it and then hears it already closed —
+        rather than both getting 200 and the second overwriting the first."""
+        ref = await a_card(signed_in)
+        await _report(signed_in, agent, ref, "working")
+        asked = await _ask(signed_in, agent, ref)
+        person = Principal(
+            token_id=None,
+            person_id=owner.id,
+            label=owner.name,
+            scopes=frozenset(Scope),
+            channel=Channel.WEB,
+        )
+
+        async with database.session() as first:
+            task = await tasks.resolve(first, ref)
+            await agent_prompts.answer(
+                first, person, task, UUID(asked["id"]), AgentPromptAnswer(key="1")
+            )
+            second = asyncio.create_task(
+                signed_in.post(
+                    f"/tasks/{ref}/agent-prompts/{asked['id']}/answer", json={"key": "2"}
+                )
+            )
+            await asyncio.sleep(0.3)
+            assert not second.done(), "the second answer did not wait for the first"
+
+        response = await second
+        assert response.status_code == 409, response.text
+        assert "Already answered" in response.json()["error"]["message"]
+        assert (await _card(signed_in, ref))["agent_session"]["prompt"]["answer_key"] == "1"
 
     @pytest.mark.parametrize(
         "body", [{"key": "9"}, {}, {"key": "1", "text": "and also"}, {"text": "   "}]
@@ -603,6 +642,40 @@ class TestPermissionsOverTheSocket:
 
         assert polled["closed_reason"] == "answered_in_terminal"
 
+    async def test_a_withdraw_frame_from_another_session_is_ignored(
+        self, signed_in: AsyncClient, agent: dict[str, str], session: AsyncSession
+    ) -> None:
+        """Prompt ids are on every card; a socket only withdraws its own."""
+        ref = await a_card(signed_in)
+        await _report(signed_in, agent, ref, "waiting", reason="permission")
+        prompt_id = await self._open_permission(session, ref)
+        headers = [(b"authorization", agent["Authorization"].encode())]
+
+        other = f"/api/v1/agent-sessions/{SESSION_B}/ws"
+        async with ws.connect(signed_in.app, other, headers=headers) as socket:
+            await socket.receive_json()
+            await socket.send_json(
+                {
+                    "type": "withdraw",
+                    "task": ref,
+                    "prompt_id": prompt_id,
+                    "reason": "answered_in_terminal",
+                }
+            )
+            # Frames are handled in order: once this one is acknowledged, the
+            # withdraw before it has been dealt with.
+            await socket.send_json(
+                {
+                    "type": "state",
+                    "task": ref,
+                    "report": {"state": "working", "client_name": ref},
+                }
+            )
+            await socket.receive_json()
+
+        polled = (await signed_in.get(f"/tasks/{ref}/agent-prompts/{prompt_id}")).json()
+        assert polled["status"] == "open"
+
     async def test_a_permission_nobody_answered_here_is_still_waiting_in_the_terminal(
         self, signed_in: AsyncClient, agent: dict[str, str], session: AsyncSession
     ) -> None:
@@ -637,6 +710,24 @@ class TestPermissionsOverTheSocket:
             told = await socket.receive_json()
 
         assert (told["type"], told["status"]) == ("answer", "withdrawn")
+
+    async def test_an_agent_token_cannot_answer_a_permission(
+        self, signed_in: AsyncClient, agent: dict[str, str], session: AsyncSession
+    ) -> None:
+        """The agent asking holds an API token: it must not be able to grant
+        itself what Claude Code asked a person for."""
+        ref = await a_card(signed_in)
+        await _report(signed_in, agent, ref, "waiting", reason="permission")
+        prompt_id = await self._open_permission(session, ref)
+
+        response = await signed_in.post(
+            f"/tasks/{ref}/agent-prompts/{prompt_id}/answer",
+            json={"key": "allow_session"},
+            headers=agent,
+        )
+
+        assert response.status_code == 403
+        assert (await _card(signed_in, ref))["agent_session"]["prompt"]["status"] == "open"
 
     async def _open_permission(self, session: AsyncSession, ref: str) -> str:
         task = await tasks.resolve(session, ref)

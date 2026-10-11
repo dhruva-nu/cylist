@@ -277,7 +277,7 @@ async def _serve_agent(
                         await websocket.send_json(reply)
                     continue
                 if message.type == "withdraw":
-                    await _withdraw_prompt(database, message)
+                    await _withdraw_prompt(database, client_session_id, message)
                     continue
                 if message.type == "bye":
                     await _end_row(
@@ -326,15 +326,23 @@ async def _open_prompt(
         )
 
 
-async def _withdraw_prompt(database: Database, message: protocol.WithdrawMessage) -> None:
+async def _withdraw_prompt(
+    database: Database, client_session_id: str, message: protocol.WithdrawMessage
+) -> None:
     """The daemon stopped waiting. Unacknowledged: there is nothing to say back."""
     async with database.session() as session:
         try:
             task = await tasks.resolve(session, message.task)
-            await agent_prompts.withdraw(session, task, message.prompt_id, message.reason)
+            await agent_prompts.withdraw(
+                session,
+                task,
+                message.prompt_id,
+                message.reason,
+                client_session_id=client_session_id,
+            )
         except NotFoundError:
-            # A prompt this server never kept, or a card since deleted: there
-            # is nothing left waiting to be told.
+            # A prompt this server never kept, a card since deleted, or
+            # another session's prompt: there is nothing here to be told.
             return
 
 

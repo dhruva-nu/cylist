@@ -207,9 +207,16 @@ async def open_permission(
     No open session on the card means nobody can see it: the reply says it is
     withdrawn, and the hook leaves the terminal's own prompt to it.
     """
-    existing = await session.get(AgentPrompt, prompt_id)
+    existing = await _locked(session, prompt_id)
     if existing is not None:
-        if existing.task_id != task.id or existing.kind is not AgentPromptKind.PERMISSION:
+        asker = await session.get(AgentSession, existing.agent_session_id)
+        if (
+            existing.task_id != task.id
+            or existing.kind is not AgentPromptKind.PERMISSION
+            or asker is None
+            or asker.client_session_id != client_session_id
+        ):
+            # Not this session's to re-send: it hears nothing of another's.
             return protocol.answer(existing.id, AgentPromptStatus.WITHDRAWN)
         await _expire_if_due(session, existing, clock_now())
         if existing.status is AgentPromptStatus.OPEN:
@@ -269,8 +276,18 @@ async def answer(
     prompt_id: UUID,
     data: AgentPromptAnswer,
 ) -> AgentPromptRead:
-    """A person's answer: close the prompt, free the agent, say so on the card."""
+    """A person's answer: close the prompt, free the agent, say so on the card.
+
+    A permission is answered by a person signed in, never with an API token.
+    Agents hold API tokens, and the agent asking holds one on the same disk as
+    the hook: one that could grant itself "Allow for this session" would be
+    walking past the very prompt Claude Code put in front of a person.
+    """
     prompt = await _prompt_on(session, task, prompt_id)
+    if prompt.kind is AgentPromptKind.PERMISSION and principal.channel is not Channel.WEB:
+        raise ForbiddenError(
+            "A permission is answered by a person on the board, not with an API token."
+        )
     now = clock_now()
     await _expire_if_due(session, prompt, now)
     if prompt.status is not AgentPromptStatus.OPEN:
@@ -324,6 +341,7 @@ async def withdraw(
     reason: str,
     *,
     principal: Principal | None = None,
+    client_session_id: str | None = None,
 ) -> AgentPromptRead:
     """The agent stopped waiting before anybody here answered.
 
@@ -335,10 +353,18 @@ async def withdraw(
 
     ``principal``, when given, must be an agent: a person does not withdraw an
     agent's question, they answer it.
+
+    ``client_session_id``, when given — the agent socket's own — must be the
+    session that asked: one session does not get to take another's prompt
+    off the board. Any other is not found, as far as that socket can tell.
     """
     if principal is not None and principal.channel is not Channel.API:
         raise ForbiddenError("Only the agent that is waiting can withdraw a prompt.")
     prompt = await _prompt_on(session, task, prompt_id)
+    if client_session_id is not None:
+        asker = await session.get(AgentSession, prompt.agent_session_id)
+        if asker is None or asker.client_session_id != client_session_id:
+            raise NotFoundError(f"No such prompt on {task.reference}.")
     if prompt.status is AgentPromptStatus.OPEN:
         now = clock_now()
         status = AgentPromptStatus.EXPIRED if reason == "expired" else AgentPromptStatus.WITHDRAWN
@@ -474,8 +500,14 @@ async def sweep(session: AsyncSession) -> int:
     something; these are the ones where the something was nothing.
     """
     now = clock_now()
+    # Locked, skipping any row a person or the agent is closing this moment:
+    # that close is the one that happens, and the next sweep sees the result.
+    await session.flush()
     found = await session.scalars(
-        select(AgentPrompt).where(AgentPrompt.status == AgentPromptStatus.OPEN)
+        select(AgentPrompt)
+        .where(AgentPrompt.status == AgentPromptStatus.OPEN)
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
     )
     closed = 0
     for prompt in list(found):
@@ -577,13 +609,32 @@ async def shown_for(
 
 
 async def _prompt_on(session: AsyncSession, task: Task, prompt_id: UUID) -> AgentPrompt:
-    prompt = await session.get(AgentPrompt, prompt_id)
+    prompt = await _locked(session, prompt_id)
     if prompt is None or prompt.task_id != task.id:
         raise NotFoundError(f"No such prompt on {task.reference}.")
     return prompt
 
 
+async def _locked(session: AsyncSession, prompt_id: UUID) -> AgentPrompt | None:
+    """A prompt, read fresh and locked until this transaction ends.
+
+    Every close is read, check it is open, write. Two of them at once — two
+    people answering, or an answer and the terminal winning — would each see
+    it open, and the second write would land on top of the first: the trail
+    and the agent disagreeing about what was answered, or a withdrawal over an
+    answer. Locked, the second waits, then reads the first one's result and is
+    told it already closed. First answer wins, in the database too.
+
+    Flushed first: re-reading overwrites what is loaded, and the session does
+    not autoflush, so a change made earlier in this transaction would be lost.
+    """
+    await session.flush()
+    return await session.get(AgentPrompt, prompt_id, with_for_update=True, populate_existing=True)
+
+
 async def _open_prompts(session: AsyncSession, row_ids: list[UUID]) -> list[AgentPrompt]:
+    # Flushed and locked, as in _locked.
+    await session.flush()
     found = await session.scalars(
         select(AgentPrompt)
         .where(
@@ -591,8 +642,11 @@ async def _open_prompts(session: AsyncSession, row_ids: list[UUID]) -> list[Agen
             AgentPrompt.status == AgentPromptStatus.OPEN,
         )
         .order_by(AgentPrompt.asked_at)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
-    return list(found)
+    # Locking waits on a close in flight; what it closed is no longer open.
+    return [prompt for prompt in found if prompt.status is AgentPromptStatus.OPEN]
 
 
 async def _expire_if_due(
