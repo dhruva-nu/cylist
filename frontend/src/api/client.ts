@@ -1260,6 +1260,8 @@ export const api = {
   bootstrapSignIn: (password: string) =>
     request<Identity>('/auth/login', { method: 'POST', body: jsonBody({ password }) }),
   me: () => request<Identity>('/me'),
+  /** Revoke this browser's session and clear its cookie. */
+  signOut: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   /** Turn an invitation link into an account, and sign in with it. */
   acceptInvite: (token: string, password: string) =>
