@@ -351,6 +351,25 @@ async def test_two_edits_an_hour_apart_are_still_two_things(
     ]
 
 
+async def test_a_pull_request_merging_says_it_merged(signed_in: AsyncClient, project: str) -> None:
+    """CYLIST-83. The day's line is what happened to the pull request, not that
+    the card's pull requests changed."""
+    reference = await make_task(signed_in, project)
+    await signed_in.patch(f"/tasks/{reference}", json={"pr_refs": [{"url": "#212"}]})
+    await signed_in.patch(
+        f"/tasks/{reference}", json={"pr_refs": [{"url": "#212", "state": "merged"}]}
+    )
+
+    report = (await signed_in.get(f"/projects/{project}/reports/day")).json()
+
+    assert [entry["summary"] for entry in report["tasks"][0]["entries"]] == [
+        "Created this task.",
+        "Raised pull request #212.",
+        "Pull request #212 merged.",
+    ]
+    assert "Pull request #212 merged." in report["markdown"]
+
+
 async def test_the_headline_counts_the_lines_it_shows(signed_in: AsyncClient, project: str) -> None:
     """A count that disagreed with the lines under it would look like a bug."""
     board = (await signed_in.get(f"/projects/{project}/columns")).json()["columns"]
