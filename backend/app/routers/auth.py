@@ -28,7 +28,7 @@ from typing import NoReturn
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import SESSION_COOKIE, current_principal
+from app.auth.dependencies import current_principal
 from app.auth.passwords import verify_password
 from app.auth.principal import Principal
 from app.auth.scopes import ALL_SCOPES
@@ -60,13 +60,14 @@ stop on.
 
 def _set_session_cookie(response: Response, value: str, settings: Settings) -> None:
     response.set_cookie(
-        SESSION_COOKIE,
+        settings.session_cookie_name,
         value,
         max_age=int(timedelta(hours=settings.session_ttl_hours).total_seconds()),
         httponly=True,  # unreadable from JavaScript, so XSS cannot exfiltrate it
         secure=settings.is_deployed,  # staging and prod are HTTPS; dev and test are not
         samesite="lax",  # survives normal navigation, not cross-site form posts
-        path="/",
+        # The base path, so a dev slot's session goes to that slot alone.
+        path=settings.session_cookie_path,
     )
 
 
@@ -273,16 +274,17 @@ async def change_password(
 async def logout(
     request: Request,
     response: Response,
+    settings: Settings = Depends(app_settings),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Revoke the current session and clear its cookie.
 
     Safe to call without a session; it simply clears the cookie.
     """
-    cookie = request.cookies.get(SESSION_COOKIE)
+    cookie = request.cookies.get(settings.session_cookie_name)
     if cookie:
         await tokens.revoke_by_digest(session, hash_token(cookie))
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(settings.session_cookie_name, path=settings.session_cookie_path)
     logger.info("Signed out", extra={"context": {"had_session": bool(cookie)}})
     return Acknowledged()
 

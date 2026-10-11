@@ -8,15 +8,18 @@
 #
 #   scripts/deploy.sh            production, on :8000   (the default)
 #   scripts/deploy.sh staging    staging, on :8001
-#   scripts/deploy.sh dev        dev, on :8002
+#   scripts/deploy.sh dev N      dev slot N (1-5), on :801N, served at :9443/dev_N
 #
 # One script rather than three, because the interesting part is the order of
 # the steps and that order is not something staging or dev should get their own,
-# drifting copy of. Only the four values below differ between the environments.
+# drifting copy of. Only the four values below differ between the environments,
+# plus what a dev slot does around them — see scripts/dev-slot.sh.
 #
 # Reads the secrets that must not live in the repository from
 # CYLIST_PROD_DIR (default ~/cylist-prod), CYLIST_STAGING_DIR
-# (default ~/cylist-staging), or CYLIST_DEV_DIR (default ~/cylist-dev):
+# (default ~/cylist-staging), or, for every dev slot alike, ~/cylist-dev-shared
+# (under CYLIST_DEV_ROOT if that is set, rather than $HOME) — the slots share
+# one database, so they share its secrets and its backups too:
 #
 #   $SECRETS_DIR/app.env       CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH,
 #                              CYLIST_VAULT_KEY
@@ -34,27 +37,48 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ENVIRONMENT="${1:-prod}"
+# Set only for a dev slot. Cleared first so a SLOT in the caller's environment
+# never turns a staging or production deploy into a dev one.
+SLOT=""
 case "$ENVIRONMENT" in
   prod)
     COMPOSE_FILE="docker-compose.prod.yml"
+    DB_COMPOSE_FILE="$COMPOSE_FILE"
     SECRETS_VAR="CYLIST_PROD_DIR"
     DEFAULT_SECRETS_DIR="$HOME/cylist-prod"
     PORT=8000
     ;;
   staging)
     COMPOSE_FILE="docker-compose.staging.yml"
+    DB_COMPOSE_FILE="$COMPOSE_FILE"
     SECRETS_VAR="CYLIST_STAGING_DIR"
     DEFAULT_SECRETS_DIR="$HOME/cylist-staging"
     PORT=8001
     ;;
   dev)
+    SLOT="${2:-}"
+    if [[ ! "$SLOT" =~ ^[1-5]$ ]]; then
+      echo "usage: ${BASH_SOURCE[0]##*/} dev <slot 1-5>" >&2
+      exit 2
+    fi
     COMPOSE_FILE="docker-compose.dev.yml"
+    # Every slot's Postgres is the one shared Postgres, a compose project of
+    # its own.
+    DB_COMPOSE_FILE="docker-compose.dev-db.yml"
     SECRETS_VAR="CYLIST_DEV_DIR"
-    DEFAULT_SECRETS_DIR="$HOME/cylist-dev"
-    PORT=8002
+    # Set outright rather than defaulted, so a CYLIST_DEV_DIR left exported
+    # from the days of the single dev stack cannot point the slots at its
+    # directory. What is the slot's own (what it is running) is in
+    # ~/cylist-dev-N; see dev-slot.sh.
+    CYLIST_DEV_DIR="${CYLIST_DEV_ROOT:-$HOME}/cylist-dev-shared"
+    DEFAULT_SECRETS_DIR="$CYLIST_DEV_DIR"
+    PORT=$((8010 + SLOT))
+    # The compose file takes everything else about the slot from this.
+    export CYLIST_DEV_SLOT="$SLOT"
+    ENVIRONMENT="dev-$SLOT"
     ;;
   *)
-    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging|dev]" >&2
+    echo "usage: ${BASH_SOURCE[0]##*/} [prod|staging|dev <slot 1-5>]" >&2
     exit 2
     ;;
 esac
@@ -69,7 +93,19 @@ KEEP_BACKUPS="${KEEP_BACKUPS:-10}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:$PORT/api/v1/health}"
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# Where Postgres is: the same project as the app, except for dev.
+db_compose() { docker compose -f "$DB_COMPOSE_FILE" "$@"; }
 step() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
+# A line in the log, and an annotation on the run when this is CI.
+warn() {
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::warning::$1"; else echo "   warning: $1" >&2; fi
+}
+
+if [[ -n "$SLOT" ]]; then
+  # shellcheck source=scripts/dev-slot.sh
+  source "$ROOT/scripts/dev-slot.sh"
+  dev_slot_prepare
+fi
 
 for f in app.env postgres.env; do
   [[ -f "$SECRETS_DIR/$f" ]] ||
@@ -84,14 +120,14 @@ step "Building the image"
 compose build app
 
 step "Starting Postgres"
-compose up -d --wait postgres
+db_compose up -d --wait postgres
 
 step "Backing up the database"
 # Inside the container, so this needs no pg_dump on the host and no published
 # port. Custom format, because that is what `pg_restore` wants.
 mkdir -p "$BACKUPS"
 DUMP="$BACKUPS/cylist-$(date -u +%Y%m%dT%H%M%SZ).dump"
-if compose exec -T postgres sh -c \
+if db_compose exec -T postgres sh -c \
      'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$DUMP"; then
   echo "   $DUMP ($(du -h "$DUMP" | cut -f1))"
 else
@@ -108,7 +144,22 @@ step "Applying migrations"
 # A one-off container rather than the app's own start-up, so a migration that
 # fails fails the deploy here — visibly — instead of leaving a container
 # restarting in a loop against a schema it does not match.
-compose run --rm -T app alembic upgrade head
+#
+# A dev slot shares its database with four others, so the database can already
+# be at a revision this branch has never heard of — another slot's branch added
+# a migration and got there first. That slot owns the schema now; this one is
+# started on it as it is, with a warning, rather than refused, since an older
+# branch on a newer schema mostly works and dev is for looking.
+if ! migrate_log="$(compose run --rm -T app alembic upgrade head 2>&1)"; then
+  echo "$migrate_log" >&2
+  if [[ -n "$SLOT" ]] && grep -q "Can't locate revision" <<< "$migrate_log"; then
+    warn "the shared dev database is at a migration this branch does not have (another slot's branch put it there), so slot $SLOT starts on that schema unmigrated"
+  else
+    exit 1
+  fi
+else
+  echo "$migrate_log"
+fi
 
 step "Starting the app"
 compose up -d --wait app
@@ -126,6 +177,10 @@ for attempt in $(seq 1 30); do
   fi
   sleep 2
 done
+
+if [[ -n "$SLOT" ]]; then
+  dev_slot_publish
+fi
 
 step "Tidying up"
 # Only the layers nothing references. Named images and volumes are untouched.

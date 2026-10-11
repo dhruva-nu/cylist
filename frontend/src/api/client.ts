@@ -10,7 +10,10 @@
  * `npm run api:types`.
  */
 
-const API_BASE = '/api/v1'
+import { withBase } from './basePath'
+
+// Under the deployment's base path — `/dev_1/api/v1` in a dev slot.
+const API_BASE = withBase('/api/v1')
 
 export type Scope = 'read' | 'write' | 'vault:read' | 'vault:reveal' | 'admin'
 export type PersonKind = 'team' | 'client'

@@ -9,7 +9,8 @@ import type { Scope, SetupInfo } from '../api/client'
 export const MCP_NAME = 'cylist'
 
 /**
- * The `claude mcp add` line for a token.
+ * The `claude mcp add` line for a token, for the deployment at `address` — its
+ * origin plus any base path, `https://host:9443/dev_1`.
  *
  * `--header` goes last because it takes any number of values: anywhere
  * earlier, it would swallow the name and the address as more headers. Double
@@ -18,9 +19,9 @@ export const MCP_NAME = 'cylist'
  * user` so the tools are there in every project on that machine, not only
  * the directory the line happened to be run in.
  */
-export function connectLine(origin: string, token: string): string {
+export function connectLine(address: string, token: string): string {
   return (
-    `claude mcp add --transport http --scope user ${MCP_NAME} ${origin}/mcp ` +
+    `claude mcp add --transport http --scope user ${MCP_NAME} ${address}/mcp ` +
     `--header "Authorization: Bearer ${token}"`
   )
 }

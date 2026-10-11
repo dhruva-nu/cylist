@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Status dashboard for the three Cylist deployments on this machine.
+"""Status dashboard for the Cylist deployments on this machine.
 
 Stdlib only — nothing to install, nothing to build. It answers two routes:
 ``/`` serves the static page, ``/api/status`` reports, for each environment:
@@ -60,15 +60,22 @@ ENVIRONMENTS = [
                           "--max-time", "10",
                           "https://dnu-home-1.tail222f46.ts.net:8443/api/v1/health"],
     },
-    {
-        "name": "dev",
-        "label": "Dev",
-        "port": 8002,
-        "url": "https://dnu-home-1.tail222f46.ts.net:9443",
-        "public_check": ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
-                          "--max-time", "10",
-                          "https://dnu-home-1.tail222f46.ts.net:9443/api/v1/health"],
-    },
+    # Five dev slots, one card each. Their names follow the same
+    # cylist-<name>-app-1 and ~/cylist-<name> pattern as the other two, which
+    # is all container_status and backup_age need; all five share :9443 and
+    # are told apart by path.
+    *(
+        {
+            "name": f"dev-{n}",
+            "label": f"Dev {n}",
+            "port": 8010 + n,
+            "url": f"https://dnu-home-1.tail222f46.ts.net:9443/dev_{n}/",
+            "public_check": ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                              "--max-time", "10",
+                              f"https://dnu-home-1.tail222f46.ts.net:9443/dev_{n}/api/v1/health"],
+        }
+        for n in range(1, 6)
+    ),
 ]
 
 # The public checks leave the loopback interface — for prod, leave the
@@ -99,8 +106,7 @@ def container_status(name: str) -> dict:
     """What `docker inspect` knows about this environment's app container.
 
     Absent entirely, distinctly from stopped, when nothing has ever deployed it
-    — true of `dev` between the moment it is added here and its first
-    `workflow_dispatch` run.
+    — true of a dev slot until its first `workflow_dispatch` run.
     """
     try:
         out = subprocess.run(
@@ -156,7 +162,7 @@ def app_health(port: int) -> tuple[str, dict | None]:
 
 def backup_age(name: str) -> str | None:
     """The newest dump's mtime for this environment, or ``None`` if the
-    backups directory is empty or missing — dev, before its first deploy.
+    backups directory is empty or missing — a dev slot, before its first deploy.
     """
     backups_dir = Path.home() / f"cylist-{name}" / "backups"
     try:

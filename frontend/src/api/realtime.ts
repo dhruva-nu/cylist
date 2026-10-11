@@ -18,6 +18,8 @@
  * together.
  */
 
+import { BASE_PATH, withBase } from './basePath'
+
 /** What the server may send down a board socket. */
 export type BoardEvent =
   | { type: 'ready' }
@@ -37,10 +39,18 @@ export const CLOSE = {
   NOT_FOUND: 4404,
 } as const
 
-/** Where a project's board socket lives, from wherever the page was served. */
-export function boardSocketUrl(projectKey: string, location: Location): string {
+/**
+ * Where a project's board socket lives, from wherever the page was served —
+ * under its base path, since a dev slot's API is at `/dev_N/api/v1`.
+ */
+export function boardSocketUrl(
+  projectKey: string,
+  location: Pick<Location, 'protocol' | 'host'>,
+  base: string = BASE_PATH,
+): string {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${scheme}//${location.host}/api/v1/projects/${encodeURIComponent(projectKey)}/board/ws`
+  const path = withBase(`/api/v1/projects/${encodeURIComponent(projectKey)}/board/ws`, base)
+  return `${scheme}//${location.host}${path}`
 }
 
 const FIRST_DELAY = 500
