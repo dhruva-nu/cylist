@@ -13,6 +13,12 @@ describe('boardSocketUrl', () => {
     )
   })
 
+  it('lives under the base path in a dev slot', () => {
+    expect(boardSocketUrl('ATL', at('https:', 'box.ts.net:9443'), '/dev_1')).toBe(
+      'wss://box.ts.net:9443/dev_1/api/v1/projects/ATL/board/ws',
+    )
+  })
+
   it('escapes a key that would otherwise change the path', () => {
     expect(boardSocketUrl('a/b', at('https:', 'x'))).toContain('/projects/a%2Fb/board/ws')
   })

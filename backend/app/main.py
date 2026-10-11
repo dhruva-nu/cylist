@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import AGENT_QUIET_AFTER, REAP_EVERY, Settings, get_settings
+from app.core.base_path import BasePathMiddleware
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
@@ -214,6 +215,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # log without one.
     app.add_middleware(RequestLogMiddleware, api_prefix=API_PREFIX)
 
+    # Outside even that, so the request it logs is already under the base path
+    # whichever way it arrived. Absent at the site root, which is production.
+    if settings.base_path:
+        app.add_middleware(BasePathMiddleware, base_path=settings.base_path)
+
     register_exception_handlers(app)
     app.include_router(api_router, prefix=API_PREFIX)
     # Before the SPA for the same reason the router is: it claims "/".
@@ -222,7 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Last, because it claims "/": in the production image the built SPA is
     # served from this same process, and in development there is nothing to
     # serve and this does nothing.
-    mount_spa(app, settings.web_dir, reserved=API_PREFIX)
+    mount_spa(app, settings.web_dir, reserved=API_PREFIX, base_path=settings.base_path)
     return app
 
 

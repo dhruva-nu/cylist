@@ -4,7 +4,7 @@
  * Everything behind a session lives in the router; `/me` decides whether the
  * router or the sign-in screen is mounted, so no route needs its own guard.
  *
- * `/invite/<token>` is read here rather than in the router, and read before
+ * `/invite/<token>` (under the base path, if there is one) is read here rather than in the router, and read before
  * `/me` is even asked. It is the one address that means something to somebody
  * who has no session and is not trying to sign in — sending them to a sign-in
  * screen for a password they have not chosen yet would be a dead end — and
@@ -14,6 +14,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
+import { stripBase } from './api/basePath'
 import { ApiError, api } from './api/client'
 import { AcceptInvite } from './routes/AcceptInvite'
 import { SignIn } from './routes/SignIn'
@@ -29,7 +30,7 @@ export function inviteTokenIn(pathname: string): string | null {
 }
 
 export function App() {
-  const invitation = inviteTokenIn(window.location.pathname)
+  const invitation = inviteTokenIn(stripBase(window.location.pathname))
 
   const identity = useQuery({
     queryKey: ['me'],
