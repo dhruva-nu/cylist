@@ -9,13 +9,14 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { AgentPresence, AgentPrompt } from '../api/client'
+import type { AgentPresence, AgentPrompt, AgentSessionRead } from '../api/client'
 import {
   agentIndicator,
   hasLiveAgent,
   isAnswerable,
   nowLine,
   promptLine,
+  sessionPill,
   silentFor,
   waitingDetail,
 } from './agentState'
@@ -311,5 +312,72 @@ describe('isAnswerable', () => {
   it('is false past its expiry, before the server has said so', () => {
     expect(isAnswerable(prompt({ expires_at: '2026-09-08T12:30:00Z' }), NOW)).toBe(true)
     expect(isAnswerable(prompt({ expires_at: '2026-09-08T11:59:59Z' }), NOW)).toBe(false)
+  })
+})
+
+describe('sessionPill', () => {
+  function session(overrides: Partial<AgentSessionRead> = {}): AgentSessionRead {
+    return {
+      id: 's1',
+      task_id: 't1',
+      actor_label: 'laptop',
+      client_session_id: 'abc',
+      client_name: 'CYLIST-37',
+      state: 'working',
+      reason: null,
+      note: null,
+      started_at: '2026-09-08T11:00:00Z',
+      state_changed_at: '2026-09-08T11:50:00Z',
+      last_seen_at: '2026-09-08T11:59:30Z',
+      ended_at: null,
+      dismissed_at: null,
+      prompt: null,
+      ...overrides,
+    }
+  }
+
+  it('says working, since the state began', () => {
+    expect(sessionPill(session())).toEqual({
+      tone: 'working',
+      label: 'Working',
+      sinceVerb: 'working since',
+      sinceAt: '2026-09-08T11:50:00Z',
+    })
+  })
+
+  it('says a question is waiting, since it was asked', () => {
+    const asked = prompt({ asked_at: '2026-09-08T11:58:00Z' })
+    expect(sessionPill(session({ state: 'waiting', reason: 'question', prompt: asked }))).toEqual({
+      tone: 'waiting',
+      label: 'Waiting: a question for you',
+      sinceVerb: 'waiting since',
+      sinceAt: '2026-09-08T11:58:00Z',
+    })
+  })
+
+  it('says a permission is waiting', () => {
+    const asked = prompt({ kind: 'permission' })
+    expect(
+      sessionPill(session({ state: 'waiting', reason: 'permission', prompt: asked })).label,
+    ).toBe('Waiting: permission')
+  })
+
+  it('says a waiting session with nothing to answer is waiting for a reply', () => {
+    expect(sessionPill(session({ state: 'waiting', reason: 'turn_ended' })).label).toBe(
+      'Waiting for your reply',
+    )
+    expect(sessionPill(session({ state: 'waiting', reason: 'idle' })).label).toBe('Waiting: idle')
+  })
+
+  it('says how a session ended, and when', () => {
+    const ended = { state: 'done' as const, ended_at: '2026-09-08T11:55:00Z' }
+    expect(sessionPill(session({ ...ended, reason: 'session_ended' }))).toEqual({
+      tone: 'done',
+      label: 'Finished',
+      sinceVerb: 'ended',
+      sinceAt: '2026-09-08T11:55:00Z',
+    })
+    expect(sessionPill(session({ ...ended, reason: 'connection_lost' })).tone).toBe('stale')
+    expect(sessionPill(session({ ...ended, reason: 'moved' })).label).toBe('Moved to another card')
   })
 })

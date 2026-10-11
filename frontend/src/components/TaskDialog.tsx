@@ -66,7 +66,6 @@ import { Link } from '@tanstack/react-router'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   api,
-  type AgentSessionRead,
   type BoardColumn,
   type ChecklistItem,
   type ChecklistState,
@@ -89,9 +88,8 @@ import {
   type TaskType,
   type Template,
 } from '../api/client'
-import { nowLine, silentFor, waitingDetail } from '../routes/agentState'
 import { can } from '../routes/projectPermissions'
-import { feedClock, feedLabel, isCodeLike } from './agentFeed'
+import { AgentPanel } from './AgentPanel'
 import { mayDelete, type Viewer } from './commentDelete'
 import { localDate } from './dates'
 import { GoalChip } from './GoalMarks'
@@ -350,6 +348,14 @@ function TaskDetailView({
             link sitting in a row of chips reads as a chip that is broken. */}
         <GoalReadField projectKey={projectKey} task={task} onClose={onClose} />
 
+        {/* High on the card, under what the card is and above what it says:
+            an agent waiting on a question is the one thing here somebody may
+            have opened the card to do — a tap on a waiting card on a phone
+            opens this rather than the board's popover (CYLIST-86). */}
+        {task.agent_sessions.length ? (
+          <AgentPanel taskRef={task.reference} taskId={task.id} sessions={task.agent_sessions} />
+        ) : null}
+
         {task.sub_statuses.length ? (
           <ReadField label="Sub-status">
             <SubStatusBar
@@ -433,26 +439,6 @@ function TaskDetailView({
             onDone={onDone}
           />
         </ReadField>
-
-        {task.agent_sessions.length ? (
-          <ReadField label="Agents">
-            <AgentSessions
-              taskRef={task.reference}
-              taskId={task.id}
-              sessions={task.agent_sessions}
-            />
-          </ReadField>
-        ) : null}
-
-        {task.agent_sessions.length ? (
-          <ReadField label="Agent feed">
-            <AgentFeed
-              taskRef={task.reference}
-              taskId={task.id}
-              live={task.agent_sessions.some((session) => session.ended_at === null)}
-            />
-          </ReadField>
-        ) : null}
 
         <ReadField label="Timeline">
           {deleting.error ? <ErrorBanner>{deleting.error.message}</ErrorBanner> : null}
@@ -567,175 +553,6 @@ function ColumnOrFinishedReadField({
       {finishedOn ? <span className={styles.aside}>· finished {finishedOn}</span> : null}
     </ReadField>
   )
-}
-
-/**
- * The Claude Code sessions that have been on this card, and what became of them.
- *
- * The card's border says one thing about all of them — whichever needs a human
- * first. This is where the rest is: which session, since when, and how long
- * ago it last said anything. A card worked on from two terminals shows two
- * rows, which is the whole reason the border carries a count.
- *
- * Dismiss clears the finished ones. It appears only once there is something
- * to clear: a session still running cannot be dismissed, only stopped, and a
- * button that would refuse is worse than one that is not there. Editing the
- * card does the same thing without the button — the server treats a person
- * touching the card as having seen what the agent left.
- */
-function AgentSessions({
-  taskRef,
-  taskId,
-  sessions,
-}: {
-  taskRef: string
-  taskId: string
-  sessions: AgentSessionRead[]
-}) {
-  const queryClient = useQueryClient()
-  const now = new Date()
-  const finished = sessions.filter((session) => session.ended_at !== null)
-
-  const dismiss = useMutation({
-    mutationFn: () => api.dismissAgentSessions(taskRef),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
-        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
-        queryClient.invalidateQueries({ queryKey: ['board'] }),
-      ])
-    },
-  })
-
-  return (
-    <div className={styles.agentSessions}>
-      {dismiss.error ? <ErrorBanner>{dismiss.error.message}</ErrorBanner> : null}
-
-      {sessions.map((session) => (
-        <div key={session.id} className={styles.agentSession}>
-          <div className={styles.agentSessionLine}>
-            <span className={styles.agentSessionName}>
-              {session.client_name ?? session.actor_label}
-            </span>
-            <span className={styles.agentSessionState}>{sessionState(session, now)}</span>
-          </div>
-          <NowLine session={session} />
-          <div className={styles.agentSessionWhen}>
-            {/* The record is what says a person did not do this — the same
-                wording the history below uses. */}
-            <span className={styles.agent}>agent</span>
-            {session.actor_label}
-            <span className={styles.aside}>
-              · started {formatWhen(session.started_at)} · last seen{' '}
-              {silentFor(session.last_seen_at, now)} ago
-            </span>
-          </div>
-        </div>
-      ))}
-
-      {finished.length ? (
-        <div className={styles.agentSessionActions}>
-          <Button small onClick={() => dismiss.mutate()} disabled={dismiss.isPending}>
-            {dismiss.isPending ? 'Dismissing…' : 'Dismiss'}
-          </Button>
-          <span className={styles.empty}>
-            {finished.length === 1
-              ? 'Takes the finished session off the board.'
-              : `Takes the ${finished.length} finished sessions off the board.`}
-          </span>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/**
- * What an open session is doing this moment — "Running pytest
- * test_pr_states.py" — which changes with every tool call it makes. Nothing
- * for a session that has ended: it is not doing anything now.
- */
-function NowLine({ session }: { session: AgentSessionRead }) {
-  const line = nowLine(session)
-  if (line === null) return null
-
-  return (
-    <div className={styles.agentNow}>
-      <span className={styles.agentNowLabel}>Now</span>
-      <span className={styles.agentNowText}>{line}</span>
-    </div>
-  )
-}
-
-const FEED_POLL_MS = 10_000
-
-/**
- * What the agents on this card read, edited, ran and said, newest first.
- *
- * Each line was written by a session's presence daemon as it followed the
- * Claude Code transcript, and the board socket says `agent.feed` for this card
- * when there is a new one — `useBoardSocket` turns that into a refetch of this
- * query, so the feed moves while the agent works without this dialog polling.
- * Kept on the server, so a card opened halfway through a session shows how it
- * got there.
- */
-function AgentFeed({ taskRef, taskId, live }: { taskRef: string; taskId: string; live: boolean }) {
-  const feed = useQuery({
-    queryKey: ['agent-feed', taskId],
-    queryFn: () => api.getAgentFeed(taskRef),
-    // Opened from Today or a goal's page there is no board socket to ring,
-    // so while an agent is still on the card the feed asks for itself — at
-    // the board's own fallback pace, and not at all once every session is over.
-    refetchInterval: live ? FEED_POLL_MS : false,
-  })
-
-  if (feed.error) return <ErrorBanner>{feed.error.message}</ErrorBanner>
-  if (!feed.data) return <span className={styles.empty}>Loading…</span>
-  if (!feed.data.length) {
-    return (
-      <span className={styles.empty}>
-        Nothing yet. Lines appear here as the agent reads, edits, runs and says things.
-      </span>
-    )
-  }
-
-  return (
-    <ol className={styles.agentFeed}>
-      {feed.data.map((entry) => (
-        <li key={entry.id} className={`${styles.agentFeedLine} ${styles[`feed_${entry.kind}`]}`}>
-          <time className={styles.agentFeedTime} dateTime={entry.at}>
-            {feedClock(entry.at)}
-          </time>
-          <span className={styles.agentFeedKind}>{feedLabel(entry.kind)}</span>
-          <span className={isCodeLike(entry.kind) ? styles.agentFeedCode : styles.agentFeedText}>
-            {entry.text}
-          </span>
-        </li>
-      ))}
-    </ol>
-  )
-}
-
-/** One session's state, in the words the card's border uses. */
-function sessionState(session: AgentSessionRead, now: Date): string {
-  if (session.ended_at !== null) {
-    if (session.reason === 'moved') return 'moved to another card'
-    if (session.reason === 'connection_lost') {
-      return `disconnected — last seen ${silentFor(session.last_seen_at, now)} ago`
-    }
-    return 'finished'
-  }
-  if (session.state === 'waiting') return `needs you — ${waitingDetail(session.reason)}`
-  return 'working'
-}
-
-/** A moment, to the minute, the way the history above renders one. */
-function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 /**

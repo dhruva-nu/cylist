@@ -150,6 +150,55 @@ export function nowLine(
   }
 }
 
+export type SessionTone = 'working' | 'waiting' | 'done' | 'stale'
+
+export interface SessionPill {
+  tone: SessionTone
+  /** What the pill says: "Working", "Waiting: a question for you". */
+  label: string
+  /** The verb the since-time hangs off: "working since 14:31". */
+  sinceVerb: 'working since' | 'waiting since' | 'ended'
+  /** The moment that verb started — the caller formats it. */
+  sinceAt: string
+}
+
+/**
+ * The agent panel's pill for one session (CYLIST-87): its state, in a word or
+ * four, the tone the board's border would wear for it, and since when.
+ */
+export function sessionPill(session: AgentSessionRead): SessionPill {
+  if (session.ended_at !== null) {
+    const ended = { sinceVerb: 'ended' as const, sinceAt: session.ended_at }
+    if (session.reason === 'moved')
+      return { tone: 'done', label: 'Moved to another card', ...ended }
+    if (session.reason === 'connection_lost')
+      return { tone: 'stale', label: 'Disconnected', ...ended }
+    return { tone: 'done', label: 'Finished', ...ended }
+  }
+  if (session.state === 'working') {
+    return {
+      tone: 'working',
+      label: 'Working',
+      sinceVerb: 'working since',
+      sinceAt: session.state_changed_at,
+    }
+  }
+  const waiting = { tone: 'waiting' as const, sinceVerb: 'waiting since' as const }
+  const open = isAnswerable(session.prompt) ? session.prompt : null
+  if (open) {
+    return {
+      ...waiting,
+      label: open.kind === 'question' ? 'Waiting: a question for you' : 'Waiting: permission',
+      sinceAt: open.asked_at,
+    }
+  }
+  return {
+    ...waiting,
+    label: session.reason === 'idle' ? 'Waiting: idle' : 'Waiting for your reply',
+    sinceAt: session.state_changed_at,
+  }
+}
+
 /**
  * The one line a prompt reads as on a card (CYLIST-85, CYLIST-89), or null
  * when there is nothing worth saying.
