@@ -134,6 +134,45 @@ describe('agentIndicator', () => {
     )
   })
 
+  it('says what an open question asks, in place of "needs you"', () => {
+    expect(
+      agentIndicator(presence({ state: 'waiting', reason: 'question', prompt: prompt() }), NOW),
+    ).toEqual({ className: 'agentWaiting', label: 'Asks: Grey dot, or no dot?' })
+  })
+
+  it('says what an open permission wants', () => {
+    const found = agentIndicator(
+      presence({
+        state: 'waiting',
+        reason: 'permission',
+        prompt: prompt({ kind: 'permission', text: 'git push origin staging' }),
+      }),
+      NOW,
+    )
+    expect(found?.label).toBe('Permission: git push origin staging')
+  })
+
+  it('keeps the count first when one of several is asking', () => {
+    expect(agentIndicator(presence({ state: 'waiting', count: 2, prompt: prompt() }), NOW)).toEqual(
+      {
+        className: 'agentWaiting',
+        label: '2 agents · one needs you',
+        detail: 'Asks: Grey dot, or no dot?',
+      },
+    )
+  })
+
+  it('says what you answered once the agent is working again', () => {
+    const answered = prompt({ status: 'answered', answer: 'Grey', answer_key: '1' })
+    expect(agentIndicator(presence({ prompt: answered }), NOW)).toEqual({
+      className: 'agentWorking',
+      label: 'You: Grey',
+    })
+    expect(
+      agentIndicator(presence({ prompt: answered, note: 'Editing BoardCard.tsx' }), NOW),
+    ).toEqual({ className: 'agentWorking', label: 'You: Grey', detail: 'Editing BoardCard.tsx' })
+  })
+
   it('draws a lost connection as an outline, not as a finish', () => {
     const found = agentIndicator(
       presence({
@@ -268,5 +307,9 @@ describe('isAnswerable', () => {
     expect(isAnswerable(prompt())).toBe(true)
     expect(isAnswerable(prompt({ status: 'answered' }))).toBe(false)
     expect(isAnswerable(null)).toBe(false)
+  })
+  it('is false past its expiry, before the server has said so', () => {
+    expect(isAnswerable(prompt({ expires_at: '2026-09-08T12:30:00Z' }), NOW)).toBe(true)
+    expect(isAnswerable(prompt({ expires_at: '2026-09-08T11:59:59Z' }), NOW)).toBe(false)
   })
 })

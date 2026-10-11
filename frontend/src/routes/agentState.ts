@@ -70,13 +70,33 @@ export function agentIndicator(presence: AgentPresence | null, now: Date): Agent
   const agents = many ? `${presence.count} agents` : 'Agent'
 
   switch (presence.state) {
-    case 'waiting':
+    case 'waiting': {
+      // A question or a permission says what it is about, which is the one
+      // thing a person deciding whether to stop what they are doing needs:
+      // "Asks: keep the cookie name per environment?" rather than "needs you".
+      const asking = isAnswerable(presence.prompt) ? promptLine(presence.prompt) : null
+      if (asking) {
+        return many
+          ? { className: 'agentWaiting', label: `${agents} · one needs you`, detail: asking }
+          : { className: 'agentWaiting', label: asking }
+      }
       return {
         className: 'agentWaiting',
         label: many ? `${agents} · one needs you` : 'Agent needs you',
         detail: waitingDetail(presence.reason),
       }
-    case 'working':
+    }
+    case 'working': {
+      // Just answered: the card says what you said — "You: Allow once" — for as
+      // long as the server keeps the answer on it, which is until the session
+      // next changes state. The agent's own action, once it has one, follows.
+      const answered = presence.prompt?.status === 'answered' ? promptLine(presence.prompt) : null
+      if (answered) {
+        if (many) return { className: 'agentWorking', label: `${agents} working`, detail: answered }
+        return presence.note
+          ? { className: 'agentWorking', label: answered, detail: presence.note }
+          : { className: 'agentWorking', label: answered }
+      }
       // What it is doing, when it has said: "Running pytest test_pr_states.py"
       // tells a person more than "Agent working" does, and the dot and the
       // border already say it is an agent. With several on the card the count
@@ -87,6 +107,7 @@ export function agentIndicator(presence: AgentPresence | null, now: Date): Agent
           : { className: 'agentWorking', label: presence.note }
       }
       return { className: 'agentWorking', label: `${agents} working` }
+    }
     case 'done':
       // A session that was cut off is finished, but not in the way finishing
       // means. It wears the dashed border the stale state used to — "the
@@ -153,9 +174,51 @@ export function promptLine(prompt: AgentPrompt | null): string | null {
   }
 }
 
-/** Whether a person can still answer this from the board. */
-export function isAnswerable(prompt: AgentPrompt | null): prompt is AgentPrompt {
-  return prompt !== null && prompt.status === 'open'
+/**
+ * Whether a person can still answer this from the board.
+ *
+ * With `now`, a prompt past its `expires_at` is not, even before the server
+ * has said so: the server refuses an answer from that moment, and offering
+ * buttons that can only fail is worse than offering none.
+ */
+export function isAnswerable(
+  prompt: AgentPrompt | null | undefined,
+  now?: Date,
+): prompt is AgentPrompt {
+  if (!prompt || prompt.status !== 'open') return false
+  return now === undefined || new Date(prompt.expires_at).getTime() > now.getTime()
+}
+
+/**
+ * A card as it reads the moment its prompt was answered, before the board has
+ * refetched: working again, saying "You: …". Exactly what the server does to
+ * the session — `_resume` clears the reason and the note and restarts the
+ * clock — so the refetch that follows changes nothing a person can see.
+ *
+ * Only the prompt the card is showing is replaced; a card whose presence has
+ * since moved on to another prompt, or to no agent at all, is left alone.
+ */
+export function withPromptAnswered<T extends { agent_session: AgentPresence | null }>(
+  task: T,
+  answered: AgentPrompt,
+): T {
+  const presence = task.agent_session
+  if (!presence || presence.prompt?.id !== answered.id) return task
+  // With several sessions on the card another may still be waiting, and which
+  // one the card then shows is the server's to say: take the buttons away and
+  // leave the rest to the refetch.
+  if (presence.count > 1) return { ...task, agent_session: { ...presence, prompt: answered } }
+  return {
+    ...task,
+    agent_session: {
+      ...presence,
+      state: 'working',
+      reason: null,
+      note: null,
+      since: answered.answered_at ?? presence.since,
+      prompt: answered,
+    },
+  }
 }
 
 /**
