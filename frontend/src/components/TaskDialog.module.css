@@ -944,6 +944,14 @@
   min-width: 0;
 }
 
+/* Undoing `.field select { width: 100% }`, which outranks `.prStateSelect` and
+   would otherwise take the whole row — with `flex-shrink: 0` it squeezes the
+   reference to nothing and pushes the cross off the edge. The rest of the
+   field's look stays, so the select stands as tall as the input beside it. */
+.prRefEditorRow .prStateSelect {
+  width: auto;
+}
+
 /* Sized by the row rather than by the glyph, so the crosses line up down the
    list however long the references beside them are. */
 .prRefEditorRow button {
