@@ -12,7 +12,7 @@ import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AgentSession, AgentSessionReason, AgentSessionState
 from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead
-from app.services import agent_prompts
+from app.services import agent_prompts, tasks
 from app.services.agent_sessions import presence
 from tests import ws
 from tests.test_agent_reports import SESSION_A, SESSION_B, a_card
@@ -538,6 +538,25 @@ class TestPermissionsOverTheSocket:
             "answered_in_terminal",
         )
 
+    async def test_the_turn_ending_withdraws_it_and_its_own_notification_does_not(
+        self, signed_in: AsyncClient, agent: dict[str, str], session: AsyncSession
+    ) -> None:
+        """Claude Code leaves the hook running when the terminal answers, so the
+        next thing the session says is the first sign the terminal won."""
+        ref = await a_card(signed_in)
+        await _report(signed_in, agent, ref, "waiting", reason="permission")
+        prompt_id = await self._open_permission(session, ref)
+
+        await _report(
+            signed_in, agent, ref, "waiting", reason="permission", note="Claude needs permission"
+        )
+        still = (await signed_in.get(f"/tasks/{ref}/agent-prompts/{prompt_id}")).json()
+        await _report(signed_in, agent, ref, "waiting", reason="turn_ended")
+        after = (await signed_in.get(f"/tasks/{ref}/agent-prompts/{prompt_id}")).json()
+
+        assert still["status"] == "open"
+        assert (after["status"], after["closed_reason"]) == ("withdrawn", "answered_in_terminal")
+
     async def test_a_withdraw_frame_closes_it(
         self, signed_in: AsyncClient, agent: dict[str, str]
     ) -> None:
@@ -576,8 +595,25 @@ class TestPermissionsOverTheSocket:
                 if polled["status"] != "open":
                     break
                 await asyncio.sleep(0.02)
+            # The terminal said yes or no, and either way the agent carries on.
+            assert (await _card(signed_in, ref))["agent_session"]["state"] == "working"
 
         assert polled["closed_reason"] == "answered_in_terminal"
+
+    async def test_a_permission_nobody_answered_here_is_still_waiting_in_the_terminal(
+        self, signed_in: AsyncClient, agent: dict[str, str], session: AsyncSession
+    ) -> None:
+        ref = await a_card(signed_in)
+        await _report(signed_in, agent, ref, "waiting", reason="permission")
+        prompt_id = await self._open_permission(session, ref)
+        task = await tasks.resolve(session, ref)
+
+        await agent_prompts.withdraw(session, task, UUID(prompt_id), "expired")
+        await session.commit()
+
+        card = (await _card(signed_in, ref))["agent_session"]
+        assert (card["state"], card["reason"]) == ("waiting", "permission")
+        assert card["prompt"]["status"] == "expired"
 
     async def test_a_prompt_for_a_session_not_on_the_card_is_refused_at_once(
         self, signed_in: AsyncClient, agent: dict[str, str]
@@ -600,8 +636,6 @@ class TestPermissionsOverTheSocket:
         assert (told["type"], told["status"]) == ("answer", "withdrawn")
 
     async def _open_permission(self, session: AsyncSession, ref: str) -> str:
-        from app.services import tasks
-
         task = await tasks.resolve(session, ref)
         prompt_id = uuid4()
         reply = await agent_prompts.open_permission(

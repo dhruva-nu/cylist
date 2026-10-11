@@ -365,3 +365,137 @@ class TestWatchingTheOwner:
             thread.join(timeout=3)
             harness.kill()
             harness.wait(timeout=5)
+
+
+class AnsweringConnection(FakeConnection):
+    """A socket the server can also speak on: frames queued here are received."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.inbound: list[str] = []
+
+    def recv(self, timeout: float | None = None) -> str:
+        if self.inbound:
+            return self.inbound.pop(0)
+        raise TimeoutError
+
+
+def ask_in_background(wait: float) -> tuple[threading.Thread, list[dict[str, Any] | None]]:
+    """What the PermissionRequest hook does, on a thread, so the test can answer it."""
+    replies: list[dict[str, Any] | None] = []
+    line = protocol.ask_message(SESSION, CARD, CARD, "p-1", "Running git push", "Bash")
+
+    def ask() -> None:
+        replies.append(ipc.ask(SESSION, line, wait=wait))
+
+    thread = threading.Thread(target=ask)
+    thread.start()
+    return thread, replies
+
+
+def sent_of(connection: FakeConnection, kind: str) -> list[dict[str, Any]]:
+    for _ in range(150):
+        found = [frame for frame in connection.sent if frame["type"] == kind]
+        if found:
+            return found
+        threading.Event().wait(0.02)
+    return []
+
+
+class TestAPermission:
+    """CYLIST-89 through the real daemon: a hook held open until the board decides."""
+
+    def test_an_answer_from_the_board_reaches_the_waiting_hook(self) -> None:
+        connection = AnsweringConnection()
+        thread = run_in_background(a_context(), lambda *_: connection)
+        try:
+            tell(protocol.bind_message(SESSION, CARD, CARD))
+            asking, replies = ask_in_background(wait=5)
+
+            [prompt] = sent_of(connection, "prompt")
+            assert prompt["prompt"]["id"] == "p-1"
+            # Meanwhile the other hooks are still answered at once.
+            assert tell(protocol.state_message(SESSION, CARD, "waiting", "permission", CARD))
+
+            connection.inbound.append(
+                json.dumps(
+                    {
+                        "type": "answer",
+                        "prompt_id": "p-1",
+                        "status": "answered",
+                        "key": "allow_once",
+                        "answer": "Allow once",
+                    }
+                )
+            )
+            asking.join(timeout=5)
+
+            [reply] = replies
+            assert reply is not None
+            assert reply["answer"] == {
+                "status": "answered",
+                "key": "allow_once",
+                "answer": "Allow once",
+            }
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+
+    def test_a_hook_that_hangs_up_withdraws_the_prompt(self) -> None:
+        """The harness drops the hook once its own dialog is answered."""
+        connection = AnsweringConnection()
+        thread = run_in_background(a_context(), lambda *_: connection)
+        try:
+            tell(protocol.bind_message(SESSION, CARD, CARD))
+            asking, replies = ask_in_background(wait=0.3)
+            asking.join(timeout=5)
+
+            [withdrawn] = sent_of(connection, "withdraw")
+            assert withdrawn == {
+                "type": "withdraw",
+                "task": CARD,
+                "prompt_id": "p-1",
+                "reason": "answered_in_terminal",
+            }
+            assert replies == [None]
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+
+    def test_nobody_answering_in_time_gives_it_back_to_the_terminal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(daemon, "ASK_WAIT", 0.3)
+        connection = AnsweringConnection()
+        thread = run_in_background(a_context(), lambda *_: connection)
+        try:
+            tell(protocol.bind_message(SESSION, CARD, CARD))
+            asking, replies = ask_in_background(wait=5)
+            asking.join(timeout=5)
+
+            [reply] = replies
+            assert reply is not None
+            assert "answer" not in reply
+            assert sent_of(connection, "withdraw")[0]["reason"] == "expired"
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)
+
+    def test_a_tool_that_ran_releases_the_hook_and_takes_the_prompt_down(self) -> None:
+        connection = AnsweringConnection()
+        thread = run_in_background(a_context(), lambda *_: connection)
+        try:
+            tell(protocol.bind_message(SESSION, CARD, CARD))
+            asking, replies = ask_in_background(wait=5)
+            sent_of(connection, "prompt")
+
+            assert tell(protocol.ran_message(SESSION)) is not None
+            asking.join(timeout=5)
+
+            [reply] = replies
+            assert reply is not None
+            assert reply["answer"]["status"] == "withdrawn"
+            assert sent_of(connection, "withdraw")[0]["reason"] == "answered_in_terminal"
+        finally:
+            tell(protocol.end_message(SESSION, "session_ended"))
+            thread.join(timeout=3)

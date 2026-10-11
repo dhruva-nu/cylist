@@ -49,8 +49,11 @@ thing it sends that is not a reply::
 
 ``status`` is ``expired`` or ``withdrawn`` when it closed without an answer
 here; the hook then leaves the terminal's own dialog to it. The daemon sends
-``withdraw`` when the terminal won the race (the hook was killed while it
-waited), or its own wait ran out (``expired``). A ``prompt`` re-sent after a
+``withdraw`` when the terminal won the race — the tool ran (its
+``PostToolUse``), or the hook went away — or its own wait ran out
+(``expired``). Claude Code does not end the hook when its dialog is
+answered, so a terminal "no" is noticed only by the session's next report,
+which withdraws any open permission on the server's side. A ``prompt`` re-sent after a
 reconnect is answered with its outcome if it has one, which is how an answer
 given while the link was down still arrives. A question asked with the MCP
 ``ask_human`` tool never touches this socket: its tool long-polls over HTTP.

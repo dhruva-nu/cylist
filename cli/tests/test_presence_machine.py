@@ -352,3 +352,107 @@ class TestTheFeed:
         _, actions = m.step(live(), m.FeedLines(lines))
 
         assert [len(frame["entries"]) for frame in frames(actions)] == [20, 20, 5]
+
+
+class TestAPermissionOnTheBoard:
+    """CYLIST-89: a permission is a level and a prompt, held until it closes."""
+
+    ASK = m.HookAsk(prompt_id="p-1", text="Running git push", tool="Bash")
+
+    def test_asking_says_waiting_then_puts_the_prompt_on_the_card(self) -> None:
+        machine, actions = m.step(live(), self.ASK)
+
+        level, prompt = frames(actions)
+        assert level["report"] == {
+            "state": "waiting",
+            "reason": "permission",
+            "client_name": "ATL-1",
+            "note": "Running git push",
+        }
+        assert prompt == {
+            "type": "prompt",
+            "task": "ATL-1",
+            "prompt": {
+                "id": "p-1",
+                "kind": "permission",
+                "text": "Running git push",
+                "tool": "Bash",
+            },
+        }
+        assert machine.asking[0][0] == "p-1"
+
+    def test_a_prompt_asked_while_the_link_is_down_goes_out_after_the_level(self) -> None:
+        machine, actions = m.step(START, self.ASK)
+        assert actions == []
+
+        _, actions = m.step(machine, m.LinkUp())
+
+        assert [f["type"] for f in frames(actions)] == ["state", "prompt"]
+
+    def test_an_open_prompt_is_sent_again_on_every_reconnect(self) -> None:
+        machine, _ = m.step(live(), self.ASK)
+        machine, _ = m.step(machine, m.LinkDown())
+
+        _, actions = m.step(machine, m.LinkUp())
+
+        assert [f["type"] for f in frames(actions)] == ["state", "prompt"]
+
+    def test_an_answer_on_the_board_puts_the_session_back_to_work_quietly(self) -> None:
+        machine, _ = m.step(live(), self.ASK)
+
+        machine, actions = m.step(machine, m.PromptClosed("p-1", "answered"))
+
+        assert actions == []
+        assert (machine.agent, machine.reason, machine.asking) == (m.Agent.WORKING, None, ())
+        # And a reconnect now says so, rather than resurrecting the prompt.
+        machine, _ = m.step(machine, m.LinkDown())
+        _, actions = m.step(machine, m.LinkUp())
+        assert [f["report"]["state"] for f in frames(actions)] == ["working"]
+
+    def test_the_terminal_answering_first_withdraws_it(self) -> None:
+        machine, _ = m.step(live(), self.ASK)
+
+        machine, actions = m.step(machine, m.AskDropped("p-1", "answered_in_terminal"))
+
+        assert frames(actions) == [
+            {
+                "type": "withdraw",
+                "task": "ATL-1",
+                "prompt_id": "p-1",
+                "reason": "answered_in_terminal",
+            }
+        ]
+        assert machine.agent is m.Agent.WORKING
+
+    def test_giving_up_says_so_and_leaves_the_session_waiting(self) -> None:
+        """The terminal's dialog is still open: it is still waiting for permission."""
+        machine, _ = m.step(live(), self.ASK)
+
+        machine, actions = m.step(machine, m.AskDropped("p-1", "expired"))
+
+        assert frames(actions)[0]["reason"] == "expired"
+        assert (machine.agent, machine.reason) == (m.Agent.WAITING, "permission")
+
+    def test_news_of_a_prompt_it_is_not_holding_changes_nothing(self) -> None:
+        machine = live()
+
+        after, actions = m.step(machine, m.PromptClosed("p-unknown", "answered"))
+        dropped, more = m.step(machine, m.AskDropped("p-unknown", "expired"))
+
+        assert (after, actions) == (machine, [])
+        assert (dropped, more) == (machine, [])
+
+    def test_a_tool_running_means_the_terminal_answered(self) -> None:
+        machine, _ = m.step(live(), self.ASK)
+
+        machine, actions = m.step(machine, m.ToolRan())
+
+        assert [(f["type"], f["reason"]) for f in frames(actions)] == [
+            ("withdraw", "answered_in_terminal")
+        ]
+        assert (machine.agent, machine.asking) == (m.Agent.WORKING, ())
+
+    def test_a_tool_running_with_nothing_asked_says_nothing(self) -> None:
+        machine = live()
+
+        assert m.step(machine, m.ToolRan()) == (machine, [])

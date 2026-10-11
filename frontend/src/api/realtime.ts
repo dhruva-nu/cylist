@@ -23,6 +23,11 @@ import { BASE_PATH, withBase } from './basePath'
 /**
  * What the server may send down a board socket.
  *
+ * An agent's question or permission prompt opening or closing (CYLIST-85,
+ * CYLIST-89) is a `board.changed` like any other change: the card's
+ * `agent_session.prompt` is what to read. The `answer` frame that carries a
+ * permission back to its agent travels on the agent's socket, never this one.
+ *
  * `agent.feed` is the second doorbell (CYLIST-88): an agent on the named card
  * has read, edited, run or said something. Only a browser with that card open
  * has anything to refetch, which is why it is not folded into `board.changed`

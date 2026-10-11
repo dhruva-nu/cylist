@@ -585,8 +585,10 @@ def test_install_writes_every_event_and_the_work_command(
     assert set(settings["hooks"]) == set(hook.HOOK_EVENTS)
     for event in hook.HOOK_EVENTS:
         [group] = settings["hooks"][event]
+        # Three seconds, except the permission hook, which waits for a person.
+        timeout = 600 if event == "PermissionRequest" else 3
         assert group["hooks"] == [
-            {"type": "command", "command": "/opt/cylist/bin/cylist hook", "timeout": 3}
+            {"type": "command", "command": "/opt/cylist/bin/cylist hook", "timeout": timeout}
         ]
     assert settings["hooks"]["Notification"][0]["matcher"] == (
         "permission_prompt|idle_prompt|elicitation_dialog"
@@ -731,3 +733,62 @@ def test_the_hook_command_is_absolute() -> None:
     command = hook.hook_command()
     assert command.endswith(" hook")
     assert Path(command.split(" ")[0]).is_absolute()
+
+
+class TestPermissionDecision:
+    """What an answer from the board becomes, in Claude Code's own words."""
+
+    def test_no_answer_is_no_decision(self) -> None:
+        assert hook.permission_decision(None, "Bash", {}, None) is None
+        expired = {"status": "expired", "key": None, "answer": None}
+        assert hook.permission_decision(expired, "Bash", {}, None) is None
+
+    def test_allow_for_this_session_without_suggestions_allows_the_exact_command(self) -> None:
+        decision = hook.permission_decision(
+            {"status": "answered", "key": "allow_session", "answer": "Allow for this session"},
+            "Bash",
+            {"command": "  uv run pytest  "},
+            None,
+        )
+
+        assert decision == {
+            "behavior": "allow",
+            "updatedPermissions": [
+                {
+                    "type": "addRules",
+                    "rules": [{"toolName": "Bash", "ruleContent": "uv run pytest"}],
+                    "behavior": "allow",
+                    "destination": "session",
+                }
+            ],
+        }
+
+    def test_allow_for_this_session_on_another_tool_allows_the_tool(self) -> None:
+        decision = hook.permission_decision(
+            {"status": "answered", "key": "allow_session", "answer": "Allow for this session"},
+            "WebFetch",
+            {"url": "https://example.com"},
+            [],
+        )
+
+        assert decision is not None
+        assert decision["updatedPermissions"][0]["rules"] == [{"toolName": "WebFetch"}]
+
+    def test_an_unknown_key_is_no_decision(self) -> None:
+        answer = {"status": "answered", "key": "maybe", "answer": "Maybe"}
+        assert hook.permission_decision(answer, "Bash", {}, None) is None
+
+    def test_a_reinstall_raises_an_old_permission_hook_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+        monkeypatch.setattr(hook, "hook_command", lambda: "/opt/cylist/bin/cylist hook")
+        settings = tmp_path / "claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        old = {"type": "command", "command": "/opt/cylist/bin/cylist hook", "timeout": 3}
+        settings.write_text(json.dumps({"hooks": {"PermissionRequest": [{"hooks": [old]}]}}))
+
+        hook.install_hooks()
+
+        written = json.loads(settings.read_text())
+        assert written["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"] == 600

@@ -50,6 +50,17 @@ FOLLOW_EVERY = 0.5
 """How often the transcript is looked at. Fast enough that a feed reads as
 live; slow enough that a stat a half-second is all a quiet session costs."""
 
+ASK_WAIT = 580.0
+"""Longest the daemon holds a permission hook waiting on the board, in seconds.
+
+Inside the 600 the hook is installed with, so the daemon is the one that gives
+up — tidily, telling the server — rather than the harness killing a hook that
+then never hears why; and inside the 590 the server keeps the prompt
+answerable, so nobody answers one this has already stopped listening for."""
+
+ASK_POLL = 0.25
+"""How often a waiting ask looks for its answer and for its hook hanging up."""
+
 
 def log_path(session_id: str) -> Path:
     from cylist_cli.commands.hook import sessions_dir
@@ -140,7 +151,10 @@ def run(
 
     accepting = threading.Thread(
         target=listener.serve,
-        args=(lambda message: _receive(message, state, events),),
+        args=(
+            lambda message: _receive(message, state, events),
+            lambda message, gone: _ask(message, gone, state, events),
+        ),
         name="cylist-ipc",
         daemon=True,
     )
@@ -178,6 +192,9 @@ class _Shared:
     Written by the main thread, read by the IPC thread, and only ever a
     couple of strings — so a plain object is enough and a lock would be
     ceremony. Nothing here decides anything; the reducer does that.
+
+    ``answers`` is the exception, and has its own lock: it is where the main
+    thread hands a permission's answer to the thread holding that hook.
     """
 
     def __init__(self, session_id: str) -> None:
@@ -187,6 +204,42 @@ class _Shared:
         self.transcript: str | None = None
         """Written by the IPC thread, read by the follower: the one exception
         to "written by the main thread", and still a single string."""
+        self.answers = _Answers()
+
+
+class _Answers:
+    """Hooks waiting on the board, by prompt, and the way to hand them an answer."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._waiting: dict[str, queue.Queue[dict[str, Any]]] = {}
+
+    def expect(self, prompt_id: str) -> queue.Queue[dict[str, Any]]:
+        inbox: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+        with self._lock:
+            self._waiting[prompt_id] = inbox
+        return inbox
+
+    def deliver(self, prompt_id: str, answer: dict[str, Any]) -> bool:
+        """Hand a waiting hook its answer. False if nobody is waiting for it."""
+        with self._lock:
+            inbox = self._waiting.pop(prompt_id, None)
+        if inbox is None:
+            return False
+        inbox.put_nowait(answer)
+        return True
+
+    def release_all(self, answer: dict[str, Any]) -> int:
+        """Hand every waiting hook the same answer. Returns how many there were."""
+        with self._lock:
+            waiting, self._waiting = self._waiting, {}
+        for inbox in waiting.values():
+            inbox.put_nowait(answer)
+        return len(waiting)
+
+    def forget(self, prompt_id: str) -> None:
+        with self._lock:
+            self._waiting.pop(prompt_id, None)
 
 
 def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Event]) -> str:
@@ -221,8 +274,67 @@ def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Even
         )
     elif kind == "end":
         events.put(m.HookEnd(str(message.get("reason") or "session_ended")))
+    elif kind == "ran":
+        # The terminal answered whatever permission is waiting here, so the
+        # hooks still holding one can stop: nobody on the board decides it now.
+        state.answers.release_all({"status": "withdrawn", "key": None, "answer": None})
+        events.put(m.ToolRan())
     # "ping" asks for the ack and nothing else.
     return protocol.ack(state.link, state.task, os.getpid())
+
+
+def _ask(
+    message: dict[str, Any],
+    gone: Callable[[], bool],
+    state: _Shared,
+    events: queue.Queue[m.Event],
+) -> str:
+    """Put a permission on the card and hold the hook until it is decided.
+
+    Runs on a thread of its own per ask (see :meth:`ipc.Listener.serve`).
+    The ways out: the board answers, and the ack carries it; a ``ran`` says
+    the terminal answered first, and the ack says "withdrawn"; the hook hangs
+    up, and the server is told; or :data:`ASK_WAIT` runs out, the server is
+    told the prompt expired, and the ack says nobody answered — the hook then
+    leaves the terminal to it.
+    """
+    if message.get("session") != state.session_id:
+        return protocol.refusal("wrong_session")
+    transcript = message.get("transcript")
+    if isinstance(transcript, str) and transcript:
+        state.transcript = transcript
+
+    prompt_id = str(message["prompt_id"])
+    inbox = state.answers.expect(prompt_id)
+    tool = message.get("tool")
+    events.put(
+        m.HookAsk(
+            prompt_id=prompt_id,
+            text=str(message["text"]),
+            tool=tool if isinstance(tool, str) else None,
+            task=str(message.get("task") or ""),
+            client_name=str(message.get("client_name") or ""),
+        )
+    )
+    deadline = _clock() + ASK_WAIT
+    try:
+        while True:
+            try:
+                answer = inbox.get(timeout=ASK_POLL)
+            except queue.Empty:
+                pass
+            else:
+                return protocol.ack(state.link, state.task, os.getpid(), answer=answer)
+            if gone():
+                logger.info("The hook for %s hung up before the board answered", prompt_id)
+                events.put(m.AskDropped(prompt_id, "answered_in_terminal"))
+                return protocol.refusal("hung_up")
+            if _clock() >= deadline:
+                logger.info("Nobody answered %s on the board in time", prompt_id)
+                events.put(m.AskDropped(prompt_id, "expired"))
+                return protocol.ack(state.link, state.task, os.getpid())
+    finally:
+        state.answers.forget(prompt_id)
 
 
 def _follow(state: _Shared, events: queue.Queue[m.Event], stopped: threading.Event) -> None:
@@ -286,6 +398,10 @@ def _loop(
     if isinstance(first, m.HookEnd | m.OwnerGone):
         return
     reducer = _Reducer(_initial(session_id, first, owned=watch is not None), state)
+    if isinstance(first, m.HookAsk):
+        # Held, not lost: the link is not up yet, so it waits in the machine
+        # and goes out after the level once it is.
+        reducer.feed(first)
 
     socket: Any = None
 
@@ -331,11 +447,17 @@ def _loop(
             _close(socket)
             return
 
-        if socket is not None and _dropped(socket):
-            _close(socket)
-            socket = None
-            if reducer.link_lost():
-                return
+        if socket is not None:
+            dropped, heard = _drain(socket)
+            for frame in heard:
+                if not _perform(socket, reducer.feed(_hear(frame, state))):
+                    dropped = True
+                    break
+            if dropped:
+                _close(socket)
+                socket = None
+                if reducer.link_lost():
+                    return
 
 
 class _Reducer:
@@ -419,6 +541,10 @@ def _initial(session_id: str, first: m.Event, *, owned: bool) -> m.Machine:
             note=first.note,
             owned=owned,
         )
+    if isinstance(first, m.HookAsk):
+        return m.Machine(
+            session=session_id, task=first.task, client_name=first.client_name, owned=owned
+        )
     return m.Machine(session=session_id, task="", client_name="", owned=owned)
 
 
@@ -445,15 +571,34 @@ def _delay(actions: list[m.Action]) -> float:
     return m.backoff(0)
 
 
-def _dropped(socket: Any) -> bool:
-    """Whether the peer has gone, without blocking to find out."""
-    try:
-        socket.recv(timeout=0)
-    except TimeoutError:
-        return False
-    except Exception:
-        return True
-    return False
+def _drain(socket: Any) -> tuple[bool, list[dict[str, Any]]]:
+    """Whether the peer has gone, and the frames worth reading it sent meanwhile.
+
+    Never blocks. Most of what the server sends — acks of the level — has
+    always been read here only to be thrown away; since CYLIST-89 an
+    ``answer`` is kept, because it is a person deciding a permission.
+    """
+    heard: list[dict[str, Any]] = []
+    while True:
+        try:
+            raw = socket.recv(timeout=0)
+        except TimeoutError:
+            return False, heard
+        except Exception:
+            return True, heard
+        frame = protocol.parse_server_frame(raw)
+        if frame is not None and frame.get("type") == "answer":
+            heard.append(frame)
+
+
+def _hear(frame: dict[str, Any], state: _Shared) -> m.Event:
+    """Hand a closed prompt's outcome to the hook waiting on it, and tell the machine."""
+    prompt_id = str(frame["prompt_id"])
+    status = str(frame.get("status") or "")
+    answer = {"status": status, "key": frame.get("key"), "answer": frame.get("answer")}
+    if not state.answers.deliver(prompt_id, answer):
+        logger.debug("An answer to %s arrived with no hook waiting for it", prompt_id)
+    return m.PromptClosed(prompt_id, status)
 
 
 def _close(socket: Any) -> None:

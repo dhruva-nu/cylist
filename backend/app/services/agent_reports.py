@@ -73,8 +73,9 @@ async def report(
     because a line per tool call would bury everything else on it.
     """
     # A question the agent is holding its turn open for outranks "working"
-    # from the same turn; an open permission is over once the tool runs.
-    data = await agent_prompts.hold_for_question(session, task, client_session_id, data)
+    # from the same turn; an open permission is over once the session says
+    # anything else.
+    data = await agent_prompts.settle_for_report(session, task, client_session_id, data)
     upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
     await agent_prompts.withdraw_for_sessions(session, upserted.ended, "session_ended")
     for transition in upserted.transitions:

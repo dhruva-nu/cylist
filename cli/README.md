@@ -235,7 +235,7 @@ same documents.
 
 `cylist setup` does this along with everything else; `cylist hook install` is
 the same step on its own. Either adds one command — `cylist hook` — to Claude
-Code's user-level `settings.json`, on seven lifecycle events, and writes the
+Code's user-level `settings.json`, on eight lifecycle events, and writes the
 `/work` and `/cylist-setup` slash commands beside it. It never touches hooks
 you already have, and running it again only points it at wherever the binary
 is now.
@@ -265,6 +265,23 @@ model's thinking, and everything through the same redaction as the note. The
 server keeps the newest 200 lines of each session, so a card opened halfway
 through shows how it got there. The feed needs the daemon: with
 `CYLIST_PRESENCE=http` the card still shows its state and note, but no feed.
+
+A **permission prompt** can be answered from the card as well as from the
+terminal. Claude Code runs the `PermissionRequest` hook as it is about to ask;
+the hook hands the request to the daemon, which puts it on the card — "Running
+git push origin staging" — with *Allow once*, *Allow for this session* and
+*Deny*. Whichever is answered first wins: an answer on the board comes back
+down the daemon's socket and the hook returns it as the harness's decision
+(*Allow for this session* adds allow rules for this session only, never to a
+settings file and never a change of mode). Claude Code keeps the hook running
+when its own dialog is answered, so the card learns the terminal won from what
+happens next — the tool's `PostToolUse`, or the session's next report — and
+takes the prompt down then. This one hook is installed with
+a 600-second timeout instead of three, and the board stops offering a prompt
+after 580 — nobody answering there leaves it to the terminal. It needs the
+daemon too: with no daemon, or `CYLIST_PRESENCE` not `ws`, the hook says
+nothing and the terminal decides alone. A hook installed before this has no
+`PermissionRequest` entry: run `cylist hook install` again.
 
 Two ways to bind a session, and nothing else binds one:
 

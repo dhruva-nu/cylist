@@ -26,7 +26,10 @@ Four rules shape everything here, and they are worth more than any feature:
   A hook that fails a prompt because the board was down would be a hook nobody
   kept installed. Bad JSON, no token, a network error — all swallowed, with a
   line on stderr only when ``CYLIST_HOOK_DEBUG=1``.
-* **It is quick.** ``UserPromptSubmit`` is on the critical path of every
+* **It is quick** — with one exception. ``PermissionRequest`` waits for a
+  person, up to ten minutes, and is installed with a timeout to match; it is
+  the only event that does, and it only waits when the board can answer.
+  Everything else stays fast. ``UserPromptSubmit`` is on the critical path of every
   prompt. The socket gets a quarter of a second and the HTTP fallback a
   second and a half — all of the addresses the server answers on, between
   them, not each — so the worst case is under two, well inside the three
@@ -57,6 +60,7 @@ import os
 import re
 import shutil
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -124,6 +128,7 @@ HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
+    "PermissionRequest",
     "PostToolUse",
     "Stop",
     "Notification",
@@ -131,6 +136,21 @@ HOOK_EVENTS = (
 )
 NOTIFICATION_MATCHER = "|".join(NOTIFICATION_REASONS)
 HOOK_TIMEOUT_SECONDS = 3
+
+PERMISSION_TIMEOUT_SECONDS = 600
+"""The one hook allowed to be slow: ``PermissionRequest`` waits for a person.
+
+Claude Code's own default for a command hook, set explicitly so a reinstall
+over an older entry raises it from three. The daemon gives up at 580 and the
+server stops offering the prompt at 590, so the harness never has to kill the
+hook to be rid of it."""
+
+PERMISSION_ASK_WAIT = 585.0
+"""How long the hook waits on the daemon's reply: the daemon's own 580, and a
+little for the reply to travel."""
+
+HOOK_TIMEOUTS = {"PermissionRequest": PERMISSION_TIMEOUT_SECONDS}
+"""Per event, where it differs from :data:`HOOK_TIMEOUT_SECONDS`."""
 
 WORK_COMMAND_FILE = """\
 ---
@@ -440,7 +460,56 @@ class Hook:
             )
             self._report_state("working", note=note)
 
+    def _on_PermissionRequest(self) -> None:  # noqa: N802
+        """Ask the board, as well as the terminal, whether a tool may run — CYLIST-89.
+
+        Claude Code calls this when it is about to show its permission dialog.
+        The daemon puts the request on the card; a person picks Allow once,
+        Allow for this session or Deny there, and this hook returns that as
+        the harness's decision. The terminal's dialog is open meanwhile and
+        the first answer wins. Claude Code does not end this hook when the
+        terminal is answered, so the tool's ``PostToolUse`` says so instead
+        (see :meth:`_on_PostToolUse`), the daemon takes the prompt down and
+        hands this hook "withdrawn", and it exits saying nothing. A denial in
+        the terminal runs no tool; the session's next report takes it down.
+
+        Silent — and so the terminal's to decide — whenever the board cannot
+        answer: an unbound session, no daemon running, presence off, nobody
+        answering before the daemon gives up.
+        """
+        if not self.task:
+            return
+        tool = str(self.event.get("tool_name") or "")
+        tool_input = self.event.get("tool_input")
+        prompt_id = str(uuid.uuid4())
+        # Marked on the session so this tool's PostToolUse — which comes if
+        # the terminal answers first — knows there is a prompt to take down.
+        self.state["asking"] = prompt_id
+        _save_state(self.session_id, self.state)
+        try:
+            answer = presence.ask_permission(
+                self.session_id,
+                self.task,
+                self._client_name(),
+                prompt_id,
+                narrate.describe_tool(tool, tool_input),
+                tool or None,
+                transcript=self._transcript(),
+                wait=PERMISSION_ASK_WAIT,
+            )
+        finally:
+            _forget_asking(self.session_id, prompt_id)
+        decision = permission_decision(
+            answer, tool, tool_input, self.event.get("permission_suggestions")
+        )
+        if decision is not None:
+            self._hook_specific_output()["decision"] = decision
+
     def _on_PostToolUse(self) -> None:  # noqa: N802
+        if self.task and self.state.get("asking"):
+            # A permission is on the card and this tool ran anyway: the
+            # terminal answered it first.
+            presence.tool_ran(self.session_id)
         target = self._cylist_write_target()
         if target and self.task and target != self.task:
             # The session has walked to another card; the server ends the old
@@ -627,6 +696,58 @@ class Hook:
             client.put(f"/tasks/{self.task}/agent-sessions/{self.session_id}", body)
 
 
+def permission_decision(
+    answer: dict[str, Any] | None,
+    tool: str,
+    tool_input: Any,
+    suggestions: Any,
+) -> dict[str, Any] | None:
+    """Claude Code's ``PermissionRequest`` decision for an answer from the board.
+
+    ``None`` when there is no answer to give — the prompt closed on the board
+    without one — which leaves the terminal's dialog to decide.
+
+    "Allow for this session" adds allow *rules* for this session only, never
+    to a settings file. Where the harness suggested rules to add, those are
+    used with their destination narrowed to ``session``; otherwise the rule
+    is the tool — and for a shell command the exact command, never the whole
+    of Bash. Other suggestions are never taken: the harness offers ones such
+    as switching the session to accept every edit, which is far more than
+    "this, for this session" and not what a person clicking it meant.
+    """
+    if not answer or answer.get("status") != "answered":
+        return None
+    key = answer.get("key")
+    if key == "allow_once":
+        return {"behavior": "allow"}
+    if key == "allow_session":
+        return {
+            "behavior": "allow",
+            "updatedPermissions": _session_permissions(tool, tool_input, suggestions),
+        }
+    if key == "deny":
+        return {"behavior": "deny", "message": "Denied from the Cylist board."}
+    return None
+
+
+def _session_permissions(tool: str, tool_input: Any, suggestions: Any) -> list[dict[str, Any]]:
+    suggested = [
+        {**entry, "destination": "session"}
+        for entry in (suggestions if isinstance(suggestions, list) else [])
+        if isinstance(entry, dict)
+        and entry.get("type") == "addRules"
+        and entry.get("behavior") == "allow"
+        and isinstance(entry.get("rules"), list)
+    ]
+    if suggested:
+        return suggested
+    rule: dict[str, Any] = {"toolName": tool}
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if tool == "Bash" and isinstance(command, str) and command.strip():
+        rule["ruleContent"] = command.strip()
+    return [{"type": "addRules", "rules": [rule], "behavior": "allow", "destination": "session"}]
+
+
 # --- State on disk -------------------------------------------------------------
 
 
@@ -662,6 +783,20 @@ def _load_state(session_id: str) -> dict[str, Any]:
 
 def _save_state(session_id: str, state: dict[str, Any]) -> None:
     _write_private(_state_path(session_id), json.dumps(state))
+
+
+def _forget_asking(session_id: str, prompt_id: str) -> None:
+    """Take a finished permission's mark off the session, if it is still there.
+
+    Read afresh rather than from the copy the hook loaded: other hooks may
+    have written the file while this one waited, and a session that ended
+    meanwhile has no file to bring back.
+    """
+    state = _load_state(session_id)
+    if state.get("asking") != prompt_id:
+        return
+    del state["asking"]
+    _save_state(session_id, state)
 
 
 def _delete_state(session_id: str) -> None:
@@ -791,8 +926,12 @@ def _is_our_hook(command: Any) -> bool:
     return bool(OUR_HOOK_COMMAND.match(str(command or "").strip()))
 
 
-def _hook_entry(command: str) -> dict[str, Any]:
-    return {"type": "command", "command": command, "timeout": HOOK_TIMEOUT_SECONDS}
+def _hook_entry(command: str, event: str) -> dict[str, Any]:
+    return {"type": "command", "command": command, "timeout": _timeout_for(event)}
+
+
+def _timeout_for(event: str) -> int:
+    return HOOK_TIMEOUTS.get(event, HOOK_TIMEOUT_SECONDS)
 
 
 def _our_entries(groups: list[Any]) -> list[dict[str, Any]]:
@@ -862,8 +1001,9 @@ def install_hooks() -> HookInstall:
             # point it at where the binary is now rather than adding a second.
             for entry in ours:
                 entry["command"] = command
+                entry["timeout"] = _timeout_for(event)
             continue
-        fresh: dict[str, Any] = {"hooks": [_hook_entry(command)]}
+        fresh: dict[str, Any] = {"hooks": [_hook_entry(command, event)]}
         if event == "Notification":
             fresh = {"matcher": NOTIFICATION_MATCHER, **fresh}
         groups.append(fresh)

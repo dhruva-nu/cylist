@@ -18,9 +18,18 @@ from cylist_cli.presence import ipc, protocol
 class FakeDaemon:
     """Listens where a daemon would, and records what it is told."""
 
-    def __init__(self, session_id: str, *, behaviour: str = "ack") -> None:
+    def __init__(
+        self,
+        session_id: str,
+        *,
+        behaviour: str = "ack",
+        answer: dict[str, Any] | None = None,
+    ) -> None:
         self.session_id = session_id
         self.behaviour = behaviour
+        self.answer = answer
+        """What an ``ask`` is answered with, as if a person had answered on
+        the board; ``None`` is nobody answering in time."""
         self.received: list[dict[str, Any]] = []
         self._listener: ipc.Listener | None = None
         self._thread: threading.Thread | None = None
@@ -60,4 +69,6 @@ class FakeDaemon:
             return protocol.refusal("wrong_session")
         if self.behaviour == "garbage":
             return "not json\n"
+        if message.get("t") == "ask":
+            return protocol.ack("live", str(message.get("task") or ""), 4242, answer=self.answer)
         return protocol.ack("live", str(message.get("task") or ""), 4242)

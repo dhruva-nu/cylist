@@ -24,6 +24,10 @@ The rules, in one place:
   sent after the level on reconnect. Unlike the level they are history, so
   they are worth holding; unlike the activity trail they are a window, so a
   long outage costs the oldest of them rather than memory.
+* A permission the harness asks for (CYLIST-89) puts the session waiting
+  and the prompt on the card, and is held — re-sent after the level on every
+  reconnect — until the board answers it, the hook stops waiting, or the
+  server says it closed.
 * Nothing keeps a daemon alive forever. It exits when the session ends, when
   the harness process it belongs to exits, when the server has been
   unreachable long enough that nobody is coming back — and, only where no
@@ -148,6 +152,55 @@ class FeedLines:
 
 
 @dataclass(frozen=True)
+class HookAsk:
+    """The ``PermissionRequest`` hook wants a person's answer — CYLIST-89.
+
+    The session is waiting for permission from this moment, and the prompt
+    goes on the card. It is held until it closes, and re-sent after the level
+    on every reconnect: an answer given while the link was down comes back as
+    the server's reply to the re-sent prompt.
+    """
+
+    prompt_id: str
+    text: str
+    tool: str | None
+    task: str = ""
+    client_name: str = ""
+
+
+@dataclass(frozen=True)
+class AskDropped:
+    """The hook stopped waiting before the board answered.
+
+    ``answered_in_terminal`` when it went away — killed at its timeout, or
+    with its session; the harness does *not* end it when the terminal is
+    answered, which is :class:`ToolRan` — and ``expired`` when the daemon's
+    own wait ran out. Either way the server is told, so the card stops
+    offering it.
+    """
+
+    prompt_id: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ToolRan:
+    """A tool ran while a permission was on the card: the terminal answered it.
+
+    Every prompt held is withdrawn as ``answered_in_terminal``. Claude Code
+    asks one permission at a time, so the one held is the one just granted.
+    """
+
+
+@dataclass(frozen=True)
+class PromptClosed:
+    """The server says a prompt closed — answered on the board, or not at all."""
+
+    prompt_id: str
+    status: str
+
+
+@dataclass(frozen=True)
 class LinkUp:
     """The socket connected."""
 
@@ -172,7 +225,20 @@ class Tick:
     """Nothing happened; consider whether that is itself news."""
 
 
-Event = HookState | HookBind | HookEnd | FeedLines | LinkUp | LinkDown | OwnerGone | Tick
+Event = (
+    HookState
+    | HookBind
+    | HookEnd
+    | HookAsk
+    | AskDropped
+    | ToolRan
+    | PromptClosed
+    | FeedLines
+    | LinkUp
+    | LinkDown
+    | OwnerGone
+    | Tick
+)
 
 
 # --- Actions ---------------------------------------------------------------
@@ -233,6 +299,9 @@ class Machine:
     since_keepalive: float = 0.0
     held: tuple[dict[str, Any], ...] = ()
     """Feed lines found while the link was down, oldest first."""
+    asking: tuple[tuple[str, str], ...] = ()
+    """Permissions waiting on a person, as ``(prompt_id, prompt frame)``,
+    oldest first. Re-sent after the level on every reconnect."""
 
 
 def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine, list[Action]]:
@@ -253,6 +322,14 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
         return _on_hook_bind(machine, event)
     if isinstance(event, HookEnd):
         return _on_hook_end(machine, event)
+    if isinstance(event, HookAsk):
+        return _on_ask(machine, event)
+    if isinstance(event, AskDropped):
+        return _on_ask_dropped(machine, event)
+    if isinstance(event, ToolRan):
+        return _on_tool_ran(machine)
+    if isinstance(event, PromptClosed):
+        return _on_prompt_closed(machine, event)
     if isinstance(event, FeedLines):
         return _on_feed(machine, event)
     if isinstance(event, LinkUp):
@@ -304,6 +381,68 @@ def _on_hook_bind(machine: Machine, event: HookBind) -> tuple[Machine, list[Acti
     return machine, [Send(_level(machine))]
 
 
+def _on_ask(machine: Machine, event: HookAsk) -> tuple[Machine, list[Action]]:
+    task = event.task or machine.task
+    frame = protocol.prompt_frame(task, event.prompt_id, event.text, event.tool)
+    machine = replace(
+        machine,
+        task=task,
+        client_name=event.client_name or machine.client_name,
+        agent=Agent.WAITING,
+        reason="permission",
+        note=event.text,
+        since_hook=0.0,
+        asking=(*machine.asking, (event.prompt_id, frame)),
+    )
+    if machine.link is not Link.LIVE:
+        return machine, []
+    # The level first: the server puts a prompt only on a session it has.
+    return machine, [Send(_level(machine)), Send(frame)]
+
+
+def _on_ask_dropped(machine: Machine, event: AskDropped) -> tuple[Machine, list[Action]]:
+    if not _is_asking(machine, event.prompt_id):
+        return machine, []
+    machine = _without(machine, event.prompt_id)
+    if event.reason == "answered_in_terminal" and not machine.asking:
+        # The terminal answered, so the tool runs or Claude is told no; either
+        # way it is working. The server concludes the same from the withdraw,
+        # so this only keeps the level a reconnect would re-send true.
+        machine = replace(machine, agent=Agent.WORKING, reason=None, note=None)
+    if machine.link is not Link.LIVE:
+        return machine, []
+    return machine, [Send(protocol.withdraw_frame(machine.task, event.prompt_id, event.reason))]
+
+
+def _on_tool_ran(machine: Machine) -> tuple[Machine, list[Action]]:
+    actions: list[Action] = []
+    for prompt_id, _ in machine.asking:
+        machine, withdrawn = _on_ask_dropped(machine, AskDropped(prompt_id, "answered_in_terminal"))
+        actions.extend(withdrawn)
+    return machine, actions
+
+
+def _on_prompt_closed(machine: Machine, event: PromptClosed) -> tuple[Machine, list[Action]]:
+    if not _is_asking(machine, event.prompt_id):
+        return machine, []
+    machine = _without(machine, event.prompt_id)
+    if event.status == "answered" and not machine.asking:
+        # The server put the session back to working when it took the answer;
+        # nothing to send, only the level to keep in step with it.
+        machine = replace(machine, agent=Agent.WORKING, reason=None, note=None)
+    return machine, []
+
+
+def _is_asking(machine: Machine, prompt_id: str) -> bool:
+    return any(asked == prompt_id for asked, _ in machine.asking)
+
+
+def _without(machine: Machine, prompt_id: str) -> Machine:
+    return replace(
+        machine, asking=tuple(entry for entry in machine.asking if entry[0] != prompt_id)
+    )
+
+
 def _on_hook_end(machine: Machine, event: HookEnd) -> tuple[Machine, list[Action]]:
     return machine, _goodbye(machine, bye_reason=event.reason, finish_reason=event.reason)
 
@@ -320,9 +459,13 @@ def _on_link_up(machine: Machine) -> tuple[Machine, list[Action]]:
     machine = replace(
         machine, link=Link.LIVE, attempt=0, since_link=0.0, since_keepalive=0.0, held=()
     )
-    # The level first: the server keeps feed lines only for a session it
-    # already has on the card.
-    return machine, [Send(_level(machine)), *_feed(machine.task, held)]
+    # The level first: the server keeps feed lines, and puts prompts, only on
+    # a session it already has on the card.
+    return machine, [
+        Send(_level(machine)),
+        *(Send(frame) for _, frame in machine.asking),
+        *_feed(machine.task, held),
+    ]
 
 
 def _feed(task: str, entries: tuple[dict[str, Any], ...]) -> list[Action]:

@@ -370,22 +370,31 @@ async def wait_state(
 # --- What a session's reports mean for its prompts -------------------------------
 
 
-async def hold_for_question(
+async def settle_for_report(
     session: AsyncSession, task: Task, client_session_id: str, data: AgentSessionPut
 ) -> AgentSessionPut:
-    """A ``working`` report while a live question is open is the question's turn.
+    """What a session's own report means for the prompts it has open.
 
-    The ``ask_human`` tool is running, so the session *is* working in the
-    harness's eyes — and a daemon that reconnects mid-question re-sends
-    exactly that level. The card should go on saying it is waiting on a
-    person until the person answers, so the report is read as a heartbeat
-    of the waiting it is. A question whose tool has stopped polling is
-    withdrawn here instead, and the report goes through.
+    Two rules, one for each kind:
 
-    Also where a ``working`` report withdraws an open *permission*: the tool
-    is running, so somebody answered the terminal's dialog first.
+    * **A permission is over once the session reports anything else.** The
+      harness's ``PermissionRequest`` hook is not ended when its dialog is
+      answered in the terminal — Claude Code leaves it running — so the
+      first sign the terminal won is the next thing the session says: a tool
+      starting, a turn ending. Only another "waiting for permission" leaves
+      it open, since that is the same dialog's own ``Notification``.
+    * **A working report while a live question is open is the question's
+      turn.** The ``ask_human`` tool is running, so the session *is* working
+      in the harness's eyes — and a daemon that reconnects mid-question
+      re-sends exactly that level. The card should go on saying it waits on
+      a person until the person answers, so the report is read as a
+      heartbeat of that waiting. A question whose tool has stopped polling is
+      withdrawn instead, and the report goes through.
+
+    Returns the report to apply. A ``done`` is left to
+    :func:`withdraw_for_sessions`, which the caller runs on whatever ended.
     """
-    if data.state is not AgentSessionState.WORKING:
+    if data.state is AgentSessionState.DONE:
         return data
     row = await session.scalar(
         select(AgentSession).where(
@@ -396,10 +405,15 @@ async def hold_for_question(
     )
     if row is None:
         return data
+    asking_permission = (
+        data.state is AgentSessionState.WAITING and data.reason is AgentSessionReason.PERMISSION
+    )
     now = clock_now()
     held = False
     for prompt in await _open_prompts(session, [row.id]):
         if prompt.kind is AgentPromptKind.PERMISSION:
+            if asking_permission:
+                continue
             await _close(
                 session,
                 prompt,
@@ -408,6 +422,8 @@ async def hold_for_question(
                 reason="answered_in_terminal",
                 resume=False,
             )
+        elif data.state is not AgentSessionState.WORKING:
+            continue
         elif now - prompt.last_polled_at > ABANDONED_AFTER:
             await _close(
                 session, prompt, AgentPromptStatus.WITHDRAWN, now, reason="abandoned", resume=False
@@ -609,29 +625,43 @@ async def _close(
     reason: str | None,
     resume: bool = True,
 ) -> AgentSession | None:
-    """Close a prompt without an answer, and put its session back where it was.
+    """Close a prompt without an answer, and put its session where it now is.
 
-    An expired question's tool returns and the agent carries on, so its
-    session is working again; anything withdrawn by an interruption leaves
-    the session waiting on its human for the next prompt. ``resume=False`` is
-    for callers whose report is about to set the state anyway.
+    Where that is depends on what closed it, and is the harness's truth
+    rather than a guess: see :func:`_after_closing`. ``resume=False`` is for
+    callers whose report is about to set the state anyway.
     """
     prompt.status = status
     prompt.closed_at = now
     prompt.closed_reason = reason if status is AgentPromptStatus.WITHDRAWN else None
     row = await session.get(AgentSession, prompt.agent_session_id)
-    if row is not None and resume:
-        expired_question = (
-            status is AgentPromptStatus.EXPIRED and prompt.kind is AgentPromptKind.QUESTION
-        )
-        await _resume(
-            session,
-            row,
-            now,
-            state=AgentSessionState.WORKING if expired_question else AgentSessionState.WAITING,
-            except_id=prompt.id,
-        )
+    after = _after_closing(prompt.kind, status, reason)
+    if row is not None and resume and after is not None:
+        await _resume(session, row, now, state=after, except_id=prompt.id)
     return row
+
+
+def _after_closing(
+    kind: AgentPromptKind, status: AgentPromptStatus, reason: str | None
+) -> AgentSessionState | None:
+    """What a session is doing once a prompt closed without an answer here.
+
+    * A question that expired: its tool returned saying so, and the agent
+      carries on — working.
+    * A question withdrawn (interrupted, abandoned): the turn was cut short,
+      and the session waits on its human for the next prompt.
+    * A permission answered in the terminal: the tool runs, or Claude is
+      told no and carries on — working either way.
+    * A permission that expired here: the terminal's dialog is still open,
+      so it is still waiting for permission — unchanged (``None``).
+    """
+    if kind is AgentPromptKind.QUESTION:
+        if status is AgentPromptStatus.EXPIRED:
+            return AgentSessionState.WORKING
+        return AgentSessionState.WAITING
+    if status is AgentPromptStatus.WITHDRAWN and reason == "answered_in_terminal":
+        return AgentSessionState.WORKING
+    return None
 
 
 async def _resume(
