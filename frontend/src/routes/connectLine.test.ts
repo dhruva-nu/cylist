@@ -9,6 +9,12 @@ describe('connectLine', () => {
     expect(line).toContain(' cylist https://box.tailnet.ts.net/mcp ')
   })
 
+  it('keeps a base path, so a dev slot is reached at its own /mcp', () => {
+    expect(connectLine('https://box.ts.net:9443/dev_1', 'cyl_abc123')).toContain(
+      ' cylist https://box.ts.net:9443/dev_1/mcp ',
+    )
+  })
+
   it('puts the variadic --header last, where it cannot swallow the name or address', () => {
     expect(line.endsWith('--header "Authorization: Bearer cyl_abc123"')).toBe(true)
   })

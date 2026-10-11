@@ -6,6 +6,7 @@
  */
 
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
+import { BASE_PATH } from './api/basePath'
 import { Shell } from './components/Shell'
 import { Agents } from './routes/Agents'
 import { GoalPage } from './routes/GoalPage'
@@ -139,7 +140,9 @@ const routeTree = rootRoute.addChildren([
   projectAgentsRoute,
 ])
 
-export const router = createRouter({ routeTree })
+// Every route above is relative to the base path, so `/p/ATL/board` is
+// `/dev_1/p/ATL/board` in a dev slot, and every `<Link>` says so.
+export const router = createRouter({ routeTree, basepath: BASE_PATH || '/' })
 
 declare module '@tanstack/react-router' {
   interface Register {

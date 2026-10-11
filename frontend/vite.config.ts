@@ -7,8 +7,14 @@ import { defineConfig } from 'vite'
 // so the target is configurable — see docker-compose.yml.
 const apiTarget = process.env.CYLIST_API_PROXY ?? 'http://localhost:8000'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
+  // A relative base for the build, so one bundle serves the site root and any
+  // dev slot (`/dev_1/`) alike: the bundle's imports resolve against the file
+  // they are in, and the backend writes the base path into index.html's own
+  // asset URLs when it serves it (`backend/app/spa.py`). The dev server keeps
+  // the root, where `./` would mean nothing.
+  base: command === 'build' ? './' : '/',
   server: {
     port: 5173,
     // Bind every interface, not just loopback: the dev server is reached over
@@ -37,4 +43,4 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
-})
+}))

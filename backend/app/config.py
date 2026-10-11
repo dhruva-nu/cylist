@@ -6,6 +6,7 @@ readable next to unrelated variables. See ``.env.example`` for the full list.
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -76,6 +77,10 @@ write: the board now reads a fact rather than a guess about the clock.
 REAP_EVERY = timedelta(seconds=60)
 """How often to go looking. Cheap — one indexed query over the open rows."""
 
+SESSION_COOKIE = "cylist_session"
+"""The session cookie's name at the site root. Under a base path it carries a
+suffix — see :attr:`Settings.session_cookie_name`."""
+
 
 class Settings(BaseSettings):
     """Runtime configuration.
@@ -109,6 +114,17 @@ class Settings(BaseSettings):
     # production image builds it here; in development it does not exist and the
     # app is served by Vite instead, so the default is simply never found.
     web_dir: Path = Path("./web")
+
+    base_path: str = ""
+    """The path prefix this deployment is served under — ``/dev_1`` — or empty.
+
+    Empty is the site root, which is what production and staging are. A dev
+    slot shares one host and port with four others, each behind ``tailscale
+    serve --set-path /dev_N``, so everything the browser is handed has to say
+    ``/dev_N/`` in front: the SPA's assets, its API calls, its socket and its
+    session cookie. See :mod:`app.core.base_path` for how a request is read,
+    which works whether or not the proxy left the prefix on.
+    """
 
     # --- Secrets ----------------------------------------------------------
     password_hash: str = ""
@@ -205,6 +221,43 @@ class Settings(BaseSettings):
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("database_url must use the postgresql+asyncpg:// driver")
         return value
+
+    @field_validator("base_path")
+    @classmethod
+    def _normalise_base_path(cls, value: str) -> str:
+        """``/dev_1``: one leading slash, none trailing, and ``/`` means none.
+
+        Written into HTML, a cookie and a regular expression's neighbourhood,
+        so anything beyond a plain path is refused at startup rather than
+        escaped in three places.
+        """
+        cleaned = value.strip().strip("/")
+        if not cleaned:
+            return ""
+        if not re.fullmatch(r"[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*", cleaned):
+            raise ValueError(
+                "base_path must be a plain path such as /dev_1 — letters, digits, '.', '_', "
+                "'~', '-' and '/'"
+            )
+        return f"/{cleaned}"
+
+    @property
+    def session_cookie_name(self) -> str:
+        """The session cookie's name, which differs per base path.
+
+        The dev slots share one host, and a browser keys cookies on host and
+        name, not port — staging's ``cylist_session`` on :8443 is sent to
+        :9443 too. A name per slot is what lets you be signed in to two slots
+        at once, and what stops one slot reading another's token as its own.
+        """
+        if not self.base_path:
+            return SESSION_COOKIE
+        return f"{SESSION_COOKIE}_{re.sub(r'[^A-Za-z0-9]+', '_', self.base_path).strip('_')}"
+
+    @property
+    def session_cookie_path(self) -> str:
+        """The session cookie's path: the base path, so it goes nowhere else."""
+        return self.base_path or "/"
 
     @property
     def blob_dir(self) -> Path:

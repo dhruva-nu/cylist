@@ -38,6 +38,8 @@ from starlette.requests import HTTPConnection
 from app.auth.principal import Principal
 from app.auth.scopes import Scope, parse_scopes
 from app.auth.tokens import hash_token, looks_like_token
+from app.config import SESSION_COOKIE as SESSION_COOKIE  # re-exported; it lived here
+from app.config import Settings
 from app.core.clock import now
 from app.core.errors import ForbiddenError, UnauthorizedError
 from app.db import SessionDependency
@@ -46,7 +48,6 @@ from app.models.api_token import ApiToken, TokenKind
 
 logger = logging.getLogger(__name__)
 
-SESSION_COOKIE = "cylist_session"
 
 _LAST_USED_RESOLUTION = timedelta(minutes=1)
 """``last_used_at`` is only refreshed once per minute per token, so a busy
@@ -59,7 +60,10 @@ def _presented_credential(connection: HTTPConnection) -> tuple[str, Channel] | N
     if header and header.lower().startswith("bearer "):
         return header[7:].strip(), Channel.API
 
-    cookie = connection.cookies.get(SESSION_COOKIE)
+    # Only this deployment's own cookie: a dev slot shares its host with
+    # staging and the other slots, and the browser sends it all of theirs.
+    settings: Settings = connection.app.state.settings
+    cookie = connection.cookies.get(settings.session_cookie_name)
     if cookie:
         return cookie, Channel.WEB
 

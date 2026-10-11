@@ -33,6 +33,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import { useRef, useState, type ReactNode } from 'react'
+import { BASE_PATH } from '../api/basePath'
 import { api, type Skill, type TokenIssued } from '../api/client'
 import { formatSize, formatStamp } from '../components/format'
 import { PageHead } from '../components/Shell'
@@ -105,7 +106,8 @@ function Section({
  * The line that connects Claude Code on another machine to this deployment.
  *
  * The MCP tools are served at `/mcp` by the same process as this page (see
- * `backend/app/mcp.py`), so the address in the line is this page's own origin:
+ * `backend/app/mcp.py`), so the address in the line is this page's own origin
+ * and base path — `https://host:9443/dev_1/mcp` in a dev slot:
  * whatever name the browser reached Cylist by, the machine can use too. The
  * machine installs nothing — no CLI, no uv, no Python. It needs Claude Code
  * and this one line.
@@ -133,7 +135,7 @@ function Connect({ announce }: { announce: (message: string) => void }) {
     onError: (error: Error) => setProblem(error.message),
   })
 
-  const line = issued ? connectLine(window.location.origin, issued.token) : ''
+  const line = issued ? connectLine(window.location.origin + BASE_PATH, issued.token) : ''
 
   async function copy() {
     try {
