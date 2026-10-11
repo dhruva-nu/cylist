@@ -4,25 +4,25 @@
 #   scripts/deploy.sh dev 2       builds, migrates and restarts slot 2
 #   make dev-logs SLOT=2          follows it
 #
-# The same two containers as production and staging, and deliberately the same
-# shape: one image serving the API and the built SPA, Postgres with no
-# published port.
+# The same app container as production and staging, and deliberately the same
+# shape: one image serving the API and the built SPA. What it does not have is
+# a Postgres of its own: every slot uses the one in docker-compose.dev-db.yml,
+# so the data is the same whichever slot you open.
 #
 # Unlike staging, a slot is not tied to any one branch. The deploy workflow is
 # workflow_dispatch — you pick the branch in GitHub's "Run workflow" dropdown
 # and the slot (1–5) as its input, so five branches can be looked at side by
 # side, tested with real infrastructure, before that work earns a place on the
-# `staging` branch. Each slot starts with an empty database of its own; none is
-# ever restored from production the way staging is, so none ever needs the
-# production vault key.
+# `staging` branch. The shared database starts empty and is never restored from
+# production the way staging is, so no slot ever needs the production vault key.
 #
 # Everything slot-specific comes from CYLIST_DEV_SLOT, which deploy.sh and the
 # Make targets set; there is no default, so a command that forgot which slot it
 # meant fails here instead of acting on some other slot. What differs from
 # docker-compose.staging.yml is only what has to:
 #
-#   * the compose project name, `cylist-dev-N`, so each slot's containers and
-#     volumes never collide with production's, staging's or another slot's;
+#   * the compose project name, `cylist-dev-N`, so each slot's containers never
+#     collide with production's, staging's or another slot's;
 #   * the image tag — `cylist:dev-N`, for the same reason staging has its own
 #     tag: building one slot must not move the tag another environment, or
 #     another slot, restarts from;
@@ -39,20 +39,6 @@
 name: cylist-dev-${CYLIST_DEV_SLOT:?set CYLIST_DEV_SLOT to the dev slot, 1-5}
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    env_file:
-      # POSTGRES_PASSWORD, and the user and database the app connects as.
-      - ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the slot directory holding app.env and postgres.env}/postgres.env
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cylist -d cylist"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
   # Exactly one replica, and no --workers on the uvicorn command. The registry
   # of who is connected over a WebSocket lives in this process: a second one
   # would split the fan-out silently, freezing most open boards, and its
@@ -72,12 +58,14 @@ services:
     # the top of this file.
     image: cylist:dev-${CYLIST_DEV_SLOT}
     env_file:
-      # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY.
+      # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY — the same
+      # file for every slot, in ~/cylist-dev-shared, since they share one
+      # database and so must share the key its vault is sealed with.
       #
       # Raw, because an argon2 hash is full of `$` and compose would otherwise
       # read `$argon2id$v=19$...` as three empty variables and blank the
       # password out from under you.
-      - path: ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the slot directory holding app.env and postgres.env}/app.env
+      - path: ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the shared dev directory holding app.env}/app.env
         format: raw
     environment:
       # Not "dev" — see the note at the top of this file and the docstring on
@@ -99,15 +87,29 @@ services:
       # way; nothing else should reach it directly.
       - "127.0.0.1:801${CYLIST_DEV_SLOT}:8000"
     volumes:
+      # The slot's own logs, and below them the blobs every slot shares: a file
+      # is a row in the shared database plus its bytes here, so a file uploaded
+      # on one slot has to download on another.
       - cylist-data:/data
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - blobs:/data/blobs
+    networks:
+      - dev
+    # No depends_on: the database is another project's. deploy.sh starts it,
+    # healthy, before it migrates or starts any slot.
     restart: unless-stopped
 
+networks:
+  # Made by docker-compose.dev-db.yml; the shared Postgres answers on it as
+  # `cylist-dev-db`.
+  dev:
+    name: cylist-dev
+    external: true
+
 volumes:
-  # Named for the slot's project (cylist-dev-N), so production's, staging's and
-  # every other slot's data are different volumes entirely and no command run
-  # against one slot can reach them.
-  postgres-data:
+  # Named for the slot's project (cylist-dev-N), so it never reaches
+  # production's, staging's or another slot's.
   cylist-data:
+  # One for all five, made by dev-slot.sh.
+  blobs:
+    name: cylist-dev-blobs
+    external: true
