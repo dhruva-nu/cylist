@@ -1,0 +1,974 @@
+.task {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px 11px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+
+  /* Named as well as set, so anything drawn on top of the card — a stack of
+     faces, a tab — can ring itself in the surface it is sitting on. */
+  --card-surface: var(--paper);
+
+  background: var(--card-surface);
+  cursor: grab;
+  touch-action: none;
+}
+
+/* A colour bar rather than a tinted card alone: what it stands for has to
+   survive being glanced at from across the room.
+
+   The rail is one channel and the outer border is another, and they say
+   different things. The rail is what the card *is* — its goal, its status,
+   its type. The border is who is on it right now: an agent session, drawn by
+   the `.agent*` rules further down, and nothing else touches it. Kept apart
+   because the rail is already contested three ways, and a fourth claimant on
+   it would have had to lose to one of them.
+
+   Three things want the rail now, and they are ordered rather than merged. A
+   card on a goal wears that goal's colour, set as `--card-rail` on the card
+   itself, because the goal has nowhere else on a board to be. Failing that it
+   wears its status, for the cards that have one worth saying. Failing both —
+   which is most cards, most of the time — it wears what kind of work it is:
+   the fact the tinted tile at the head of the card used to spend twenty-four
+   pixels and the card's heaviest object on.
+
+   Three pixels, edge to edge of the card's straight side, and a little short
+   of full strength: a mark, not a stripe of paint.
+
+   The type ramp is written first and the status blocks below override it,
+   which is the whole of what makes a held bug wear amber: a class and a
+   pseudo-element weigh exactly the same, so source order is the only thing
+   deciding between them. Moving `.hold` above `.type_bug` would silently swap
+   what the card says. */
+.task::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -1px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--card-rail, var(--line-2));
+  opacity: 0.85;
+}
+
+.type_feature::before {
+  background: var(--card-rail, var(--ok));
+}
+
+.type_bug::before {
+  background: var(--card-rail, var(--blocked));
+}
+
+/* Grey stays grey. A chore is the one of the three that is nobody's idea, and
+   colouring it would be saying so twice. */
+.type_chore::before {
+  background: var(--card-rail, var(--line-2));
+}
+
+/* Keyboard focus only, never `:focus-within`. A click leaves focus on
+   whatever was clicked — the owner's select, a stage, a tick — and a card
+   that answered to that stayed open after the pointer had long gone. */
+.task:hover,
+.task:focus-visible,
+.task:has(:focus-visible) {
+  z-index: 3;
+  border-color: var(--line-2);
+}
+
+.task:active {
+  cursor: grabbing;
+}
+
+.dragging {
+  opacity: 0.4;
+}
+
+/* The overlay's copy: the same card, picked up. Full width of the overlay,
+   which dnd-kit has already sized to the card this was lifted from, so it
+   neither grows nor shrinks on the way out of the column. */
+.lifted {
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  cursor: grabbing;
+}
+
+.hold::before {
+  background: var(--card-rail, var(--hold));
+}
+
+.blocked::before {
+  background: var(--card-rail, var(--blocked));
+}
+
+.cancelled::before {
+  background: var(--ink-3);
+}
+
+/* Held or blocked: said on the card's line of facts, and here only as an
+   edge. A card washed amber or red read as an alarm from across the room
+   whatever was wrong with it, and a column of them was a column of noise. */
+.hold {
+  border-color: color-mix(in srgb, var(--hold) 40%, var(--line));
+}
+
+.blocked {
+  border-color: color-mix(in srgb, var(--blocked) 45%, var(--line));
+}
+
+.cancelled {
+  opacity: 0.7;
+}
+
+.cancelled .title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-2);
+}
+
+/* While an agent is on the card its line takes the rail's place too: the
+   border and the line already say what kind of card this is right now. */
+.agentWorking::before,
+.agentWaiting::before,
+.agentDone::before,
+.agentStale::before {
+  display: none;
+}
+
+/* An agent on the card: the outer border, which nothing else on a card draws.
+
+   After `.hold`, `.blocked` and `.cancelled` on purpose — those set the border
+   transparent to let the tint carry the card, and a class weighs the same as a
+   class, so the agent border wins only by being written later. Moving this
+   block above them would silently switch the border off on every held card
+   an agent picks up.
+
+   The border alone, in a muted colour, and still: a ring that breathed made
+   every card with an agent on it the loudest thing on the board, which is
+   the opposite of what an agent getting on with it deserves. */
+.agentWorking,
+.agentWaiting,
+.agentDone,
+.agentStale {
+  --agent-ring: var(--agent);
+
+  border-color: color-mix(in srgb, var(--agent-ring) 60%, var(--line));
+}
+
+/* Waiting is the amber the board already uses for "somebody has to do
+   something" — because somebody does, and it is you. Static, so a card that
+   needs you does not also demand you watch it. */
+.agentWaiting {
+  --agent-ring: var(--hold);
+}
+
+/* Finished is green and stays until dismissed — the border is the board
+   saying "come and look", and a message that removed itself would be one
+   you could miss. */
+.agentDone {
+  --agent-ring: var(--ok);
+}
+
+/* A session whose connection was lost — it dropped, or went quiet past the
+   idle window. Dashed grey, so it reads as an outline of an agent rather
+   than one.
+
+   This used to be drawn for a *working* row that had been silent too long,
+   guessed at from the clock. The server ends those rows now and says why, so
+   the same border means the same thing and is finally certain of it. */
+.agentStale {
+  --agent-ring: var(--line-2);
+
+  border-style: dashed;
+}
+
+/* The priority, as its glyph and its name in figures. No box at any level:
+   colour on the two that ask for something, grey on the one that does not. */
+.prio {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  align-items: center;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.priority_p0 {
+  color: var(--priority-p0);
+}
+
+.priority_p1 {
+  color: var(--priority-p1);
+}
+
+.priority_p2 {
+  color: var(--ink-3);
+}
+
+.priority_p3 {
+  color: var(--priority-p3);
+}
+
+/* The owner's disc, made a control: the select sits over it and does the
+   clicking, so the disc itself stays the only thing drawn. */
+.assigneePicker {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.assigneeSelect {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* A due date, drawn as near or as far as it is — five steps, and the same
+   height in all five so that a column of cards keeps one edge down its side.
+   The mark never changes size and never takes a ground; only its ink and its
+   weight move. */
+.due {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Past its date: the red p0 takes, because the two are meant to read as one
+   alarm rather than two. */
+.dueLate {
+  color: var(--blocked);
+  font-weight: 600;
+}
+
+.dueToday,
+.dueTomorrow {
+  color: var(--hold);
+  font-weight: 600;
+}
+
+/* From here out the mark is only reporting, so it stops using words and shows
+   the date. Two steps of ink rather than one: inside the week is something you
+   are working towards, past it is something you have merely been told. */
+.dueSoon {
+  color: var(--ink-2);
+}
+
+.dueLater {
+  color: var(--ink-3);
+}
+
+/* The words in the near states are set in the UI face; the dates in the far
+   ones are figures, and are set as figures. */
+.dueSoon .dueText,
+.dueLater .dueText {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* --- The card's face ------------------------------------------------------
+
+   Rows nine pixels apart, and nothing on the face but the title, the
+   priority, the stages and sub-tasks, and one line of which card it is, when
+   it is owed, where it is tracked and whose it is. See `TaskCardBody`. */
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+
+/* The rail is a goal, and pointing at it names the goal: a tab slid out from
+   the rail itself, over the card's corner. Waits a quarter of a second, like
+   everything on a card that opens on hover, so a pointer crossing the column
+   leaves it alone. */
+.goalHit {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -1px;
+  z-index: 4;
+  width: 12px;
+  cursor: default;
+}
+
+.goalTab {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px 0 9px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--card-rail, var(--line-2));
+  border-radius: 0 6px 6px 0;
+  background: var(--paper-2);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.goalHit:hover .goalTab {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.25s;
+}
+
+.headLine {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* The first thing on the card, and the only thing on it set at reading size.
+
+   Clamped rather than left to run: a long identifier used to overflow and be
+   sheared off by the card's own edge. `anywhere` because the strings that do
+   this are the ones with no spaces to break at. */
+.title {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+}
+
+/* Stages and sub-tasks, side by side on one quiet row. */
+.progress {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* A mark that opens into what it stands for. Only the mark is the target —
+   the hover ground hugs it, so it is plain which thing the pointer is on. */
+.mark {
+  position: relative;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+
+.mark:hover,
+.mark:focus-visible {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+
+.stageMark {
+  gap: 8px;
+}
+
+.stageTrack {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  width: 52px;
+}
+
+.stageStep {
+  flex: 1;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--line-2);
+}
+
+.stageStepDone {
+  background: var(--ok);
+}
+
+.stageStepHere {
+  background: var(--ink-2);
+}
+
+.stageName {
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageCount,
+.subtaskMark {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.subtaskMark {
+  gap: 4px;
+}
+
+.faceLine {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.faceGap {
+  flex: 1;
+}
+
+.reference {
+  flex: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A mark waiting to open draws a hairline under itself that fills over the
+   rest it needs, so the wait reads as the card listening rather than lag. */
+.mark::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  bottom: 0;
+  left: 6px;
+  height: 1px;
+  background: var(--ink-3);
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.markArming::after {
+  opacity: 1;
+  transform: scaleX(1);
+  transition: transform 0.2s linear;
+}
+
+.markOpen {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+
+/* --- The one slot under the bottom line -----------------------------------
+
+   Shut, and paying no gap, until the card has been rested on for a quarter of
+   a second — then open with the card's other facts. A mark that has opened
+   opens it at once with its own list. Shutting is at once: the delay is on
+   the open state only.
+
+   Nothing above the slot ever folds away for it. The lists used to take the
+   place of the bottom line, and the pull-request mark lives on that line — so
+   opening the sub-tasks on the way down to it took it out from under the
+   pointer. `0fr` to `1fr` is what lets the slot animate to a height nobody
+   has to measure. */
+.more {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-top: -9px;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.16s ease,
+    opacity 0.16s ease,
+    margin-top 0.16s ease;
+}
+
+.task:hover .more,
+.task:focus-visible .more,
+.task:has(:focus-visible) .more {
+  grid-template-rows: 1fr;
+  margin-top: 0;
+  opacity: 1;
+  transition-delay: 0.25s;
+}
+
+.focus_stages .more,
+.focus_subs .more,
+.focus_prs .more {
+  grid-template-rows: 1fr;
+  margin-top: 0;
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+/* Never on the copy in the air: a card being carried is not being read. */
+.lifted .more {
+  display: none;
+}
+
+/* Every list in the one cell, in the order of the marks that open them —
+   facts, stages, sub-tasks, pull requests. The lists before the open one
+   wait off to the left and the ones after it off to the right, so switching
+   slides the way the pointer moved. The old list fades first and the new one
+   80ms after, while the height morphs between the two. */
+.slotStack {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.slotPane {
+  display: grid;
+  grid-area: 1 / 1;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateX(16px);
+  pointer-events: none;
+  transition:
+    grid-template-rows 0.26s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.14s ease,
+    transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.focus_stages .factsPane,
+.focus_subs .factsPane,
+.focus_subs .stagesPane,
+.focus_prs .factsPane,
+.focus_prs .stagesPane,
+.focus_prs .subsPane {
+  transform: translateX(-16px);
+}
+
+.cardBody:not(.focus_stages, .focus_subs, .focus_prs) .factsPane,
+.focus_stages .stagesPane,
+.focus_subs .subsPane,
+.focus_prs .prsPane {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition:
+    grid-template-rows 0.26s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.18s ease 0.08s,
+    transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.paneInner {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Every stage on one line: done, here, and to come. */
+.stageList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.stage {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  white-space: nowrap;
+}
+
+button.stage {
+  cursor: pointer;
+}
+
+button.stage:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.stage::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 50%;
+}
+
+.stage:not(:last-child)::after {
+  content: '';
+  width: 10px;
+  height: 1px;
+  margin-left: 5px;
+  background: var(--line-2);
+}
+
+.stageDone::before {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.stageHere {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.stageHere::before {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+/* A card's parts, one short row each — and each one something to act on: the
+   tick finishes the part or opens it again, the rest of a sub-task's row opens
+   that sub-task, and a tick box's whole row is its tick. */
+.parts {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -4px;
+  padding: 0;
+  list-style: none;
+}
+
+.part {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  min-width: 0;
+  height: 24px;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.partTick {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  margin: 0 4px;
+  padding: 0;
+  border: 1.5px solid var(--line-2);
+  border-radius: 3px;
+  background: none;
+  color: transparent;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+button.partTick:hover {
+  border-color: var(--ink-2);
+  color: var(--ink-3);
+}
+
+.partTick > svg {
+  width: 9px;
+  height: 9px;
+}
+
+.partDone .partTick {
+  border-color: var(--ink-3);
+  background: var(--ink-3);
+  color: var(--card-surface, var(--paper));
+}
+
+.partOpen,
+.partWhole {
+  display: flex;
+  flex: 1;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.partWhole {
+  padding-left: 0;
+}
+
+button.partOpen,
+button.partWhole {
+  cursor: pointer;
+}
+
+button.partOpen:hover,
+button.partWhole:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+button.partWhole:hover .partTick {
+  border-color: var(--ink-2);
+}
+
+.partWhole[aria-disabled='true'],
+.partTick[aria-disabled='true'] {
+  cursor: progress;
+}
+
+.partRef {
+  flex: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.partTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partDone .partTitle {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-2);
+}
+
+.partNote {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* Every pull request on the card as one mark, coloured by the one furthest
+   behind, with a count when there is more than one. */
+.prMark {
+  flex: none;
+  gap: 3px;
+  margin: -4px -2px;
+  padding: 4px 5px;
+}
+
+.prCount {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pr_raised {
+  color: var(--pr-raised);
+}
+
+.pr_approved {
+  color: var(--pr-approved);
+}
+
+.pr_merged {
+  color: var(--pr-merged);
+}
+
+.prList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 -4px;
+  padding: 2px 0 0;
+  list-style: none;
+}
+
+.prRow {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 5px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.prRowLink:hover {
+  background: var(--paper-2);
+}
+
+.prRowLink:hover .prNumber {
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.prRepo {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prNumber {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.prState {
+  display: inline-flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.prState::before,
+.status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pr_raised.prState {
+  color: var(--ink-2);
+}
+
+/* The card's other facts: icon and value, one line, wrapping if it must. */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding-top: 2px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.fact {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.factMono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status_hold {
+  color: var(--hold);
+}
+
+.status_blocked {
+  color: var(--blocked);
+}
+
+/* Everyone who owes this card something, overlapped into one mark. The ring is
+   the card's own surface, so the faces read as a stack rather than as a smear. */
+.owners {
+  padding-left: 4px;
+}
+
+.owners > * {
+  margin-left: -5px;
+  box-shadow: 0 0 0 1.5px var(--card-surface, var(--paper));
+}
+
+/* What an agent on the card is doing, in the stages' slot: words behind a 2px
+   rule in the border's colour, and no fill. One line, cut to fit — what a
+   working agent is doing changes with every tool call, and a line that
+   wrapped to two whenever the command was long would make the column jump. */
+.agentLine {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 1px 0 1px 9px;
+  border-left: 2px solid var(--agent-ring, var(--agent));
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.agentLabel {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--agent-ring, var(--agent));
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The detail gives way before the headline does: "You: 409 Conflict" matters
+   more than the tool call after it. */
+.agentDetail {
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentStale .agentLabel {
+  color: var(--ink-3);
+}
+
+.agentCount {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

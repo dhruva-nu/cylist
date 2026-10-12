@@ -40,7 +40,7 @@ import {
   type Placement,
   type PopoverPart,
 } from './cardPopover'
-import styles from './ProjectBoard.module.css'
+import styles from './CardPromptPopover.module.css'
 
 /**
  * The board's screen-reader announcer, for the cards deep inside it: an

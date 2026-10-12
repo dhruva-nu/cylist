@@ -1,0 +1,90 @@
+/* The lane's name, on a bar the width of the board rather than in a rail down
+   the side: a name in the margin is the first thing to scroll out of sight,
+   and the name is the one thing about a lane you always need in view. */
+.laneHead {
+  position: sticky;
+  left: 6px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 4px 12px 4px 10px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+}
+
+/* The lane's fold, at the head of the bar. A hit area the height of the bar
+   rather than the size of the arrow in it: this is the only way back from a
+   folded lane, and a 10px triangle is not a target. */
+.laneFold {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.laneFold:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.laneName {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.laneName:hover {
+  text-decoration: underline;
+}
+
+.laneDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--goal, var(--ink-3));
+}
+
+.laneRef {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* A lane whose goal has been achieved or dropped, still drawn because cards
+   are on it. Held back rather than hidden: the cards are live and droppable,
+   the heading over them is not the live work it looks like. */
+.laneSettled .laneName,
+.laneSettled .laneDot {
+  opacity: 0.6;
+}
+
+/* The lane for everything on no goal: an outline rather than a fill, because
+   it is the absence of a goal rather than one more of them. */
+.laneHeadLoose {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* The same count a column's heading carries, so a lane's total and a column's
+   read as one kind of number. */
+.count {
+  composes: count from './Column.module.css';
+}
