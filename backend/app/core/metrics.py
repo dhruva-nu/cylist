@@ -8,16 +8,11 @@ reset when the process restarts, which is why the endpoint also reports
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.clock import now
-
-Message = dict[str, Any]
-Receive = Callable[[], Awaitable[Message]]
-Send = Callable[[Message], Awaitable[None]]
-ASGIApp = Callable[[Message, Receive, Send], Awaitable[None]]
 
 
 class Metrics:
@@ -55,7 +50,7 @@ class MetricsMiddleware:
         self.app = app
         self.metrics = metrics
 
-    async def __call__(self, scope: Message, receive: Receive, send: Send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
