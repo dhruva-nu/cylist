@@ -8,8 +8,8 @@
  * there are tests.
  */
 
-import type { Goal } from '../api/client'
-import { localDate } from '../components/dates'
+import type { Goal } from '../../api/client'
+import { localDate } from '../../components/dates'
 
 /** One cell. `iso` is the key everything else is filed under. */
 export interface CalendarDay {

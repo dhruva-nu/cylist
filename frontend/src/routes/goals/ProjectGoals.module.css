@@ -7,36 +7,6 @@
   gap: 18px;
 }
 
-/* List or calendar, in the page's actions beside "+ New goal" — the same
-   control the vault uses for its kinds. */
-.segmented {
-  display: flex;
-  overflow: hidden;
-  width: fit-content;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-control);
-}
-
-.segmented button {
-  padding: 7px 16px;
-  border: 0;
-  background: var(--paper);
-  color: var(--ink-2);
-  font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.segmented button + button {
-  border-left: 1px solid var(--line-2);
-}
-
-.segmented button.on {
-  background: var(--brand-soft);
-  color: var(--brand-ink);
-}
-
 /* The card carries its goal's rail down the left, in the same 4px the board
    draws on a task — this page is where you learn what that colour means, so
    the two have to be the same mark. Padding on the left makes room for it. */

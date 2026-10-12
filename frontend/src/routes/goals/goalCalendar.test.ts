@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { Goal, Person } from '../api/client'
+import type { Goal, Person } from '../../api/client'
 import { WEEKDAYS, goalsByDate, isoOf, monthWeeks, openingMonth } from './goalCalendar'
 
 const ADITI: Person = {
