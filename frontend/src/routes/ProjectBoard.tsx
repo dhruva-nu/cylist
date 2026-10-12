@@ -66,6 +66,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearch } from '@tanstack/react-router'
 import {
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -2428,6 +2429,7 @@ function CardList({
           task={task}
           members={members}
           onOpen={() => onOpenTask(task.id)}
+          onOpenTask={onOpenTask}
           onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
           onSetAssignee={(assigneeId) => onSetAssignee(task.id, task.reference, assigneeId)}
         />
@@ -2535,12 +2537,15 @@ function TaskCard({
   task,
   members,
   onOpen,
+  onOpenTask,
   onMoveSubStatus,
   onSetAssignee,
 }: {
   task: Task
   members: Person[]
   onOpen: () => void
+  /** Opens another card's dialog — one of this card's sub-tasks. */
+  onOpenTask: (taskId: string) => void
   onMoveSubStatus: (index: number) => void
   onSetAssignee: (assigneeId: string) => void
 }) {
@@ -2623,6 +2628,7 @@ function TaskCard({
           members={members}
           onMoveSubStatus={onMoveSubStatus}
           onSetAssignee={onSetAssignee}
+          onOpenTask={onOpenTask}
         />
       </article>
       {popover.open && answerable ? (
@@ -2669,41 +2675,94 @@ function owedDateOf(task: Task) {
  */
 type CardFocus = 'prs' | 'stages' | 'subs'
 
+/** How long a mark has to be rested on before it opens: long enough that
+ * passing over one on the way to another does nothing. */
+const MARK_REST_MS = 200
+
+/** How long an open list waits after the pointer leaves before it shuts —
+ * long enough to travel from one mark to the next, so the slot goes straight
+ * from one list to the other instead of dropping back to the facts between. */
+const MARK_GRACE_MS = 350
+
 /**
- * Which of those marks the pointer, or the keyboard, is on.
+ * Which of those marks has opened its list, and which is waiting to.
  *
- * Only the mark itself opens anything — not the row it sits on, and not the
- * card: the card's own hover is for the line of facts under its face, and a
- * row that swapped half the card whenever the pointer crossed it on the way
- * somewhere else was a card that would not hold still.
+ * A mark opens only after the pointer has rested on it, never as it passes:
+ * the stage bar and the sub-task count sit on the row above the pull-request
+ * mark, and a mark that opened on contact opened on the way down to the one
+ * below it. Focus opens at once, because a keyboard does not pass over
+ * anything, and so does a click — for a pointer that cannot hover. A click
+ * never shuts: the pointer that clicked has usually just watched the list
+ * open, and shutting it then would undo what it came for. Leaving shuts.
  *
- * The pane a mark opens keeps it open too, and letting go waits a moment
- * before it shuts: the stages in that pane are buttons, and a pane that shut
- * on the way from the mark down to them could never be used.
+ * Whatever opens goes into the one slot under the card's bottom line, and the
+ * slot holds itself open while the pointer is in it, so its rows can be used.
  */
 function useCardFocus() {
   const [focus, setFocus] = useState<CardFocus | null>(null)
-  const timer = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const [arming, setArming] = useState<CardFocus | null>(null)
+  // Each list mounts the first time it opens and stays, so it has something
+  // to slide out with when the next one takes the slot.
+  const [opened, setOpened] = useState<ReadonlySet<CardFocus>>(() => new Set())
+  const openTimer = useRef<number | undefined>(undefined)
+  const closeTimer = useRef<number | undefined>(undefined)
+  useEffect(
+    () => () => {
+      window.clearTimeout(openTimer.current)
+      window.clearTimeout(closeTimer.current)
+    },
+    [],
+  )
 
-  const holdOpen = useCallback((which: CardFocus) => {
-    window.clearTimeout(timer.current)
+  const show = useCallback((which: CardFocus | null) => {
+    window.clearTimeout(openTimer.current)
+    window.clearTimeout(closeTimer.current)
+    setArming(null)
     setFocus(which)
+    if (which) setOpened((seen) => (seen.has(which) ? seen : new Set(seen).add(which)))
   }, [])
-  const letGo = useCallback(() => {
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => setFocus(null), 140)
-  }, [])
+  const arm = (which: CardFocus) => {
+    window.clearTimeout(openTimer.current)
+    window.clearTimeout(closeTimer.current)
+    if (focus === which) return
+    setArming(which)
+    openTimer.current = window.setTimeout(() => show(which), MARK_REST_MS)
+  }
+  const letGo = () => {
+    window.clearTimeout(openTimer.current)
+    setArming(null)
+    closeTimer.current = window.setTimeout(() => setFocus(null), MARK_GRACE_MS)
+  }
+  const keep = () => window.clearTimeout(closeTimer.current)
 
-  /** What a mark, or the pane it opened, spreads onto itself. */
-  const on = (which: CardFocus) => ({
-    onPointerEnter: () => holdOpen(which),
+  /** What a mark spreads onto itself. */
+  const mark = (which: CardFocus) => ({
+    onPointerEnter: () => arm(which),
     onPointerLeave: letGo,
-    onFocus: () => holdOpen(which),
+    onFocus: () => show(which),
     onBlur: letGo,
+    onPick: () => show(which),
   })
+  /** What the slot under the bottom line spreads onto itself. */
+  const slot = { onPointerEnter: keep, onPointerLeave: letGo, onFocus: keep, onBlur: letGo }
 
-  return { focus, on }
+  return { focus, arming, opened, mark, slot }
+}
+
+/** The handlers `useCardFocus` hands a mark. */
+type MarkHandlers = ReturnType<ReturnType<typeof useCardFocus>['mark']>
+
+/** A mark's own events, without the click it takes for itself. */
+function markEvents(handlers: MarkHandlers) {
+  const { onPointerEnter, onPointerLeave, onFocus, onBlur } = handlers
+  return { onPointerEnter, onPointerLeave, onFocus, onBlur }
+}
+
+/** A mark's classes: open, or filling its hairline while it waits to open. */
+function markClass(kind: string | undefined, open: boolean, arming: boolean) {
+  return [styles.mark, kind, open && styles.markOpen, arming && styles.markArming]
+    .filter(Boolean)
+    .join(' ')
 }
 
 /**
@@ -2711,34 +2770,37 @@ function useCardFocus() {
  *
  * Drawn twice while a card is being dragged — dimmed in the column it came
  * from, and solid in the overlay — so it lives apart from the drag wiring that
- * only the one in the column has. `onMoveSubStatus` and `onSetAssignee` are
- * optional because the overlay's copy has nothing to click: it is a picture of
- * a card moving.
+ * only the one in the column has. The callbacks are optional because the
+ * overlay's copy has nothing to click: it is a picture of a card moving.
  *
  * The face is what every card in a column is compared on, and nothing else:
  * the title and its priority, how far through its stages and sub-tasks it is,
  * and one line of which card it is, when it is owed, where it is tracked and
- * whose it is. Everything else — the conversation, the status, who it waits
- * on, its parent, who owns its parts — is one line more, opened by resting on
- * the card. The goal is the rail down its left edge, named when the rail is
- * pointed at.
+ * whose it is. Under that is one slot, and only one: the card's other facts
+ * after a short rest on the card, or — after a short rest on a mark — the
+ * stages, the sub-tasks or the pull requests. Nothing that opens ever takes
+ * the place of a row, so nothing the pointer is aiming at moves. The goal is
+ * the rail down the card's left edge, named when the rail is pointed at.
  */
 function TaskCardBody({
   task,
   members,
   onMoveSubStatus,
   onSetAssignee,
+  onOpenTask,
 }: {
   task: Task
   members: Person[]
   onMoveSubStatus?: (index: number) => void
   /** Undefined for the overlay's copy — see `onMoveSubStatus`. */
   onSetAssignee?: (assigneeId: string) => void
+  /** Opens a sub-task's own dialog. Undefined for the overlay's copy. */
+  onOpenTask?: (taskId: string) => void
 }) {
   const { owed, stage } = owedDateOf(task)
   const viewerId = useViewerId()
   const agent = agentIndicator(task.agent_session, new Date(), viewerId)
-  const { focus, on } = useCardFocus()
+  const { focus, arming, opened, mark, slot } = useCardFocus()
   const staged = task.sub_statuses.length > 0
   // While an agent is on the card, the line saying what it is doing takes the
   // place of the stages: that is the progress worth reading right then, and
@@ -2765,62 +2827,78 @@ function TaskCardBody({
       {progress ? (
         <div className={styles.progress}>
           {staged ? (
-            <StageMark task={task} onMove={onMoveSubStatus} handlers={on('stages')} />
+            <StageMark
+              task={task}
+              onMove={onMoveSubStatus}
+              open={focus === 'stages'}
+              arming={arming === 'stages'}
+              handlers={mark('stages')}
+            />
           ) : null}
-          {task.subtask_count ? <SubtaskMark task={task} handlers={on('subs')} /> : null}
+          {task.subtask_count ? (
+            <SubtaskMark
+              task={task}
+              open={focus === 'subs'}
+              arming={arming === 'subs'}
+              handlers={mark('subs')}
+            />
+          ) : null}
         </div>
       ) : null}
 
-      {progress ? (
-        <div
-          className={`${styles.pane} ${styles.progressPane}`}
-          {...on(focus === 'subs' ? 'subs' : 'stages')}
-        >
-          <div className={styles.paneInner}>
-            {focus === 'stages' ? (
-              <StageList task={task} members={members} onMove={onMoveSubStatus} />
-            ) : null}
-            {focus === 'subs' ? <SubtaskList task={task} /> : null}
-          </div>
-        </div>
-      ) : null}
+      <div className={styles.faceLine}>
+        <span className={styles.reference}>{task.reference}</span>
+        <DueMark iso={owed} column={stage} />
+        {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
+        {task.pr_refs.length ? (
+          <PrMark
+            refs={task.pr_refs}
+            open={focus === 'prs'}
+            arming={arming === 'prs'}
+            handlers={mark('prs')}
+          />
+        ) : null}
+        <span className={styles.faceGap} />
+        {onSetAssignee ? (
+          <AssigneePicker task={task} members={members} onSetAssignee={onSetAssignee} />
+        ) : (
+          <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
+        )}
+      </div>
 
-      <div className={`${styles.pane} ${styles.facePane}`}>
-        <div className={styles.paneInner}>
-          <div className={styles.faceLine}>
-            <span className={styles.reference}>{task.reference}</span>
-            <DueMark iso={owed} column={stage} />
-            {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
-            {task.pr_refs.length ? (
-              <PrMark refs={task.pr_refs} open={focus === 'prs'} handlers={on('prs')} />
-            ) : null}
-            <span className={styles.faceGap} />
-            {onSetAssignee ? (
-              <AssigneePicker task={task} members={members} onSetAssignee={onSetAssignee} />
-            ) : (
-              <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
-            )}
-          </div>
-
-          {/* The line the card grows by. Opened by a short rest on the card
-              rather than the moment the pointer crosses it — a column you are
-              only moving across should not ripple — and shut at once. */}
-          <div className={styles.more}>
+      {/* The one slot. Opened by a short rest on the card rather than the
+          moment the pointer crosses it — a column you are only moving across
+          should not ripple — or at once by a mark that has opened. Every list
+          shares the one cell, in the order of the marks, so switching from
+          one to another slides the way the pointer moved. */}
+      <div className={styles.more} {...slot}>
+        <div className={styles.slotStack}>
+          <div className={`${styles.slotPane} ${styles.factsPane}`}>
             <div className={styles.paneInner}>
-              <div className={`${styles.pane} ${styles.factsPane}`}>
-                <div className={styles.paneInner}>
-                  <CardFacts task={task} />
-                </div>
-              </div>
-              {task.pr_refs.length ? (
-                <div className={`${styles.pane} ${styles.prsPane}`} {...on('prs')}>
-                  <div className={styles.paneInner}>
-                    <PrList refs={task.pr_refs} />
-                  </div>
-                </div>
-              ) : null}
+              <CardFacts task={task} />
             </div>
           </div>
+          {staged && progress ? (
+            <div className={`${styles.slotPane} ${styles.stagesPane}`}>
+              <div className={styles.paneInner}>
+                <StageList task={task} members={members} onMove={onMoveSubStatus} />
+              </div>
+            </div>
+          ) : null}
+          {task.subtask_count && progress && opened.has('subs') ? (
+            <div className={`${styles.slotPane} ${styles.subsPane}`}>
+              <div className={styles.paneInner}>
+                <SubtaskList task={task} onOpenTask={onOpenTask} />
+              </div>
+            </div>
+          ) : null}
+          {task.pr_refs.length ? (
+            <div className={`${styles.slotPane} ${styles.prsPane}`}>
+              <div className={styles.paneInner}>
+                <PrList refs={task.pr_refs} />
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -2858,11 +2936,15 @@ function PriorityMark({ priority }: { priority: Task['priority'] }) {
 function StageMark({
   task,
   onMove,
+  open,
+  arming,
   handlers,
 }: {
   task: Task
   onMove: ((index: number) => void) | undefined
-  handlers: ReturnType<ReturnType<typeof useCardFocus>['on']>
+  open: boolean
+  arming: boolean
+  handlers: MarkHandlers
 }) {
   const labels = task.sub_statuses
   const index = task.sub_status_index ?? 0
@@ -2871,7 +2953,7 @@ function StageMark({
 
   return (
     <span
-      className={`${styles.mark} ${styles.stageMark}`}
+      className={markClass(styles.stageMark, open, arming)}
       role={onMove ? 'slider' : undefined}
       tabIndex={onMove ? 0 : undefined}
       aria-label={onMove ? 'Stage' : undefined}
@@ -2879,9 +2961,13 @@ function StageMark({
       aria-valuemax={onMove ? labels.length : undefined}
       aria-valuenow={onMove ? index + 1 : undefined}
       aria-valuetext={`Stage ${index + 1} of ${labels.length}: ${current}`}
-      {...handlers}
+      aria-expanded={open}
+      {...markEvents(handlers)}
       onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        handlers.onPick()
+      }}
       onKeyDown={(event) => {
         if (!onMove) return
         event.stopPropagation()
@@ -2979,10 +3065,14 @@ function StageList({
  */
 function SubtaskMark({
   task,
+  open,
+  arming,
   handlers,
 }: {
   task: Task
-  handlers: ReturnType<ReturnType<typeof useCardFocus>['on']>
+  open: boolean
+  arming: boolean
+  handlers: MarkHandlers
 }) {
   const done = task.subtask_count - task.open_subtask_count
   const label = `${done} of ${task.subtask_count} sub-tasks finished`
@@ -2990,12 +3080,16 @@ function SubtaskMark({
   return (
     <button
       type="button"
-      className={`${styles.mark} ${styles.subtaskMark}`}
+      className={markClass(styles.subtaskMark, open, arming)}
       aria-label={label}
-      {...handlers}
+      aria-expanded={open}
+      {...markEvents(handlers)}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        handlers.onPick()
+      }}
     >
       <TickIcon />
       <span aria-hidden="true">
@@ -3010,12 +3104,51 @@ function SubtaskMark({
  * their own, then the tick boxes. Fetched when first asked for, since the
  * board itself only carries the counts — and kept, under the same key the
  * card's dialog reads, so opening the card after looking costs nothing.
+ *
+ * Every row is something to act on, not a picture of one. The tick finishes
+ * the part, or opens it again; the rest of a sub-task's row opens that
+ * sub-task. A tick box has no dialog of its own, so its whole row is the tick.
+ * Every click stops at the row: the card underneath would otherwise open the
+ * parent as well.
  */
-function SubtaskList({ task }: { task: Task }) {
+function SubtaskList({
+  task,
+  onOpenTask,
+}: {
+  task: Task
+  onOpenTask: ((taskId: string) => void) | undefined
+}) {
+  const queryClient = useQueryClient()
+  const announce = useContext(BoardAnnounce)
   const detail = useQuery({
     queryKey: ['task', task.id],
     queryFn: () => api.getTask(task.reference),
   })
+
+  async function refresh() {
+    await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    // The count on the card is the board's, so the board is out of date too.
+    await queryClient.invalidateQueries({ queryKey: ['tasks'] })
+  }
+  const finish = useMutation({
+    mutationFn: ({ part, finished }: { part: Task; finished: boolean }) =>
+      api.finishTask(part.id, finished),
+    onSuccess: async (part, { finished }) => {
+      announce(`${part.reference} is ${finished ? 'finished' : 'open again'}.`)
+      await refresh()
+    },
+    onError: (error) => announce(error.message),
+  })
+  const tick = useMutation({
+    mutationFn: ({ id, done }: { id: string; done: boolean }) =>
+      api.updateChecklistItem(id, { state: done ? 'done' : 'open' }),
+    onSuccess: async (item) => {
+      announce(`${item.title} is ${item.state === 'done' ? 'done' : 'open again'}.`)
+      await refresh()
+    },
+    onError: (error) => announce(error.message),
+  })
+  const busy = finish.isPending || tick.isPending
 
   if (!detail.data) {
     return <div className={styles.partNote}>{detail.error ? 'Could not load' : 'Loading…'}</div>
@@ -3023,36 +3156,109 @@ function SubtaskList({ task }: { task: Task }) {
 
   const subtasks = detail.data.subtasks.filter((subtask) => subtask.status !== 'cancelled')
   const ticks = detail.data.checklist.filter((item) => item.state !== 'cancelled')
+  const stop = {
+    onPointerDown: (event: { stopPropagation: () => void }) => event.stopPropagation(),
+    onKeyDown: (event: { stopPropagation: () => void }) => event.stopPropagation(),
+  }
 
   return (
     <ul className={styles.parts}>
-      {subtasks.map((subtask) => (
-        <li
-          key={subtask.id}
-          className={`${styles.part} ${subtask.finished_at ? styles.partDone : ''}`}
-        >
-          <span className={styles.partTick} aria-hidden="true">
-            <TickIcon />
-          </span>
-          <span className={styles.partRef}>{subtask.reference}</span>
-          <span className={styles.partTitle}>{subtask.title}</span>
-          <Avatar name={subtask.assignee.name} colour={subtask.assignee.colour} small />
-          <span className="visually-hidden">{subtask.finished_at ? 'finished' : 'open'}</span>
-        </li>
-      ))}
-      {ticks.map((item) => (
-        <li
-          key={item.id}
-          className={`${styles.part} ${item.state === 'done' ? styles.partDone : ''}`}
-        >
-          <span className={styles.partTick} aria-hidden="true">
-            <TickIcon />
-          </span>
-          <span className={styles.partTitle}>{item.title}</span>
-          <span className="visually-hidden">{item.state === 'done' ? 'done' : 'open'}</span>
-        </li>
-      ))}
+      {subtasks.map((subtask) => {
+        const finished = subtask.finished_at !== null
+        return (
+          <li key={subtask.id} className={`${styles.part} ${finished ? styles.partDone : ''}`}>
+            <button
+              type="button"
+              className={styles.partTick}
+              aria-pressed={finished}
+              aria-label={
+                finished ? `Open ${subtask.reference} again` : `Finish ${subtask.reference}`
+              }
+              title={finished ? 'Open it again' : 'Finish it'}
+              disabled={busy}
+              {...stop}
+              onClick={(event) => {
+                event.stopPropagation()
+                finish.mutate({ part: subtask, finished: !finished })
+              }}
+            >
+              <TickIcon />
+            </button>
+            {onOpenTask ? (
+              <button
+                type="button"
+                className={styles.partOpen}
+                title={`Open ${subtask.reference}`}
+                {...stop}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenTask(subtask.id)
+                }}
+              >
+                <PartLabel subtask={subtask} />
+                <ChevronIcon />
+              </button>
+            ) : (
+              <span className={styles.partOpen}>
+                <PartLabel subtask={subtask} />
+              </span>
+            )}
+          </li>
+        )
+      })}
+      {ticks.map((item) => {
+        const done = item.state === 'done'
+        return (
+          <li key={item.id} className={`${styles.part} ${done ? styles.partDone : ''}`}>
+            <button
+              type="button"
+              className={styles.partWhole}
+              aria-pressed={done}
+              disabled={busy}
+              {...stop}
+              onClick={(event) => {
+                event.stopPropagation()
+                tick.mutate({ id: item.id, done: !done })
+              }}
+            >
+              <span className={styles.partTick} aria-hidden="true">
+                <TickIcon />
+              </span>
+              <span className={styles.partTitle}>{item.title}</span>
+            </button>
+          </li>
+        )
+      })}
     </ul>
+  )
+}
+
+/** A sub-task's reference, title and owner, as its row says them. */
+function PartLabel({ subtask }: { subtask: Task }) {
+  return (
+    <>
+      <span className={styles.partRef}>{subtask.reference}</span>
+      <span className={styles.partTitle}>{subtask.title}</span>
+      <Avatar name={subtask.assignee.name} colour={subtask.assignee.colour} small />
+    </>
+  )
+}
+
+/** A row that opens something: shown on hover, so a list at rest stays quiet. */
+function ChevronIcon() {
+  return (
+    <svg className={styles.go} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m6 3.5 4.5 4.5L6 12.5" />
+    </svg>
+  )
+}
+
+/** A row that opens elsewhere, in a new tab. */
+function OutIcon() {
+  return (
+    <svg className={styles.go} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5M12 9.5V13a.5.5 0 0 1-.5.5h-8A.5.5 0 0 1 3 13V5a.5.5 0 0 1 .5-.5H7" />
+    </svg>
   )
 }
 
@@ -3065,11 +3271,13 @@ function SubtaskList({ task }: { task: Task }) {
 function PrMark({
   refs,
   open,
+  arming,
   handlers,
 }: {
   refs: PrRef[]
   open: boolean
-  handlers: ReturnType<ReturnType<typeof useCardFocus>['on']>
+  arming: boolean
+  handlers: MarkHandlers
 }) {
   const state = leastAdvancedPrState(refs) ?? 'raised'
   const only = refs.length === 1 ? refs[0] : undefined
@@ -3080,14 +3288,17 @@ function PrMark({
   return (
     <button
       type="button"
-      className={`${styles.mark} ${styles.prMark} ${styles[`pr_${state}`]}`}
+      className={`${markClass(styles.prMark, open, arming)} ${styles[`pr_${state}`]}`}
       aria-label={label}
       aria-expanded={open}
       title={label}
-      {...handlers}
+      {...markEvents(handlers)}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        handlers.onPick()
+      }}
     >
       <PrIcon state={state} size={13} />
       {refs.length > 1 ? <span className={styles.prCount}>×{refs.length}</span> : null}
@@ -3095,38 +3306,44 @@ function PrMark({
   )
 }
 
-/** Each pull request on its own line: where it is, which one, how far it got. */
+/**
+ * Each pull request on its own line: where it is, which one, how far it got.
+ * The whole line is the link, so it opens wherever on it you click; one that
+ * is not a URL has nowhere to go and is only the line.
+ */
 function PrList({ refs }: { refs: PrRef[] }) {
   return (
     <ul className={styles.prList}>
       {refs.map((ref) => {
         const repo = prRefRepo(ref.url)
         const href = /^https?:\/\//i.test(ref.url) ? ref.url : null
-        const name = (
+        const line = (
           <>
             <PrIcon state={ref.state} size={12} />
             {repo ? <span className={styles.prRepo}>{repo}</span> : null}
             <span className={styles.prNumber}>{prRefLabel(ref.url)}</span>
+            <span className={`${styles.prState} ${styles[`pr_${ref.state}`]}`}>{ref.state}</span>
           </>
         )
         return (
-          <li key={ref.url} className={styles.prRow}>
+          <li key={ref.url}>
             {href ? (
               <a
-                className={styles.prLink}
+                className={`${styles.prRow} ${styles.prRowLink}`}
                 href={href}
                 target="_blank"
                 rel="noreferrer"
+                title={`Open ${repo ? `${repo} ` : ''}${prRefLabel(ref.url)} in a new tab`}
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
               >
-                {name}
+                {line}
+                <OutIcon />
               </a>
             ) : (
-              <span className={styles.prLink}>{name}</span>
+              <span className={styles.prRow}>{line}</span>
             )}
-            <span className={`${styles.prState} ${styles[`pr_${ref.state}`]}`}>{ref.state}</span>
           </li>
         )
       })}
