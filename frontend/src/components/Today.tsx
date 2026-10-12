@@ -43,7 +43,7 @@ import styles from './Today.module.css'
 
 /** The gloss rather than the bare level, because a row shows the icon and this
  * is what a pointer or a screen reader gets instead of it. Worded as the board
- * words them — see `PRIORITY_LABELS` in `ProjectBoard.tsx`. */
+ * words them — see `priorityInFull` in `taskLabels.ts`. */
 const PRIORITY_LABELS = {
   p0: 'P0 — drop what you are doing',
   p1: 'P1 — as soon as P0 is clear',

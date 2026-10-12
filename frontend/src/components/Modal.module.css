@@ -26,8 +26,8 @@
    frame stops being a desktop frame at 899px (see Shell.module.css), so above
    860 the panel reaches the window's edges on the narrowest window that still
    has a sidebar, and a panel with no scrim beside it is a page. Text does not
-   take all of the extra room: `.prose` and `.bubble` in TaskDialog.module.css
-   keep a measure. The grid of fields, the sub-tasks, the checklist and the
+   take all of the extra room: `.prose` in taskDialog/TaskDetailView.module.css
+   and `.bubble` in taskDialog/Comments.module.css keep a measure. The grid of fields, the sub-tasks, the checklist and the
    comment bubbles are what the width is for. */
 .modal.wide {
   width: min(860px, 100%);
