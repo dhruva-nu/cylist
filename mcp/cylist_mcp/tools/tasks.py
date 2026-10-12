@@ -123,11 +123,14 @@ def register(server: MCPServer, client: Api) -> None:
         ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
+            # Checked before anything is fetched: a bad status is the model's
+            # mistake to fix, and two board-sized reads should not precede it.
+            if status is not None:
+                check_status(status)
             tasks = await client.get(f"/projects/{project}/tasks")
             board = await client.get(f"/projects/{project}/columns")
 
             if status is not None:
-                check_status(status)
                 tasks = [task for task in tasks if task.get("status") == status]
             if assignee is not None:
                 wanted = await resolve.person_id(client, assignee, project_ref=project)
@@ -290,8 +293,10 @@ def register(server: MCPServer, client: Api) -> None:
                 jira_ref=jira_ref,
                 pr_refs=pr_refs,
             )
-            parent = await client.get(f"/tasks/{task}")
             if assignee:
+                # Only an assignee needs the parent: it is resolved against the
+                # parent's project, which the sub-task belongs to too.
+                parent = await client.get(f"/tasks/{task}")
                 body["assignee_id"] = await resolve.person_id(
                     client, assignee, project_ref=project_of(parent)
                 )
