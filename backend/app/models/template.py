@@ -14,7 +14,7 @@ Two consequences worth stating, because they are choices:
   its own ``sub_statuses`` — the same click-through progress bar every card
   carries — the moment it lands in the column, and cannot leave until it is on
   the last one. See :func:`app.services.templates.landing_sub_stages` for
-  where that happens and :func:`app.services.tasks._refuse_stage_incomplete`
+  where that happens and :func:`app.services.tasks.moves.refuse_stage_incomplete`
   for where leaving early is refused.
 """
 
@@ -76,7 +76,7 @@ class TemplateStage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     click-through progress bar every card carries; see
     :func:`app.services.templates.landing_sub_stages`. The card cannot leave
     the column until it is on the last label, whichever column it is headed to
-    next — see :func:`app.services.tasks._refuse_stage_incomplete`.
+    next — see :func:`app.services.tasks.moves.refuse_stage_incomplete`.
     """
 
     __tablename__ = "template_stage"

@@ -353,7 +353,7 @@ async def _refuse_duplicate(session: AsyncSession, project_id: UUID, name: str) 
 async def _next_number(session: AsyncSession, project: Project) -> int:
     """Take the next goal number for a project.
 
-    Locks the project row, for the reason ``tasks._next_number`` does: a
+    Locks the project row, for the reason ``tasks.numbering.next_number`` does: a
     deleted goal's number must never come back, and two callers creating a goal
     at the same moment must not be handed the same one.
     """
