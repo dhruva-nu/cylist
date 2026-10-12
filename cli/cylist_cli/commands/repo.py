@@ -34,7 +34,7 @@ a model is asked to do by hand:
   appending twenty lines to it.
 
 The ``/cylist-setup`` slash command in
-:data:`cylist_cli.commands.hook.SETUP_COMMAND_FILE` is a wrapper round this
+:data:`cylist_cli.commands.hook_install.SETUP_COMMAND_FILE` is a wrapper round this
 and nothing more: the block has to be read off the board, not composed from
 whatever the model remembers about Cylist.
 """

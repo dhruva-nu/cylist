@@ -39,12 +39,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cylist_cli import system
 from cylist_cli.errors import CylistError
 
 DEFAULT_URL = "http://localhost:8000"
-
-CONFIG_MODE = 0o600
-"""Owner read/write only. The file holds a bearer token."""
 
 
 def config_path() -> Path:
@@ -158,22 +156,13 @@ def dedupe(urls: Iterable[str]) -> tuple[str, ...]:
 def save(url: str, token: str, *, urls: Iterable[str] = (), path: Path | None = None) -> Path:
     """Write the config file with mode 0600, and return where it went.
 
-    The file is created 0600 rather than created and then chmod-ed: between
-    those two calls a token would briefly be world-readable, and on a shared
-    machine "briefly" is long enough.
+    0600 from the first byte — see :func:`cylist_cli.system.write_private` —
+    because the file holds a bearer token.
     """
     where = path or config_path()
     candidates = dedupe((url, *urls))
     try:
-        where.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(where, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, CONFIG_MODE)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(_render(url, token, candidates))
-        finally:
-            # An existing file keeps its old mode through O_CREAT, so tighten
-            # it as well — the token is new even when the file is not.
-            os.chmod(where, CONFIG_MODE)  # noqa: PTH101 - path is already a Path
+        system.write_private(where, _render(url, token, candidates))
     except OSError as exc:
         raise CylistError(f"Cannot write {where}: {exc.strerror}.") from exc
     return where

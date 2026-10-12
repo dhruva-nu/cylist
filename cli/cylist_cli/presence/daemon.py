@@ -29,7 +29,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from cylist_cli import endpoints
+from cylist_cli import endpoints, presence
 from cylist_cli.context import Context
 from cylist_cli.presence import ipc, protocol, supervisor, transcript
 from cylist_cli.presence import machine as m
@@ -63,11 +63,10 @@ ASK_POLL = 0.25
 
 
 def log_path(session_id: str) -> Path:
-    from cylist_cli.commands.hook import sessions_dir
-
-    logs = sessions_dir().parent / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    return logs / f"daemon-{session_id[:16]}.log"
+    """This session's log, with the directory it goes in made if need be."""
+    path = presence.daemon_log(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _find_boottime_clock() -> Callable[[], float] | None:

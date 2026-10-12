@@ -64,7 +64,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from cylist_cli import output
-from cylist_cli.commands.hook import REFERENCE, claude_config_dir
+from cylist_cli.commands.hook import REFERENCE
+from cylist_cli.commands.hook_install import claude_config_dir
 from cylist_cli.context import Context
 from cylist_cli.errors import ApiError, CylistError
 
