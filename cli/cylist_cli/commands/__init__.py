@@ -17,6 +17,7 @@ from cylist_cli.commands import (
     people,
     projects,
     repo,
+    run,
     setup,
     skills,
     tasks,
@@ -38,6 +39,7 @@ REGISTRARS = (
     activity.register,
     repo.register,
     work.register,
+    run.register,
     hook.register,
 )
 

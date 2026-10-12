@@ -13,11 +13,18 @@ dependencies = [
     "websockets>=13",
 ]
 
+[project.optional-dependencies]
+# `cylist run`: the agent runs in-process through the Claude Agent SDK. An
+# extra because the SDK bundles its own Claude Code (~100 MB), which nobody
+# using only `cylist work` and the hook should have to download.
+agent = ["claude-agent-sdk>=0.2.165"]
+
 [project.scripts]
 cylist = "cylist_cli.main:run"
 
 [dependency-groups]
 dev = [
+    "claude-agent-sdk>=0.2.165",
     "pytest>=8.3",
     "ruff>=0.8",
     "mypy>=1.14",
