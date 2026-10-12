@@ -36,7 +36,7 @@
   padding: 3px 8px;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* The same column of rows as the stage editor, with the add button under it. */

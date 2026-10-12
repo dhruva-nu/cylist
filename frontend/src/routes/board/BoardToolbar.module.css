@@ -22,8 +22,8 @@
 }
 
 .pageTitle {
-  font-size: 19px;
-  font-weight: 650;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.015em;
   white-space: nowrap;
 }
@@ -44,12 +44,12 @@
   height: 26px;
   padding: 0 9px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -72,12 +72,12 @@
 .agentChipDot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--chip-ink);
 }
 
 .agentChipCount {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
 }
 
@@ -119,8 +119,8 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -139,7 +139,7 @@
   justify-content: center;
   width: var(--control, 40px);
   padding: 0;
-  font-size: 16px;
+  font-size: var(--text-xl);
 }
 
 /* How many filters are narrowing the board, on the button that holds them. */
@@ -149,11 +149,11 @@
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--brand);
   color: var(--on-brand);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
 }
 
 /* Columns | Lanes. */
@@ -173,12 +173,12 @@
   height: 100%;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -201,10 +201,10 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 20;
+  z-index: var(--layer-dialog);
   padding: 8px;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--paper);
   box-shadow: var(--shadow-lg);
 }
@@ -228,19 +228,19 @@
 .popTitle {
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
 }
 
 .popLink {
   padding: 4px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   text-decoration: underline;
   text-decoration-color: var(--line-2);
   text-underline-offset: 3px;
@@ -255,8 +255,8 @@
   padding: 10px 10px 6px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .optionList {
@@ -274,12 +274,12 @@
   min-height: 34px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
 }
@@ -291,7 +291,7 @@
 
 .option[aria-pressed='true'] {
   color: var(--ink);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .optionSwatch {
@@ -299,7 +299,7 @@
   width: 10px;
   height: 10px;
   border: 1px solid var(--line-2);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .optionName {
@@ -321,12 +321,12 @@
   height: 30px;
   padding: 0 12px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -354,12 +354,12 @@
   width: 100%;
   padding: 8px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
 }
@@ -377,8 +377,8 @@
 
 .switchHint {
   color: var(--ink-3);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .switch {
@@ -386,7 +386,7 @@
   flex: none;
   width: 34px;
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--line-2);
   transition: background 0.15s;
 }
@@ -398,7 +398,7 @@
   left: 3px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--paper);
   transition: transform 0.15s;
 }
@@ -416,7 +416,7 @@
   width: 100%;
   padding: 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   font-family: var(--font-ui);
@@ -437,14 +437,14 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
 }
 
 .menuHint {
   color: var(--ink-3);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .meter {
@@ -456,7 +456,7 @@
 .meter i {
   width: 14px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--line-2);
 }
 

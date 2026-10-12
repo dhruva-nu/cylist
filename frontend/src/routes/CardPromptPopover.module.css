@@ -6,7 +6,7 @@
    further down before the box starts. */
 .cardPopover {
   position: fixed;
-  z-index: 40;
+  z-index: var(--layer-tooltip);
   display: flex;
   flex-direction: column;
   padding-top: 10px;
@@ -21,7 +21,7 @@
 .cardPopoverBox {
   padding: 14px;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--paper);
   box-shadow: var(--shadow-lg);
   max-height: min(70vh, 520px);

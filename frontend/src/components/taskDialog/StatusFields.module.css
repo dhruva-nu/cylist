@@ -23,8 +23,8 @@
   background: var(--paper);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -100,15 +100,15 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
 .tagPicker button span:first-child {
   width: 20px;
   height: 20px;
-  font-size: 9px;
+  font-size: var(--text-2xs);
 }
 
 .tagged {

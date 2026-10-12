@@ -7,7 +7,7 @@
 .entry {
   display: flex;
   gap: 10px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* A measure, so that widening the panel does not set a comment to 110
@@ -31,14 +31,14 @@
   justify-content: space-between;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
 }
 
 .who span {
   color: var(--ink-3);
   font-family: var(--font-body);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 .whoEnd {
@@ -55,7 +55,7 @@
   border: 0;
   background: none;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1;
   cursor: pointer;
 }
@@ -72,7 +72,7 @@
 
 .when {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* Dashed and untinted: Cylist wrote this, not a person. */

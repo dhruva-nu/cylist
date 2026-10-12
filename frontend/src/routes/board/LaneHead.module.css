@@ -27,10 +27,10 @@
   margin-left: -4px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1;
   cursor: pointer;
 }
@@ -45,8 +45,8 @@
   gap: 8px;
   align-items: center;
   color: var(--ink);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
   text-decoration: none;
 }
 
@@ -57,15 +57,15 @@
 .laneDot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--goal, var(--ink-3));
 }
 
 .laneRef {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
 }
 
 /* A lane whose goal has been achieved or dropped, still drawn because cards

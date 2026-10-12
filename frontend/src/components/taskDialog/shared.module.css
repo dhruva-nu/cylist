@@ -7,14 +7,14 @@
    title, an outcome and a column name, and calling it .role stopped being
    true the moment a role became a thing of its own. */
 .aside {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   opacity: 0.75;
 }
 
 /* What a list says in place of the entries it does not have yet. */
 .empty {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* A box to write in and whatever goes with it, on one line: a comment and

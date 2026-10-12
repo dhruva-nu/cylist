@@ -3,17 +3,17 @@
   min-width: 52px;
   padding: 3px 7px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: center;
 }
 
 .tagSays {
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-base);
 }
 
 /* Takes every pixel the title and the buttons leave, right up to the filter.
@@ -29,7 +29,7 @@
   width: 100%;
   height: var(--control, 40px);
   padding: 0 14px;
-  font-size: 14px;
+  font-size: var(--text-base);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-control);
   background: var(--paper);
@@ -66,13 +66,13 @@
   height: var(--size);
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: none;
   color: var(--ink-2);
 
   /* The glyph is a multiplication sign, which sits small in the font at the
      size the label around it is set in. */
-  font-size: 19px;
+  font-size: var(--text-3xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -84,13 +84,13 @@
 
 .suggestions {
   position: absolute;
-  z-index: 5;
+  z-index: var(--layer-raised);
   width: 100%;
   margin: 4px 0 0;
   padding: 6px;
   list-style: none;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--paper);
   box-shadow: var(--shadow-lg);
 
@@ -107,7 +107,7 @@
   width: 100%;
   padding: 7px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   font: inherit;
@@ -122,11 +122,11 @@
 
 .suggestionKind {
   padding: 1px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-2);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
 }
 
 /* A goal's colour in the search box's suggestions, so picking `goal:` off the
@@ -134,5 +134,5 @@
 .suggestionDot {
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
 }

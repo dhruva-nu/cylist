@@ -17,8 +17,8 @@
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
   cursor: pointer;
 }
 
@@ -34,7 +34,7 @@
 /* The dot a tab carries while something required on it is still blank. */
 .needed {
   color: var(--blocked);
-  font-size: 16px;
+  font-size: var(--text-xl);
   line-height: 1;
 }
 

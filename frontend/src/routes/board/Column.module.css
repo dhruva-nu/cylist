@@ -28,7 +28,7 @@
      the space they stand in, and a card on paper inside a box of paper was
      two outlines saying one thing. */
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 
   /* So a fold wipes rather than spills: while the box is narrowing, whatever
      is inside it is still laid out at its own width. */
@@ -111,12 +111,12 @@
   align-items: center;
   padding: 14px 0;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -128,7 +128,7 @@
    name starts at the bottom of the rail and runs towards the count. */
 .railName {
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-lg);
   white-space: nowrap;
   writing-mode: vertical-rl;
   text-orientation: mixed;
@@ -143,8 +143,8 @@
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -168,10 +168,10 @@
 .dragHandle {
   padding: 2px 4px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-3);
-  font-size: 15px;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: grab;
   touch-action: none;
@@ -191,8 +191,8 @@
 }
 
 .headRow h3 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0;
 }
 
@@ -204,17 +204,17 @@
 
 .count {
   padding: 1px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .head p {
   margin: 4px 0 0;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* Both axes named. A lone `overflow-y` computes the other axis to `auto` as
@@ -255,7 +255,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--paper);
 }
 
@@ -271,8 +271,8 @@
   border-bottom: 1px solid var(--line);
   background: var(--paper-2);
   color: var(--ink-2);
-  font-weight: 600;
-  font-size: 12.5px;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
 }
 
 /* The label between the fold button and the count, given the room to take —
@@ -319,12 +319,12 @@
 .addTask {
   padding: 8px 6px 14px;
   border: 0;
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
 }
@@ -365,8 +365,8 @@
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
 }
@@ -378,7 +378,7 @@
 /* The sign, sized to be the thing you aim at. Tabular so + and − occupy the
    same width and the words beside them do not shift as it opens and shuts. */
 .holdFoot > span {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
