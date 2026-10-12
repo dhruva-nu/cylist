@@ -222,6 +222,7 @@ cylist repo setup ATL [--path PATH] [--dry-run]
 
 cylist setup                           token, hooks and MCP, in one command
 cylist work ATL-41 [-- --model opus]   open Claude Code on a card
+cylist run ATL-41 [PROMPT] [--model M] run an agent on a card, answered from the board
 cylist hook install                    wire the board up to Claude Code's hooks
 cylist hook uninstall
 ```
@@ -235,7 +236,7 @@ same documents.
 
 `cylist setup` does this along with everything else; `cylist hook install` is
 the same step on its own. Either adds one command — `cylist hook` — to Claude
-Code's user-level `settings.json`, on six lifecycle events, and writes the
+Code's user-level `settings.json`, on eight lifecycle events, and writes the
 `/work` and `/cylist-setup` slash commands beside it. It never touches hooks
 you already have, and running it again only points it at wherever the binary
 is now.
@@ -245,6 +246,43 @@ it runs: the card's border pulses while the agent is working, turns amber the
 moment it is waiting on you — a permission prompt, or just the end of its turn
 — and green when the session ends. Nothing the model does or says is involved;
 the harness's own hooks report it.
+
+While it works, the card also says *what* it is doing: each tool call's
+`PreToolUse` hook sums the call up in one line — "Running pytest
+test_pr_states.py", "Editing tasks.py", "Reading models.py" — and sends it as
+the session's note, which the card's agent line and the task's Now line show.
+The line is redacted before it leaves the machine (tokens, `password=…`,
+`Bearer …`, keys in URLs), and it is one line that each call replaces, never a
+row in the card's history. A hook installed before this was added has no
+`PreToolUse` entry: run `cylist hook install` again to add it.
+
+An open card also carries the session's **feed**: what the agent read, edited,
+ran and said, line by line. The daemon below follows the session's Claude Code
+transcript (every hook event names it) from the moment it starts, and sends
+the agent's text, a one-line subject for each tool call, and — for shell
+commands and failures only — the last or first line of what came back. Never
+a file's contents or a whole command's output, never your prompts or the
+model's thinking, and everything through the same redaction as the note. The
+server keeps the newest 200 lines of each session, so a card opened halfway
+through shows how it got there. The feed needs the daemon: with
+`CYLIST_PRESENCE=http` the card still shows its state and note, but no feed.
+
+A **permission prompt** can be answered from the card as well as from the
+terminal. Claude Code runs the `PermissionRequest` hook as it is about to ask;
+the hook hands the request to the daemon, which puts it on the card — "Running
+git push origin staging" — with *Allow once*, *Allow for this session* and
+*Deny*. Whichever is answered first wins: an answer on the board comes back
+down the daemon's socket and the hook returns it as the harness's decision
+(*Allow for this session* adds allow rules for this session only, never to a
+settings file and never a change of mode). Claude Code keeps the hook running
+when its own dialog is answered, so the card learns the terminal won from what
+happens next — the tool's `PostToolUse`, or the session's next report — and
+takes the prompt down then. This one hook is installed with
+a 600-second timeout instead of three, and the board stops offering a prompt
+after 580 — nobody answering there leaves it to the terminal. It needs the
+daemon too: with no daemon, or `CYLIST_PRESENCE` not `ws`, the hook says
+nothing and the terminal decides alone. A hook installed before this has no
+`PermissionRequest` entry: run `cylist hook install` again.
 
 Two ways to bind a session, and nothing else binds one:
 
@@ -386,6 +424,39 @@ on Windows too, rather than under `%APPDATA%`. Unidiomatic, and deliberate:
 the MCP server is a separate package that reads the same token file, and two
 platform-dependent path rules that have to agree is a divergence waiting to
 happen. `~/.claude` is already in the same place.
+
+## Running an agent from Cylist
+
+`cylist work` opens Claude Code in your terminal and the board watches it from
+outside. `cylist run` turns that round: Cylist starts the agent itself through
+the [Claude Agent SDK](https://docs.claude.com/en/docs/agent-sdk/overview), and
+the board is where you answer it.
+
+```
+uv tool install 'cylist-cli[agent]'     # the SDK is an extra: it bundles Claude Code (~100 MB)
+cylist run ATL-41                        # the card's title and description are the prompt
+cylist run ATL-41 "fix the flaky test" --model opus --permission-mode acceptEdits
+```
+
+* **The card follows it.** The Now line and the feed come straight from the
+  SDK's messages, read the same way the daemon reads a transcript, and
+  redacted the same way.
+* **Permissions are answered on the board.** A tool call your settings would
+  ask about waits on the card for **Allow once**, **Allow for this session**
+  or **Deny**. There is no terminal dialog, so there is nothing to race; nobody
+  answering within about ten minutes is a denial.
+* **Questions too.** The agent has its own `ask_human` tool. It runs in the
+  same process, so the question lands on this session and no other.
+* **The terminal echoes along.** After each turn you can reply there, or press
+  Enter to finish. Run it without a terminal (from a script, say) and it
+  finishes after one turn.
+
+It runs with your Claude Code login, settings, `CLAUDE.md` and MCP servers,
+and speaks the same agent socket as the daemon, so nothing on the server
+changes. The cylist hooks still fire inside it but stay quiet, since the
+session is not bound through them. A session started this way can be picked
+up later in a terminal with `claude --resume <session id>`; the id is printed
+when it starts.
 
 ## Setting a repository up to use a board
 

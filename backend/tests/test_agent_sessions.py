@@ -296,6 +296,74 @@ class TestWhatTheCardSays:
         assert page["tasks"][0]["agent_session"]["state"] == "working"
 
 
+class TestWhatItIsDoingNow:
+    """CYLIST-84: the note is the agent's current action, sent on every tool call."""
+
+    async def test_the_note_is_on_the_card_and_on_the_session(self, signed_in: AsyncClient) -> None:
+        agent = await _agent(signed_in)
+        ref = await _card(signed_in, await _setup(signed_in))
+
+        await _put(signed_in, agent, ref, "working", note="Running pytest test_pr_states.py")
+
+        card = await _card_read(signed_in, ref)
+        assert card["agent_session"]["note"] == "Running pytest test_pr_states.py"
+        detail = (await signed_in.get(f"/tasks/{ref}")).json()
+        assert detail["agent_sessions"][0]["note"] == "Running pytest test_pr_states.py"
+
+    async def test_each_report_replaces_it_and_one_without_clears_it(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """A turn that ends, or a prompt that starts one, is not still running
+        whatever it ran last."""
+        agent = await _agent(signed_in)
+        ref = await _card(signed_in, await _setup(signed_in))
+        await _put(signed_in, agent, ref, "working", note="Reading tasks.py")
+
+        moved_on = await _put(signed_in, agent, ref, "working", note="Editing tasks.py")
+        assert moved_on["note"] == "Editing tasks.py"
+
+        turn_over = await _put(signed_in, agent, ref, "waiting", reason="turn_ended")
+        assert turn_over["note"] is None
+
+    async def test_a_note_per_tool_call_is_not_history(self, signed_in: AsyncClient) -> None:
+        agent = await _agent(signed_in)
+        ref = await _card(signed_in, await _setup(signed_in))
+
+        for note in ("Reading tasks.py", "Editing tasks.py", "Running pytest"):
+            await _put(signed_in, agent, ref, "working", note=note)
+
+        assert await _agent_activity(signed_in) == ["agent_session.started"]
+
+    async def test_a_finished_session_is_doing_nothing(self, signed_in: AsyncClient) -> None:
+        agent = await _agent(signed_in)
+        ref = await _card(signed_in, await _setup(signed_in))
+        await _put(signed_in, agent, ref, "working", note="Editing tasks.py")
+
+        ended = await _put(signed_in, agent, ref, "done", note="Editing tasks.py")
+
+        assert ended["note"] is None
+
+    async def test_a_blank_note_is_no_note(self, signed_in: AsyncClient) -> None:
+        agent = await _agent(signed_in)
+        ref = await _card(signed_in, await _setup(signed_in))
+
+        row = await _put(signed_in, agent, ref, "working", note="   ")
+
+        assert row["note"] is None
+
+    async def test_a_note_is_a_line_not_a_log(self, signed_in: AsyncClient) -> None:
+        agent = await _agent(signed_in)
+        ref = await _card(signed_in, await _setup(signed_in))
+
+        response = await signed_in.put(
+            f"/tasks/{ref}/agent-sessions/{SESSION_A}",
+            json={"state": "working", "note": "x" * 301},
+            headers=agent,
+        )
+
+        assert response.status_code == 422
+
+
 async def _last_seen(client: AsyncClient, ref: str) -> str:
     """When the card's one session last reported in."""
     rows = (await client.get(f"/tasks/{ref}/agent-sessions")).json()

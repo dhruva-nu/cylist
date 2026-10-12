@@ -9,11 +9,14 @@ broken socket but a wedged process.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack
+from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 
+from app.realtime.hub import Watcher
 from tests import ws
 
 BOARD = "/api/v1/projects/ATL/board/ws"
@@ -180,6 +183,52 @@ class TestBeingTold:
             assert (await socket.receive_json())["type"] == "board.changed"
 
 
+class TestWhatTheAgentIsDoing:
+    """A note is not history, but a board showing the card still has to hear of it."""
+
+    async def test_a_new_note_rings_the_doorbell(self, signed_in: AsyncClient) -> None:
+        person = await make_project(signed_in)
+        await make_task(signed_in, person)
+        agent = await _agent_headers(signed_in)
+        await _report(signed_in, agent, note="Reading tasks.py")
+
+        async with ws.connect(signed_in.app, BOARD, cookies=cookie_of(signed_in)) as socket:
+            await socket.receive_json()
+
+            await _report(signed_in, agent, note="Editing tasks.py")
+
+            assert (await socket.receive_json())["type"] == "board.changed"
+
+    async def test_the_same_note_again_says_nothing(self, signed_in: AsyncClient) -> None:
+        person = await make_project(signed_in)
+        await make_task(signed_in, person)
+        agent = await _agent_headers(signed_in)
+        await _report(signed_in, agent, note="Editing tasks.py")
+
+        async with ws.connect(signed_in.app, BOARD, cookies=cookie_of(signed_in)) as socket:
+            await socket.receive_json()
+
+            await _report(signed_in, agent, note="Editing tasks.py")
+
+            with pytest.raises(TimeoutError):
+                await socket.receive_json()
+
+
+async def _agent_headers(client: AsyncClient) -> dict[str, str]:
+    issued = await client.post("/tokens", json={"name": "hook", "scopes": ["read", "write"]})
+    assert issued.status_code in (200, 201), issued.text
+    return {"Authorization": f"Bearer {issued.json()['token']}"}
+
+
+async def _report(client: AsyncClient, agent: dict[str, str], *, note: str) -> None:
+    response = await client.put(
+        "/tasks/ATL-1/agent-sessions/sess-note",
+        json={"state": "working", "note": note},
+        headers=agent,
+    )
+    assert response.status_code == 200, response.text
+
+
 class TestWhatASocketCosts:
     async def test_many_open_sockets_leave_the_api_answering(self, signed_in: AsyncClient) -> None:
         """The regression guard for the whole design.
@@ -218,3 +267,48 @@ class TestWhatASocketCosts:
         # The handler's `finally` has run by the time the context exits.
         assert hub.stats()["board_watchers"] == 0
         assert hub.stats()["projects_watched"] == 0
+
+
+class TestTheHubsDoorbells:
+    """Two kinds of nudge share one queue per browser without drowning each other."""
+
+    async def test_a_feed_nudge_does_not_crowd_out_the_board_s(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        watcher.offer("agent.feed:a", {"type": "agent.feed", "task_id": "a"})
+        watcher.offer("board.changed", {"type": "board.changed"})
+
+        assert (await watcher.next())["type"] == "agent.feed"
+        assert (await watcher.next())["type"] == "board.changed"
+
+    async def test_the_same_nudge_twice_is_waiting_once(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        for _ in range(3):
+            watcher.offer("agent.feed:a", {"type": "agent.feed", "task_id": "a"})
+        watcher.offer("board.changed", {"type": "board.changed"})
+
+        assert (await watcher.next())["type"] == "agent.feed"
+        assert (await watcher.next())["type"] == "board.changed"
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):
+                await watcher.next()
+
+    async def test_many_cards_cannot_grow_it_without_bound_or_lock_the_board_out(
+        self,
+    ) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        for n in range(100):
+            watcher.offer(f"agent.feed:{n}", {"type": "agent.feed", "task_id": str(n)})
+        watcher.offer("board.changed", {"type": "board.changed"})
+
+        seen = []
+        while True:
+            try:
+                async with asyncio.timeout(0.01):
+                    seen.append((await watcher.next())["type"])
+            except TimeoutError:
+                break
+        assert seen.count("agent.feed") == 16
+        assert seen[-1] == "board.changed"

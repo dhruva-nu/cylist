@@ -198,6 +198,7 @@ Related: `claude mcp list`, `claude mcp get cylist`, `claude mcp remove cylist`.
 | `set_task_goal` | put a card on a goal, or take it off the one it is on |
 | `set_goal_status` | open / achieved / dropped — achieving is refused over open cards |
 | `add_comment` | write to a card's timeline |
+| `ask_human` | put a question (and up to six options) on the bound card and wait for the person's answer, which is the result |
 | `list_people` | the directory, or one project's members |
 | `list_files` | folders and items, by path |
 | `add_link` | file a URL into a folder |
@@ -240,6 +241,11 @@ Two conveniences worth knowing, both described in the tool schemas themselves:
   lifecycle hooks — installed by `cylist setup` alongside this server. There is no tool for it and nothing to announce;
   `agent_session` on a card is what it looks like from the outside, and
   `get_task`'s `agent_sessions` says which sessions have been on it.
+- **`ask_human` holds the turn open.** It needs a session bound to the card
+  (`/work`); the card turns amber with the question until somebody answers it
+  on the board, and the answer is the tool's result. Nobody answering within
+  `timeout_minutes` (default 30) is a result too, not an error, and cancelling
+  the call withdraws the question from the card.
 - **Goals gate their own closing.** `set_goal_status(..., "achieved")` is
   refused while a card on the goal is neither in the board's last column nor
   cancelled, and the refusal names every card holding it open. Dropping a goal

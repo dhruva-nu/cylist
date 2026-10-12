@@ -688,9 +688,25 @@
 
 /* The words under the title. `.waiting` gives the line its size and colour;
    this only adds the mark in front, coloured by the same variable the border
-   is, so the line and the ring can never disagree about what state it is. */
-.agentLine {
+   is, so the line and the ring can never disagree about what state it is.
+   Both classes in the selector: `.waiting` is written further down and wraps,
+   and a line long enough to wrap — a question, say — would otherwise drop its
+   text onto a second row and leave the dot alone on the first. */
+.waiting.agentLine {
+  flex-wrap: nowrap;
   gap: 6px;
+  min-width: 0;
+}
+
+/* What a working agent is doing changes with every tool call, and a line that
+   wrapped to two whenever the command was long would make the column jump. One
+   line, cut to fit; the title carries the rest. */
+.agentLine .at,
+.agentLine .agentDetail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agentDot {
@@ -710,8 +726,16 @@
   color: var(--ink-2);
 }
 
+/* When the line is too long for the card, the detail gives way before the
+   headline does: "You: 409 Conflict" matters more than the tool call after
+   it, and "2 agents working" more than what one of them is doing. */
+.agentLine .agentDetail {
+  flex-shrink: 100;
+}
+
 /* How many sessions the one border stands for. Only drawn past one. */
 .agentCount {
+  flex: none;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--agent-soft);
@@ -1314,8 +1338,12 @@
    a group, and stay at the end of the row while there is room for them. */
 .tools {
   display: flex;
-  flex: 0 0 auto;
+  /* Allowed to shrink, so on a phone the strip takes the row under the
+     search box and wraps its own buttons inside the screen; with a fixed
+     basis it was one long row running off the right-hand edge. */
+  flex: 0 1 auto;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 8px;
   align-items: center;
   margin-left: auto;
@@ -1578,4 +1606,102 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
+}
+
+/* The answer popover under a waiting card (CYLIST-86) — see CardPromptPopover.
+   Fixed, because a column's card list clips what hangs out of it; placed from
+   the card's own box by `placePopover`. The transparent band at the top is
+   the bridge the pointer crosses from the card without the popover noticing
+   it left: it tucks `POPOVER_OVERLAP` under the card and reaches a little
+   further down before the box starts. */
+.cardPopover {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding-top: 10px;
+  cursor: auto;
+}
+
+.cardPopoverAbove {
+  padding-top: 0;
+  padding-bottom: 10px;
+}
+
+.cardPopoverBox {
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+
+/* The agent chips (CYLIST-90) — see `AgentChips`. Quiet while there is
+   nothing to count; in the border's own colour once there is, so the chip
+   and the cards it would show read as the same thing. */
+.agentChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agentChip {
+  --chip-ink: var(--line-2);
+  --chip-ground: var(--paper);
+
+  white-space: nowrap;
+}
+
+.needsChip {
+  --chip-ink: var(--hold);
+  --chip-ground: var(--hold-soft);
+}
+
+.workingChip {
+  --chip-ink: var(--agent);
+  --chip-ground: var(--agent-soft);
+}
+
+.agentChipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+
+.agentChipLive {
+  border-color: var(--chip-ink);
+}
+
+.agentChipLive .agentChipDot {
+  background: var(--chip-ink);
+}
+
+.agentChipCount {
+  min-width: 1.4em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* Pressed: filled with the state's soft colour and ringed twice as heavy, so
+   "the board is narrowed to these" cannot be mistaken for "there are some". */
+.agentChipOn {
+  border-color: var(--chip-ink);
+  background: var(--chip-ground);
+  box-shadow: inset 0 0 0 1px var(--chip-ink);
+}
+
+.agentChipOn .agentChipDot {
+  background: var(--chip-ink);
+}
+
+.agentChipOn .agentChipCount {
+  background: var(--paper);
 }

@@ -48,6 +48,7 @@ from app.schemas.tasks import (
 )
 from app.services import (
     activity,
+    agent_prompts,
     agent_sessions,
     columns,
     permissions,
@@ -205,8 +206,11 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
     split = await tasks.subtask_counts(session, ids)
     owners = await tasks.subtask_owners(session, ids)
     boards = await _boards_by_project(session, found)
-    # One query for the agents on every card.
+    # One query for the agents on every card, and one for what they are asking.
     agents = await agent_sessions.for_tasks(session, ids)
+    shown = await agent_prompts.shown_for(
+        session, [row for rows in agents.values() for row in rows]
+    )
     return [
         _task_read(
             task,
@@ -214,7 +218,7 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
             split.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
             boards.get(task.project_id),
-            agent_sessions.presence(agents.get(task.id, [])),
+            agent_sessions.presence(agents.get(task.id, []), shown),
         )
         for task in found
     ]
@@ -253,6 +257,7 @@ async def _task_detail(session: AsyncSession, task: Task) -> TaskDetail:
     owners = await tasks.subtask_owners(session, ids)
     board = await columns.list_for_project(session, task.project)
     agents = await agent_sessions.list_for_task(session, task)
+    shown = await agent_prompts.shown_for(session, agents)
     return TaskDetail(
         **_task_read(
             task,
@@ -260,10 +265,10 @@ async def _task_detail(session: AsyncSession, task: Task) -> TaskDetail:
             counts.get(task.id, tasks.Split(0, 0)),
             owners.get(task.id),
             board,
-            agent_sessions.presence(agents),
+            agent_sessions.presence(agents, shown),
         ).model_dump(),
         comments=[_comment_read(entry) for entry in timeline],
-        agent_sessions=[agent_sessions.read(row) for row in agents],
+        agent_sessions=[agent_sessions.read(row, shown.get(row.id)) for row in agents],
         # A sub-task cannot be split again, so its own counts are always zero —
         # asked for all the same, because the loop that reads them does not know
         # which of these is which and a special case here would be a lie waiting

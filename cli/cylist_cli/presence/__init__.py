@@ -9,7 +9,7 @@ The point is not the saved handshakes. It is that a connection can *end*: a
 socket closing tells the board the session is over, where a PUT that stops
 coming tells it nothing at all and left the server guessing from a clock.
 
-The six modules, smallest first:
+The modules, smallest first:
 
 * :mod:`.protocol` — the two wire formats. Pure.
 * :mod:`.owner` — which ``claude`` a session belongs to, and whether it is
@@ -17,15 +17,19 @@ The six modules, smallest first:
   clock that could not tell a waiting human from a closed terminal.
 * :mod:`.machine` — every rule about when to send, keepalive and give up.
   Pure, and where to look first.
+* :mod:`.narrate` and :mod:`.transcript` — what the agent is doing, as a
+  card's one-line note and as its feed, redacted before either leaves.
 * :mod:`.ipc` — the unix socket between hook and daemon.
 * :mod:`.supervisor` — one daemon per session, started and stopped.
 * :mod:`.daemon` — the process. Deliberately dull; it decides nothing.
 
-Only :func:`report` and :func:`finish` are meant to be called from the hook,
-and both are written so that failure means "do it the old way" rather than
-"raise". The HTTP path stays for exactly that reason: a machine where the
-daemon cannot start, or a sandbox with no unix sockets, degrades to what
-Cylist did yesterday rather than to silence.
+Only :func:`report`, :func:`finish`, :func:`ask_permission` and
+:func:`tool_ran` are meant to be called from the hook, and all of them are
+written so that failure means "do it the old way" rather than "raise". The
+HTTP path stays for exactly that reason: a machine where the daemon cannot
+start, or a sandbox with no unix sockets, degrades to what Cylist did
+yesterday rather than to silence. For a permission the old way is the
+terminal's own dialog.
 
 Nothing here may import ``websockets`` at module scope. ``commands`` imports
 every module eagerly, and an unbound session — the common case, since hooks
@@ -35,6 +39,7 @@ are installed user-wide and fire in every project — must pay nothing.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from cylist_cli.presence import ipc, protocol, supervisor
 
@@ -62,6 +67,8 @@ def report(
     client_name: str,
     *,
     bind: bool = False,
+    note: str | None = None,
+    transcript: str | None = None,
 ) -> bool:
     """Tell the daemon where the session is. False means "fall back to HTTP".
 
@@ -75,9 +82,9 @@ def report(
         return False
 
     line = (
-        protocol.bind_message(session_id, task, client_name)
+        protocol.bind_message(session_id, task, client_name, transcript)
         if bind
-        else protocol.state_message(session_id, task, state, reason, client_name)
+        else protocol.state_message(session_id, task, state, reason, client_name, note, transcript)
     )
     if ipc.send(session_id, line) is not None:
         return True
@@ -88,6 +95,44 @@ def report(
         # No fork, no /tmp, a sandbox that forbids it — all the same answer.
         return False
     return False
+
+
+def ask_permission(
+    session_id: str,
+    task: str,
+    client_name: str,
+    prompt_id: str,
+    text: str,
+    tool: str | None,
+    *,
+    transcript: str | None = None,
+    wait: float,
+) -> dict[str, Any] | None:
+    """Ask the board whether a tool may run, and wait for a person to say.
+
+    Returns ``{"status", "key", "answer"}`` once the prompt closed on the
+    board, or ``None`` when the board cannot decide it: no daemon (never
+    spawned here — the terminal's own dialog is already the answer to "no
+    daemon"), presence turned off, or nobody answered in time. ``None``
+    always means "leave it to the terminal".
+    """
+    if mode() != "ws":
+        return None
+    line = protocol.ask_message(session_id, task, client_name, prompt_id, text, tool, transcript)
+    ack = ipc.ask(session_id, line, wait=wait)
+    answer = ack.get("answer") if ack else None
+    return answer if isinstance(answer, dict) else None
+
+
+def tool_ran(session_id: str) -> bool:
+    """Tell the daemon a tool ran while a permission was waiting on the board.
+
+    Never spawns: a session with a permission waiting already has a daemon,
+    and one without has nothing to take off the card.
+    """
+    if mode() != "ws":
+        return False
+    return ipc.send(session_id, protocol.ran_message(session_id)) is not None
 
 
 def finish(command: list[str], session_id: str, reason: str) -> bool:
@@ -115,6 +160,7 @@ def daemon_log(session_id: str) -> object:
 
 __all__ = [
     "MODE_ENV",
+    "ask_permission",
     "daemon_log",
     "finish",
     "ipc",
@@ -122,4 +168,5 @@ __all__ = [
     "protocol",
     "report",
     "supervisor",
+    "tool_ran",
 ]

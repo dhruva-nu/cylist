@@ -15,13 +15,26 @@ one property is what makes the rest of this module simple enough to trust:
 
 * :meth:`Hub.publish` never awaits a socket, so a browser on a bad connection
   cannot slow down the transaction that is telling it something.
-* A queue that is already full is left alone rather than grown, because a
-  second "the board changed" adds nothing to the first.
+* A nudge already waiting is not queued again, because a second "the board
+  changed" adds nothing to the first.
 * A dropped event costs a refetch that the next event will trigger anyway.
 
 The cost is one HTTP round trip per nudge. The thing it buys is that there is
 exactly one piece of code that knows how to build a card — ``read_tasks()`` —
 and no second, drifting copy of it here.
+
+A third kind of event, ``agent.prompt`` (CYLIST-85 and CYLIST-89), rings
+the board's doorbell like any change and also does two things no doorbell
+does: it wakes a long-poll waiting for that prompt's answer, and for a
+permission it puts the ``answer`` frame on the agent's own socket. See
+:meth:`Hub._prompt_changed` for why that is still safe to drop.
+
+There are two doorbells, not one. ``board.changed`` is the board's; an
+``agent.feed`` names one card whose agent feed has grown (CYLIST-88), and only
+a browser with that card open does anything about it. They are kept apart
+rather than folded into one because an agent writes a feed line every few
+seconds, and a board that refetched every card for each would be paying for
+a dialog it may not have open.
 """
 
 from __future__ import annotations
@@ -29,26 +42,31 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from app.core.clock import now
+from app.realtime import protocol
 
 logger = logging.getLogger(__name__)
 
-_PENDING = 1
-"""How many nudges a watcher may have waiting.
+_PENDING = 16
+"""How many distinct nudges a watcher may have waiting.
 
-One, because they are identical. A watcher with a nudge already queued has
-everything a second one would tell it, so the second is dropped rather than
-buffered — which is coalescing, and is the reason a slow client cannot make
-this grow without bound.
+Nudges are keyed — ``board.changed`` is one key, each card's ``agent.feed``
+another — and a key already waiting is not queued twice: a watcher with a
+nudge pending has everything a second one would tell it, so the second is
+dropped rather than buffered. That is coalescing, and with the cap it is the
+reason a slow client cannot make this grow without bound. The board's own
+nudge is always let in; past the cap, it is the feed nudges that wait for the
+next one, and a board nudge refetches the open card's feed anyway.
 
 Only messages that are safe to drop and safe to duplicate may go through
 :meth:`Hub.publish`. Anything else needs its own path.
 """
+
+BOARD_CHANGED = "board.changed"
 
 
 @dataclass(eq=False)
@@ -60,9 +78,25 @@ class Watcher:
     """
 
     project_id: UUID
-    queue: asyncio.Queue[dict[str, Any]] = field(
-        default_factory=lambda: asyncio.Queue(maxsize=_PENDING)
-    )
+    _pending: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _ready: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def offer(self, key: str, nudge: dict[str, Any]) -> None:
+        """Queue a nudge unless one like it is already waiting. Never blocks."""
+        if key in self._pending:
+            return
+        if key != BOARD_CHANGED and len(self._pending) >= _PENDING:
+            return
+        self._pending[key] = nudge
+        self._ready.set()
+
+    async def next(self) -> dict[str, Any]:
+        """The oldest waiting nudge, once there is one."""
+        while not self._pending:
+            self._ready.clear()
+            await self._ready.wait()
+        key = next(iter(self._pending))
+        return self._pending.pop(key)
 
 
 @dataclass(eq=False)
@@ -70,6 +104,9 @@ class AgentLink:
     """One agent session holding one socket."""
 
     client_session_id: str
+    outbox: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    """Frames for the agent that are not replies — today only a permission's
+    ``answer``. Drained by the socket's handler; see :meth:`Hub.deliver`."""
     displaced: asyncio.Event = field(default_factory=asyncio.Event)
     """Set when the same client session connects again somewhere else. The
     handler that sees it closes without ending the database row, because the
@@ -82,6 +119,7 @@ class Hub:
     def __init__(self) -> None:
         self._watchers: dict[UUID, set[Watcher]] = {}
         self._agents: dict[str, AgentLink] = {}
+        self._prompt_waiters: dict[UUID, set[asyncio.Event]] = {}
 
     # --- Browsers ----------------------------------------------------------
 
@@ -107,6 +145,8 @@ class Hub:
         network. An event for a project nobody is watching is dropped, which
         is the common case and costs a dictionary lookup.
         """
+        if event.get("type") == protocol.PROMPT_CHANGED:
+            self._prompt_changed(event)
         project_id = event.get("project_id")
         if not isinstance(project_id, UUID):
             return
@@ -114,13 +154,64 @@ class Hub:
         if not watchers:
             return
 
-        nudge = {"type": "board.changed", "at": now().isoformat()}
+        task_id = event.get("task_id")
+        if event.get("type") == protocol.FEED_CHANGED and isinstance(task_id, UUID):
+            key = f"{protocol.FEED_CHANGED}:{task_id}"
+            nudge = protocol.feed_changed(str(task_id))
+        else:
+            key = BOARD_CHANGED
+            nudge = protocol.board_changed()
         for watcher in watchers:
-            # A watcher with one queued already has everything this would say.
-            with suppress(asyncio.QueueFull):
-                watcher.queue.put_nowait(nudge)
+            # A watcher with one waiting already has everything this would say.
+            watcher.offer(key, nudge)
+
+    # --- Prompts ------------------------------------------------------------
+
+    @contextmanager
+    def prompt_waiter(self, prompt_id: UUID) -> Iterator[asyncio.Event]:
+        """An event set when this prompt next opens or closes, for as long as the block runs.
+
+        What a long-poll for an ``ask_human`` answer waits on. Registered
+        *before* the waiter reads the row, so a close committed between the
+        read and the wait still wakes it.
+        """
+        waiter = asyncio.Event()
+        self._prompt_waiters.setdefault(prompt_id, set()).add(waiter)
+        try:
+            yield waiter
+        finally:
+            waiters = self._prompt_waiters.get(prompt_id)
+            if waiters is not None:
+                waiters.discard(waiter)
+                if not waiters:
+                    del self._prompt_waiters[prompt_id]
+
+    def _prompt_changed(self, event: dict[str, Any]) -> None:
+        """Wake whoever waits on a prompt, and hand an agent its answer.
+
+        The answer frame is the one thing published here that is not a
+        doorbell, and it is still safe to lose: a daemon that never hears it
+        re-sends the prompt on its next connection and is answered then, and
+        a hook that is never answered leaves the terminal's dialog to decide.
+        """
+        prompt_id = event.get("prompt_id")
+        if isinstance(prompt_id, UUID):
+            for waiter in self._prompt_waiters.get(prompt_id, ()):
+                waiter.set()
+        deliver = event.get("deliver")
+        client_session_id = event.get("client_session_id")
+        if isinstance(deliver, dict) and isinstance(client_session_id, str):
+            self.deliver(client_session_id, deliver)
 
     # --- Agents ------------------------------------------------------------
+
+    def deliver(self, client_session_id: str, frame: dict[str, Any]) -> bool:
+        """Queue a frame for an agent's socket. False if it holds none here."""
+        link = self._agents.get(client_session_id)
+        if link is None:
+            return False
+        link.outbox.put_nowait(frame)
+        return True
 
     def register_agent(self, link: AgentLink) -> AgentLink | None:
         """Take ownership of a client session, displacing any older socket.

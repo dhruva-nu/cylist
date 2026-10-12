@@ -121,6 +121,26 @@ class TestWhenThereIsADaemon:
         assert daemon.received[0]["state"] == "waiting"
         assert daemon.received[0]["reason"] == "turn_ended"
 
+    def test_a_tool_call_sends_its_line_down_the_socket(
+        self, fire: Fire, recorder: fake_api.Recorder
+    ) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION) as daemon:
+            fire(event("PreToolUse", tool_name="Edit", tool_input={"file_path": "/r/a/tasks.py"}))
+
+        assert recorder.paths() == []
+        assert daemon.received[0]["t"] == "state"
+        assert daemon.received[0]["state"] == "working"
+        assert daemon.received[0]["note"] == "Editing tasks.py"
+
+    def test_the_daemon_is_told_which_transcript_to_follow(self, fire: Fire) -> None:
+        """Every hook event names it, and it is how the card's feed is found."""
+        bind()
+        with fake_daemon.FakeDaemon(SESSION) as daemon:
+            fire(event("Stop", transcript_path="/home/somebody/.claude/projects/x/abc.jsonl"))
+
+        assert daemon.received[0]["transcript"] == "/home/somebody/.claude/projects/x/abc.jsonl"
+
     def test_walking_to_another_card_is_a_bind(
         self, fire: Fire, recorder: fake_api.Recorder
     ) -> None:
@@ -316,3 +336,152 @@ class TestTheSingleton:
         held.release()
 
         assert supervisor.is_running(SESSION) is False
+
+
+def answered(key: str, label: str) -> dict[str, Any]:
+    return {"status": "answered", "key": key, "answer": label}
+
+
+class TestAPermissionAskedOfTheBoard:
+    """CYLIST-89: the PermissionRequest hook asks the daemon, the board answers."""
+
+    def _ask(self, fire: Fire, **fields: Any) -> tuple[str, dict[str, Any] | None]:
+        code, out, _ = fire(
+            event(
+                "PermissionRequest",
+                tool_name="Bash",
+                tool_input={"command": "git push origin staging"},
+                **fields,
+            )
+        )
+        assert code == 0
+        return out, (json.loads(out) if out.strip() else None)
+
+    def test_the_daemon_is_asked_with_what_the_tool_wants(self, fire: Fire) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION, answer=answered("allow_once", "Allow once")) as d:
+            self._ask(fire)
+
+        [asked] = d.received
+        assert asked["t"] == "ask"
+        assert asked["task"] == CARD
+        assert asked["tool"] == "Bash"
+        assert asked["text"] == "Running git push origin staging"
+        assert asked["prompt_id"]
+
+    def test_allow_once_allows(self, fire: Fire) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION, answer=answered("allow_once", "Allow once")):
+            _, reply = self._ask(fire)
+
+        assert reply == {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "allow"},
+            }
+        }
+
+    def test_allow_for_this_session_adds_the_suggested_rules_for_this_session_only(
+        self, fire: Fire
+    ) -> None:
+        bind()
+        suggestion = {
+            "type": "addRules",
+            "rules": [{"toolName": "Bash", "ruleContent": "git push:*"}],
+            "behavior": "allow",
+            "destination": "localSettings",
+        }
+        allow = answered("allow_session", "Allow for this session")
+        with fake_daemon.FakeDaemon(SESSION, answer=allow):
+            _, reply = self._ask(fire, permission_suggestions=[suggestion])
+
+        assert reply is not None
+        decision = reply["hookSpecificOutput"]["decision"]
+        assert decision["behavior"] == "allow"
+        assert decision["updatedPermissions"] == [{**suggestion, "destination": "session"}]
+
+    def test_deny_denies_and_says_where_from(self, fire: Fire) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION, answer=answered("deny", "Deny")):
+            _, reply = self._ask(fire)
+
+        assert reply is not None
+        decision = reply["hookSpecificOutput"]["decision"]
+        assert decision == {"behavior": "deny", "message": "Denied from the Cylist board."}
+
+    def test_nobody_answering_leaves_it_to_the_terminal(self, fire: Fire) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION, answer=None):
+            out, _ = self._ask(fire)
+
+        assert out == ""
+
+    def test_no_daemon_leaves_it_to_the_terminal_and_starts_none(
+        self, fire: Fire, recorder: fake_api.Recorder, no_real_processes: list[dict[str, Any]]
+    ) -> None:
+        bind()
+        out, _ = self._ask(fire)
+
+        assert out == ""
+        assert recorder.paths() == []
+        assert no_real_processes == []
+
+    def test_an_unbound_session_asks_nobody(self, fire: Fire) -> None:
+        with fake_daemon.FakeDaemon(SESSION, answer=answered("deny", "Deny")) as daemon:
+            out, _ = self._ask(fire)
+
+        assert out == ""
+        assert daemon.received == []
+
+    def test_the_mark_comes_off_once_it_is_decided(self, fire: Fire) -> None:
+        from cylist_cli.commands import hook
+
+        bind()
+        with fake_daemon.FakeDaemon(SESSION, answer=answered("deny", "Deny")):
+            self._ask(fire)
+
+        assert "asking" not in hook._load_state(SESSION)
+
+    def test_a_tool_that_ran_while_one_was_asked_tells_the_daemon(self, fire: Fire) -> None:
+        from cylist_cli.commands import hook
+
+        hook._save_state(SESSION, {"task": CARD, "title_applied": CARD, "asking": "p-1"})
+        with fake_daemon.FakeDaemon(SESSION) as daemon:
+            fire(event("PostToolUse", tool_name="Bash", tool_input={"command": "ls"}))
+
+        assert [message["t"] for message in daemon.received] == ["ran"]
+
+    def test_an_ordinary_tool_call_still_costs_nothing(self, fire: Fire) -> None:
+        bind()
+        with fake_daemon.FakeDaemon(SESSION) as daemon:
+            fire(event("PostToolUse", tool_name="Bash", tool_input={"command": "ls"}))
+
+        assert daemon.received == []
+
+    def test_only_rules_are_taken_from_the_suggestions(self, fire: Fire) -> None:
+        """The harness suggests switching the session to accept every edit, for
+        a shell command. "Allow for this session" means this command, not that."""
+        bind()
+        allow = answered("allow_session", "Allow for this session")
+        with fake_daemon.FakeDaemon(SESSION, answer=allow):
+            _, reply = self._ask(
+                fire,
+                permission_suggestions=[
+                    {
+                        "type": "addDirectories",
+                        "directories": ["/home/somebody/project"],
+                        "destination": "session",
+                    },
+                    {"type": "setMode", "mode": "acceptEdits", "destination": "session"},
+                ],
+            )
+
+        assert reply is not None
+        assert reply["hookSpecificOutput"]["decision"]["updatedPermissions"] == [
+            {
+                "type": "addRules",
+                "rules": [{"toolName": "Bash", "ruleContent": "git push origin staging"}],
+                "behavior": "allow",
+                "destination": "session",
+            }
+        ]
