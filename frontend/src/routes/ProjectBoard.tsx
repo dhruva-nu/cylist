@@ -46,6 +46,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  useDndContext,
   useDraggable,
   useDroppable,
   useSensor,
@@ -91,7 +92,15 @@ import {
   type Suggestion,
 } from './boardSearch'
 import { hidesCancelled, hidesHold, isCancelled, splitOnHold } from './boardHiding'
-import { agentIndicator, hasLiveAgent } from './agentState'
+import {
+  agentCounts,
+  agentIndicator,
+  hasLiveAgent,
+  isAnswerable,
+  passesAgentFilter,
+  type AgentFilter,
+} from './agentState'
+import { BoardAnnounce, CardPromptPopover, useCardPopover } from './CardPromptPopover'
 import { useBoardSocket } from './useBoardSocket'
 import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
 import { GoalChip, GoalStatusPill } from '../components/GoalMarks'
@@ -116,6 +125,7 @@ import {
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
 import { usePermissions } from './usePermissions'
+import { useViewerId } from './useViewerId'
 
 /**
  * Which keys drive a keyboard drag.
@@ -642,6 +652,7 @@ interface BoardFilters {
   search: string
   quickGoal: QuickGoal
   quickStatus: QuickStatus
+  quickAgent: AgentFilter
   showCancelled: boolean
 }
 
@@ -661,7 +672,7 @@ interface BoardFilters {
  */
 function narrowBoard(
   tasks: Task[],
-  { search, quickGoal, quickStatus, showCancelled }: BoardFilters,
+  { search, quickGoal, quickStatus, quickAgent, showCancelled }: BoardFilters,
   columns: BoardColumn[],
   members: Person[],
 ) {
@@ -690,8 +701,17 @@ function narrowBoard(
    */
   const hidingCancelled = hidesCancelled(showCancelled, quickStatus, parsed)
   const cancelledCount = narrowed.filter(isCancelled).length
-  const visibleTasks = hidingCancelled ? narrowed.filter((task) => !isCancelled(task)) : narrowed
-  return { visibleTasks, cancelledCount, hidingCancelled, parsed }
+  const unhidden = hidingCancelled ? narrowed.filter((task) => !isCancelled(task)) : narrowed
+  /**
+   * The agent chips, last of all. Their counts are taken from the board as
+   * everything else has narrowed it but before the chip itself has, so the
+   * number on a chip is exactly how many cards pressing it leaves — and both
+   * chips keep their numbers while either is pressed.
+   */
+  const agentTally = agentCounts(unhidden)
+  const visibleTasks =
+    quickAgent === 'all' ? unhidden : unhidden.filter((task) => passesAgentFilter(task, quickAgent))
+  return { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally }
 }
 
 /** The cards to draw, sorted into their columns in the order they arrived. */
@@ -754,6 +774,8 @@ export function ProjectBoard() {
    */
   const [quickGoal, setQuickGoal] = useState<QuickGoal>('all')
   const [quickStatus, setQuickStatus] = useState<QuickStatus>('all')
+  /** The agent chips (CYLIST-90): every card, the ones that need you, or the busy ones. */
+  const [quickAgent, setQuickAgent] = useState<AgentFilter>('all')
   /** The goal a card written from a lane starts on. */
   const [newTaskGoalId, setNewTaskGoalId] = useState<string | null>(null)
   /**
@@ -828,9 +850,9 @@ export function ProjectBoard() {
     )
   }
 
-  const { visibleTasks, cancelledCount, hidingCancelled, parsed } = narrowBoard(
+  const { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally } = narrowBoard(
     tasks.data,
-    { search, quickGoal, quickStatus, showCancelled },
+    { search, quickGoal, quickStatus, quickAgent, showCancelled },
     columns,
     memberList,
   )
@@ -1037,7 +1059,7 @@ export function ProjectBoard() {
     // `hidesHold`. Passed in rather than read inside `Column` because the
     // search box and the status filter are the board's, and a column that
     // reached for them would be reaching past its own props for them.
-    hidingHold: hidesHold(holdShown.includes(column.id), quickStatus, parsed),
+    hidingHold: hidesHold(holdShown.includes(column.id), quickStatus, parsed, quickAgent !== 'all'),
     onToggleHold: () => toggleHold(column.id),
   })
 
@@ -1071,6 +1093,12 @@ export function ProjectBoard() {
           goals={goalList}
         />
         <div className={styles.tools}>
+          <AgentChips
+            value={quickAgent}
+            onChange={setQuickAgent}
+            needsYou={agentTally.needsYou}
+            working={agentTally.working}
+          />
           {/* A toggle rather than a second page: lanes are the same board read
               by goal instead of by column, and a board you have to leave to
               group is one you group once and then stop using. */}
@@ -1122,130 +1150,132 @@ export function ProjectBoard() {
         </div>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        // Columns are the only drop targets and they never overlap, so nearest
-        // centre is both the obvious answer and the one a keyboard drag — which
-        // lands the card dead centre — can rely on.
-        collisionDetection={closestCenter}
-        accessibility={{ announcements, screenReaderInstructions: SCREEN_READER_INSTRUCTIONS }}
-        // The board scrolls sideways to reach a column that is off the edge,
-        // and nothing else scrolls at all. Left to itself dnd-kit picks the
-        // nearest scrollable ancestor, which is the card list you are dragging
-        // out of: the column then scrolls its own cards away under the pointer
-        // for as long as you hold one near its top or bottom.
-        autoScroll={{ canScroll: (element) => element === boardRef.current }}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => setDraggingId(null)}
-      >
-        {inLanes ? (
-          <div ref={boardRef} className={styles.lanes}>
-            {/* The column headings, once, above every lane — with the drag
+      <BoardAnnounce.Provider value={announce}>
+        <DndContext
+          sensors={sensors}
+          // Columns are the only drop targets and they never overlap, so nearest
+          // centre is both the obvious answer and the one a keyboard drag — which
+          // lands the card dead centre — can rely on.
+          collisionDetection={closestCenter}
+          accessibility={{ announcements, screenReaderInstructions: SCREEN_READER_INSTRUCTIONS }}
+          // The board scrolls sideways to reach a column that is off the edge,
+          // and nothing else scrolls at all. Left to itself dnd-kit picks the
+          // nearest scrollable ancestor, which is the card list you are dragging
+          // out of: the column then scrolls its own cards away under the pointer
+          // for as long as you hold one near its top or bottom.
+          autoScroll={{ canScroll: (element) => element === boardRef.current }}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => setDraggingId(null)}
+        >
+          {inLanes ? (
+            <div ref={boardRef} className={styles.lanes}>
+              {/* The column headings, once, above every lane — with the drag
                 handle and the fold still on them. Repeating them down each
                 lane would say the same five words as many times as there are
                 goals, and put the board's own controls in five places. */}
-            <div className={styles.laneRow} style={{ gridTemplateColumns: laneTracks }}>
+              <div className={styles.laneRow} style={{ gridTemplateColumns: laneTracks }}>
+                {columns.map((column) => (
+                  <Column
+                    key={column.id}
+                    part="head"
+                    {...sharedColumnProps(column)}
+                    tasks={byColumn.get(column.id) ?? []}
+                    onMoveSubStatus={() => {}}
+                    onSetAssignee={() => {}}
+                  />
+                ))}
+              </div>
+
+              {lanes.map(({ key, goal }) => {
+                const laneFolded = foldedLanes.includes(key)
+                const name = goal?.name ?? 'No goal'
+                return (
+                  <section key={key} className={styles.lane} aria-label={name}>
+                    <LaneHead
+                      goal={goal}
+                      projectKey={projectKey}
+                      count={columns.reduce(
+                        (total, column) => total + tasksInLane(key, column.id).length,
+                        0,
+                      )}
+                      folded={laneFolded}
+                      rowId={`lane-${key}`}
+                      onToggleFold={() => onToggleLane(key, name)}
+                      onAdd={
+                        may('tasks')
+                          ? () => {
+                              setNewTaskGoalId(goal?.id ?? null)
+                              setCreatingTask(true)
+                            }
+                          : null
+                      }
+                    />
+                    {laneFolded ? null : (
+                      <div
+                        id={`lane-${key}`}
+                        className={styles.laneRow}
+                        style={{ gridTemplateColumns: laneTracks }}
+                      >
+                        {columns.map((column) => (
+                          <Column
+                            key={column.id}
+                            part="cards"
+                            laneKey={key}
+                            {...sharedColumnProps(column)}
+                            tasks={tasksInLane(key, column.id)}
+                            onMoveSubStatus={onMoveSubStatus}
+                            onSetAssignee={onSetAssignee}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )
+              })}
+            </div>
+          ) : (
+            <div ref={boardRef} className={styles.board}>
               {columns.map((column) => (
                 <Column
                   key={column.id}
-                  part="head"
                   {...sharedColumnProps(column)}
                   tasks={byColumn.get(column.id) ?? []}
-                  onMoveSubStatus={() => {}}
-                  onSetAssignee={() => {}}
+                  onMoveSubStatus={onMoveSubStatus}
+                  onSetAssignee={onSetAssignee}
                 />
               ))}
             </div>
+          )}
 
-            {lanes.map(({ key, goal }) => {
-              const laneFolded = foldedLanes.includes(key)
-              const name = goal?.name ?? 'No goal'
-              return (
-                <section key={key} className={styles.lane} aria-label={name}>
-                  <LaneHead
-                    goal={goal}
-                    projectKey={projectKey}
-                    count={columns.reduce(
-                      (total, column) => total + tasksInLane(key, column.id).length,
-                      0,
-                    )}
-                    folded={laneFolded}
-                    rowId={`lane-${key}`}
-                    onToggleFold={() => onToggleLane(key, name)}
-                    onAdd={
-                      may('tasks')
-                        ? () => {
-                            setNewTaskGoalId(goal?.id ?? null)
-                            setCreatingTask(true)
-                          }
-                        : null
-                    }
-                  />
-                  {laneFolded ? null : (
-                    <div
-                      id={`lane-${key}`}
-                      className={styles.laneRow}
-                      style={{ gridTemplateColumns: laneTracks }}
-                    >
-                      {columns.map((column) => (
-                        <Column
-                          key={column.id}
-                          part="cards"
-                          laneKey={key}
-                          {...sharedColumnProps(column)}
-                          tasks={tasksInLane(key, column.id)}
-                          onMoveSubStatus={onMoveSubStatus}
-                          onSetAssignee={onSetAssignee}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              )
-            })}
-          </div>
-        ) : (
-          <div ref={boardRef} className={styles.board}>
-            {columns.map((column) => (
-              <Column
-                key={column.id}
-                {...sharedColumnProps(column)}
-                tasks={byColumn.get(column.id) ?? []}
-                onMoveSubStatus={onMoveSubStatus}
-                onSetAssignee={onSetAssignee}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Outside the board, so the board's own overflow has nothing to say
+          {/* Outside the board, so the board's own overflow has nothing to say
             about where the card in the air is allowed to be drawn. */}
-        <DragOverlay dropAnimation={null}>
-          {draggedTask ? (
-            <article
-              // Filtered like the card in the column, and for the same reason:
-              // an active task has no status class, and a template string would
-              // put the word "undefined" in the class list instead of nothing.
-              className={[
-                styles.task,
-                styles[`type_${draggedTask.type}`],
-                styles[draggedTask.status],
-                styles.lifted,
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              style={
-                draggedTask.goal_colour
-                  ? ({ '--card-rail': draggedTask.goal_colour } as CSSProperties)
-                  : undefined
-              }
-            >
-              <TaskCardBody task={draggedTask} members={memberList} />
-            </article>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+          <DragOverlay dropAnimation={null}>
+            {draggedTask ? (
+              <article
+                // Filtered like the card in the column, and for the same reason:
+                // an active task has no status class, and a template string would
+                // put the word "undefined" in the class list instead of nothing.
+                className={[
+                  styles.task,
+                  styles[`type_${draggedTask.type}`],
+                  styles[draggedTask.status],
+                  styles.lifted,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={
+                  draggedTask.goal_colour
+                    ? ({ '--card-rail': draggedTask.goal_colour } as CSSProperties)
+                    : undefined
+                }
+              >
+                <TaskCardBody task={draggedTask} members={memberList} />
+              </article>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      </BoardAnnounce.Provider>
 
       {columnDialog ? (
         <ColumnDialog
@@ -1615,6 +1645,78 @@ function QuickFilters({
         ⏷ Filters
         {active ? <span className={styles.filterDot} aria-hidden="true" /> : null}
       </Button>
+    </div>
+  )
+}
+
+/**
+ * "Needs you" and "Agents working" (CYLIST-90): the two questions a board with
+ * agents on it gets asked most, as a pair of chips with live counts.
+ *
+ * Chips rather than two more options in the Filters drawer: the drawer is shut
+ * by default, and a count of cards waiting on you is worth nothing if it is
+ * behind a button. Pressing one narrows the board to those cards, ANDed with
+ * the search box and the drawer like every other filter; pressing it again,
+ * or the other one, lets go. One at a time, because "needs you or working" is
+ * just "has a live agent", which the borders already show.
+ *
+ * The counts move with the board's own socket: a `board.changed` refetches the
+ * cards and these are counted off them, so there is no polling of their own.
+ */
+function AgentChips({
+  value,
+  onChange,
+  needsYou,
+  working,
+}: {
+  value: AgentFilter
+  onChange: (value: AgentFilter) => void
+  needsYou: number
+  working: number
+}) {
+  const chips = [
+    {
+      key: 'needs_you' as const,
+      label: 'Needs you',
+      count: needsYou,
+      title: 'Only the cards whose agent is waiting on a person',
+      className: styles.needsChip,
+    },
+    {
+      key: 'working' as const,
+      label: 'Agents working',
+      count: working,
+      title: 'Only the cards whose agent is working',
+      className: styles.workingChip,
+    },
+  ]
+
+  return (
+    <div className={styles.agentChips} role="group" aria-label="Agent filters">
+      {chips.map((chip) => {
+        const on = value === chip.key
+        return (
+          <Button
+            key={chip.key}
+            small
+            aria-pressed={on}
+            className={[
+              styles.agentChip,
+              chip.className,
+              chip.count > 0 ? styles.agentChipLive : '',
+              on ? styles.agentChipOn : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            title={on ? 'Show every card again' : chip.title}
+            onClick={() => onChange(on ? 'all' : chip.key)}
+          >
+            <span className={styles.agentChipDot} aria-hidden="true" />
+            {chip.label}
+            <span className={styles.agentChipCount}>{chip.count}</span>
+          </Button>
+        )
+      })}
     </div>
   )
 }
@@ -2318,65 +2420,97 @@ function TaskCard({
   onSetAssignee: (assigneeId: string) => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
-  const agent = agentIndicator(task.agent_session, new Date())
+  const now = new Date()
+  const viewerId = useViewerId()
+  const agent = agentIndicator(task.agent_session, now, viewerId)
+  // A question or permission waiting on this card opens a popover under it on
+  // hover (CYLIST-86) — never while anything on the board is being dragged.
+  const prompt = task.agent_session?.prompt ?? null
+  const answerable = isAnswerable(prompt, now)
+  const { active } = useDndContext()
+  const popover = useCardPopover({ answerable, dragging: active !== null })
+  const setCardRef = useCallback(
+    (element: HTMLElement | null) => {
+      setNodeRef(element)
+      popover.cardRef.current = element
+    },
+    [setNodeRef, popover.cardRef],
+  )
 
   return (
-    <article
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        // Enter belongs to the card, every other key to the drag sensor —
-        // whose own onKeyDown this handler has just replaced, so it has to be
-        // called on rather than dropped. Not while the card is in the air,
-        // though: opening a dialog over a drag in progress strands the drag.
-        if (event.key === 'Enter' && !isDragging) {
-          event.preventDefault()
-          onOpen()
-          return
+    <>
+      <article
+        ref={setCardRef}
+        {...attributes}
+        {...listeners}
+        {...popover.card}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          // Enter belongs to the card, every other key to the drag sensor —
+          // whose own onKeyDown this handler has just replaced, so it has to be
+          // called on rather than dropped. Not while the card is in the air,
+          // though: opening a dialog over a drag in progress strands the drag.
+          if (event.key === 'Enter' && !isDragging) {
+            event.preventDefault()
+            onOpen()
+            return
+          }
+          listeners?.onKeyDown?.(event)
+        }}
+        aria-label={[
+          // The type leads, and is said at all, because the rail that carries
+          // it cannot be: a colour down the edge of a card is the one thing on
+          // it a screen reader has no way to reach. With the tile gone this is
+          // the only place on the card the word appears — the goal below it has
+          // the same problem and the same answer.
+          `${TYPE_LABELS[task.type]} ${task.reference}: ${task.title}`,
+          task.parent_reference ? `a sub-task of ${task.parent_reference}` : null,
+          task.goal_name ? `on ${task.goal_name}` : null,
+          // The border is colour and motion alone, so the words go here too.
+          agent ? [agent.label, agent.detail].filter(Boolean).join(', ') : null,
+          // Said, because the popover that opens on focus is otherwise news.
+          answerable ? 'its choices follow the card' : null,
+        ]
+          .filter(Boolean)
+          .join(', ')}
+        // The rail's colour, when the card is on a goal. Read by `.task::before`
+        // through a fallback, so a card on no goal keeps the status colour the
+        // rail has always been — see ProjectBoard.module.css.
+        style={
+          task.goal_colour ? ({ '--card-rail': task.goal_colour } as CSSProperties) : undefined
         }
-        listeners?.onKeyDown?.(event)
-      }}
-      aria-label={[
-        // The type leads, and is said at all, because the rail that carries
-        // it cannot be: a colour down the edge of a card is the one thing on
-        // it a screen reader has no way to reach. With the tile gone this is
-        // the only place on the card the word appears — the goal below it has
-        // the same problem and the same answer.
-        `${TYPE_LABELS[task.type]} ${task.reference}: ${task.title}`,
-        task.parent_reference ? `a sub-task of ${task.parent_reference}` : null,
-        task.goal_name ? `on ${task.goal_name}` : null,
-        // The border is colour and motion alone, so the words go here too.
-        agent ? [agent.label, agent.detail].filter(Boolean).join(', ') : null,
-      ]
-        .filter(Boolean)
-        .join(', ')}
-      // The rail's colour, when the card is on a goal. Read by `.task::before`
-      // through a fallback, so a card on no goal keeps the status colour the
-      // rail has always been — see ProjectBoard.module.css.
-      style={task.goal_colour ? ({ '--card-rail': task.goal_colour } as CSSProperties) : undefined}
-      // No transform of its own: while this card is in the air the DragOverlay
-      // is the copy that follows the pointer, and this one stays put and dims.
-      className={[
-        styles.task,
-        styles[`type_${task.type}`],
-        styles[task.status],
-        // The agent channel is the outer border, which nothing else on the
-        // card uses — the rail is already contested three ways.
-        agent && styles[agent.className],
-        isDragging && styles.dragging,
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      <TaskCardBody
-        task={task}
-        members={members}
-        onMoveSubStatus={onMoveSubStatus}
-        onSetAssignee={onSetAssignee}
-      />
-    </article>
+        // No transform of its own: while this card is in the air the DragOverlay
+        // is the copy that follows the pointer, and this one stays put and dims.
+        className={[
+          styles.task,
+          styles[`type_${task.type}`],
+          styles[task.status],
+          // The agent channel is the outer border, which nothing else on the
+          // card uses — the rail is already contested three ways.
+          agent && styles[agent.className],
+          isDragging && styles.dragging,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <TaskCardBody
+          task={task}
+          members={members}
+          onMoveSubStatus={onMoveSubStatus}
+          onSetAssignee={onSetAssignee}
+        />
+      </article>
+      {popover.open && answerable ? (
+        <CardPromptPopover
+          taskRef={task.reference}
+          prompt={prompt}
+          cardRef={popover.cardRef}
+          popoverRef={popover.popoverRef}
+          handlers={popover.popover}
+          onAnswered={popover.onAnswered}
+        />
+      ) : null}
+    </>
   )
 }
 
@@ -2478,11 +2612,16 @@ function TaskCardBody({
  * waiting on, and this one is waiting on you.
  */
 function AgentLine({ session }: { session: AgentPresence | null }) {
-  const agent = agentIndicator(session, new Date())
+  const viewerId = useViewerId()
+  const agent = agentIndicator(session, new Date(), viewerId)
   if (!agent) return null
 
   return (
-    <div className={`${styles.waiting} ${styles.agentLine}`}>
+    <div
+      className={`${styles.waiting} ${styles.agentLine}`}
+      // The line is cut to the card's width; the whole of it is a hover away.
+      title={agent.detail ? `${agent.label} · ${agent.detail}` : agent.label}
+    >
       <span className={styles.agentDot} aria-hidden="true" />
       <span className={styles.at}>{agent.label}</span>
       {agent.detail ? <span className={styles.agentDetail}>· {agent.detail}</span> : null}

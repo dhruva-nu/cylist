@@ -272,6 +272,64 @@ def test_a_notification_without_a_type_reads_its_message(
     assert _put_body(recorder)["reason"] == "permission"
 
 
+def test_a_notification_says_what_it_is_waiting_on(fire: Fire, recorder: fake_api.Recorder) -> None:
+    _bind()
+    fire(
+        _event(
+            "Notification",
+            notification_type="permission_prompt",
+            message="Claude needs your permission to use Bash",
+        )
+    )
+    assert _put_body(recorder)["note"] == "Claude needs your permission to use Bash"
+
+
+def test_a_tool_call_says_what_the_agent_is_about_to_do(
+    fire: Fire, recorder: fake_api.Recorder
+) -> None:
+    """CYLIST-84: the card's line moves with the agent, one tool call at a time."""
+    _bind()
+
+    fire(
+        _event(
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "cd backend && uv run pytest tests/test_pr_states.py"},
+        )
+    )
+
+    assert _put_body(recorder) == {
+        "state": "working",
+        "client_name": "ATL-1",
+        "note": "Running pytest test_pr_states.py",
+    }
+
+
+def test_a_tool_call_never_carries_a_secret_to_the_board(
+    fire: Fire, recorder: fake_api.Recorder
+) -> None:
+    _bind()
+
+    fire(
+        _event(
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "curl -H 'Authorization: Bearer cyl_abcdefghijklmnop' x"},
+        )
+    )
+
+    note = _put_body(recorder)["note"]
+    assert "cyl_abcdefghijklmnop" not in note
+    assert "[redacted]" in note
+
+
+def test_a_turn_ending_clears_the_line(fire: Fire, recorder: fake_api.Recorder) -> None:
+    """Stop sends no note, which the server reads as "doing nothing in particular"."""
+    _bind()
+    fire(_event("Stop"))
+    assert "note" not in _put_body(recorder)
+
+
 def test_session_end_reports_done_and_removes_the_state(
     fire: Fire, recorder: fake_api.Recorder
 ) -> None:
@@ -301,6 +359,7 @@ def test_an_unknown_event_is_ignored(fire: Fire, recorder: fake_api.Recorder) ->
     "event",
     [
         _event("UserPromptSubmit", prompt="hello"),
+        _event("PreToolUse", tool_name="Bash", tool_input={"command": "ls"}),
         _event("PostToolUse", tool_name="Bash", tool_input={"command": "ls"}),
         _event("Stop"),
         _event("Notification", notification_type="permission_prompt"),
@@ -526,8 +585,10 @@ def test_install_writes_every_event_and_the_work_command(
     assert set(settings["hooks"]) == set(hook.HOOK_EVENTS)
     for event in hook.HOOK_EVENTS:
         [group] = settings["hooks"][event]
+        # Three seconds, except the permission hook, which waits for a person.
+        timeout = 600 if event == "PermissionRequest" else 3
         assert group["hooks"] == [
-            {"type": "command", "command": "/opt/cylist/bin/cylist hook", "timeout": 3}
+            {"type": "command", "command": "/opt/cylist/bin/cylist hook", "timeout": timeout}
         ]
     assert settings["hooks"]["Notification"][0]["matcher"] == (
         "permission_prompt|idle_prompt|elicitation_dialog"
@@ -599,7 +660,7 @@ def test_install_preserves_other_hooks_and_settings(
         json.dumps(
             {
                 "theme": "dark",
-                "hooks": {"Stop": [{"hooks": [theirs]}], "PreToolUse": [{"hooks": [theirs]}]},
+                "hooks": {"Stop": [{"hooks": [theirs]}], "PreCompact": [{"hooks": [theirs]}]},
             }
         )
     )
@@ -608,7 +669,7 @@ def test_install_preserves_other_hooks_and_settings(
 
     settings = json.loads(_settings(tmp_path).read_text())
     assert settings["theme"] == "dark"
-    assert settings["hooks"]["PreToolUse"] == [{"hooks": [theirs]}]
+    assert settings["hooks"]["PreCompact"] == [{"hooks": [theirs]}]
     assert settings["hooks"]["Stop"][0] == {"hooks": [theirs]}
     assert settings["hooks"]["Stop"][1]["hooks"][0]["command"] == "/opt/cylist/bin/cylist hook"
 
@@ -672,3 +733,62 @@ def test_the_hook_command_is_absolute() -> None:
     command = hook.hook_command()
     assert command.endswith(" hook")
     assert Path(command.split(" ")[0]).is_absolute()
+
+
+class TestPermissionDecision:
+    """What an answer from the board becomes, in Claude Code's own words."""
+
+    def test_no_answer_is_no_decision(self) -> None:
+        assert hook.permission_decision(None, "Bash", {}, None) is None
+        expired = {"status": "expired", "key": None, "answer": None}
+        assert hook.permission_decision(expired, "Bash", {}, None) is None
+
+    def test_allow_for_this_session_without_suggestions_allows_the_exact_command(self) -> None:
+        decision = hook.permission_decision(
+            {"status": "answered", "key": "allow_session", "answer": "Allow for this session"},
+            "Bash",
+            {"command": "  uv run pytest  "},
+            None,
+        )
+
+        assert decision == {
+            "behavior": "allow",
+            "updatedPermissions": [
+                {
+                    "type": "addRules",
+                    "rules": [{"toolName": "Bash", "ruleContent": "uv run pytest"}],
+                    "behavior": "allow",
+                    "destination": "session",
+                }
+            ],
+        }
+
+    def test_allow_for_this_session_on_another_tool_allows_the_tool(self) -> None:
+        decision = hook.permission_decision(
+            {"status": "answered", "key": "allow_session", "answer": "Allow for this session"},
+            "WebFetch",
+            {"url": "https://example.com"},
+            [],
+        )
+
+        assert decision is not None
+        assert decision["updatedPermissions"][0]["rules"] == [{"toolName": "WebFetch"}]
+
+    def test_an_unknown_key_is_no_decision(self) -> None:
+        answer = {"status": "answered", "key": "maybe", "answer": "Maybe"}
+        assert hook.permission_decision(answer, "Bash", {}, None) is None
+
+    def test_a_reinstall_raises_an_old_permission_hook_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+        monkeypatch.setattr(hook, "hook_command", lambda: "/opt/cylist/bin/cylist hook")
+        settings = tmp_path / "claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        old = {"type": "command", "command": "/opt/cylist/bin/cylist hook", "timeout": 3}
+        settings.write_text(json.dumps({"hooks": {"PermissionRequest": [{"hooks": [old]}]}}))
+
+        hook.install_hooks()
+
+        written = json.loads(settings.read_text())
+        assert written["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"] == 600

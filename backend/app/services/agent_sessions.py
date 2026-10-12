@@ -17,7 +17,7 @@ off it — which is the agreed way a green border goes away without a button.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -34,6 +34,7 @@ from app.models.agent_session import AgentSession, AgentSessionReason, AgentSess
 from app.models.task import Task
 from app.schemas.agent_sessions import (
     AgentPresence,
+    AgentPromptRead,
     AgentSessionPut,
     AgentSessionRead,
     PresenceState,
@@ -56,6 +57,14 @@ class Upserted:
 
     row: AgentSession
     transitions: list[Transition] = field(default_factory=list)
+    note_changed: bool = False
+    """Whether the report changed what the card says the agent is doing.
+
+    Not a transition — a note changes on every tool call, and the trail is
+    not for that — but it is still news to a board looking at the card."""
+    ended: list[AgentSession] = field(default_factory=list)
+    """Rows this report ended — walked off another card, or this one said
+    ``done`` — whose open prompts nobody is now left to answer."""
 
 
 async def upsert(
@@ -88,10 +97,11 @@ async def upsert(
         )
 
     now = clock_now()
-    transitions = await _walk_off_other_cards(session, client_session_id, task, now)
+    transitions, ended = await _walk_off_other_cards(session, client_session_id, task, now)
 
     row, created = await _find_or_create_row(session, principal, task, client_session_id, data, now)
     state_before = None if created else row.state
+    note_before = None if created else row.note
     was_open = row.ended_at is None
     if data.client_name is not None:
         row.client_name = data.client_name
@@ -109,18 +119,24 @@ async def upsert(
     # in the same request — the router records these transitions next — sees
     # the row it is about to refresh.
     await session.flush()
-    return Upserted(row=row, transitions=transitions)
+    if row.ended_at is not None:
+        ended.append(row)
+    return Upserted(
+        row=row, transitions=transitions, note_changed=row.note != note_before, ended=ended
+    )
 
 
 async def _walk_off_other_cards(
     session: AsyncSession, client_session_id: str, task: Task, now: datetime
-) -> list[Transition]:
+) -> tuple[list[Transition], list[AgentSession]]:
     """End this client session's open rows on every card but ``task``.
 
     One card at a time: the session is moving here, so wherever else it was
-    open it has left, with ``reason=moved`` and the card it went to.
+    open it has left, with ``reason=moved`` and the card it went to. Returns
+    the transitions to record and the rows it ended.
     """
     transitions: list[Transition] = []
+    ended: list[AgentSession] = []
     elsewhere = await session.scalars(
         select(AgentSession).where(
             AgentSession.client_session_id == client_session_id,
@@ -130,6 +146,7 @@ async def _walk_off_other_cards(
     )
     for other in elsewhere:
         _finish(other, AgentSessionReason.MOVED, now)
+        ended.append(other)
         other_task = await session.get(Task, other.task_id)
         if other_task is not None:
             transitions.append(
@@ -140,7 +157,7 @@ async def _walk_off_other_cards(
                     _trail_payload(other, moved_to=task.reference),
                 )
             )
-    return transitions
+    return transitions, ended
 
 
 async def _find_or_create_row(
@@ -180,8 +197,11 @@ def _apply_reported_state(row: AgentSession, data: AgentSessionPut, now: datetim
     """Set a row to the state a hook reported.
 
     ``working`` and ``waiting`` both reopen a finished row and undo its
-    dismissal; ``done`` ends it.
+    dismissal; ``done`` ends it. The note is replaced outright — a report that
+    does not say what the session is doing says it is doing nothing in
+    particular, and a stale "Running pytest" is worse than none.
     """
+    row.note = data.note
     if data.state is AgentSessionState.WORKING:
         row.state = AgentSessionState.WORKING
         row.reason = None
@@ -201,6 +221,7 @@ def _finish(row: AgentSession, reason: AgentSessionReason, now: datetime) -> Non
         row.state_changed_at = now
     row.state = AgentSessionState.DONE
     row.reason = reason
+    row.note = None  # what it was doing is over too
     row.ended_at = row.ended_at or now
     row.last_seen_at = now
 
@@ -363,7 +384,9 @@ async def for_tasks(
     return grouped
 
 
-def read(row: AgentSession) -> AgentSessionRead:
+def read(row: AgentSession, prompt: AgentPromptRead | None = None) -> AgentSessionRead:
+    """One row as the API shows it, with the prompt it shows, when the caller
+    has read one — see :func:`app.services.agent_prompts.for_sessions`."""
     return AgentSessionRead(
         id=row.id,
         task_id=row.task_id,
@@ -378,10 +401,14 @@ def read(row: AgentSession) -> AgentSessionRead:
         last_seen_at=row.last_seen_at,
         ended_at=row.ended_at,
         dismissed_at=row.dismissed_at,
+        prompt=prompt,
     )
 
 
-def presence(rows: Iterable[AgentSession]) -> AgentPresence | None:
+def presence(
+    rows: Iterable[AgentSession],
+    prompts: Mapping[UUID, AgentPromptRead] | None = None,
+) -> AgentPresence | None:
     """The one state a card's border shows, from every session on it.
 
     Whatever needs a human wins, then whatever is alive, then what is over:
@@ -406,8 +433,12 @@ def presence(rows: Iterable[AgentSession]) -> AgentPresence | None:
     waiting, so ``waiting`` and ``working`` between them cover ``open_rows``.
 
     Pure, and tested on its own. ``rows`` is expected to be the undismissed
-    sessions of one card, as :func:`for_tasks` returns them.
+    sessions of one card, as :func:`for_tasks` returns them. ``prompts`` is
+    the prompt each session shows, by session id — what a person can answer
+    from the card, or the answer they gave — and only the deciding session's
+    is carried.
     """
+    shown = prompts or {}
     considered = [row for row in rows if row.dismissed_at is None]
     if not considered:
         return None
@@ -417,10 +448,29 @@ def presence(rows: Iterable[AgentSession]) -> AgentPresence | None:
     working = [row for row in open_rows if row.state is AgentSessionState.WORKING]
 
     if waiting:
-        return _summary("waiting", _latest(waiting), len(open_rows))
+        deciding = _waiting_on_a_prompt(waiting, shown)
+        return _summary("waiting", deciding, len(open_rows), shown.get(deciding.id))
     if working:
-        return _summary("working", _latest(working), len(open_rows))
-    return _summary("done", _latest(considered), len(considered))
+        deciding = _latest(working)
+        return _summary("working", deciding, len(open_rows), shown.get(deciding.id))
+    return _summary("done", _latest(considered), len(considered), None)
+
+
+def _waiting_on_a_prompt(
+    rows: list[AgentSession], prompts: Mapping[UUID, AgentPromptRead]
+) -> AgentSession:
+    """Of the waiting rows, one a person can answer from the card, if any is.
+
+    A question or a permission is the one thing a card can resolve without
+    a terminal, so it is what the card shows when there is a choice — the
+    oldest asked first, since that agent has waited longest.
+    """
+    answerable = [
+        row for row in rows if (p := prompts.get(row.id)) is not None and p.status == "open"
+    ]
+    if answerable:
+        return min(answerable, key=lambda row: prompts[row.id].asked_at)
+    return _latest(rows)
 
 
 def _latest(rows: list[AgentSession]) -> AgentSession:
@@ -428,12 +478,19 @@ def _latest(rows: list[AgentSession]) -> AgentSession:
     return max(rows, key=lambda row: row.last_seen_at)
 
 
-def _summary(state: PresenceState, deciding: AgentSession, count: int) -> AgentPresence:
+def _summary(
+    state: PresenceState,
+    deciding: AgentSession,
+    count: int,
+    prompt: AgentPromptRead | None,
+) -> AgentPresence:
     return AgentPresence(
         state=state,
         count=count,
         reason=deciding.reason,
         client_name=deciding.client_name,
+        note=deciding.note,
         since=deciding.state_changed_at,
         last_seen_at=deciding.last_seen_at,
+        prompt=prompt,
     )

@@ -805,6 +805,8 @@ export interface AgentSessionRead {
   client_name: string | null
   state: AgentSessionState
   reason: AgentSessionReason | null
+  /** What the session is doing right now — "Running pytest test_pr_states.py" —
+   * from its latest tool call, or what it is waiting on. Null when it has not said. */
   note: string | null
   started_at: string
   /** When `state` last changed. */
@@ -813,9 +815,101 @@ export interface AgentSessionRead {
   last_seen_at: string
   ended_at: string | null
   dismissed_at: string | null
+  /** What the session is waiting on a person for while it is; otherwise the
+   * last prompt it closed since entering its current state, so a card can say
+   * "You: Allow once". Null when neither. */
+  prompt: AgentPrompt | null
 }
 
+/** What an agent is waiting on a person for (CYLIST-85, CYLIST-89). */
+export type AgentPromptKind = 'question' | 'permission'
+
+/**
+ * Where a prompt has got to. Only `open` is waiting on anyone: `answered` was
+ * answered on the board, `expired` ran out of time, `withdrawn` stopped
+ * waiting first — see `closed_reason`.
+ */
+export type AgentPromptStatus = 'open' | 'answered' | 'expired' | 'withdrawn'
+
+/** Why a withdrawn prompt was withdrawn. */
+export type AgentPromptClosedReason =
+  'answered_in_terminal' | 'interrupted' | 'abandoned' | 'session_ended'
+
+/** One choice a prompt offers. */
+export interface AgentPromptOption {
+  /** What an answer names to pick this: `allow_once`, or `1` for a question's first. */
+  key: string
+  /** What the button says. */
+  label: string
+}
+
+/** The keys a permission's options always have, in the order they are offered. */
+export type PermissionAnswerKey = 'allow_once' | 'allow_session' | 'deny'
+
+/**
+ * Something an agent session is waiting on a person for, or was: a question
+ * it asked with `ask_human`, or a permission Claude Code wants before a tool
+ * runs. Mirrors `AgentPromptRead` in `app/schemas/agent_sessions.py`.
+ */
+export interface AgentPrompt {
+  id: string
+  agent_session_id: string
+  task_id: string
+  kind: AgentPromptKind
+  /** The question, or for a permission what the tool wants to do. */
+  text: string
+  /** For a permission, the tool's own name: `Bash`. */
+  tool: string | null
+  /** The choices, in order. A permission's are always the three `PermissionAnswerKey`s. */
+  options: AgentPromptOption[]
+  /** Whether a typed reply is accepted as well as a choice — a question's are. */
+  allows_reply: boolean
+  status: AgentPromptStatus
+  /** What was answered: the chosen option's label, or the reply typed. */
+  answer: string | null
+  /** The chosen option's key; null for a typed reply. */
+  answer_key: string | null
+  /** Who answered, by name. */
+  answered_by: string | null
+  /**
+   * Who answered, as a person id — compared with `api.me()`'s to say "You: …"
+   * rather than the name. Null when unanswered, or answered with a token that
+   * is nobody's.
+   */
+  answered_by_id: string | null
+  answered_at: string | null
+  closed_reason: AgentPromptClosedReason | null
+  asked_at: string
+  /** After this nobody may answer it. */
+  expires_at: string
+  closed_at: string | null
+}
+
+/** A person's answer: one of the options by key, or — to a question — a typed reply. */
+export type AgentPromptAnswer = { key: string } | { text: string }
+
 export type AgentPresenceState = 'working' | 'waiting' | 'done'
+
+/** What one line of an agent's feed is. */
+export type AgentFeedKind = 'said' | 'read' | 'edit' | 'run' | 'tool' | 'output' | 'error'
+
+/**
+ * One line of what an agent read, edited, ran or said on a card (CYLIST-88).
+ * Written by the agent's presence daemon from its transcript, redacted on the
+ * agent's machine; each session keeps its newest 200.
+ */
+export interface AgentFeedEntry {
+  id: string
+  agent_session_id: string
+  /** The session's display name, if known. */
+  client_name: string | null
+  /** When the agent did it, by its own clock. */
+  at: string
+  kind: AgentFeedKind
+  /** The tool's own name — `Bash`, `Edit` — for every kind but `said`. */
+  tool: string | null
+  text: string
+}
 
 /**
  * What a card says about the agents on it, reduced to the one state its border
@@ -835,10 +929,15 @@ export interface AgentPresence {
   reason: AgentSessionReason | null
   /** The deciding session's name. */
   client_name: string | null
+  /** What the deciding session is doing right now — its current tool call. */
+  note: string | null
   /** When the deciding session entered its state. */
   since: string
   /** When the deciding session last reported in. */
   last_seen_at: string
+  /** The deciding session's open question or permission, answerable from the
+   * card — or, once answered, the answer, until the session next changes state. */
+  prompt: AgentPrompt | null
 }
 
 export interface Task {
@@ -1568,6 +1667,22 @@ export const api = {
    */
   getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
     request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
+  /** What the agents on a card have been doing, newest first. */
+  getAgentFeed: (taskRef: string, limit = 100) =>
+    request<AgentFeedEntry[]>(`/tasks/${taskRef}/agent-feed?limit=${limit}`),
+  /** What the agents on a card have asked, open or not, newest first. */
+  listAgentPrompts: (taskRef: string, limit = 20) =>
+    request<AgentPrompt[]>(`/tasks/${taskRef}/agent-prompts?limit=${limit}`),
+  /**
+   * Answer what an agent on a card is waiting on. The first answer wins: one
+   * already answered, expired or withdrawn comes back as a `conflict` error
+   * saying which. The agent is told at once and the card goes back to working.
+   */
+  answerAgentPrompt: (taskRef: string, promptId: string, answer: AgentPromptAnswer) =>
+    request<AgentPrompt>(`/tasks/${taskRef}/agent-prompts/${promptId}/answer`, {
+      method: 'POST',
+      body: jsonBody(answer),
+    }),
   /** Clear the finished sessions off a card. The ones still running stay. */
   dismissAgentSessions: (taskRef: string) =>
     request<void>(`/tasks/${taskRef}/agent-sessions/dismiss`, { method: 'POST' }),

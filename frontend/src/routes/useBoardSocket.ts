@@ -52,7 +52,20 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
         void queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] })
         // An open card is looking at the same change from the other side.
         void queryClient.invalidateQueries({ queryKey: ['task'] })
+        // And so is its agent feed, whose own nudge may have been the one
+        // the server coalesced away.
+        void queryClient.invalidateQueries({ queryKey: ['agent-feed'] })
       }, DEBOUNCE_MS)
+    }
+
+    // A feed line concerns one card, and only an open one has a query to
+    // refetch — TanStack ignores the key when nothing is subscribed to it.
+    const refreshFeed = (taskId: string) => {
+      if (document.hidden) {
+        missedWhileHidden.current = true
+        return
+      }
+      void queryClient.invalidateQueries({ queryKey: ['agent-feed', taskId] })
     }
 
     const open = () => {
@@ -72,6 +85,8 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
           refresh()
         } else if (message.type === 'board.changed') {
           refresh()
+        } else if (message.type === 'agent.feed') {
+          refreshFeed(message.task_id)
         }
       }
 

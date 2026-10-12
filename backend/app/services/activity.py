@@ -562,8 +562,20 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
         if p.get("client_name")
         else "An agent started working on this card."
     ),
-    "agent_session.waiting": lambda p: _AGENT_WAITING.get(
-        str(p.get("reason")), "The agent is waiting on you."
+    "agent_session.waiting": lambda p: (
+        f"The agent asked: {p.get('question')}"
+        if p.get("reason") == "question" and p.get("question")
+        else _AGENT_WAITING.get(str(p.get("reason")), "The agent is waiting on you.")
+    ),
+    "agent_session.answered": lambda p: (
+        f"Answered the agent's permission request ({p.get('text')}): {p.get('answer')}."
+        if p.get("kind") == "permission"
+        else f"Answered the agent's question {_quoted(p.get('text'))}: {p.get('answer')}"
+    ),
+    "agent_session.unanswered": lambda p: (
+        "Nobody answered the agent's request in time; it was left to the terminal."
+        if p.get("kind") == "permission"
+        else f"Nobody answered the agent's question {_quoted(p.get('text'))} in time."
     ),
     "agent_session.finished": lambda p: (
         f"The agent moved on to {p.get('moved_to')}."

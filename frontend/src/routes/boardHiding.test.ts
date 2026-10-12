@@ -151,6 +151,11 @@ describe('a column holding its on-hold cards back', () => {
     expect(hidesHold(false, 'cancelled', parsed(''))).toBe(true)
   })
 
+  it('stands down while an agent chip is pressed, so a held card that needs you is seen', () => {
+    expect(hidesHold(false, 'all', parsed(''), true)).toBe(false)
+    expect(hidesHold(false, 'all', parsed(''), false)).toBe(true)
+  })
+
   it('is left alone by filters about something else', () => {
     expect(hidesHold(false, 'active', parsed(''))).toBe(true)
     expect(hidesHold(false, 'blocked', parsed('blk:'))).toBe(true)

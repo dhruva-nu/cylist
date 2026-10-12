@@ -30,7 +30,7 @@ from app.db import Database
 from app.mcp import mount_mcp
 from app.realtime.hub import Hub
 from app.routers import api_router
-from app.services import agent_reports, hooks
+from app.services import agent_prompts, agent_reports, hooks
 from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
 from app.spa import mount_spa
@@ -125,6 +125,9 @@ def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
 async def _reap_forever(app: FastAPI) -> None:
     """End open rows that have gone quiet and hold no socket.
 
+    Also closes the prompts nothing else will — see
+    :func:`app.services.agent_prompts.sweep`.
+
     The backstop for a client that reports over HTTP and then dies: a socket
     closing says so at once, a PUT that stops coming says nothing. A session
     holding a socket is witnessed however long it has been silent, so only the
@@ -144,6 +147,9 @@ async def _reap_forever(app: FastAPI) -> None:
                     app.state.hub.live_session_ids(),
                     quiet_after=AGENT_QUIET_AFTER,
                 )
+                # Questions and permissions whose time ran out with nobody
+                # looking, and questions whose tool is no longer polling.
+                await agent_prompts.sweep(session)
         except asyncio.CancelledError:
             raise
         except Exception:

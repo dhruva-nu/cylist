@@ -155,3 +155,37 @@ class TestSendingWithNobodyThere:
         """Every way this fails means the same thing to a hook — use HTTP —
         so they are one return value and not three exceptions."""
         assert ipc.send(SESSION, protocol.end_message(SESSION, "session_ended")) is None
+
+
+class TestAsking:
+    """CYLIST-89's two additions: the hook's ``ask``, and the server's ``answer``."""
+
+    def test_an_ask_round_trips(self) -> None:
+        line = protocol.ask_message("s-1", "ATL-1", "ATL-1", "p-1", "Running ls", "Bash")
+
+        parsed = protocol.parse_message(line)
+
+        assert parsed is not None
+        assert (parsed["t"], parsed["prompt_id"], parsed["text"], parsed["tool"]) == (
+            "ask",
+            "p-1",
+            "Running ls",
+            "Bash",
+        )
+
+    def test_an_ask_that_does_not_say_what_is_refused(self) -> None:
+        line = '{"v": 1, "t": "ask", "session": "s-1", "task": "ATL-1"}'
+
+        assert protocol.parse_message(line) is None
+
+    def test_an_answer_must_name_its_prompt(self) -> None:
+        assert protocol.parse_server_frame('{"type": "answer", "status": "answered"}') is None
+        frame = protocol.parse_server_frame('{"type": "answer", "prompt_id": "p-1"}')
+        assert frame == {"type": "answer", "prompt_id": "p-1"}
+
+    def test_anything_else_the_server_says_is_passed_over_unharmed(self) -> None:
+        assert protocol.parse_server_frame("not json") is None
+        assert protocol.parse_server_frame('{"type": "ack", "session": {}}') == {
+            "type": "ack",
+            "session": {},
+        }

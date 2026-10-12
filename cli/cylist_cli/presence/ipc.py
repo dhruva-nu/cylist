@@ -39,6 +39,7 @@ import hmac
 import json
 import os
 import secrets
+import select
 import socket
 import stat
 import sys
@@ -225,6 +226,56 @@ def send(session_id: str, line: str, *, timeout: float = CONNECT_TIMEOUT) -> dic
     return ack
 
 
+def ask(session_id: str, line: str, *, wait: float) -> dict[str, Any] | None:
+    """Hand the daemon a question for the board, and wait for its answer.
+
+    The one exchange on this channel that is not over in milliseconds: the
+    reply comes when a person answers on the board, or when the daemon gives
+    up. Connecting still gets :data:`CONNECT_TIMEOUT` — a daemon that is not
+    there should cost a permission prompt nothing — and only the reply gets
+    ``wait``.
+
+    Deliberately no half-close after the message, unlike :func:`send`. The
+    daemon watches this connection while it waits, and the only way it can
+    tell that the hook was killed — at its timeout, or with its session — is
+    that the connection ends. A half-close would look exactly like that from
+    the other side. (Answering the terminal's dialog does *not* end the hook:
+    Claude Code leaves it running, which is what ``ran`` is for.)
+    """
+    try:
+        client, prelude = _dial(session_id, CONNECT_TIMEOUT)
+    except OSError:
+        return None
+    try:
+        client.sendall(prelude + line.encode())
+        client.settimeout(wait)
+        reply = _Reader(client).line()
+    except OSError:
+        return None
+    finally:
+        client.close()
+    ack = protocol.parse_ack(reply) if reply else None
+    if ack is None or ack.get("ok") is not True:
+        return None
+    return ack
+
+
+def hung_up(client: socket.socket) -> bool:
+    """Whether the other end of a connection has gone, without waiting to find out.
+
+    Readable with nothing to read is a closed peer; readable with bytes is a
+    caller saying more than it should, which is not a hang-up. ``select`` on a
+    socket and ``MSG_PEEK`` both work on every platform this runs on.
+    """
+    try:
+        readable, _, _ = select.select([client], [], [], 0)
+        if not readable:
+            return False
+        return client.recv(1, socket.MSG_PEEK) == b""
+    except OSError:
+        return True
+
+
 def _dial(session_id: str, timeout: float) -> tuple[socket.socket, bytes]:
     """Connect to this session's daemon, and say what must precede the message.
 
@@ -333,12 +384,23 @@ class Listener:
         _publish(self.path, {"port": bound.getsockname()[1], "secret": self._secret})
         return bound
 
-    def serve(self, handle: Callable[[dict[str, Any]], str]) -> None:
+    def serve(
+        self,
+        handle: Callable[[dict[str, Any]], str],
+        wait: Callable[[dict[str, Any], Callable[[], bool]], str] | None = None,
+    ) -> None:
         """Accept until closed, handing each parsed message to ``handle``.
 
         Runs on its own thread. Never raises out of a single bad caller: one
         malformed line is that caller's problem, and a daemon that died of it
         would take a live session off the board.
+
+        An ``ask`` goes to ``wait`` instead, on a thread of its own, because
+        its answer can be minutes away and every other hook — the
+        ``Notification`` the same permission raises, to begin with — still
+        has to be answered in milliseconds meanwhile. ``wait`` is handed a
+        way to ask whether the hook has hung up. With no ``wait``, an ``ask``
+        is answered at once like anything else.
         """
         while not self._stopping.is_set():
             try:
@@ -349,13 +411,23 @@ class Listener:
                 return  # the socket was closed; the daemon is going away
             try:
                 client.settimeout(CONNECT_TIMEOUT)
-                client.sendall(self._answer(client, handle).encode())
+                message = self._read(client)
+                if isinstance(message, dict) and message.get("t") == "ask" and wait is not None:
+                    threading.Thread(
+                        target=self._answer_later,
+                        args=(client, message, wait),
+                        name="cylist-ask",
+                        daemon=True,
+                    ).start()
+                    continue  # the thread owns the connection now
+                reply = message if isinstance(message, str) else handle(message)
+                client.sendall(reply.encode())
             except OSError:
                 pass
-            finally:
-                client.close()
+            client.close()
 
-    def _answer(self, client: socket.socket, handle: Callable[[dict[str, Any]], str]) -> str:
+    def _read(self, client: socket.socket) -> dict[str, Any] | str:
+        """The caller's message, or the refusal to send it instead."""
         reader = _Reader(client)
         if self._secret is not None and not hmac.compare_digest(reader.line(), self._secret):
             # Refused before the message is even parsed. On the loopback the
@@ -363,7 +435,21 @@ class Listener:
             # other process on the machine.
             return protocol.refusal("unauthorised")
         message = protocol.parse_message(reader.line())
-        return handle(message) if message else protocol.refusal("unreadable")
+        return message if message else protocol.refusal("unreadable")
+
+    @staticmethod
+    def _answer_later(
+        client: socket.socket,
+        message: dict[str, Any],
+        wait: Callable[[dict[str, Any], Callable[[], bool]], str],
+    ) -> None:
+        try:
+            reply = wait(message, lambda: hung_up(client))
+            client.sendall(reply.encode())
+        except OSError:
+            pass  # the hook has gone; there is nobody to answer
+        finally:
+            client.close()
 
     def close(self) -> None:
         self._stopping.set()

@@ -13,6 +13,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.realtime import auth
+from app.services import agent_feed
 from tests import ws
 from tests.test_agent_reports import SESSION_A, a_card, states
 
@@ -221,3 +222,140 @@ class TestReconnecting:
                 await asyncio.sleep(0.05)
 
                 assert await states(signed_in, ref) == [("working", None)]
+
+
+def feed(ref: str, *entries: dict[str, object]) -> dict[str, object]:
+    return {"type": "feed", "task": ref, "entries": list(entries)}
+
+
+def line(text: str, kind: str = "run", tool: str | None = "Bash") -> dict[str, object]:
+    return {"at": "2026-10-12T14:31:02Z", "kind": kind, "tool": tool, "text": text}
+
+
+class TestTheFeed:
+    """CYLIST-88: what the agent read, edited, ran and said, kept per session."""
+
+    async def test_lines_are_kept_and_read_back_newest_first(
+        self, signed_in: AsyncClient, token: str
+    ) -> None:
+        ref = await a_card(signed_in)
+
+        async with ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket:
+            await socket.receive_json()
+            await socket.send_json(working(ref))
+            await socket.receive_json()
+
+            await socket.send_json(
+                feed(
+                    ref,
+                    line("Starting with the model.", kind="said", tool=None),
+                    line("backend/app/models/task.py", kind="read", tool="Read"),
+                    line("pytest test_pr_states.py"),
+                )
+            )
+            # Unacknowledged: a feed line is not worth a round trip.
+            with pytest.raises(TimeoutError):
+                await socket.receive_json()
+
+        lines = (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()
+        assert [(entry["kind"], entry["text"]) for entry in lines] == [
+            ("run", "pytest test_pr_states.py"),
+            ("read", "backend/app/models/task.py"),
+            ("said", "Starting with the model."),
+        ]
+        assert lines[0]["tool"] == "Bash"
+        assert lines[0]["client_name"] == ref
+
+    async def test_a_feed_is_not_history(self, signed_in: AsyncClient, token: str) -> None:
+        ref = await a_card(signed_in)
+
+        async with ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket:
+            await socket.receive_json()
+            await socket.send_json(working(ref))
+            await socket.receive_json()
+            await socket.send_json(feed(ref, line("ls"), line("git status")))
+            await asyncio.sleep(0.05)
+
+        history = (await signed_in.get(f"/tasks/{ref}/history")).json()["entries"]
+        assert not [entry for entry in history if "feed" in str(entry)]
+
+    async def test_lines_for_a_card_the_session_is_not_on_are_dropped(
+        self, signed_in: AsyncClient, token: str
+    ) -> None:
+        """The daemon follows its transcript whatever it has reported, so a
+        frame can outrun the state that puts the session on the card. Dropped,
+        and the socket carries on: a feed is never a reason to leave the board."""
+        ref = await a_card(signed_in)
+
+        async with ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket:
+            await socket.receive_json()
+            await socket.send_json(feed(ref, line("too early")))
+            await socket.send_json(feed("ATL-999", line("nowhere")))
+
+            await socket.send_json(working(ref))
+            assert (await socket.receive_json())["type"] == "ack"
+
+        assert (await signed_in.get(f"/tasks/{ref}/agent-feed")).json() == []
+
+    async def test_a_line_of_an_unknown_kind_is_not_a_frame(
+        self, signed_in: AsyncClient, token: str
+    ) -> None:
+        ref = await a_card(signed_in)
+
+        async with ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket:
+            await socket.receive_json()
+            await socket.send_json(feed(ref, line("x", kind="thought")))
+
+            assert await socket.expect_close() == auth.BAD_FRAME
+
+    async def test_each_session_keeps_only_its_newest_lines(
+        self, signed_in: AsyncClient, token: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(agent_feed, "KEEP_PER_SESSION", 3)
+        ref = await a_card(signed_in)
+
+        async with ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket:
+            await socket.receive_json()
+            await socket.send_json(working(ref))
+            await socket.receive_json()
+            await socket.send_json(feed(ref, *(line(f"step {n}") for n in range(5))))
+            await asyncio.sleep(0.05)
+
+        lines = (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()
+        assert [entry["text"] for entry in lines] == ["step 4", "step 3", "step 2"]
+
+    async def test_a_board_watching_the_card_hears_of_it_by_card(
+        self, signed_in: AsyncClient, token: str
+    ) -> None:
+        """A doorbell of its own, naming the card: the board does not refetch
+        every card because one agent ran `ls`."""
+        ref = await a_card(signed_in)
+        task_id = (await signed_in.get(f"/tasks/{ref}")).json()["id"]
+        jar = "; ".join(f"{k}={v}" for k, v in signed_in.cookies.items())
+
+        async with (
+            ws.connect(signed_in.app, "/api/v1/projects/ATL/board/ws", cookies=jar) as board,
+            ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket,
+        ):
+            await board.receive_json()
+            await socket.receive_json()
+            await socket.send_json(working(ref))
+            await socket.receive_json()
+            assert (await board.receive_json())["type"] == "board.changed"
+
+            await socket.send_json(feed(ref, line("pytest")))
+
+            nudge = await board.receive_json()
+            assert nudge["type"] == "agent.feed"
+            assert nudge["task_id"] == task_id
+            assert set(nudge) == {"type", "task_id", "at"}
+
+    async def test_reading_the_feed_needs_only_read(self, signed_in: AsyncClient) -> None:
+        ref = await a_card(signed_in)
+        issued = await signed_in.post("/tokens", json={"name": "reader", "scopes": ["read"]})
+        headers = {"Authorization": f"Bearer {issued.json()['token']}"}
+
+        response = await signed_in.get(f"/tasks/{ref}/agent-feed", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == []

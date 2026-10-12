@@ -30,12 +30,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
+from app.db import publish_into
 from app.models.activity import Channel
 from app.models.agent_session import AgentSession, AgentSessionReason
 from app.models.api_token import ApiToken
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
-from app.services import activity, agent_sessions
+from app.services import activity, agent_prompts, agent_sessions
 
 
 class OpenRow(NamedTuple):
@@ -66,8 +67,17 @@ async def report(
     The single path. A heartbeat produces no transitions and therefore no
     trail entries, which is the whole reason ``upsert`` reports them
     separately rather than logging as it goes.
+
+    A new note is the one change that is news without being history: the
+    board is told — the card's agent line reads it — and the trail is not,
+    because a line per tool call would bury everything else on it.
     """
+    # A question the agent is holding its turn open for outranks "working"
+    # from the same turn; an open permission is over once the session says
+    # anything else.
+    data = await agent_prompts.settle_for_report(session, task, client_session_id, data)
     upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
+    await agent_prompts.withdraw_for_sessions(session, upserted.ended, "session_ended")
     for transition in upserted.transitions:
         await activity.record(
             session,
@@ -77,6 +87,18 @@ async def report(
             entity_id=transition.task_id,
             project_id=transition.project_id,
             payload=transition.payload,
+        )
+    if upserted.note_changed and not upserted.transitions:
+        # A transition above has already rung the board's doorbell.
+        publish_into(
+            session,
+            {
+                "type": "board.changed",
+                "project_id": task.project_id,
+                "entity_type": "task",
+                "entity_id": task.id,
+                "verb": "agent_session.noted",
+            },
         )
     return agent_sessions.read(upserted.row)
 
@@ -187,6 +209,9 @@ async def _end_each(
         return 0
 
     moment = clock_now()
+    await agent_prompts.withdraw_for_sessions(
+        session, [entry.row for entry in rows], "session_ended"
+    )
     for row, project_id, person_id in rows:
         transition = agent_sessions.close(row, reason, project_id, moment, cause=cause)
         await activity.record(

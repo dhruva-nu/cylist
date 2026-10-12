@@ -20,6 +20,8 @@ indistinguishable from a mistake it made.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 from collections.abc import Awaitable, Callable
@@ -138,6 +140,9 @@ what is still outstanding.
 Each project carries what its agents work from. `list_skills` and `read_skill`
 give you the procedures somebody has already written down for this project —
 worth a look before improvising one.
+
+When you cannot decide something alone, `ask_human` puts the question on
+your card and waits for the person's answer; do not use it for progress.
 
 Progress is reported for you. When a session is bound to a card — someone ran
 `cylist work ATL-41`, or typed `/work ATL-41` — the harness's own hooks tell
@@ -662,6 +667,57 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
                     client, author, project_ref=_project_of(current)
                 )
             return {"comment": await client.post(f"/tasks/{task}/comments", payload)}
+
+        return await _as_tool_result(call)
+
+    @server.tool(
+        name="ask_human",
+        description=(
+            "Ask the person you are working for a question, on the card your "
+            "session is bound to, and wait for the answer. Use it when you "
+            "cannot reasonably decide alone — a product choice, an ambiguity in "
+            "the card, something only they know — not to report progress. The "
+            "card turns amber with your question and its options; they answer "
+            "from the board, and the answer is this tool's result, so you carry "
+            "on in the same turn. Offer 2-4 short options when the choice is "
+            "between known alternatives; they may also type a reply. If nobody "
+            "answers within the timeout the result says so: decide yourself "
+            "and say what you chose, or ask again in the terminal. Needs a "
+            "session bound to the card (/work)."
+        ),
+    )
+    async def ask_human(
+        task: Annotated[
+            str,
+            Field(description="The card your session is bound to, such as 'ATL-41'."),
+        ],
+        question: Annotated[
+            str, Field(description="One clear question, as you would ask a colleague.")
+        ],
+        options: Annotated[
+            list[str] | None,
+            Field(description="Up to six short choices, in the order to show them."),
+        ] = None,
+        timeout_minutes: Annotated[
+            int,
+            Field(
+                description="How long to wait for an answer. Default 30, at most 240.",
+                ge=1,
+                le=240,
+            ),
+        ] = 30,
+    ) -> CallToolResult:
+        async def call() -> dict[str, Any]:
+            asked = await client.post(
+                f"/tasks/{task}/agent-prompts",
+                {
+                    "question": question,
+                    "options": options or [],
+                    "timeout_seconds": max(60, timeout_minutes * 60),
+                },
+            )
+            settled = await _wait_for_answer(client, task, str(asked["id"]), asked)
+            return _answer_payload(settled, timeout_minutes)
 
         return await _as_tool_result(call)
 
@@ -1596,6 +1652,60 @@ def local_timezone() -> str | None:
     if "zoneinfo" in parts:
         return "/".join(parts[parts.index("zoneinfo") + 1 :])
     return None
+
+
+ASK_POLL_SECONDS = 20
+"""How long one poll for an answer waits on the server. Inside the client's
+thirty-second request timeout, and frequent enough that the server can tell a
+tool still waiting from one that has gone — it gives up on a question nobody
+has polled for ninety seconds."""
+
+
+async def _wait_for_answer(
+    client: Api, task: str, prompt_id: str, current: dict[str, Any]
+) -> dict[str, Any]:
+    """Long-poll a prompt until it is no longer open.
+
+    The server ends each poll as soon as the prompt closes, so an answer
+    arrives within moments of being given. If this call is cancelled — the
+    person pressed Esc, the session went away — the question is withdrawn on
+    the way out, so the card does not go on asking for an answer nobody will
+    read.
+    """
+    path = f"/tasks/{task}/agent-prompts/{prompt_id}"
+    try:
+        while current.get("status") == "open":
+            current = await client.get(path, wait=ASK_POLL_SECONDS)
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            async with asyncio.timeout(5):
+                await client.post(f"{path}/withdraw", {"reason": "interrupted"})
+        raise
+    return current
+
+
+def _answer_payload(prompt: dict[str, Any], timeout_minutes: int) -> dict[str, Any]:
+    """What the model is handed back: the answer, or plainly that there is none."""
+    status = prompt.get("status")
+    if status == "answered":
+        return {
+            "answered": True,
+            "answer": prompt.get("answer"),
+            "option": prompt.get("answer_key"),
+            "answered_by": prompt.get("answered_by"),
+        }
+    if status == "expired":
+        why = (
+            f"Nobody answered within {timeout_minutes} minutes. Decide for yourself "
+            "and say what you chose, or ask again in the terminal."
+        )
+    else:
+        why = (
+            "The question was withdrawn before anybody answered it: "
+            + str(prompt.get("closed_reason") or "the session ended").replace("_", " ")
+            + "."
+        )
+    return {"answered": False, "status": status, "message": why}
 
 
 async def _as_tool_result(call: Callable[[], Awaitable[dict[str, Any]]]) -> CallToolResult:
