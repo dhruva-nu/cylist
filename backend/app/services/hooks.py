@@ -28,6 +28,7 @@ filter set only ever fires for a card's events:
 from __future__ import annotations
 
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -363,11 +364,74 @@ class HookFilters:
     task_type: TaskType | None = None
 
 
+@dataclass(frozen=True)
+class HookLabels:
+    """What a hook's ids name, and how it last went — for drawing it on a page."""
+
+    to_column_name: str | None
+    from_column_name: str | None
+    template_name: str | None
+    last_delivery: HookDelivery | None
+
+
 async def list_hooks(session: AsyncSession, project: Project) -> list[Hook]:
     found = await session.scalars(
         select(Hook).where(Hook.project_id == project.id).order_by(Hook.name)
     )
     return list(found)
+
+
+async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID, HookLabels]:
+    """Name every column and template these hooks filter on, and find each one's
+    latest delivery.
+
+    Three queries for the whole list rather than four per hook: the Hooks page
+    draws every one of them at once. A filter whose column or template has
+    since been deleted is named ``None``, which is what tells the page that it
+    now matches nothing.
+    """
+    if not hooks:
+        return {}
+
+    column_ids = {
+        column_id
+        for hook in hooks
+        for column_id in (hook.to_column_id, hook.from_column_id)
+        if column_id is not None
+    }
+    template_ids = {hook.template_id for hook in hooks if hook.template_id is not None}
+    column_names = await _names_by_id(session, BoardColumn, column_ids)
+    template_names = await _names_by_id(session, TaskTemplate, template_ids)
+
+    # DISTINCT ON keeps the first row per hook in this ordering — its newest.
+    latest = await session.scalars(
+        select(HookDelivery)
+        .where(HookDelivery.hook_id.in_([hook.id for hook in hooks]))
+        .order_by(HookDelivery.hook_id, HookDelivery.created_at.desc(), HookDelivery.id.desc())
+        .distinct(HookDelivery.hook_id)
+    )
+    last_by_hook = {delivery.hook_id: delivery for delivery in latest}
+
+    return {
+        hook.id: HookLabels(
+            to_column_name=column_names.get(hook.to_column_id) if hook.to_column_id else None,
+            from_column_name=(
+                column_names.get(hook.from_column_id) if hook.from_column_id else None
+            ),
+            template_name=template_names.get(hook.template_id) if hook.template_id else None,
+            last_delivery=last_by_hook.get(hook.id),
+        )
+        for hook in hooks
+    }
+
+
+async def _names_by_id(
+    session: AsyncSession, model: type[BoardColumn] | type[TaskTemplate], ids: set[UUID]
+) -> dict[UUID, str]:
+    if not ids:
+        return {}
+    rows = await session.execute(select(model.id, model.name).where(model.id.in_(ids)))
+    return dict(rows.tuples().all())
 
 
 async def get(session: AsyncSession, project: Project, hook_id: UUID) -> Hook:

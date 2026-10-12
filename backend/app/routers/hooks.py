@@ -12,20 +12,16 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.crypto import VaultCipher
-from app.core.errors import ForbiddenError
 from app.db import SessionDependency, publish_into
-from app.models.board import BoardColumn
 from app.models.hook import Hook, HookDelivery
 from app.models.project import Project
-from app.models.template import TaskTemplate
-from app.routers.guards import Guard
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.routers.vault import vault_cipher
 from app.schemas.hooks import (
@@ -39,7 +35,7 @@ from app.schemas.hooks import (
     HookSecretRotate,
     HookUpdate,
 )
-from app.services import activity, hook_delivery, hooks, roles
+from app.services import activity, hook_delivery, hooks
 from app.services.hooks import HookFields, HookFilters
 
 router = APIRouter(tags=["hooks"])
@@ -47,25 +43,10 @@ router = APIRouter(tags=["hooks"])
 _FILTERS = ("to_column_id", "from_column_id", "template_id", "task_type")
 
 
-def _admin_of_hooks(*scopes: Scope) -> Guard:
-    async def dependency(
-        project: Project = Depends(resolved_project),
-        principal: Principal = Depends(require(*scopes)),
-        session: AsyncSession = SessionDependency,
-    ) -> Principal:
-        """The project's admin, and nobody else — the same test roles use."""
-        if not await roles.may_administer(session, project, principal):
-            raise ForbiddenError(
-                f"Only an admin of {project.key} can see or change its hooks.",
-                details={"project_key": project.key},
-            )
-        return principal
-
-    return dependency
-
-
-may_read_hooks = _admin_of_hooks(Scope.READ)
-may_change_hooks = _admin_of_hooks(Scope.WRITE)
+# The project's admin, and nobody else — the same test roles use. Reading is
+# fenced too: see the module note on why a hook's URL is worth guarding.
+may_read_hooks = guards.project_admin_only("see or change its hooks", Scope.READ)
+may_change_hooks = guards.project_admin_only("see or change its hooks", Scope.WRITE)
 
 
 async def resolved_hook(
@@ -76,18 +57,8 @@ async def resolved_hook(
     return await hooks.get(session, project, hook_id)
 
 
-async def _read(session: AsyncSession, hook: Hook) -> HookRead:
-    async def column_name(column_id: UUID | None) -> str | None:
-        column = await session.get(BoardColumn, column_id) if column_id else None
-        return column.name if column is not None else None
-
-    template = await session.get(TaskTemplate, hook.template_id) if hook.template_id else None
-    last = await session.scalar(
-        select(HookDelivery)
-        .where(HookDelivery.hook_id == hook.id)
-        .order_by(HookDelivery.created_at.desc(), HookDelivery.id.desc())
-        .limit(1)
-    )
+def _hook_read(hook: Hook, labels: hooks.HookLabels) -> HookRead:
+    last = labels.last_delivery
     return HookRead(
         id=hook.id,
         name=hook.name,
@@ -95,17 +66,23 @@ async def _read(session: AsyncSession, hook: Hook) -> HookRead:
         url=hook.url,
         verbs=list(hook.verbs),
         to_column_id=hook.to_column_id,
-        to_column_name=await column_name(hook.to_column_id),
+        to_column_name=labels.to_column_name,
         from_column_id=hook.from_column_id,
-        from_column_name=await column_name(hook.from_column_id),
+        from_column_name=labels.from_column_name,
         template_id=hook.template_id,
-        template_name=template.name if template is not None else None,
+        template_name=labels.template_name,
         task_type=hook.task_type,
         secret_hint=hook.secret_hint,
         last_delivery=DeliverySummary.model_validate(last) if last is not None else None,
         created_at=hook.created_at,
         updated_at=hook.updated_at,
     )
+
+
+async def _read(session: AsyncSession, hook: Hook) -> HookRead:
+    """One hook as the page draws it, for the endpoints that return exactly one."""
+    labels = await hooks.labels_for(session, [hook])
+    return _hook_read(hook, labels[hook.id])
 
 
 def _filters_of(body: HookCreate | HookUpdate) -> HookFilters:
@@ -154,7 +131,9 @@ async def list_hooks(
     _: Principal = Depends(may_read_hooks),
     session: AsyncSession = SessionDependency,
 ) -> list[HookRead]:
-    return [await _read(session, hook) for hook in await hooks.list_hooks(session, project)]
+    found = await hooks.list_hooks(session, project)
+    labels = await hooks.labels_for(session, found)
+    return [_hook_read(hook, labels[hook.id]) for hook in found]
 
 
 @router.post(

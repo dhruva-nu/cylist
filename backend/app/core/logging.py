@@ -54,7 +54,7 @@ import sys
 import uuid
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, TextIO
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle, and only needed for types
     from app.config import Settings
@@ -287,7 +287,7 @@ def _remove_our_handlers(root: logging.Logger) -> None:
         handler.close()
 
 
-class StderrHandler(logging.StreamHandler):  # type: ignore[type-arg]
+class StderrHandler(logging.StreamHandler[TextIO]):
     """Writes to whatever ``sys.stderr`` is *now*.
 
     :class:`logging.StreamHandler` binds the stream object it is handed once,
@@ -304,7 +304,7 @@ class StderrHandler(logging.StreamHandler):  # type: ignore[type-arg]
         super().__init__(sys.stderr)
 
     @property
-    def stream(self) -> Any:
+    def stream(self) -> TextIO:
         return sys.stderr
 
     @stream.setter

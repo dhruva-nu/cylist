@@ -41,6 +41,10 @@ MAX_DEPTH = 32
 rather than a guess: it makes every walk up the tree terminate, so a cycle that
 somehow reached the database surfaces as a 422 instead of a hung request."""
 
+_LINK_CANNOT_BE_UPLOAD = (
+    "A link's source is where the document actually lives, so it cannot be `upload`."
+)
+
 
 class Counts(NamedTuple):
     """What a project holds, for its hub card."""
@@ -133,10 +137,7 @@ async def create_folder(session: AsyncSession, project: Project, data: FolderCre
         default_sensitivity=(data.default_sensitivity or parent.default_sensitivity),
     )
     session.add(folder)
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise _duplicate_name(data.name) from exc
+    await _flush_refusing_duplicate(session, data.name)
     return folder
 
 
@@ -241,13 +242,7 @@ async def update_folder(session: AsyncSession, folder: Folder, data: FolderUpdat
     if fields.get("default_sensitivity") is not None:
         folder.default_sensitivity = fields["default_sensitivity"]
 
-    # Read now, not in the handler below: a failed flush leaves the session
-    # unusable, and every attribute read on it would try to reload the row.
-    name = folder.name
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise _duplicate_name(name) from exc
+    await _flush_refusing_duplicate(session, folder.name)
     return folder
 
 
@@ -325,8 +320,7 @@ async def add_link(session: AsyncSession, folder: Folder, data: LinkCreate) -> F
     """
     if data.source is ItemSource.UPLOAD:
         raise UnprocessableRequestError(
-            "A link's source is where the document actually lives, so it cannot be `upload`.",
-            details={"source": data.source.value},
+            _LINK_CANNOT_BE_UPLOAD, details={"source": data.source.value}
         )
     await _ensure_name_is_free(session, folder, data.name)
     await ensure_person_exists(session, data.added_by)
@@ -371,9 +365,7 @@ async def update_item(session: AsyncSession, item: FileItem, data: ItemUpdate) -
             "An uploaded file's URL and source are fixed by the upload."
         )
     if fields.get("source") is ItemSource.UPLOAD:
-        raise UnprocessableRequestError(
-            "A link's source is where the document actually lives, so it cannot be `upload`."
-        )
+        raise UnprocessableRequestError(_LINK_CANNOT_BE_UPLOAD)
     if "added_by" in fields:
         await ensure_person_exists(session, fields["added_by"])
 
@@ -389,14 +381,19 @@ async def update_item(session: AsyncSession, item: FileItem, data: ItemUpdate) -
         # Null clears it, which is the only way to undo a wrong attribution.
         item.added_by = fields["added_by"]
 
-    name = item.name
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise _duplicate_name(name) from exc
-
+    await _flush_refusing_duplicate(session, item.name)
     await session.refresh(item, ["added_by_person"])
     return item
+
+
+async def project_id_of_item(session: AsyncSession, item: FileItem) -> UUID:
+    """Which project a file or link is on, by way of the folder holding it.
+
+    A file knows its folder and nothing above it — the tree is what has a
+    project — so this is the hop anything checking a permission on one makes.
+    """
+    folder = await get_folder(session, item.folder_id)
+    return folder.project_id
 
 
 async def delete_item(session: AsyncSession, store: BlobStore, item: FileItem) -> None:
@@ -460,17 +457,26 @@ def filename_of(source: UploadFile) -> str:
 
 async def _add_item(session: AsyncSession, item: FileItem) -> FileItem:
     """Insert an item, turning a lost race for its name into a 409."""
-    name = item.name
     session.add(item)
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise _duplicate_name(name) from exc
+    await _flush_refusing_duplicate(session, item.name)
 
     # Freshly inserted rows have no loaded relationship, and reading one
     # outside a query would mean lazy IO on the event loop.
     await session.refresh(item, ["added_by_person"])
     return item
+
+
+async def _flush_refusing_duplicate(session: AsyncSession, name: str) -> None:
+    """Flush, turning the unique index on names-in-a-folder into a 409.
+
+    ``name`` is taken from the caller before the flush rather than read off
+    the row after it: a failed flush leaves the session unusable, and every
+    attribute read on it would try to reload the row.
+    """
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise _duplicate_name(name) from exc
 
 
 def _duplicate_name(name: str) -> ConflictError:
@@ -486,6 +492,12 @@ async def _ensure_name_is_free(session: AsyncSession, folder: Folder, name: str)
 
 
 async def ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
+    """Refuse an attribution to somebody who is not in the directory.
+
+    Checked here rather than left to the foreign key, so the caller hears which
+    id was wrong instead of getting an integrity error. ``None`` is always
+    fine: nobody has to be named as having added something.
+    """
     if person_id is None:
         return
     if await session.get(Person, person_id) is None:

@@ -250,10 +250,10 @@ async def change_password(
     await people.set_password(session, person, body.new_password)
     await tokens.revoke_for_person(session, person.id)
     await _start_session(session, response, settings, person)
+
     # Recorded against the principal that made the request — the session just
     # revoked. That is the credential that actually did it, and saying so is
     # the point of an audit trail.
-
     await activity.record(
         session,
         principal,

@@ -38,6 +38,7 @@ from app.schemas.vault import (
     VaultTreeCreate,
     VaultTreeUpdate,
 )
+from app.services import permissions
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,17 +66,15 @@ async def create_tree(session: AsyncSession, project: Project, data: VaultTreeCr
     Raises:
         ConflictError: if the project already has a tree with that name.
     """
-    existing = await list_trees(session, project)
-    if any(tree.name == data.name for tree in existing):
-        raise ConflictError(
-            f"This project already has a vault tree called {data.name!r}.",
-            details={"name": data.name},
-        )
+    await _refuse_taken_tree_name(session, project.id, data.name)
+    existing = await session.scalar(
+        select(func.count()).select_from(VaultTree).where(VaultTree.project_id == project.id)
+    )
 
     tree = VaultTree(
         project_id=project.id,
         name=data.name,
-        position=len(existing),
+        position=existing or 0,
         default_sensitivity=(data.default_sensitivity or DEFAULT_LEVEL),
     )
     session.add(tree)
@@ -108,16 +107,7 @@ async def update_tree(session: AsyncSession, tree: VaultTree, data: VaultTreeUpd
         ConflictError: if another tree in this project already has that name.
     """
     if data.name is not None and data.name != tree.name:
-        others = await session.scalars(
-            select(VaultTree).where(
-                VaultTree.project_id == tree.project_id, VaultTree.id != tree.id
-            )
-        )
-        if any(other.name == data.name for other in others):
-            raise ConflictError(
-                f"This project already has a vault tree called {data.name!r}.",
-                details={"name": data.name},
-            )
+        await _refuse_taken_tree_name(session, tree.project_id, data.name, excluding=tree.id)
         tree.name = data.name
 
     if data.position is not None:
@@ -177,12 +167,10 @@ async def counts(
             :func:`app.services.files.counts`. Trees are structure and are
             always counted.
     """
-    secrets = func.count(VaultNode.id).filter(VaultNode.kind == VaultNodeKind.SECRET)
+    counted: list[ColumnElement[bool]] = [VaultNode.kind == VaultNodeKind.SECRET]
     if readable is not None:
-        secrets = func.count(VaultNode.id).filter(
-            VaultNode.kind == VaultNodeKind.SECRET,
-            VaultNode.sensitivity.in_([level.value for level in readable]),
-        )
+        counted.append(VaultNode.sensitivity.in_([level.value for level in readable]))
+    secrets = func.count(VaultNode.id).filter(*counted)
     row = (
         await session.execute(
             select(func.count(func.distinct(VaultTree.id)), secrets)
@@ -221,9 +209,20 @@ async def get_node(session: AsyncSession, node_id: UUID) -> VaultNode:
 
 
 async def create_node(
-    session: AsyncSession, cipher: VaultCipher, data: VaultNodeCreate
+    session: AsyncSession,
+    cipher: VaultCipher,
+    data: VaultNodeCreate,
+    *,
+    cleared_for: frozenset[Sensitivity] | None = None,
 ) -> VaultNode:
     """Create a branch or a secret, at the end of its parent's children.
+
+    Args:
+        cleared_for: The levels the caller may read. A parent they are not
+            cleared for is answered as though it did not exist, exactly as
+            reading it by id is: otherwise adding a node under it — and the
+            409 naming a sibling — would describe a branch the caller cannot
+            see. ``None`` checks nothing, for callers not acting for a person.
 
     Raises:
         NotFoundError: if the tree or the named parent does not exist.
@@ -233,6 +232,10 @@ async def create_node(
     """
     tree = await get_tree(session, data.tree_id)
     parent = await _resolve_parent(session, tree, data.parent_id)
+    if parent is not None and cleared_for is not None:
+        verdicts = _clearance_verdicts(await nodes_in_tree(session, tree.id), cleared_for)
+        if not verdicts.get(parent.id, False):
+            raise NotFoundError("No vault node with that id.")
 
     siblings = await _siblings(session, tree.id, data.parent_id)
     _refuse_duplicate_name(siblings, data.name)
@@ -298,16 +301,32 @@ async def delete_node(session: AsyncSession, node: VaultNode) -> None:
     await _renumber(session, tree_id, parent_id)
 
 
-async def move_node(session: AsyncSession, node: VaultNode, data: VaultNodeMove) -> VaultNode:
+async def move_node(
+    session: AsyncSession,
+    node: VaultNode,
+    data: VaultNodeMove,
+    *,
+    cleared_for: frozenset[Sensitivity] | None = None,
+) -> VaultNode:
     """Move a node to a new parent and position within its tree.
+
+    Args:
+        cleared_for: The levels the caller may read. A destination they are
+            not cleared for is refused as though it were not in the tree, for
+            the reason :func:`create_node` gives — and because moving a
+            secret into a branch you cannot see is moving it out of reach.
 
     Raises:
         UnprocessableRequestError: if the destination is a secret, is outside
             this tree, or is the node itself or one of its descendants.
         ConflictError: if something of that name is already there.
     """
-    everything = {other.id: other for other in await nodes_in_tree(session, node.tree_id)}
-    parent = _validate_destination(everything, node, data.parent_id)
+    tree_nodes = await nodes_in_tree(session, node.tree_id)
+    everything = {other.id: other for other in tree_nodes}
+    destinations = everything
+    if cleared_for is not None:
+        destinations = {other.id: other for other in cleared_nodes(tree_nodes, cleared_for)}
+    parent = _validate_destination(destinations, node, data.parent_id)
     destination_id = parent.id if parent is not None else None
 
     if destination_id != node.parent_id:
@@ -347,7 +366,98 @@ async def reveal(session: AsyncSession, cipher: VaultCipher, node: VaultNode) ->
     return cipher.open(secret.secret_ciphertext, node_id=node.id, key_version=secret.key_version)
 
 
+# --- Who may see what -------------------------------------------------------
+
+
+async def project_id_of(session: AsyncSession, node: VaultNode) -> UUID:
+    """Which project a node is in, by way of its tree. A node knows only the
+    tree; the tree is what belongs to a project."""
+    tree = await get_tree(session, node.tree_id)
+    return tree.project_id
+
+
+def cleared_nodes(nodes: list[VaultNode], allowed: frozenset[Sensitivity]) -> list[VaultNode]:
+    """The nodes of one tree a reader cleared for ``allowed`` may see, in order.
+
+    A branch above the clearance takes everything under it, whatever those
+    children are classified as. A tree that showed "Production" standing empty
+    would have told the reader which branch is the interesting one, which is
+    most of what there was to learn.
+    """
+    verdicts = _clearance_verdicts(nodes, allowed)
+    return [node for node in nodes if verdicts[node.id]]
+
+
+def require_visible(
+    node: VaultNode, tree_nodes: list[VaultNode], allowed: frozenset[Sensitivity]
+) -> None:
+    """Refuse a node the reader is not cleared for, as though it were not there.
+
+    A secret inside a restricted branch is restricted whatever it says about
+    itself: hiding the branch and serving its children by id would be a lock
+    on the door and a window beside it. See
+    :func:`app.services.permissions.enforce_visible` for why this is a 404.
+
+    Raises:
+        NotFoundError: if the node, or any branch above it, is above ``allowed``.
+    """
+    if not _clearance_verdicts(tree_nodes, allowed).get(node.id, False):
+        raise NotFoundError("No node with that id.")
+
+
+def _clearance_verdicts(
+    nodes: list[VaultNode], allowed: frozenset[Sensitivity]
+) -> dict[UUID, bool]:
+    """Whether each node and every branch above it is within ``allowed``.
+
+    Walks up from each node rather than relying on the list's order: the tree
+    is ordered by position among siblings, so a child can come before the
+    branch it sits in. Each walk stops at the first ancestor already decided,
+    so the whole tree costs one pass. A cycle that somehow reached the
+    database is treated as hidden rather than followed forever.
+    """
+    by_id = {node.id: node for node in nodes}
+    verdicts: dict[UUID, bool] = {}
+
+    for node in nodes:
+        chain: list[VaultNode] = []
+        on_chain: set[UUID] = set()
+        current: VaultNode | None = node
+        while current is not None and current.id not in verdicts and current.id not in on_chain:
+            chain.append(current)
+            on_chain.add(current.id)
+            current = by_id.get(current.parent_id) if current.parent_id is not None else None
+
+        if current is None:
+            inherited = True
+        elif current.id in on_chain:
+            inherited = False
+        else:
+            inherited = verdicts[current.id]
+
+        for link in reversed(chain):
+            inherited = inherited and permissions.readable(link.sensitivity, allowed)
+            verdicts[link.id] = inherited
+
+    return verdicts
+
+
 # --- Internals -------------------------------------------------------------
+
+
+async def _refuse_taken_tree_name(
+    session: AsyncSession, project_id: UUID, name: str, *, excluding: UUID | None = None
+) -> None:
+    statement = select(VaultTree.id).where(
+        VaultTree.project_id == project_id, VaultTree.name == name
+    )
+    if excluding is not None:
+        statement = statement.where(VaultTree.id != excluding)
+    if await session.scalar(statement) is not None:
+        raise ConflictError(
+            f"This project already has a vault tree called {name!r}.",
+            details={"name": name},
+        )
 
 
 def _seal(cipher: VaultCipher, node_id: UUID, data: SecretCreate) -> VaultSecret:

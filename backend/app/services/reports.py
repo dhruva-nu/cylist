@@ -28,6 +28,7 @@ full record, still keeps every one of them.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -35,6 +36,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity import Activity
+from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
 from app.schemas.activity import FieldChange, HistoryEntry
@@ -69,12 +71,7 @@ async def for_day(
     starts_at, ends_at = window(day, zone)
     entries = await activity.between(session, project.id, starts_at, ends_at)
 
-    board = await columns.list_for_project(session, project)
-    last_column_id = board[-1].id if board else None
-    column_names = {column.id: column.name for column in board}
-    # Keyed by the string a payload stores, for the moves too old to have
-    # recorded a column's name themselves — see `activity.describe`.
-    column_names_by_payload_id = {str(column.id): column.name for column in board}
+    board = _Board.of(await columns.list_for_project(session, project))
     # Every task, not only the board's cards: a sub-task is not on the board but
     # it is as likely as anything else to be in a day's work.
     cards = {card.reference: card for card in await tasks.all_for_project(session, project)}
@@ -86,12 +83,12 @@ async def for_day(
     for entry in entries:
         reference = _card_reference(entry)
         if reference is None:
-            elsewhere.append(activity.entry_of(entry, column_names_by_payload_id))
+            elsewhere.append(activity.entry_of(entry, board.names_by_payload_id))
         else:
             by_card.setdefault(reference, []).append(entry)
 
     touched = [
-        _task_day(reference, rows, cards, column_names, last_column_id, column_names_by_payload_id)
+        _task_day(reference, rows, cards.get(reference), board)
         for reference, rows in by_card.items()
     ]
     finished = [card.reference for card in touched if card.finished]
@@ -143,18 +140,30 @@ def _card_reference(entry: Activity) -> str | None:
     return reference if isinstance(reference, str) else None
 
 
-def _task_day(
-    reference: str,
-    rows: list[Activity],
-    cards: dict[str, Task],
-    column_names: dict[UUID, str],
-    last_column_id: UUID | None,
-    column_names_by_payload_id: dict[str, str],
-) -> TaskDay:
+@dataclass(frozen=True)
+class _Board:
+    """What a day's report needs to know about the board it is reporting on."""
+
+    names: dict[UUID, str]
+    names_by_payload_id: dict[str, str]
+    """The same names keyed by the string a payload stores, for the moves too
+    old to have recorded a column's name themselves — see
+    :func:`app.services.activity.describe`."""
+    last_column_id: UUID | None
+
+    @classmethod
+    def of(cls, columns_left_to_right: list[BoardColumn]) -> _Board:
+        return cls(
+            names={column.id: column.name for column in columns_left_to_right},
+            names_by_payload_id={str(column.id): column.name for column in columns_left_to_right},
+            last_column_id=columns_left_to_right[-1].id if columns_left_to_right else None,
+        )
+
+
+def _task_day(reference: str, rows: list[Activity], card: Task | None, board: _Board) -> TaskDay:
     """One card's entries, with where the card stands now."""
-    card = cards.get(reference)
-    entries = _condensed([activity.entry_of(row, column_names_by_payload_id) for row in rows])
-    finished = _ended_in(rows, last_column_id)
+    entries = _condensed([activity.entry_of(row, board.names_by_payload_id) for row in rows])
+    finished = _ended_in(rows, board.last_column_id)
 
     if card is None:
         # Deleted, or created under a reference the board no longer holds. The
@@ -180,7 +189,7 @@ def _task_day(
         # A sub-task is in no column, and its parent is what says so: without it
         # the two ways of having no column — not on the board, and not existing
         # any more — would read as the same thing.
-        column=column_names.get(card.column_id) if card.column_id else None,
+        column=board.names.get(card.column_id) if card.column_id else None,
         parent=card.parent.reference if card.parent else None,
         status=card.status,
         finished=finished,

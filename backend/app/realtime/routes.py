@@ -49,6 +49,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["realtime"])
 
 
+@dataclass(frozen=True)
+class Refusal:
+    """A decided "no", carried out of the session block to be sent."""
+
+    code: int
+    error: str
+    message: str
+
+
+AdmissionFailure = UnauthorizedError | auth.SocketForbiddenError | NotFoundError
+"""Every way a handshake can be turned away, each with a close code of its own."""
+
+
 @router.websocket("/projects/{project_ref}/board/ws")
 async def board_socket(websocket: WebSocket, project_ref: str) -> None:
     """Nudge a browser whenever the board it is looking at changes.
@@ -254,53 +267,70 @@ async def _serve_agent(
                 if link.displaced.is_set():
                     return auth.DISPLACED, "displaced"
 
-                message = protocol.parse(raw)
-                if message is None:
-                    await websocket.send_json(
-                        protocol.error("bad_frame", "That is not a message this socket takes.")
-                    )
-                    await websocket.close(code=auth.BAD_FRAME)
-                    return auth.BAD_FRAME, "bad_frame"
-
-                if message.type == "heartbeat":
-                    # Nothing to write. The deadline has already moved, which
-                    # is the entire purpose of the message.
-                    continue
-                if message.type == "feed":
-                    # Unacknowledged, and never a reason to close: see the
-                    # protocol's note on `feed`.
-                    await _record_feed(database, client_session_id, message)
-                    continue
-                if message.type == "prompt":
-                    reply = await _open_prompt(database, client_session_id, message)
-                    if reply is not None:
-                        await websocket.send_json(reply)
-                    continue
-                if message.type == "withdraw":
-                    await _withdraw_prompt(database, client_session_id, message)
-                    continue
-                if message.type == "bye":
-                    await _end_row(
-                        database,
-                        client_session_id,
-                        "bye",
-                        reason=message.reason or AgentSessionReason.SESSION_ENDED,
-                    )
-                    await websocket.close(code=1000)
-                    return 1000, "bye"
-
-                refusal = await _record_report(
-                    websocket, database, principal, client_session_id, message
-                )
-                if refusal is not None:
-                    await _refuse(websocket, refusal)
-                    return refusal.code, "refused"
+                ending = await _handle_frame(websocket, database, principal, client_session_id, raw)
+                if ending is not None:
+                    return ending
     except TimeoutError:
         await websocket.close(code=auth.IDLE)
         return auth.IDLE, "idle"
     finally:
         incoming.cancel()
         outgoing.cancel()
+
+
+async def _handle_frame(
+    websocket: WebSocket,
+    database: Database,
+    principal: Principal,
+    client_session_id: str,
+    raw: str,
+) -> tuple[int, str] | None:
+    """Act on one frame from the agent. Returns a close code and cause to end on.
+
+    ``None`` means carry on reading. Every message but ``bye`` and a refused
+    report leaves the socket open, so the loop above only has to know whether
+    it is over, not what each message was.
+    """
+    message = protocol.parse(raw)
+    if message is None:
+        await websocket.send_json(
+            protocol.error("bad_frame", "That is not a message this socket takes.")
+        )
+        await websocket.close(code=auth.BAD_FRAME)
+        return auth.BAD_FRAME, "bad_frame"
+
+    if message.type == "heartbeat":
+        # Nothing to write. The deadline has already moved, which is the
+        # entire purpose of the message.
+        return None
+    if message.type == "feed":
+        # Unacknowledged, and never a reason to close: see the protocol's note
+        # on `feed`.
+        await _record_feed(database, client_session_id, message)
+        return None
+    if message.type == "prompt":
+        reply = await _open_prompt(database, client_session_id, message)
+        if reply is not None:
+            await websocket.send_json(reply)
+        return None
+    if message.type == "withdraw":
+        await _withdraw_prompt(database, client_session_id, message)
+        return None
+    if message.type == "bye":
+        await _end_row(
+            database,
+            client_session_id,
+            "bye",
+            reason=message.reason or AgentSessionReason.SESSION_ENDED,
+        )
+        await websocket.close(code=1000)
+        return 1000, "bye"
+
+    refusal = await _record_report(websocket, database, principal, client_session_id, message)
+    if refusal is not None:
+        await _refuse(websocket, refusal)
+        return refusal.code, "refused"
+    return None
 
 
 async def _open_prompt(
@@ -406,19 +436,8 @@ async def _admit_agent(websocket: WebSocket, session: AsyncSession) -> Refusal |
     """Authorise an agent socket, touching only the database."""
     try:
         return await auth.admit(websocket, session, scope=Scope.WRITE, api_only=True)
-    except UnauthorizedError as exc:
-        return Refusal(auth.UNAUTHORIZED, "unauthorized", str(exc))
-    except auth.SocketForbiddenError as exc:
-        return Refusal(auth.FORBIDDEN, "forbidden", str(exc))
-
-
-@dataclass(frozen=True)
-class Refusal:
-    """A decided "no", carried out of the session block to be sent."""
-
-    code: int
-    error: str
-    message: str
+    except (UnauthorizedError, auth.SocketForbiddenError) as exc:
+        return _refusal_for(exc)
 
 
 async def _handshake(
@@ -436,13 +455,22 @@ async def _handshake(
     try:
         await auth.admit(websocket, session, scope=Scope.READ)
         project = await projects.resolve(session, project_ref)
-    except UnauthorizedError as exc:
-        return Refusal(auth.UNAUTHORIZED, "unauthorized", str(exc))
-    except auth.SocketForbiddenError as exc:
-        return Refusal(auth.FORBIDDEN, "forbidden", str(exc))
-    except NotFoundError as exc:
-        return Refusal(auth.NOT_FOUND, "not_found", str(exc))
+    except (UnauthorizedError, auth.SocketForbiddenError, NotFoundError) as exc:
+        return _refusal_for(exc)
     return project.id
+
+
+def _refusal_for(exc: AdmissionFailure) -> Refusal:
+    """The close code and error word an admission failure is sent with.
+
+    One table for both sockets, so a board and an agent turned away for the
+    same reason are told so in the same words.
+    """
+    if isinstance(exc, UnauthorizedError):
+        return Refusal(auth.UNAUTHORIZED, "unauthorized", str(exc))
+    if isinstance(exc, auth.SocketForbiddenError):
+        return Refusal(auth.FORBIDDEN, "forbidden", str(exc))
+    return Refusal(auth.NOT_FOUND, "not_found", str(exc))
 
 
 async def _refuse(websocket: WebSocket, refusal: Refusal) -> None:
@@ -452,5 +480,5 @@ async def _refuse(websocket: WebSocket, refusal: Refusal) -> None:
     handshake's status code, so the reason has to arrive over the accepted
     socket or not at all.
     """
-    await websocket.send_json({"type": "error", "code": refusal.error, "message": refusal.message})
+    await websocket.send_json(protocol.error(refusal.error, refusal.message))
     await websocket.close(code=refusal.code)

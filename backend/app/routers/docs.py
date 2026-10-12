@@ -62,6 +62,7 @@ async def resolved_topic(
     topic_id: UUID = Path(description="The topic's id."),
     session: AsyncSession = SessionDependency,
 ) -> DocTopic:
+    """Turn the path segment into a topic, 404-ing if nothing matches."""
     return await docs.get_topic(session, topic_id)
 
 
@@ -69,6 +70,7 @@ async def resolved_doc(
     doc_id: UUID = Path(description="The doc's id."),
     session: AsyncSession = SessionDependency,
 ) -> Doc:
+    """Turn the path segment into a doc, 404-ing if nothing matches."""
     return await docs.get_doc(session, doc_id)
 
 
@@ -270,22 +272,26 @@ async def place_doc(
     return DocPlan(
         status=placed.status,
         reason=placed.reason,
-        edits=[
-            PlannedEdit(
-                kind=edit.kind,
-                sure=edit.sure,
-                probability=round(edit.probability, 3),
-                why=edit.why,
-                facts=edit.facts,
-                doc_id=edit.doc.id if edit.doc else None,
-                path=edit.doc.path if edit.doc else edit.topic.path if edit.topic else None,
-                section=edit.section,
-                topic_id=(edit.doc.topic.id if edit.doc else edit.topic.id if edit.topic else None),
-                doc_shape=edit.doc.shape if edit.doc else None,
-                related_path=edit.related.path if edit.related else None,
-            )
-            for edit in placed.edits
-        ],
+        edits=[_planned_edit(edit) for edit in placed.edits],
+    )
+
+
+def _planned_edit(edit: docs.Edit) -> PlannedEdit:
+    """One edit of a plan, addressed by the doc it touches or else the topic it
+    goes under — a new doc has no doc yet, only the topic it will be filed in."""
+    topic = edit.doc.topic if edit.doc is not None else edit.topic
+    return PlannedEdit(
+        kind=edit.kind,
+        sure=edit.sure,
+        probability=round(edit.probability, 3),
+        why=edit.why,
+        facts=edit.facts,
+        doc_id=edit.doc.id if edit.doc is not None else None,
+        path=edit.doc.path if edit.doc is not None else topic.path if topic is not None else None,
+        section=edit.section,
+        topic_id=topic.id if topic is not None else None,
+        doc_shape=edit.doc.shape if edit.doc is not None else None,
+        related_path=edit.related.path if edit.related is not None else None,
     )
 
 
@@ -565,6 +571,7 @@ async def delete_doc(
     principal: Principal = Depends(WRITE_THIS_DOC),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
+    """Delete a doc. The docs below it in its topic move up to close the gap."""
     project_id, title = doc.project_id, doc.title
     await docs.delete_doc(session, doc)
     await _record(

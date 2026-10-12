@@ -20,7 +20,7 @@ import logging
 import os
 import tempfile
 from collections.abc import AsyncIterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import IO
 
 from anyio import to_thread
@@ -92,7 +92,21 @@ class LocalBlobStore(BlobStore):
         return StoredBlob(sha256=sha256, size=size, path=path, deduplicated=deduplicated)
 
     def locate(self, path: str) -> Path:
-        return self._root / path
+        """The file under the root that ``path`` names.
+
+        Every path this store hands out is a digest fanned out by
+        :func:`_relative_path`, so one that is absolute or climbs with ``..``
+        did not come from here. It is refused rather than joined: a row
+        edited by hand, or restored from somewhere else, must not be able to
+        turn a download into a read of any file the server can open.
+
+        Raises:
+            ValueError: if ``path`` would leave the root.
+        """
+        relative = PurePosixPath(path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"Blob path {path!r} is outside the store.")
+        return self._root / relative
 
     async def exists(self, path: str) -> bool:
         return await to_thread.run_sync(self.locate(path).is_file)
