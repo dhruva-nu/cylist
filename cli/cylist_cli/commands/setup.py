@@ -70,6 +70,7 @@ from cylist_cli import config as configuration
 from cylist_cli import endpoints, output, system
 from cylist_cli.client import Client
 from cylist_cli.commands import hook
+from cylist_cli.commands.hook_install import HookInstall
 from cylist_cli.context import Context
 from cylist_cli.errors import ApiError, CylistError
 
@@ -695,14 +696,7 @@ def _setup(args: argparse.Namespace, ctx: Context) -> None:
                     "minted": credential.minted,
                 },
                 "config_path": str(path),
-                "hooks": None
-                if hooks is None
-                else {
-                    "settings": str(hooks.settings_path),
-                    "command": hooks.command,
-                    "added": hooks.added,
-                    "commands": [str(command.path) for command in hooks.commands],
-                },
+                "hooks": None if hooks is None else hooks.as_json(),
                 "mcp": None
                 if registration is None
                 else {
@@ -724,7 +718,7 @@ def _report(
     server: Server,
     credential: Credential,
     path: Path,
-    hooks: hook.HookInstall | None,
+    hooks: HookInstall | None,
     registration: Registration | None,
 ) -> None:
     also = f", also on {', '.join(server.others)}" if server.others else ""

@@ -38,9 +38,13 @@ are installed user-wide and fire in every project — must pay nothing.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from cylist_cli import system
 from cylist_cli.presence import ipc, protocol, supervisor
 
 MODE_ENV = "CYLIST_PRESENCE"
@@ -59,7 +63,7 @@ def mode() -> str:
 
 
 def report(
-    command: list[str],
+    command: Callable[[], list[str]],
     session_id: str,
     task: str,
     state: str,
@@ -77,6 +81,10 @@ def report(
     before it is any use, which is far longer than a prompt should be held
     up for. So the event that starts a daemon is reported over HTTP, and the
     ones after it go down the socket.
+
+    ``command`` says how to start one, and is called only when one has to be
+    started: finding the CLI searches PATH, and the usual event — a daemon
+    already listening — should not pay for an answer it does not use.
     """
     if mode() != "ws":
         return False
@@ -89,11 +97,9 @@ def report(
     if ipc.send(session_id, line) is not None:
         return True
 
-    try:
-        supervisor.spawn(command, session_id)
-    except OSError:
-        # No fork, no /tmp, a sandbox that forbids it — all the same answer.
-        return False
+    # No fork, no /tmp, a sandbox that forbids it — all the same answer.
+    with contextlib.suppress(OSError):
+        supervisor.spawn(command(), session_id)
     return False
 
 
@@ -135,7 +141,7 @@ def tool_ran(session_id: str) -> bool:
     return ipc.send(session_id, protocol.ran_message(session_id)) is not None
 
 
-def finish(command: list[str], session_id: str, reason: str) -> bool:
+def finish(session_id: str, reason: str) -> bool:
     """Tell the daemon the session is over. False means "fall back to HTTP".
 
     Never spawns. A session that is ending has no use for a new daemon, and
@@ -146,16 +152,14 @@ def finish(command: list[str], session_id: str, reason: str) -> bool:
     return ipc.send(session_id, protocol.end_message(session_id, reason)) is not None
 
 
-def daemon_log(session_id: str) -> object:
+def daemon_log(session_id: str) -> Path:
     """Where a daemon writes what it is doing. Named without importing it.
 
     ``cylist hook status`` wants to print this path, and importing the daemon
     module to ask would drag ``websockets`` into a command that is only
     listing processes.
     """
-    from cylist_cli.commands.hook import sessions_dir
-
-    return sessions_dir().parent / "logs" / f"daemon-{session_id[:16]}.log"
+    return system.state_dir() / "logs" / f"daemon-{session_id[:16]}.log"
 
 
 __all__ = [

@@ -109,9 +109,6 @@ class HookState:
     reason: str | None
     client_name: str
     task: str = ""
-    note: str | None = None
-    """What the session is doing right now: "Editing tasks.py". Replaced by
-    every report, so ``None`` clears it rather than leaving it alone."""
     """Which card, when the hook says so — and it always does on the wire.
 
     It matters most for the *first* message a daemon ever gets. The hook
@@ -123,6 +120,9 @@ class HookState:
 
     Empty means "not said", which leaves whatever the machine already had.
     """
+    note: str | None = None
+    """What the session is doing right now: "Editing tasks.py". Replaced by
+    every report, so ``None`` clears it rather than leaving it alone."""
 
 
 @dataclass(frozen=True)
@@ -316,29 +316,31 @@ def step(machine: Machine, event: Event, elapsed: float = 0.0) -> tuple[Machine,
         since_link=machine.since_link + elapsed,
         since_keepalive=machine.since_keepalive + elapsed,
     )
-    if isinstance(event, HookState):
-        return _on_hook_state(machine, event)
-    if isinstance(event, HookBind):
-        return _on_hook_bind(machine, event)
-    if isinstance(event, HookEnd):
-        return _on_hook_end(machine, event)
-    if isinstance(event, HookAsk):
-        return _on_ask(machine, event)
-    if isinstance(event, AskDropped):
-        return _on_ask_dropped(machine, event)
-    if isinstance(event, ToolRan):
-        return _on_tool_ran(machine)
-    if isinstance(event, PromptClosed):
-        return _on_prompt_closed(machine, event)
-    if isinstance(event, FeedLines):
-        return _on_feed(machine, event)
-    if isinstance(event, LinkUp):
-        return _on_link_up(machine)
-    if isinstance(event, LinkDown):
-        return _on_link_down(machine)
-    if isinstance(event, OwnerGone):
-        return _on_owner_gone(machine)
-    return _on_tick(machine)
+    match event:
+        case HookState():
+            return _on_hook_state(machine, event)
+        case HookBind():
+            return _on_hook_bind(machine, event)
+        case HookEnd():
+            return _on_hook_end(machine, event)
+        case HookAsk():
+            return _on_ask(machine, event)
+        case AskDropped():
+            return _on_ask_dropped(machine, event)
+        case ToolRan():
+            return _on_tool_ran(machine)
+        case PromptClosed():
+            return _on_prompt_closed(machine, event)
+        case FeedLines():
+            return _on_feed(machine, event)
+        case LinkUp():
+            return _on_link_up(machine)
+        case LinkDown():
+            return _on_link_down(machine)
+        case OwnerGone():
+            return _on_owner_gone(machine)
+        case Tick():
+            return _on_tick(machine)
 
 
 def _on_hook_state(machine: Machine, event: HookState) -> tuple[Machine, list[Action]]:

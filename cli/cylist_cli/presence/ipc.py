@@ -49,11 +49,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from cylist_cli import system
 from cylist_cli.presence import protocol
 
 DIR_MODE = 0o700
 SOCKET_MODE = 0o600
-ENDPOINT_MODE = 0o600
 
 CONNECT_TIMEOUT = 0.25
 """How long a hook will wait on the socket before giving up on it.
@@ -203,27 +203,7 @@ def send(session_id: str, line: str, *, timeout: float = CONNECT_TIMEOUT) -> dic
     report over HTTP instead — which is why they are one return value and not
     three exceptions.
     """
-    try:
-        client, prelude = _dial(session_id, timeout)
-    except OSError:
-        return None
-    try:
-        client.sendall(prelude + line.encode())
-        with contextlib.suppress(OSError):
-            # Best effort. It tells the daemon there is no more to read; a
-            # transport that will not half-close is not a reason to give up,
-            # because the line already ends in a newline.
-            client.shutdown(socket.SHUT_WR)
-        reply = _Reader(client).line()
-    except OSError:
-        return None
-    finally:
-        client.close()
-
-    ack = protocol.parse_ack(reply) if reply else None
-    if ack is None or ack.get("ok") is not True:
-        return None
-    return ack
+    return _exchange(session_id, line, connect_timeout=timeout, reply_timeout=None)
 
 
 def ask(session_id: str, line: str, *, wait: float) -> dict[str, Any] | None:
@@ -242,18 +222,38 @@ def ask(session_id: str, line: str, *, wait: float) -> dict[str, Any] | None:
     the other side. (Answering the terminal's dialog does *not* end the hook:
     Claude Code leaves it running, which is what ``ran`` is for.)
     """
+    return _exchange(session_id, line, connect_timeout=CONNECT_TIMEOUT, reply_timeout=wait)
+
+
+def _exchange(
+    session_id: str, line: str, *, connect_timeout: float, reply_timeout: float | None
+) -> dict[str, Any] | None:
+    """Send one line and read the ack. ``None`` for every way that can fail.
+
+    ``reply_timeout`` is ``None`` for an ordinary message, which half-closes
+    and reads its reply within the connect timeout, and the wait for an
+    ``ask``, which keeps the connection whole (see :func:`ask` for why).
+    """
     try:
-        client, prelude = _dial(session_id, CONNECT_TIMEOUT)
+        client, prelude = _dial(session_id, connect_timeout)
     except OSError:
         return None
     try:
         client.sendall(prelude + line.encode())
-        client.settimeout(wait)
+        if reply_timeout is None:
+            with contextlib.suppress(OSError):
+                # Best effort. It tells the daemon there is no more to read; a
+                # transport that will not half-close is not a reason to give
+                # up, because the line already ends in a newline.
+                client.shutdown(socket.SHUT_WR)
+        else:
+            client.settimeout(reply_timeout)
         reply = _Reader(client).line()
     except OSError:
         return None
     finally:
         client.close()
+
     ack = protocol.parse_ack(reply) if reply else None
     if ack is None or ack.get("ok") is not True:
         return None
@@ -409,27 +409,44 @@ class Listener:
                 continue
             except OSError:
                 return  # the socket was closed; the daemon is going away
-            try:
-                client.settimeout(CONNECT_TIMEOUT)
-                message = self._read(client)
-                if isinstance(message, dict) and message.get("t") == "ask" and wait is not None:
-                    threading.Thread(
-                        target=self._answer_later,
-                        args=(client, message, wait),
-                        name="cylist-ask",
-                        daemon=True,
-                    ).start()
-                    continue  # the thread owns the connection now
-                reply = message if isinstance(message, str) else handle(message)
-                client.sendall(reply.encode())
-            except OSError:
-                pass
-            client.close()
+            self._answer(client, handle, wait)
+
+    def _answer(
+        self,
+        client: socket.socket,
+        handle: Callable[[dict[str, Any]], str],
+        wait: Callable[[dict[str, Any], Callable[[], bool]], str] | None,
+    ) -> None:
+        """Read one caller's message and reply, or hand the connection to a waiting thread."""
+        handed_off = False
+        try:
+            client.settimeout(CONNECT_TIMEOUT)
+            message = self._read(client)
+            if isinstance(message, dict) and message.get("t") == "ask" and wait is not None:
+                threading.Thread(
+                    target=self._answer_later,
+                    args=(client, message, wait),
+                    name="cylist-ask",
+                    daemon=True,
+                ).start()
+                handed_off = True  # the thread owns the connection now
+                return
+            reply = message if isinstance(message, str) else handle(message)
+            client.sendall(reply.encode())
+        except OSError:
+            pass  # the caller has gone; there is nobody to answer
+        finally:
+            if not handed_off:
+                client.close()
 
     def _read(self, client: socket.socket) -> dict[str, Any] | str:
         """The caller's message, or the refusal to send it instead."""
         reader = _Reader(client)
-        if self._secret is not None and not hmac.compare_digest(reader.line(), self._secret):
+        # Compared as bytes: ``compare_digest`` raises on a str that is not
+        # ASCII, and a caller is free to send one.
+        if self._secret is not None and not hmac.compare_digest(
+            reader.line().encode(), self._secret.encode()
+        ):
             # Refused before the message is even parsed. On the loopback the
             # token is the only thing standing between this daemon and any
             # other process on the machine.
@@ -461,19 +478,15 @@ class Listener:
 def _publish(path: Path, endpoint: dict[str, Any]) -> None:
     """Write an endpoint file that is never seen half-written.
 
-    Created 0600 and then renamed into place: a hook that read this file
-    between the open and the write would find no secret and report over HTTP,
-    which is harmless but is a fallback taken for no reason.
+    Written 0600 beside it and then renamed into place: a hook that read this
+    file between the open and the write would find no secret and report over
+    HTTP, which is harmless but is a fallback taken for no reason.
     """
     scratch = path.parent / (path.name + ".new")
-    descriptor = os.open(scratch, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, ENDPOINT_MODE)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(endpoint))
+    system.write_private(scratch, json.dumps(endpoint))
     scratch.replace(path)
 
 
 def describe(session_id: str) -> dict[str, Any] | None:
     """Ask a daemon what it is doing, for ``cylist hook status``."""
-    return send(
-        session_id, json.dumps({"v": protocol.VERSION, "t": "ping", "session": session_id}) + "\n"
-    )
+    return send(session_id, protocol.ping_message(session_id))

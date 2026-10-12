@@ -347,19 +347,18 @@ def _render_timeline(comments: list[dict[str, Any]], names: dict[str, str]) -> N
     for entry in comments:
         author = (entry.get("author") or {}).get("name") or "an agent"
         when = _to_the_minute(entry.get("created_at", ""))
+        tagged: list[str] = []
         if entry.get("kind") == "status_change":
             meta = entry.get("meta") or {}
-            tagged = ", ".join(names.get(person, person) for person in meta.get("tagged", []) or [])
-            headline = f"{when}  {author} set status {meta.get('from')} -> {meta.get('to')}"
-            output.echo(headline)
-            for line in output.wrap(str(entry.get("body", "")), width - 2, indent="  "):
-                output.echo(line)
-            if tagged:
-                output.echo(f"  waiting on: {tagged}")
+            tagged = meta.get("tagged") or []
+            output.echo(f"{when}  {author} set status {meta.get('from')} -> {meta.get('to')}")
         else:
             output.echo(f"{when}  {author}")
-            for line in output.wrap(str(entry.get("body", "")), width - 2, indent="  "):
-                output.echo(line)
+        for line in output.wrap(str(entry.get("body", "")), width - 2, indent="  "):
+            output.echo(line)
+        if tagged:
+            waiting_on = ", ".join(names.get(person, person) for person in tagged)
+            output.echo(f"  waiting on: {waiting_on}")
         output.echo()
 
 
