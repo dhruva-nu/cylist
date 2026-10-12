@@ -126,6 +126,10 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
 
     if data.archived is not None:
         person.archived_at = now() if data.archived else None
+    if data.archived:
+        # Archiving through a PATCH is the same act as through a DELETE, and
+        # leaves the same way: without credentials to come back to.
+        await _withdraw_access(session, person)
 
     if "email" in fields and (person.has_account or person.invite_is_pending):
         # Changing an account's email changes the name it signs in under, so
@@ -143,14 +147,48 @@ async def archive(session: AsyncSession, person_id: UUID) -> Person:
     person = await get(session, person_id)
     if not person.is_archived:
         person.archived_at = now()
-    # Archiving is also how access is withdrawn, so it has to reach the
-    # credentials: a session cookie outlives it by a month otherwise, and an
-    # API token outlives it forever. The password is deliberately left alone —
-    # un-archiving somebody should not mean they have to be invited again.
+    await _withdraw_access(session, person)
+    return person
+
+
+async def _withdraw_access(session: AsyncSession, person: Person) -> None:
+    """Take away every way an archived person had of getting back in.
+
+    Archiving is also how access is withdrawn, so it has to reach the
+    credentials: a session cookie outlives it by a month otherwise, and an API
+    token outlives it forever. The password is deliberately left alone —
+    un-archiving somebody should not mean they have to be invited again.
+    """
     await tokens.revoke_for_person(session, person.id)
+    _clear_invitation(person)
+
+
+def _clear_invitation(person: Person) -> None:
+    """Spend whatever invitation is outstanding, so its link opens nothing."""
     person.invite_token_hash = None
     person.invite_expires_at = None
-    return person
+
+
+def _require_may_hold_account(person: Person) -> None:
+    """Refuse an account to somebody who may not have one, however it is opened.
+
+    The rules are about who may sign in, not about how: not archived, not the
+    machine, and not a client.
+
+    Raises:
+        UnprocessableRequestError: naming which of those they are.
+    """
+    if person.is_archived:
+        raise UnprocessableRequestError("An archived person cannot be given an account.")
+    if person.is_agent:
+        raise UnprocessableRequestError(
+            f"{person.name} is a machine, and a machine does not sign in. Mint it an API "
+            "token instead — see Tokens."
+        )
+    if person.kind is not PersonKind.TEAM:
+        raise UnprocessableRequestError(
+            "Only team members get accounts. Clients are named on the work, not signed in to it."
+        )
 
 
 # --- Accounts ---------------------------------------------------------------
@@ -218,17 +256,7 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
             belongs to somebody who can already sign in.
     """
     person = await get(session, person_id)
-    if person.is_archived:
-        raise UnprocessableRequestError("An archived person cannot be given an account.")
-    if person.is_agent:
-        raise UnprocessableRequestError(
-            f"{person.name} is a machine, and a machine does not sign in. Mint it an API "
-            "token instead — see Tokens."
-        )
-    if person.kind is not PersonKind.TEAM:
-        raise UnprocessableRequestError(
-            "Only team members get accounts. Clients are named on the work, not signed in to it."
-        )
+    _require_may_hold_account(person)
     if not person.email:
         raise UnprocessableRequestError(
             "Give them an email address first — it is what they sign in with."
@@ -268,18 +296,7 @@ async def open_account(
         ConflictError: if the address belongs to somebody else who can sign in.
     """
     person = await get(session, person_id)
-    if person.is_archived:
-        raise UnprocessableRequestError("An archived person cannot be given an account.")
-    if person.is_agent:
-        raise UnprocessableRequestError(
-            f"{person.name} is a machine, and a machine does not sign in. Mint it an API "
-            "token instead — see Tokens."
-        )
-    if person.kind is not PersonKind.TEAM:
-        raise UnprocessableRequestError(
-            "Only team members get accounts. Clients are named on the work, not signed in to it."
-        )
-
+    _require_may_hold_account(person)
     await _require_email_free(session, email, excluding=person.id)
 
     had_one = person.password_hash is not None
@@ -288,8 +305,7 @@ async def open_account(
     # Any outstanding invitation is answered by this: the account it would have
     # opened is open, and a link that still worked would be a second way in
     # that nobody is watching.
-    person.invite_token_hash = None
-    person.invite_expires_at = None
+    _clear_invitation(person)
     await session.flush()
     return person, had_one
 
@@ -297,8 +313,7 @@ async def open_account(
 async def withdraw_invite(session: AsyncSession, person_id: UUID) -> Person:
     """Cancel an outstanding invitation. Doing it twice is not an error."""
     person = await get(session, person_id)
-    person.invite_token_hash = None
-    person.invite_expires_at = None
+    _clear_invitation(person)
     await session.flush()
     return person
 
@@ -327,8 +342,7 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
         raise UnprocessableRequestError("That invitation link is not valid, or it has expired.")
 
     person.password_hash = hash_password(password)
-    person.invite_token_hash = None
-    person.invite_expires_at = None
+    _clear_invitation(person)
     await session.flush()
     return person
 
@@ -336,8 +350,7 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
 async def set_password(session: AsyncSession, person: Person, new_password: str) -> Person:
     """Replace somebody's password. The caller has already proved it is theirs."""
     person.password_hash = hash_password(new_password)
-    person.invite_token_hash = None
-    person.invite_expires_at = None
+    _clear_invitation(person)
     await session.flush()
     return person
 
