@@ -158,7 +158,10 @@ class Tail:
         self._offset += len(chunk)
         data = self._partial + chunk
         *whole, self._partial = data.split(b"\n")
-        return [line.decode("utf-8", "replace") for line in whole if line.strip()]
+        # A file written in text mode on Windows ends its lines with \r\n.
+        return [
+            line.removesuffix(b"\r").decode("utf-8", "replace") for line in whole if line.strip()
+        ]
 
 
 def _size(path: str) -> int:

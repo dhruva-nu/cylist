@@ -178,6 +178,15 @@ class TestFollowingTheFile:
             handle.write("true}\n")
         assert tail.read() == ['{"half": true}']
 
+    def test_windows_line_endings_are_not_part_of_the_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b"")
+        tail = Tail(str(path))
+
+        with path.open("ab") as handle:
+            handle.write(b'{"a": 1}\r\n{"b": 2}\r\n')
+        assert tail.read() == ['{"a": 1}', '{"b": 2}']
+
     def test_a_file_that_is_not_there_yet_is_waited_for(self, tmp_path: Path) -> None:
         path = tmp_path / "later.jsonl"
         tail = Tail(str(path))
