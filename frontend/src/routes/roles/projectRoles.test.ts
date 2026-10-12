@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RoleSummary } from '../api/client'
+import type { RoleSummary } from '../../api/client'
 import { nameIsTaken, whyUndeletable } from './projectRoles'
 
 const ADMIN: RoleSummary = {

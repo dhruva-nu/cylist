@@ -7,7 +7,7 @@
  * and only one of them is visible in a member list.
  */
 
-import type { RoleSummary } from '../api/client'
+import type { RoleSummary } from '../../api/client'
 
 /**
  * Whether a project already has a role by this name, ignoring case.
