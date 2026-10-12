@@ -3,7 +3,7 @@
  * tools, served at `/mcp` by the same process as the web app.
  */
 
-import type { Scope, SetupInfo } from '../api/client'
+import type { Scope, SetupInfo } from '../../api/client'
 
 /** What Claude Code lists the server as — the same name `cylist setup` uses. */
 export const MCP_NAME = 'cylist'

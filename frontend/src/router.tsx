@@ -8,7 +8,7 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { BASE_PATH } from './api/basePath'
 import { Shell } from './components/Shell'
-import { Agents } from './routes/Agents'
+import { Agents } from './routes/agents/Agents'
 import { GoalPage } from './routes/goals/GoalPage'
 import { Home } from './routes/home/Home'
 import { ProjectDocs } from './routes/docs/ProjectDocs'
