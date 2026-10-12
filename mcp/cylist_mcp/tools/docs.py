@@ -271,8 +271,12 @@ def with_topics_listed(exc: CylistError) -> CylistError:
     model reads first, and a refusal that says "name a topic" without saying
     which ones there are costs it a list_docs to recover from.
     """
-    topics = exc.details.get("topics")
-    if exc.code != "topic_unclear" or not isinstance(topics, list) or not topics:
+    # Read defensively: these details came off the wire, and a shape this
+    # does not expect should leave the server's own refusal as it was rather
+    # than turn it into a crash the model cannot read.
+    raw = exc.details.get("topics")
+    topics = [topic for topic in raw if isinstance(topic, dict)] if isinstance(raw, list) else []
+    if exc.code != "topic_unclear" or not topics:
         return exc
 
     listed = "; ".join(f"{topic.get('section')} / {topic.get('name')}" for topic in topics)
