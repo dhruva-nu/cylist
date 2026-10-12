@@ -13,43 +13,43 @@
  * address that does not exist yet.
  */
 
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { ApiError, api } from '../api/client'
-import { Button, ErrorBanner } from '../components/ui'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, type FormEvent } from 'react'
+import { api } from '../api/client'
+import { queryKeys, useSetup } from '../api/queries'
+import { Button, ErrorNotice } from '../components/ui'
 import styles from './SignIn.module.css'
 
 export function SignIn() {
   const queryClient = useQueryClient()
-  const setup = useQuery({ queryKey: ['setup'], queryFn: api.setup })
+  const setup = useSetup()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
   // Assume accounts until told otherwise: the email form is right for every
   // deployment but a brand-new one, and a flash of the wrong form is better
   // spent on the rare case than on the usual one.
   const bootstrapping = setup.data ? !setup.data.has_accounts : false
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
+  // The refetch of who this is happens inside the request, so the button
+  // stays busy until the gate swaps this screen for the app.
+  const signIn = useMutation({
+    mutationFn: async () => {
       await (bootstrapping ? api.bootstrapSignIn(password) : api.signIn(email, password))
-      await queryClient.invalidateQueries({ queryKey: ['me'] })
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Something went wrong.')
-      setBusy(false)
-    }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.identity })
+    },
+  })
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    signIn.mutate()
   }
 
   const ready = password.length > 0 && (bootstrapping || email.trim().length > 0)
 
   return (
     <div className={styles.centred}>
-      <form className={styles.card} onSubmit={(event) => void submit(event)}>
+      <form className={styles.card} onSubmit={submit}>
         <h1 className={styles.wordmark}>
           <span className={styles.mark}>C</span> Cylist
         </h1>
@@ -88,9 +88,9 @@ export function SignIn() {
           onChange={(event) => setPassword(event.target.value)}
           required
         />
-        {error ? <ErrorBanner>{error}</ErrorBanner> : null}
-        <Button variant="go" type="submit" disabled={busy || !ready}>
-          {busy ? 'Signing in…' : 'Sign in'}
+        <ErrorNotice error={signIn.error} />
+        <Button variant="go" type="submit" disabled={signIn.isPending || !ready}>
+          {signIn.isPending ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
     </div>
