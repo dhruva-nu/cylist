@@ -1,0 +1,118 @@
+/* The status control: four options in one bordered strip. */
+.segmented {
+  display: flex;
+  width: fit-content;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+}
+
+/* The ends are rounded one option at a time rather than with `overflow:
+   hidden` on the group: hiding the overflow would crop the focus ring off the
+   first and last option, which are exactly the two a keyboard arrives at. */
+.segmented button:first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.segmented button:last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+.segmented button {
+  padding: 7px 16px;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--line-2);
+}
+
+.on.active {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.on.hold {
+  background: var(--hold-soft);
+  color: var(--hold);
+}
+
+.on.blocked {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+/* Grey rather than red: cancelled is a settled state, not an alarm. */
+.on.cancelled {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+
+/* The reason panel takes the colour of the status being chosen as a rule down
+   its edge, so the choice is confirmed before the text is read without the
+   whole panel turning amber or red around a box you are typing in. */
+.why {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: -6px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--hold);
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+}
+
+.why.blocked {
+  border-left-color: var(--blocked);
+}
+
+.why.cancelled {
+  border-left-color: var(--ink-3);
+}
+
+.why small {
+  color: var(--ink-2);
+}
+
+.reason {
+  min-height: 60px;
+  background: var(--paper);
+}
+
+.tagPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tagPicker button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tagPicker button span:first-child {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.tagged {
+  border-color: var(--ink) !important;
+  background: var(--ink) !important;
+  color: var(--paper) !important;
+}

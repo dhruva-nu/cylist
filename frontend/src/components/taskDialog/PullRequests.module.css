@@ -1,0 +1,74 @@
+/*
+ * The pull requests a card names, in the read view: one per line, each its own
+ * mark-and-label. A list rather than a comma-separated run, because each entry
+ * is a link with its own target and a run of them reads as one long one.
+ */
+.prRefs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The reference, then the state that belongs to it, hard against the right —
+   so the states line up down the list however long the references are, and
+   the column of them can be read on its own. */
+.prRefRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.prRefRow .prStateSelect {
+  margin-left: auto;
+}
+
+/* Quieter than the form's own selects: on the detail view this is the only
+   control among a page of text, and it has to look like somewhere you *may*
+   press rather than somewhere you are being asked to. */
+.prStateSelect {
+  flex-shrink: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  padding: 3px 8px;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* The same column of rows as the stage editor, with the add button under it. */
+.prRefEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prRefEditorRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.prRefEditorRow .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Undoing `.field select { width: 100% }`, which outranks `.prStateSelect` and
+   would otherwise take the whole row — with `flex-shrink: 0` it squeezes the
+   reference to nothing and pushes the cross off the edge. The rest of the
+   field's look stays, so the select stands as tall as the input beside it. */
+.prRefEditorRow .prStateSelect {
+  width: auto;
+}
+
+/* Sized by the row rather than by the glyph, so the crosses line up down the
+   list however long the references beside them are. */
+.prRefEditorRow button {
+  flex-shrink: 0;
+  min-width: 32px;
+  padding-inline: 6px;
+}

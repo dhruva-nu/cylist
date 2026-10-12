@@ -1,0 +1,91 @@
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.entry {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+}
+
+/* A measure, so that widening the panel does not set a comment to 110
+   characters a line. A bubble is not a `p`, so the frame's `.wrap p` never
+   reached it and this is the only thing holding it.
+
+   80ch rather than the 68ch the description takes: this is somebody talking,
+   a few sentences at 14px, and the long end of a readable measure is right
+   for it. Held to the reading measure it would be a ribbon down the left of a
+   panel half again as wide. */
+.bubble {
+  flex: 1;
+  max-width: 80ch;
+  padding: 9px 13px;
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+}
+
+.who {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.who span {
+  color: var(--ink-3);
+  font-family: var(--font-body);
+  font-weight: 400;
+}
+
+.whoEnd {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Always drawn rather than revealed on hover: a control that only exists
+   while the pointer is over it is one a touch screen never offers and a
+   keyboard reaches by surprise. Quiet until it is wanted instead. */
+.retract {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.retract:hover:not(:disabled),
+.retract:focus-visible {
+  color: var(--blocked);
+}
+
+.retract:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.when {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+/* Dashed and untinted: Cylist wrote this, not a person. */
+.system .bubble {
+  border: 1px dashed var(--line-2);
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.system.hold .bubble {
+  border-color: var(--hold);
+}
+
+.system.blocked .bubble {
+  border-color: var(--blocked);
+}
