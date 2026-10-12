@@ -86,6 +86,11 @@ FOLDER_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 NAME_WIDTH = 32
 DESCRIPTION_WIDTH = 60
 
+_PROJECT_HELP = (
+    "Project key, e.g. ATL. Defaults to the project of the card this session is "
+    "working on (CYLIST_TASK), so inside 'cylist work' it can be left out."
+)
+
 
 def register(subparsers: Any) -> None:
     skills = subparsers.add_parser(
@@ -159,12 +164,6 @@ def register(subparsers: Any) -> None:
         help="Replace a skill folder even if it was written by hand or edited since.",
     )
     pull.set_defaults(handler=_pull)
-
-
-_PROJECT_HELP = (
-    "Project key, e.g. ATL. Defaults to the project of the card this session is "
-    "working on (CYLIST_TASK), so inside 'cylist work' it can be left out."
-)
 
 
 # --- ls --------------------------------------------------------------------
@@ -283,9 +282,7 @@ def _walk(source: Path) -> Iterator[Path]:
             continue
         if path.parent == source and path.name == MARKER:
             continue
-        if path.name == GITIGNORE and path.read_text("utf-8", errors="replace") == (
-            IGNORE_EVERYTHING
-        ):
+        if _is_our_gitignore(path):
             continue
         if path.name in (".DS_Store", "Thumbs.db"):
             continue
@@ -544,10 +541,17 @@ def _local_files(target: Path) -> dict[str, str]:
         relative = path.relative_to(target).as_posix()
         if relative == MARKER or path.is_dir():
             continue
-        if relative == GITIGNORE and path.read_text("utf-8", errors="replace") == IGNORE_EVERYTHING:
+        if relative == GITIGNORE and _is_our_gitignore(path):
             continue
         found[relative] = _sha256(path.read_bytes()) if path.is_file() else "not a file"
     return found
+
+
+def _is_our_gitignore(path: Path) -> bool:
+    """Whether this is the ``.gitignore`` of ``*`` that ``pull`` writes into a folder."""
+    return path.name == GITIGNORE and path.read_text("utf-8", errors="replace") == (
+        IGNORE_EVERYTHING
+    )
 
 
 def _write_folder(
