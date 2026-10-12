@@ -130,8 +130,26 @@ def run(
         # start one is the ordinary case.
         return 0
 
-    _configure_logging(session_id)
-    supervisor.write_pid(session_id)
+    log = _start_logging(session_id)
+    try:
+        supervisor.write_pid(session_id)
+        _serve(ctx, session_id, connect=connect, owner=owner)
+    finally:
+        supervisor.clear_pid(session_id)
+        lock.release()
+        logger.removeHandler(log)
+        log.close()
+    return 0
+
+
+def _serve(
+    ctx: Context,
+    session_id: str,
+    *,
+    connect: Any,
+    owner: owner_module.Owner | None,
+) -> None:
+    """Listen for the hooks, follow the transcript, and run the loop until it ends."""
     events: queue.Queue[m.Event] = queue.Queue()
     state = _Shared(session_id)
 
@@ -144,9 +162,7 @@ def run(
         # and an empty log beside a vanished process is the hardest possible
         # way to find out that a path was too long or a port refused.
         logger.exception("Could not listen for hooks; this daemon is no use")
-        supervisor.clear_pid(session_id)
-        lock.release()
-        return 0
+        return
 
     accepting = threading.Thread(
         target=listener.serve,
@@ -180,9 +196,6 @@ def run(
     finally:
         stopped.set()
         listener.close()
-        supervisor.clear_pid(session_id)
-        lock.release()
-    return 0
 
 
 class _Shared:
@@ -241,17 +254,25 @@ class _Answers:
             self._waiting.pop(prompt_id, None)
 
 
-def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Event]) -> str:
-    """Turn one IPC message into an event, and answer the hook."""
-    if message.get("session") != state.session_id:
-        # A socket path collision, or a reused runtime directory. Cheap to
-        # check, and the alternative is one conversation's state landing on
-        # another's card.
-        return protocol.refusal("wrong_session")
+def _accept(message: dict[str, Any], state: _Shared) -> bool:
+    """Whether a message is for this session, noting the transcript it names if so.
 
+    A socket path collision, or a reused runtime directory, could otherwise
+    deliver another session's message here. Cheap to check, and the
+    alternative is one conversation's state landing on another's card.
+    """
+    if message.get("session") != state.session_id:
+        return False
     transcript = message.get("transcript")
     if isinstance(transcript, str) and transcript:
         state.transcript = transcript
+    return True
+
+
+def _receive(message: dict[str, Any], state: _Shared, events: queue.Queue[m.Event]) -> str:
+    """Turn one IPC message into an event, and answer the hook."""
+    if not _accept(message, state):
+        return protocol.refusal("wrong_session")
 
     kind = message.get("t")
     if kind == "state":
@@ -297,11 +318,8 @@ def _ask(
     told the prompt expired, and the ack says nobody answered — the hook then
     leaves the terminal to it.
     """
-    if message.get("session") != state.session_id:
+    if not _accept(message, state):
         return protocol.refusal("wrong_session")
-    transcript = message.get("transcript")
-    if isinstance(transcript, str) and transcript:
-        state.transcript = transcript
 
     prompt_id = str(message["prompt_id"])
     inbox = state.answers.expect(prompt_id)
@@ -429,8 +447,13 @@ def _loop(
                 continue
             endpoints.remember(base_url)
             if not _perform(socket, reducer.feed(m.LinkUp())):
+                # Lost like any other link, so the next attempt waits its
+                # backoff: a server that accepts and then drops at once must
+                # not be redialled in a tight loop.
                 _close(socket)
                 socket = None
+                if reducer.link_lost():
+                    return
                 continue
 
         actions = reducer.feed(_next_event(events, watch))
@@ -438,7 +461,8 @@ def _loop(
         if socket is not None and not _perform(socket, actions):
             _close(socket)
             socket = None
-            if reducer.link_lost():
+            # A goodbye that could not be sent still ends the session.
+            if _finished(actions) or reducer.link_lost():
                 return
             continue
 
@@ -647,8 +671,8 @@ def _on_being_asked_to_stop(hang_up: Callable[..., None]) -> None:
             signal.signal(number, hang_up)
 
 
-def _configure_logging(session_id: str) -> None:
-    """One file per daemon life, truncated at start.
+def _start_logging(session_id: str) -> logging.Handler:
+    """One file per daemon life, truncated at start. Returns its handler, to close.
 
     Truncated rather than appended so a long-lived machine cannot accumulate
     an unbounded log from a process nobody remembers starting.
@@ -657,3 +681,4 @@ def _configure_logging(session_id: str) -> None:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG if os.environ.get("CYLIST_HOOK_DEBUG") == "1" else logging.INFO)
+    return handler
