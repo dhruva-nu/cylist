@@ -16,8 +16,7 @@
  * hold and what `/tasks/{ref}` takes, so nothing has to be looked up first.
  */
 
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { queryKeys, useBoard, useGoals, useInvalidate, useTemplates } from '../api/queries'
 import { TaskDialog } from './TaskDialog'
 import { LiveRegion, useAnnouncer } from './ui'
 
@@ -33,7 +32,7 @@ export function OpenCard({
   onOpen: (reference: string) => void
   onClose: () => void
 }) {
-  const queryClient = useQueryClient()
+  const invalidate = useInvalidate()
   const { message, announce } = useAnnouncer()
 
   /**
@@ -45,18 +44,9 @@ export function OpenCard({
    * card is most likely to be opened they come out of the cache and cost
    * nothing.
    */
-  const board = useQuery({
-    queryKey: ['board', projectKey],
-    queryFn: () => api.listColumns(projectKey),
-  })
-  const templates = useQuery({
-    queryKey: ['templates', projectKey],
-    queryFn: () => api.listTemplates(projectKey),
-  })
-  const goals = useQuery({
-    queryKey: ['goals', projectKey],
-    queryFn: () => api.listGoals(projectKey),
-  })
+  const board = useBoard(projectKey)
+  const templates = useTemplates(projectKey)
+  const goals = useGoals(projectKey)
 
   /**
    * What an edit made here has to invalidate.
@@ -68,15 +58,14 @@ export function OpenCard({
    * from the sidebar is a card the page behind it is very likely showing.
    */
   async function refresh() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['day-report', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['board', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['task'] }),
-      queryClient.invalidateQueries({ queryKey: ['goals', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['goal'] }),
-      queryClient.invalidateQueries({ queryKey: ['project-summary', projectKey] }),
-    ])
+    await invalidate(
+      ['day-report', projectKey],
+      queryKeys.board(projectKey),
+      queryKeys.tasks(projectKey),
+      queryKeys.allTasks,
+      queryKeys.goals(projectKey),
+      queryKeys.allGoals,
+    )
   }
 
   const columns = board.data?.columns ?? []

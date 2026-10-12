@@ -16,8 +16,8 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type Person, type PersonInput, type PersonKind } from '../api/client'
-import { Field, FieldPair, Modal, ModalBody } from './Modal'
-import { Button, ErrorBanner } from './ui'
+import { DialogActions, Field, FieldPair, Modal, ModalBody } from './Modal'
+import { ErrorNotice } from './ui'
 
 const EMPTY_PERSON: PersonInput = {
   name: '',
@@ -77,27 +77,26 @@ export function PersonDialog({
     },
   })
 
-  const complete = form.name.trim() && form.title.trim() && form.responsibilities.trim()
+  const complete =
+    form.name.trim() !== '' && form.title.trim() !== '' && form.responsibilities.trim() !== ''
 
   return (
     <Modal
       title={title}
       onClose={onClose}
       footer={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="go"
-            disabled={save.isPending || !complete}
-            onClick={() => save.mutate(form)}
-          >
-            {saveButtonLabel(save.isPending, person)}
-          </Button>
-        </>
+        <DialogActions
+          submitLabel={person ? 'Save' : 'Add person'}
+          pendingLabel="Saving…"
+          pending={save.isPending}
+          disabled={!complete}
+          onSubmit={() => save.mutate(form)}
+          onCancel={onClose}
+        />
       }
     >
       <ModalBody>
-        {save.error ? <ErrorBanner>{save.error.message}</ErrorBanner> : null}
+        <ErrorNotice error={save.error} />
         <FieldPair>
           <Field label="Name" required>
             <input
@@ -149,11 +148,4 @@ export function PersonDialog({
       </ModalBody>
     </Modal>
   )
-}
-
-/** What the Save button says it will do. */
-function saveButtonLabel(saving: boolean, person: Person | undefined): string {
-  if (saving) return 'Saving…'
-  if (person) return 'Save'
-  return 'Add person'
 }

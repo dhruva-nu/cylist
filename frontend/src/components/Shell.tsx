@@ -5,9 +5,8 @@
  */
 
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { api } from '../api/client'
+import { useIdentity, useProject, useProjects } from '../api/queries'
 import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
 import { Avatar } from './ui'
@@ -128,7 +127,7 @@ export function Shell() {
  * gets the plain accent, because there is nobody to name yet.
  */
 function You() {
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
   const person = identity.data?.person ?? null
 
   return person ? (
@@ -186,13 +185,6 @@ function Breadcrumbs() {
   )
 }
 
-function useProject(projectKey: string) {
-  return useQuery({
-    queryKey: ['project', projectKey],
-    queryFn: () => api.getProject(projectKey),
-  })
-}
-
 /** How long the pointer rests on the project before its list drops. */
 const SWITCHER_DELAY_MS = 600
 
@@ -215,7 +207,7 @@ function ProjectSwitcher({
   withSeparator?: boolean
 }) {
   const project = useProject(projectKey)
-  const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects })
+  const projects = useProjects()
   const [hovered, setHovered] = useState(false)
   const [open, setOpen] = useState(false)
   const timer = useRef<number | undefined>(undefined)

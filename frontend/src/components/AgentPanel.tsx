@@ -42,7 +42,7 @@ import {
 import { useViewerId } from '../routes/useViewerId'
 import { feedClock, feedLabel, isCodeLike } from './agentFeed'
 import { AgentPromptAnswer } from './AgentPromptAnswer'
-import { Button, ErrorBanner } from './ui'
+import { Button, ErrorNotice } from './ui'
 import styles from './AgentPanel.module.css'
 
 export function AgentPanel({
@@ -81,7 +81,7 @@ export function AgentPanel({
         <SessionBlock key={session.id} taskRef={taskRef} session={session} now={now} />
       ))}
 
-      {dismiss.error ? <ErrorBanner>{dismiss.error.message}</ErrorBanner> : null}
+      <ErrorNotice error={dismiss.error} />
       {finished.length ? (
         <div className={styles.actions}>
           <Button small onClick={() => dismiss.mutate()} disabled={dismiss.isPending}>
@@ -210,7 +210,7 @@ function AgentFeed({ taskRef, taskId, live }: { taskRef: string; taskId: string;
     refetchInterval: live ? FEED_POLL_MS : false,
   })
 
-  if (feed.error) return <ErrorBanner>{feed.error.message}</ErrorBanner>
+  if (feed.error) return <ErrorNotice error={feed.error} />
   if (!feed.data) return <span className={styles.quiet}>Loading…</span>
   if (!feed.data.length) {
     return (

@@ -124,10 +124,13 @@ function drawingRank(line: RolePermissions): number {
  * The whole line goes back to the server every time — see `api.setColumnRules`
  * — so this returns the whole line rather than the one entry that changed.
  */
+/** The two things a column rule says: may a card be moved in, may its sub-stages be set. */
+export type ColumnRuleField = 'may_enter' | 'may_stage'
+
 export function withColumnRule(
   columns: ColumnRule[],
   columnId: string,
-  field: 'may_enter' | 'may_stage',
+  field: ColumnRuleField,
   on: boolean,
 ): ColumnRule[] {
   return columns.map((column) =>

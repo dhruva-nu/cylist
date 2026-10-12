@@ -11,15 +11,12 @@
  * The server is still the fence; this only decides what is worth drawing.
  */
 
-import { useQuery } from '@tanstack/react-query'
-import { api, type Permission } from '../api/client'
+import type { Permission } from '../api/client'
+import { usePermissionGrid } from '../api/queries'
 import { can } from './projectPermissions'
 
 export function usePermissions(projectKey: string): (permission: Permission) => boolean {
-  const grid = useQuery({
-    queryKey: ['permissions', projectKey],
-    queryFn: () => api.getPermissions(projectKey),
-  })
+  const grid = usePermissionGrid(projectKey)
 
   // `can` is permissive while the query is in flight — see the note there.
   return (permission: Permission) => can(grid.data?.mine, permission)

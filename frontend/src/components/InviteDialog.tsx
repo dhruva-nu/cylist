@@ -18,7 +18,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, type InviteIssued, type Person } from '../api/client'
 import { Modal, ModalBody } from './Modal'
-import { Button, ErrorBanner } from './ui'
+import { Button, ErrorNotice } from './ui'
 import styles from './InviteDialog.module.css'
 
 export function InviteDialog({
@@ -36,6 +36,9 @@ export function InviteDialog({
 
   const invite = useMutation({
     mutationFn: (): Promise<InviteIssued> => api.invitePerson(person.id),
+    // The link carries a token that is shown once, here; once the dialog has
+    // gone, react-query has no business keeping it.
+    gcTime: 0,
     onSuccess: async () => {
       await onDone()
       onSaved(person.name)
@@ -90,8 +93,8 @@ export function InviteDialog({
       }
     >
       <ModalBody>
-        {invite.error ? <ErrorBanner>{invite.error.message}</ErrorBanner> : null}
-        {withdraw.error ? <ErrorBanner>{withdraw.error.message}</ErrorBanner> : null}
+        <ErrorNotice error={invite.error} />
+        <ErrorNotice error={withdraw.error} />
 
         {issued ? (
           <>

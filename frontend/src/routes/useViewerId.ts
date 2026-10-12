@@ -7,10 +7,9 @@
  * is fetched once and shared.
  */
 
-import { useQuery } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { useIdentity } from '../api/queries'
 
 export function useViewerId(): string | null {
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
   return identity.data?.person?.id ?? null
 }

@@ -32,6 +32,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMatchRoute } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
 import { api, type Task } from '../api/client'
+import { useIdentity } from '../api/queries'
 import { formatDue, formatDueLong, localToday } from './dates'
 import { Modal, ModalBody } from './Modal'
 import { OpenCard } from './OpenCard'
@@ -136,7 +137,7 @@ function useTodaysWork(projectKey: string | null): TodayWork | null {
     queryFn: () => api.listColumns(projectKey ?? ''),
     enabled,
   })
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
 
   if (!tasks.data || !board.data) return null
   return todaysWork(tasks.data, board.data.columns, identity.data?.person ?? null, localToday())
