@@ -22,6 +22,7 @@ export {
   CalendarIcon,
   ClockIcon,
   CommentIcon,
+  FolderIcon,
   JiraIcon,
   MailIcon,
   PrIcon,

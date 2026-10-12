@@ -281,3 +281,19 @@ export function MailIcon({ size = 14 }: { size?: number }) {
     </Glyph>
   )
 }
+
+/**
+ * A folder, for the files screen's tree and the vault's branches.
+ *
+ * Not one of the card's glyphs: it is drawn on a 24-unit grid and sized by the
+ * stylesheet of whatever row it sits in, where the glyphs above carry their own
+ * size. One drawing for both screens, so a folder looks like a folder wherever
+ * a project keeps one.
+ */
+export function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  )
+}
