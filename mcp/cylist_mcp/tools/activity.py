@@ -122,15 +122,23 @@ def local_timezone() -> str | None:
     setting a zone deliberately sets; then the symlink Linux and macOS keep at
     ``/etc/localtime``. When neither answers, None lets the server apply its
     own default rather than this guessing one.
+
+    ``TZ`` may also name a zone *file* — ``:/etc/localtime`` is a common
+    setting, made to spare libc a stat per call — and a path is not a zone the
+    API knows, so a path is read the same way the symlink is.
     """
     configured = os.environ.get("TZ", "").lstrip(":").strip()
-    if configured:
+    if configured and not configured.startswith("/"):
         return configured
+    return zone_named_by_file(Path(configured or "/etc/localtime"))
 
+
+def zone_named_by_file(path: Path) -> str | None:
+    """The zone a tz file names by where it lives: '.../zoneinfo/Asia/Kolkata'."""
     try:
-        parts = Path("/etc/localtime").resolve().parts
+        parts = path.resolve().parts
     except OSError:  # pragma: no cover - an unreadable /etc is not worth faking
         return None
-    if "zoneinfo" in parts:
-        return "/".join(parts[parts.index("zoneinfo") + 1 :])
-    return None
+    if "zoneinfo" not in parts:
+        return None
+    return "/".join(parts[parts.index("zoneinfo") + 1 :]) or None
