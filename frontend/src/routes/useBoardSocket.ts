@@ -8,6 +8,7 @@
  */
 
 import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../api/queries'
 import { useEffect, useRef, useState } from 'react'
 import { backoffDelay, boardSocketUrl, isFinal, parseEvent } from '../api/realtime'
 
@@ -38,6 +39,9 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
     let socket: WebSocket | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
     let attempt = 0
+    // Kept here rather than read from `signedOut`: the handlers below are made
+    // once per effect, and the state they closed over would never turn true.
+    let refused = false
 
     const refresh = () => {
       // Refetching a tab nobody is looking at is the waste
@@ -51,7 +55,7 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
       debounce.current = setTimeout(() => {
         void queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] })
         // An open card is looking at the same change from the other side.
-        void queryClient.invalidateQueries({ queryKey: ['task'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
         // And so is its agent feed, whose own nudge may have been the one
         // the server coalesced away.
         void queryClient.invalidateQueries({ queryKey: ['agent-feed'] })
@@ -70,9 +74,10 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
 
     const open = () => {
       if (!live) return
-      socket = new WebSocket(boardSocketUrl(projectKey, window.location))
+      const current = new WebSocket(boardSocketUrl(projectKey, window.location))
+      socket = current
 
-      socket.onmessage = (event) => {
+      current.onmessage = (event) => {
         const message = parseEvent(event.data)
         if (!message) return
         if (message.type === 'ready') {
@@ -90,10 +95,15 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
         }
       }
 
-      socket.onclose = (event) => {
+      current.onclose = (event) => {
+        // A socket that has already been replaced — closing while the tab
+        // came back and opened a fresh one — has nothing left to say: its
+        // retry would open a second socket beside the live one.
+        if (socket !== current) return
         setConnected(false)
         if (!live) return
         if (isFinal(event.code)) {
+          refused = true
           setSignedOut(true)
           return
         }
@@ -110,7 +120,7 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
       }
       // Frozen tabs get their sockets closed out from under them, and a
       // person who has just come back should not wait out a backoff.
-      if (live && !signedOut && (socket === null || socket.readyState > WebSocket.OPEN)) {
+      if (live && !refused && (socket === null || socket.readyState > WebSocket.OPEN)) {
         if (retry) clearTimeout(retry)
         attempt = 0
         open()
@@ -128,9 +138,6 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
       socket?.close()
       setConnected(false)
     }
-    // `signedOut` is read inside but must not restart the effect: doing so
-    // would reopen the very socket that was refused.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKey, queryClient])
 
   return { connected, signedOut }

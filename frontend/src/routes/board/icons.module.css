@@ -1,0 +1,40 @@
+/* The board's own small line icons — see `icons.tsx`. Each is drawn in
+   `currentColor`, so it takes the ink of whatever it sits in. */
+
+/* A toolbar button's icon. */
+.toolIcon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+/* A tick, wherever it is drawn: kept its own width inside a flex row. */
+.tick {
+  flex: none;
+}
+
+/* The arrow on a row that opens something: shown on hover or focus only, so
+   a list at rest stays quiet. */
+.go {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+button:hover > .go,
+a:hover > .go,
+button:focus-visible > .go,
+a:focus-visible > .go {
+  opacity: 1;
+}

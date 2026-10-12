@@ -61,6 +61,18 @@ def _skill_read(skill: Skill) -> SkillRead:
     )
 
 
+async def _require_content(store: BlobStore, skill: Skill) -> None:
+    """Refuse to serve a skill whose bytes have gone from the store.
+
+    A 404 naming the skill rather than the 500 the file response would raise
+    on a missing path: the row is fine, and whoever re-uploads it fixes it.
+    """
+    if not await store.exists(skill.blob.path):
+        raise NotFoundError(
+            "This skill's content is missing from the store.", details={"name": skill.name}
+        )
+
+
 # --- Skills ----------------------------------------------------------------
 
 
@@ -240,10 +252,7 @@ async def download_skill(
     store: BlobStore = Depends(get_blob_store),
 ) -> FileResponse:
     """The skill's own bytes, under the name it was uploaded with."""
-    if not await store.exists(skill.blob.path):
-        raise NotFoundError(
-            "This skill's content is missing from the store.", details={"name": skill.name}
-        )
+    await _require_content(store, skill)
 
     return FileResponse(
         store.locate(skill.blob.path),
@@ -274,10 +283,7 @@ async def skill_folder(
     `/download` is still the skill exactly as it was uploaded; this is the
     same bytes, laid out to be used.
     """
-    if not await store.exists(skill.blob.path):
-        raise NotFoundError(
-            "This skill's content is missing from the store.", details={"name": skill.name}
-        )
+    await _require_content(store, skill)
 
     content = await to_thread.run_sync(store.locate(skill.blob.path).read_bytes)
     folder = await to_thread.run_sync(skill_folders.unpack, skill.name, skill.description, content)

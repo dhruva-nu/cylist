@@ -72,13 +72,7 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
         colour=data.colour or colour_for(data.key),
     )
     session.add(project)
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise ConflictError(
-            f"The key {data.key} is already used by another project.",
-            details={"key": data.key},
-        ) from exc
+    await _flush_claiming_key(session, project.key)
 
     await columns.seed(session, project)
     await files.seed_root(session, project)
@@ -98,6 +92,38 @@ async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID
     # had one. Load it now so callers can read it without lazy IO.
     await session.refresh(project, ["members"])
     return project
+
+
+async def _flush_claiming_key(session: AsyncSession, key: str) -> None:
+    """Write a project whose key may already be taken, saying so if it is.
+
+    The unique index is what decides — a check beforehand would race another
+    request creating the same key — so the refusal is the index's, reworded
+    from a constraint name into a sentence about the key.
+
+    Raises:
+        ConflictError: if another project already has the key.
+    """
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise ConflictError(
+            f"The key {key} is already used by another project.",
+            details={"key": key},
+        ) from exc
+
+
+def require_confirmation(project: Project, confirm: str) -> None:
+    """Refuse to delete a project unless the caller has named it.
+
+    Raises:
+        UnprocessableRequestError: if ``confirm`` is not the project's key.
+    """
+    if confirm.strip().upper() != project.key:
+        raise UnprocessableRequestError(
+            f"Name the project to delete it: confirm must be {project.key}.",
+            details={"project_key": project.key},
+        )
 
 
 async def resolve(session: AsyncSession, reference: str) -> Project:
@@ -142,13 +168,7 @@ async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -
     if data.archived is not None:
         project.archived_at = now() if data.archived else None
 
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise ConflictError(
-            f"The key {data.key} is already used by another project.",
-            details={"key": data.key},
-        ) from exc
+    await _flush_claiming_key(session, project.key)
 
     if fields.get("name") is not None:
         await files.rename_root(session, project)
@@ -156,13 +176,6 @@ async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -
     # `members` is only populated by a SELECT, and a just-inserted row has not
     # had one. Load it now so callers can read it without lazy IO.
     await session.refresh(project, ["members"])
-    return project
-
-
-async def archive(session: AsyncSession, project: Project) -> Project:
-    """Hide a project. Its board, files and vault are left untouched."""
-    if not project.is_archived:
-        project.archived_at = now()
     return project
 
 

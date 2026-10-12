@@ -1,0 +1,130 @@
+/* --- Sub-tasks ----------------------------------------------------------- */
+
+.subtasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The row is a container, not the button: it holds a tick box as well, and one
+   control cannot sit inside another. */
+.subtaskRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--text-base);
+}
+
+.subtaskRow:hover {
+  border-color: var(--line-2);
+}
+
+/* Undoing the `.field input { width: 100% }` every other field in this dialog
+   wants — the same reset .checkLabel makes, so both kinds of sub-task carry
+   the same tick box. */
+.subtaskRow input {
+  flex: none;
+  width: auto;
+  margin: 0;
+}
+
+/* A whole row is the target rather than the reference alone: the title is what
+   the eye lands on, and a link you have to aim at is a link you misclick. */
+.subOpen {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Struck through once it is done, for the same reason the tick boxes are: the
+   list is read to find what is left, and what is left should be the only thing
+   on it still asking to be read. */
+.subtaskRow.settled .subTitle {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.subRef {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.subTitle {
+  flex: 1;
+  font-weight: var(--weight-semibold);
+}
+
+.subState {
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.checkRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 4px 3px 0;
+  font-size: var(--text-base);
+}
+
+.checkLabel {
+  display: flex;
+  flex: 1;
+  gap: 9px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.checkLabel input {
+  width: auto;
+  margin: 0;
+}
+
+/* Struck through rather than hidden: a cancelled item is a decision somebody
+   made, and hiding it makes the decision look like it never happened. */
+.struck {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.settled .checkLabel span {
+  color: var(--ink-3);
+}
+
+.checkActions {
+  display: flex;
+  gap: 2px;
+}
+
+.parentLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gate {
+  color: var(--hold);
+  font-weight: var(--weight-semibold);
+}

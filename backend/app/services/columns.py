@@ -14,6 +14,7 @@ written into either row.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -55,16 +56,49 @@ async def seed(session: AsyncSession, project: Project) -> list[BoardColumn]:
 
 async def list_for_project(session: AsyncSession, project: Project) -> list[BoardColumn]:
     """Return the board's columns, left to right."""
+    return await _board_of(session, project.id)
+
+
+async def _board_of(session: AsyncSession, project_id: UUID) -> list[BoardColumn]:
     return list(
         await session.scalars(
             select(BoardColumn)
-            .where(BoardColumn.project_id == project.id)
+            .where(BoardColumn.project_id == project_id)
             .order_by(BoardColumn.position)
         )
     )
 
 
+async def boards_by_project(
+    session: AsyncSession, project_ids: Collection[UUID]
+) -> dict[UUID, list[BoardColumn]]:
+    """The columns of several boards at once, each left to right.
+
+    A card's dates only mean anything against the order of its own board — met
+    is "the card has got this far" — and a listing is nearly always one board,
+    so it is one query for all of them rather than one per card. Nearly, not
+    always: a day's report reaches across projects.
+    """
+    if not project_ids:
+        return {}
+
+    rows = await session.scalars(
+        select(BoardColumn)
+        .where(BoardColumn.project_id.in_(project_ids))
+        .order_by(BoardColumn.position)
+    )
+    boards: dict[UUID, list[BoardColumn]] = {}
+    for column in rows:
+        boards.setdefault(column.project_id, []).append(column)
+    return boards
+
+
 async def get(session: AsyncSession, column_id: UUID) -> BoardColumn:
+    """One column by id.
+
+    Raises:
+        NotFoundError: if nothing matches.
+    """
     column = await session.get(BoardColumn, column_id)
     if column is None:
         raise NotFoundError("No column with that id.")
@@ -111,6 +145,7 @@ async def last(session: AsyncSession, project_id: UUID) -> BoardColumn:
 
 
 async def count(session: AsyncSession, project_id: UUID) -> int:
+    """How many columns a project's board has."""
     total = await session.scalar(
         select(func.count()).select_from(BoardColumn).where(BoardColumn.project_id == project_id)
     )
@@ -293,13 +328,7 @@ async def _strip_stale_outcomes(session: AsyncSession, project_id: UUID) -> None
     of a board would go on saying work ended there, and cards would go on
     sitting in them.
     """
-    board = list(
-        await session.scalars(
-            select(BoardColumn)
-            .where(BoardColumn.project_id == project_id)
-            .order_by(BoardColumn.position)
-        )
-    )
+    board = await _board_of(session, project_id)
     for column in board[:-1]:
         if column.outcomes:
             column.outcomes = []
@@ -309,11 +338,6 @@ async def _strip_stale_outcomes(session: AsyncSession, project_id: UUID) -> None
 
 async def _renumber(session: AsyncSession, project_id: UUID) -> None:
     """Close the gap a deleted column left, keeping positions contiguous."""
-    columns = await session.scalars(
-        select(BoardColumn)
-        .where(BoardColumn.project_id == project_id)
-        .order_by(BoardColumn.position)
-    )
-    for position, column in enumerate(columns):
+    for position, column in enumerate(await _board_of(session, project_id)):
         column.position = position
     await session.flush()

@@ -13,13 +13,13 @@
 
 .suggestions {
   position: absolute;
-  z-index: 5;
+  z-index: var(--layer-raised);
   width: 100%;
   margin: 4px 0 0;
   padding: 6px;
   list-style: none;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--paper);
   box-shadow: var(--shadow-lg);
 
@@ -36,7 +36,7 @@
   width: 100%;
   padding: 7px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink);
   font: inherit;
@@ -64,7 +64,7 @@
   margin-left: auto;
   padding-left: 8px;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* An avatar's footprint, so a list of files and a list of people line their

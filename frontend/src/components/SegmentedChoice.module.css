@@ -1,0 +1,28 @@
+/* Joined buttons with one lit: the vault's kinds, the goals page's views. */
+.segmented {
+  display: flex;
+  overflow: hidden;
+  width: fit-content;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+}
+
+.segmented button {
+  padding: 7px 16px;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--line-2);
+}
+
+.segmented button.on {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}

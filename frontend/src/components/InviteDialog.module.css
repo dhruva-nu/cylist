@@ -21,7 +21,7 @@
   background: var(--paper-2);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   white-space: nowrap;
 }
 
@@ -33,6 +33,6 @@
   border-radius: var(--radius-control);
   background: var(--hold-soft);
   color: var(--hold);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.5;
 }

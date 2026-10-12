@@ -11,7 +11,7 @@
 .prose {
   color: var(--ink);
   font-family: var(--font-body);
-  font-size: 15.5px;
+  font-size: var(--text-xl);
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -42,21 +42,21 @@ div.prose p {
 }
 
 .prose h1 {
-  font-size: 26px;
+  font-size: var(--text-display);
 }
 
 .prose h2 {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
-  font-size: 20px;
+  font-size: var(--text-3xl);
 }
 
 .prose h3 {
-  font-size: 17px;
+  font-size: var(--text-xl);
 }
 
 .prose h4 {
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
 .prose p,
@@ -95,7 +95,7 @@ div.prose p {
 
 .prose code {
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   font-family: var(--font-mono);
   font-size: 0.88em;
@@ -113,7 +113,7 @@ div.prose p {
 .prose pre code {
   padding: 0;
   background: none;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* A wide table scrolls inside itself rather than pushing the page sideways. */
@@ -121,7 +121,7 @@ div.prose p {
   display: block;
   overflow-x: auto;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* Rows divided by hairlines rather than every cell boxed, and the header a
@@ -138,7 +138,7 @@ div.prose p {
   border-bottom-color: var(--line-2);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .prose hr {

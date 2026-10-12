@@ -34,6 +34,7 @@ from app.models.agent_session import AgentFeedEntry, AgentSession
 from app.models.task import Task
 from app.realtime import protocol
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentFeedEntryRead
+from app.services import agent_sessions
 
 KEEP_PER_SESSION = 200
 """How many lines each session keeps. Enough to scroll back through a long
@@ -57,13 +58,7 @@ async def append(
     """
     if not entries:
         return 0
-    row = await session.scalar(
-        select(AgentSession).where(
-            AgentSession.task_id == task.id,
-            AgentSession.client_session_id == client_session_id,
-            AgentSession.ended_at.is_(None),
-        )
-    )
+    row = await agent_sessions.open_on_card(session, task, client_session_id)
     if row is None:
         return 0
 

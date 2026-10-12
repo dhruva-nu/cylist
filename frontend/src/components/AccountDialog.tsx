@@ -17,8 +17,8 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, MIN_PASSWORD_LENGTH, type Person } from '../api/client'
-import { Field, Modal, ModalBody } from './Modal'
-import { Button, ErrorBanner } from './ui'
+import { DialogActions, Field, Modal, ModalBody } from './Modal'
+import { ErrorNotice } from './ui'
 
 export function AccountDialog({
   person,
@@ -51,16 +51,18 @@ export function AccountDialog({
       title={resetting ? `Reset ${person.name}'s password` : `Give ${person.name} an account`}
       onClose={onClose}
       footer={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="go" disabled={!complete || save.isPending} onClick={() => save.mutate()}>
-            {saveButtonLabel(save.isPending, resetting)}
-          </Button>
-        </>
+        <DialogActions
+          submitLabel={resetting ? 'Reset password' : 'Create account'}
+          pendingLabel="Saving…"
+          pending={save.isPending}
+          disabled={!complete}
+          onSubmit={() => save.mutate()}
+          onCancel={onClose}
+        />
       }
     >
       <ModalBody>
-        {save.error ? <ErrorBanner>{save.error.message}</ErrorBanner> : null}
+        <ErrorNotice error={save.error} />
         <p>
           {resetting
             ? 'This replaces the password they have and signs them out everywhere else. Yours is the one session that survives it.'
@@ -93,11 +95,4 @@ export function AccountDialog({
       </ModalBody>
     </Modal>
   )
-}
-
-/** What the Save button says it will do: a reset for somebody who already signs in. */
-function saveButtonLabel(saving: boolean, resetting: boolean): string {
-  if (saving) return 'Saving…'
-  if (resetting) return 'Reset password'
-  return 'Create account'
 }

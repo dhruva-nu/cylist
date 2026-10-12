@@ -39,7 +39,6 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from contextvars import ContextVar
-from functools import cached_property
 from typing import Any
 
 import httpx
@@ -121,21 +120,25 @@ class HostedMcp:
         self._transport = transport
         self._base_url = base_url
         self._caller = _Caller()
+        self._managers: dict[frozenset[str], StreamableHTTPSessionManager] | None = None
 
-    # Built on first use rather than here. Building one registers every tool,
-    # which costs about an eighth of a second each, and a host builds this
-    # whenever it builds an app — the backend's test suite builds one or two
-    # per test, and almost none of them ever serve /mcp.
-    @cached_property
-    def _managers(self) -> dict[frozenset[str], StreamableHTTPSessionManager]:
-        return {tools: _manager(self._caller, tools) for tools in TOOL_SETS}
-
+    # Built by each run rather than once here. Building one registers every
+    # tool, which costs about an eighth of a second each, and a host builds
+    # this whenever it builds an app — almost none of the backend's tests ever
+    # serve /mcp. And the SDK lets a session manager run only once in its
+    # life, while the backend's test suite runs the same app's tools in one
+    # test after another.
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
+        managers = {tools: _manager(self._caller, tools) for tools in TOOL_SETS}
         async with AsyncExitStack() as stack:
-            for manager in self._managers.values():
+            for manager in managers.values():
                 await stack.enter_async_context(manager.run())
-            yield
+            self._managers = managers
+            try:
+                yield
+            finally:
+                self._managers = None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -172,6 +175,8 @@ class HostedMcp:
                 return
 
             scopes = frozenset(str(scope) for scope in identity.get("scopes", []))
+            if self._managers is None:
+                raise RuntimeError("HostedMcp.run() has to be entered before it serves a request")
             manager = self._managers[tool_set(scopes)]
             caller_reset = _caller.set(client)
             try:

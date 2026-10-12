@@ -1,4 +1,4 @@
-"""``cylist hook`` — the Claude Code lifecycle hook, and its installer.
+"""``cylist hook`` — the Claude Code lifecycle hook, and the commands around it.
 
 Claude Code runs ``cylist hook`` on every prompt, tool call, stop and exit,
 with one JSON object on stdin saying which. This module turns those into
@@ -44,12 +44,9 @@ Four rules shape everything here, and they are worth more than any feature:
   refusable entirely with ``CYLIST_PRESENCE=off``. A background process on
   somebody's laptop has to be all of those things.
 
-State is one small file per session under ``$XDG_STATE_HOME/cylist/sessions``
-(``%LOCALAPPDATA%\\cylist\\sessions`` on Windows):
-which card the session is bound to and whether it has been nudged. ``/clear``
-ends one session and starts another in the same process; a ``handoff.json``
-written on the way out and read on the way in is what carries the binding
-across.
+What the hook remembers between events is in :mod:`.hook_state`; how it is
+written into Claude Code's settings, and taken out again, is in
+:mod:`.hook_install`.
 """
 
 from __future__ import annotations
@@ -58,20 +55,22 @@ import argparse
 import json
 import os
 import re
-import shutil
 import sys
 import uuid
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from cylist_cli import output, presence, system
+from cylist_cli.commands import hook_install, hook_state
+from cylist_cli.commands.hook_install import HOOK_EVENTS as HOOK_EVENTS
+from cylist_cli.commands.hook_install import NOTIFICATION_REASONS, HookInstall
+from cylist_cli.commands.hook_install import SLASH_COMMANDS as SLASH_COMMANDS
+from cylist_cli.commands.hook_install import claude_config_dir as claude_config_dir
+from cylist_cli.commands.hook_state import sessions_dir as sessions_dir
 from cylist_cli.context import Context
-from cylist_cli.errors import CylistError
 from cylist_cli.presence import narrate
+from cylist_cli.system import cylist_argv as cylist_argv
 
 HTTP_TIMEOUT = httpx.Timeout(1.5)
 """Total. A down backend costs a prompt this much and no more."""
@@ -85,11 +84,6 @@ that refuse instantly — the usual shape of a wrong one, a ``localhost`` with
 nothing behind it — cost nothing and leave the budget to the next; one that
 hangs spends it, and is the last thing tried.
 """
-
-HANDOFF_TTL = timedelta(seconds=5)
-"""How old a ``/clear`` handoff may be and still be believed."""
-
-FILE_MODE = 0o600
 
 REFERENCE = re.compile(r"^[A-Z][A-Z0-9]*-\d+$")
 """A card's reference. Only this binds; a UUID in ``tool_input.task`` does not."""
@@ -115,100 +109,12 @@ WRITE_TOOLS = frozenset(
 these on a *different* card has moved to it; an unbound session calling one is
 nudged, once, towards ``/work``."""
 
-NOTIFICATION_REASONS = {
-    "permission_prompt": "permission",
-    "idle_prompt": "idle",
-    "elicitation_dialog": "question",
-}
-
 TITLE_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
 """The only two events whose output may rename the session."""
-
-HOOK_EVENTS = (
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PermissionRequest",
-    "PostToolUse",
-    "Stop",
-    "Notification",
-    "SessionEnd",
-)
-NOTIFICATION_MATCHER = "|".join(NOTIFICATION_REASONS)
-HOOK_TIMEOUT_SECONDS = 3
-
-PERMISSION_TIMEOUT_SECONDS = 600
-"""The one hook allowed to be slow: ``PermissionRequest`` waits for a person.
-
-Claude Code's own default for a command hook, set explicitly so a reinstall
-over an older entry raises it from three. The daemon gives up at 580 and the
-server stops offering the prompt at 590, so the harness never has to kill the
-hook to be rid of it."""
 
 PERMISSION_ASK_WAIT = 585.0
 """How long the hook waits on the daemon's reply: the daemon's own 580, and a
 little for the reply to travel."""
-
-HOOK_TIMEOUTS = {"PermissionRequest": PERMISSION_TIMEOUT_SECONDS}
-"""Per event, where it differs from :data:`HOOK_TIMEOUT_SECONDS`."""
-
-WORK_COMMAND_FILE = """\
----
-description: Bind this session to a Cylist task and show it on the board
-argument-hint: <TASK-REF | off>
----
-This session is now bound to Cylist task $ARGUMENTS by the Cylist hook
-(the board shows it as working / waiting / done automatically; you do not
-need to report progress). If $ARGUMENTS is `off`, just acknowledge.
-Otherwise fetch the task with `get_task`, restate it in two lines, and
-begin. As you work, whenever you would open the code to answer a question,
-ask the project's docs first with `ask_docs`; an `ok` answer is the section
-to act on. Any other status means the docs do not know yet: find it in the
-code, then straight away `place_doc` what you found and make the edits it
-plans with `write_doc`, so the next agent to ask is answered — short,
-factual sentences, not a progress report.
-
-Writing the code is not finishing the card. Finish it by raising a pull
-request whose body shows the work running: a screenshot of every change
-that has a screen, and the checks you ran with their result. Then
-`add_comment` the pull request's link on the card and `move_task` it to the
-column the board keeps for work that is raised and waiting to be deployed —
-`get_project` names the columns, and on most boards it is `Dev`. If the
-work cannot be raised, leave the card where it is and say why.
-"""
-
-SETUP_COMMAND_FILE = """\
----
-description: Teach this repository's CLAUDE.md how to work with a Cylist project
-argument-hint: <PROJECT-KEY>
----
-Set the repository you are in up to work against Cylist project $ARGUMENTS.
-
-Run `cylist repo setup $ARGUMENTS` from the root of this repository. It checks
-the project exists before it writes anything, reads that project's columns,
-docs and skills off the board, and puts a block into CLAUDE.md fenced by
-`<!-- cylist:begin $ARGUMENTS -->` markers — appending it, or replacing the
-block it wrote last time, so nothing else in the file is touched and running
-it twice changes nothing. Add `--dry-run` to see the block without writing it,
-and `--path` to write a CLAUDE.md somewhere other than the repository root.
-
-Then say in two lines where it was written and what it now tells a session
-about $ARGUMENTS. Write none of the block by hand: it is read live off the
-board, and a version composed from memory is wrong. If `cylist` is not found,
-say that this machine has not had `cylist setup` run on it (or that the
-install is not on PATH) — do not improvise the block instead.
-"""
-
-SLASH_COMMANDS: tuple[tuple[str, str, str], ...] = (
-    ("work.md", WORK_COMMAND_FILE, "type /work <REF> in a session"),
-    ("cylist-setup.md", SETUP_COMMAND_FILE, "type /cylist-setup <KEY> in any repository"),
-)
-"""Every ``~/.claude/commands/*.md`` this installs: file name, body, what to say.
-
-A table rather than a line each inside the installer, so that shipping another
-slash command is a constant and an entry here, and ``uninstall`` cannot forget
-one that ``install`` writes.
-"""
 
 BRIEFED_STARTS = frozenset({"startup", "clear", "compact"})
 """The ``SessionStart`` sources that begin with no memory of the card, and so
@@ -241,6 +147,20 @@ def working_brief(ref: str) -> str:
         "names them; on most boards it is Dev). If the work cannot be raised, "
         "leave the card where it is and say why."
     )
+
+
+def hook_command() -> str:
+    """The absolute command Claude Code should run, as settings.json wants it."""
+    return hook_install.command_line([*cylist_argv(), "hook"])
+
+
+def install_hooks() -> HookInstall:
+    """Wire ``cylist hook`` into Claude Code's user settings, idempotently.
+
+    See :func:`.hook_install.install`. The command is built here, from where
+    this CLI is running now, so that a reinstall re-points the hook at it.
+    """
+    return hook_install.install(hook_command())
 
 
 def register(subparsers: Any) -> None:
@@ -313,6 +233,56 @@ def register(subparsers: Any) -> None:
     stop.set_defaults(handler=_stop, swallow_errors=False)
 
 
+# --- Installing and uninstalling ---------------------------------------------
+
+
+def _install(_: argparse.Namespace, ctx: Context) -> None:
+    report = install_hooks()
+
+    if ctx.as_json:
+        output.emit_json(report.as_json())
+        return
+    if report.added:
+        output.echo(
+            f"Added the Cylist hook to {report.settings_path} for: {', '.join(report.added)}."
+        )
+    else:
+        output.echo(f"The Cylist hook was already in {report.settings_path}; nothing to add.")
+    output.echo(f"Hook command: {report.command}")
+    for command in report.commands:
+        output.echo(f"{'Wrote' if command.wrote else 'Kept'} {command.path} — {command.hint}.")
+    output.echo("Open a new Claude Code session for the hooks to load.")
+
+
+def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
+    report = hook_install.uninstall()
+
+    # Uninstalling has to leave nothing running. Nothing would start a daemon
+    # again once the hooks are gone, so any still holding a session would sit
+    # there until their own idle window — which is a background process left
+    # behind by an uninstall, and there is no good version of that.
+    stopped = _stop_sessions(presence.supervisor.running_sessions())
+
+    if ctx.as_json:
+        output.emit_json(
+            {
+                "settings": str(report.settings_path),
+                "removed": sorted(set(report.removed)),
+                "commands_removed": [str(path) for path in report.commands_removed],
+                "daemons_stopped": stopped,
+            }
+        )
+        return
+    if stopped:
+        output.echo(f"Stopped {len(stopped)} presence daemon(s).")
+    if report.removed:
+        output.echo(f"Removed the Cylist hook from {report.settings_path}.")
+    else:
+        output.echo(f"No Cylist hook in {report.settings_path}; nothing to remove.")
+    for path in report.commands_removed:
+        output.echo(f"Removed {path}.")
+
+
 # --- The daemon and its handles ----------------------------------------------
 
 
@@ -361,11 +331,16 @@ def _status(_: argparse.Namespace, ctx: Context) -> None:
 
 def _stop(args: argparse.Namespace, ctx: Context) -> None:
     wanted = [args.session] if args.session else presence.supervisor.running_sessions()
-    stopped = [session for session in wanted if presence.supervisor.stop(session)]
+    stopped = _stop_sessions(wanted)
     if ctx.as_json:
         output.emit_json({"stopped": stopped})
         return
     output.echo(f"Stopped {len(stopped)} presence daemon(s)." if stopped else "Nothing to stop.")
+
+
+def _stop_sessions(sessions: list[str]) -> list[str]:
+    """Stop each of these sessions' daemons, and say which ones there were to stop."""
+    return [session for session in sessions if presence.supervisor.stop(session)]
 
 
 # --- The dispatcher ----------------------------------------------------------
@@ -400,7 +375,7 @@ class Hook:
         self.event = event
         self.name = str(event.get("hook_event_name") or "")
         self.session_id = str(event.get("session_id") or "")
-        self.state = _load_state(self.session_id) if self.session_id else {}
+        self.state = hook_state.load_state(self.session_id) if self.session_id else {}
         self.reply: dict[str, Any] = {}
 
     # -- Per event ------------------------------------------------------------
@@ -420,8 +395,8 @@ class Hook:
         if REFERENCE.match(wanted):
             self._bind(wanted)
         elif not self.task and self.event.get("source") == "clear":
-            carried = _take_handoff()
-            if carried:
+            carried = hook_state.take_handoff()
+            if carried and REFERENCE.match(carried):
                 self._bind(carried)
         if self.task:
             self._rename()
@@ -436,7 +411,7 @@ class Hook:
             if wanted.lower() == "off":
                 if self.task:
                     self._report_end("session_ended")
-                _delete_state(self.session_id)
+                hook_state.delete_state(self.session_id)
                 return
             self._bind(wanted.upper())
             self._rename()
@@ -455,9 +430,7 @@ class Hook:
         line rather than a hundred lines.
         """
         if self.task:
-            note = narrate.describe_tool(
-                str(self.event.get("tool_name") or ""), self.event.get("tool_input")
-            )
+            note = narrate.describe_tool(self._tool_name(), self.event.get("tool_input"))
             self._report_state("working", note=note)
 
     def _on_PermissionRequest(self) -> None:  # noqa: N802
@@ -479,13 +452,13 @@ class Hook:
         """
         if not self.task:
             return
-        tool = str(self.event.get("tool_name") or "")
+        tool = self._tool_name()
         tool_input = self.event.get("tool_input")
         prompt_id = str(uuid.uuid4())
         # Marked on the session so this tool's PostToolUse — which comes if
         # the terminal answers first — knows there is a prompt to take down.
         self.state["asking"] = prompt_id
-        _save_state(self.session_id, self.state)
+        hook_state.save_state(self.session_id, self.state)
         try:
             answer = presence.ask_permission(
                 self.session_id,
@@ -498,7 +471,7 @@ class Hook:
                 wait=PERMISSION_ASK_WAIT,
             )
         finally:
-            _forget_asking(self.session_id, prompt_id)
+            hook_state.forget_asking(self.session_id, prompt_id)
         decision = permission_decision(
             answer, tool, tool_input, self.event.get("permission_suggestions")
         )
@@ -511,25 +484,20 @@ class Hook:
             # terminal answered it first.
             presence.tool_ran(self.session_id)
         target = self._cylist_write_target()
-        if target and self.task and target != self.task:
+        if target is None:
+            # Nothing. An ordinary tool call used to cost a PUT once a minute,
+            # to prove the process was still alive; the socket proves that by
+            # existing. This is the event that got cheapest, and it is by far
+            # the most frequent one.
+            return
+        if not self.task:
+            self._nudge_towards(target)
+        elif target != self.task:
             # The session has walked to another card; the server ends the old
             # row. No rename here — PostToolUse cannot set a title; the next
             # prompt will.
             self._bind(target)
             self._report_state("working", bind=True)
-            return
-        if target and not self.task:
-            if not self.state.get("nudged"):
-                self.reply["systemMessage"] = (
-                    f"Tip: /work {target} shows this session on the board."
-                )
-                self.state["nudged"] = True
-                _save_state(self.session_id, self.state)
-            return
-        # Nothing. An ordinary tool call used to cost a PUT once a minute,
-        # to prove the process was still alive; the socket proves that by
-        # existing. This is the event that got cheapest, and it is by far
-        # the most frequent one.
 
     def _on_Stop(self) -> None:  # noqa: N802
         if self.task:
@@ -538,24 +506,21 @@ class Hook:
     def _on_Notification(self) -> None:  # noqa: N802
         if not self.task:
             return
-        kind = str(self.event.get("notification_type") or "")
-        reason = NOTIFICATION_REASONS.get(kind)
+        message = str(self.event.get("message") or "")
+        reason = NOTIFICATION_REASONS.get(str(self.event.get("notification_type") or ""))
         if reason is None:
-            message = str(self.event.get("message") or "").lower()
-            reason = "permission" if "permission" in message else "idle"
+            reason = "permission" if "permission" in message.lower() else "idle"
         # The harness's own words — "Claude needs your permission to use
         # Bash" — are the best line the card has for what it is waiting on.
-        said = narrate.clip(narrate.redact(str(self.event.get("message") or "")), narrate.NOTE_MAX)
+        said = narrate.clip(narrate.redact(message), narrate.NOTE_MAX)
         self._report_state("waiting", reason=reason, note=said or None)
 
     def _on_SessionEnd(self) -> None:  # noqa: N802
-        if not self.task:
-            _delete_state(self.session_id)
-            return
-        self._report_end("session_ended")
-        if self.event.get("reason") == "clear":
-            _write_handoff(self.task)
-        _delete_state(self.session_id)
+        if self.task:
+            self._report_end("session_ended")
+            if self.event.get("reason") == "clear":
+                hook_state.write_handoff(self.task)
+        hook_state.delete_state(self.session_id)
 
     # -- Pieces -----------------------------------------------------------------
 
@@ -567,8 +532,16 @@ class Hook:
     def _bind(self, ref: str) -> None:
         if self.task != ref:
             self.state["task"] = ref
-            self.state["bound_at"] = _now().isoformat()
-        _save_state(self.session_id, self.state)
+            self.state["bound_at"] = hook_state.now().isoformat()
+        hook_state.save_state(self.session_id, self.state)
+
+    def _nudge_towards(self, target: str) -> None:
+        """Suggest ``/work`` to an unbound session writing to a card — once."""
+        if self.state.get("nudged"):
+            return
+        self.reply["systemMessage"] = f"Tip: /work {target} shows this session on the board."
+        self.state["nudged"] = True
+        hook_state.save_state(self.session_id, self.state)
 
     def _rename(self) -> None:
         """Ask Claude Code to call the session what the card is called."""
@@ -578,7 +551,7 @@ class Hook:
             return
         self._hook_specific_output()["sessionTitle"] = self.task
         self.state["title_applied"] = self.task
-        _save_state(self.session_id, self.state)
+        hook_state.save_state(self.session_id, self.state)
 
     def _brief(self) -> None:
         """Put the card, and its docs, in front of the model."""
@@ -604,9 +577,12 @@ class Hook:
             return str(self.task)
         return str(self.event.get("session_title") or self.task)
 
+    def _tool_name(self) -> str:
+        return str(self.event.get("tool_name") or "")
+
     def _cylist_write_target(self) -> str | None:
         """The card a Cylist write tool just changed, if this was one."""
-        tool = str(self.event.get("tool_name") or "")
+        tool = self._tool_name()
         if not tool.startswith("mcp__cylist"):
             return None
         parts = tool.split("__")
@@ -628,13 +604,12 @@ class Hook:
 
         The daemon is asked first and never started: a session that is
         ending has no use for a new one, and spawning here would leave a
-        process behind to time itself out.
+        process behind to time itself out. For the same reason a daemon that
+        is not there sends this straight to HTTP rather than back through
+        :meth:`_report_state`, which would start one.
         """
-        if presence.finish(cylist_argv(), self.session_id, reason):
+        if presence.finish(self.session_id, reason):
             return
-        # Straight to HTTP, deliberately not back through `_report_state`: that would
-        # start a daemon, and a daemon for a session that is ending is a
-        # process left behind to time itself out.
         self._http_put("done", reason=reason)
 
     def _report_state(
@@ -660,7 +635,7 @@ class Hook:
         if not self.task:
             return
         if presence.report(
-            cylist_argv(),
+            cylist_argv,
             self.session_id,
             self.task,
             state,
@@ -694,6 +669,9 @@ class Hook:
             body["note"] = note
         with self.ctx.build_client(token, timeout=HTTP_TIMEOUT, budget=HTTP_BUDGET) as client:
             client.put(f"/tasks/{self.task}/agent-sessions/{self.session_id}", body)
+
+
+# --- The board's answer to a permission ----------------------------------------
 
 
 def permission_decision(
@@ -748,418 +726,16 @@ def _session_permissions(tool: str, tool_input: Any, suggestions: Any) -> list[d
     return [{"type": "addRules", "rules": [rule], "behavior": "allow", "destination": "session"}]
 
 
-# --- State on disk -------------------------------------------------------------
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
-def sessions_dir() -> Path:
-    """Where a session's binding is remembered between hook invocations.
-
-    One rule for every machine-local file this CLI writes, so that a Windows
-    install does not keep its sessions under ``%LOCALAPPDATA%`` and the
-    address it last reached under ``~/.local/state``. See
-    :func:`cylist_cli.system.state_dir`.
-    """
-    return system.state_dir() / "sessions"
-
-
-def _state_path(session_id: str) -> Path:
-    # A session id is a UUID from the harness, but it is still a path segment
-    # from somebody else's process: keep it to one flat file name.
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id)
-    return sessions_dir() / f"{safe}.json"
-
-
-def _load_state(session_id: str) -> dict[str, Any]:
-    try:
-        loaded = json.loads(_state_path(session_id).read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _save_state(session_id: str, state: dict[str, Any]) -> None:
-    _write_private(_state_path(session_id), json.dumps(state))
-
-
-def _forget_asking(session_id: str, prompt_id: str) -> None:
-    """Take a finished permission's mark off the session, if it is still there.
-
-    Read afresh rather than from the copy the hook loaded: other hooks may
-    have written the file while this one waited, and a session that ended
-    meanwhile has no file to bring back.
-    """
-    state = _load_state(session_id)
-    if state.get("asking") != prompt_id:
-        return
-    del state["asking"]
-    _save_state(session_id, state)
-
-
-def _delete_state(session_id: str) -> None:
-    _state_path(session_id).unlink(missing_ok=True)
-
-
-def _handoff_path() -> Path:
-    return sessions_dir() / "handoff.json"
-
-
-def _write_handoff(task: str) -> None:
-    _write_private(_handoff_path(), json.dumps({"task": task, "at": _now().isoformat()}))
-
-
-def _take_handoff() -> str | None:
-    """The card the session that just ``/clear``-ed was on, if that was seconds ago."""
-    path = _handoff_path()
-    try:
-        carried = json.loads(path.read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
-    finally:
-        path.unlink(missing_ok=True)
-    if not isinstance(carried, dict):
-        return None
-    try:
-        fresh = _now() - datetime.fromisoformat(str(carried.get("at"))) <= HANDOFF_TTL
-    except ValueError:
-        return None
-    task = str(carried.get("task") or "")
-    return task if fresh and REFERENCE.match(task) else None
-
-
-def _write_private(path: Path, content: str) -> None:
-    """Create 0600 rather than create-then-chmod, as ``config.save`` does."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(content)
-    os.chmod(path, FILE_MODE)  # noqa: PTH101 - an existing file keeps its old mode
-
-
-# --- Installing ------------------------------------------------------------------
-
-
-def claude_config_dir() -> Path:
-    root = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(root) if root else Path.home() / ".claude"
-
-
-def cylist_argv() -> list[str]:
-    """How to invoke this CLI, as an argv, without the subcommand.
-
-    Absolute, because a hook runs with whatever PATH the harness happened to
-    inherit, and ``uv tool install`` and a venv put ``cylist`` in different
-    places. Falls back to the module form for a checkout run with ``uv run``.
-
-    An argv rather than a string because two callers want it and they want
-    different things: the installer writes a shell command into settings.json,
-    and the supervisor execs a list.
-    """
-    found = shutil.which("cylist")
-    if found and _is_executable_image(found):
-        return [str(Path(found).resolve())]
-    invoked = Path(sys.argv[0])
-    if invoked.name == "cylist" and invoked.is_absolute():
-        return [str(invoked.resolve())]
-    return [str(Path(sys.executable).resolve()), "-m", "cylist_cli"]
-
-
-def _is_executable_image(found: str) -> bool:
-    """Whether ``CreateProcess`` can run this directly, which on Windows is a question.
-
-    ``PATHEXT`` puts ``.EXE`` ahead of ``.CMD``, so the shims pip and uv write
-    are found first and this is almost always true. When it is not — a batch
-    shim and no exe beside it — the module form is taken instead, because a
-    ``.cmd`` needs ``cmd.exe`` wrapped round it and a daemon does not need a
-    ``cmd.exe`` sitting in front of it for its whole life.
-    """
-    if sys.platform == "win32":
-        return Path(found).suffix.lower() not in {".cmd", ".bat"}
-    else:
-        return True
-
-
-def hook_command() -> str:
-    r"""The absolute command Claude Code should run, as settings.json wants it.
-
-    Quoted where it has to be. A POSIX install lands in a path without
-    spaces often enough to have got away with plain joining; ``C:\Users\Given
-    Name\...\cylist.exe`` does not, and an unquoted one would have the shell
-    run ``C:\Users\Given`` on every prompt.
-    """
-    return " ".join(_quote(part) for part in [*cylist_argv(), "hook"])
-
-
-def _quote(part: str) -> str:
-    """Double quotes, which are what both ``cmd.exe`` and a POSIX shell take.
-
-    Not ``shlex.quote``: it picks single quotes, which ``cmd.exe`` does not
-    treat as quoting at all. A Windows path cannot contain ``"`` — the
-    filesystem forbids it — so there is nothing here left to escape.
-    """
-    return f'"{part}"' if " " in part else part
-
-
-OUR_HOOK_COMMAND = re.compile(
-    r'^"?(?:.*[\\/])?(?:cylist(?:\.exe)?"?\s|.*-m\s+cylist_cli\s)hook$', re.IGNORECASE
-)
-r"""Any install of this hook, quoted or not, with or without the ``.exe``.
-
-Matched rather than suffix-tested because quoting moved the end of the
-string: ``"C:\...\cylist.exe" hook`` no longer ends in ``cylist hook``, and
-an installer that could not recognise its own earlier work would add a
-second copy of the hook on every run.
-
-Case-insensitive for the same reason, and it is not hypothetical:
-``shutil.which`` on Windows appends the extension *verbatim* from
-``%PATHEXT%``, which is conventionally upper case, so :func:`cylist_argv`
-routinely returns ``…\cylist.EXE``. Matching only ``.exe`` would mean
-``cylist setup`` — which promises to be safe to run again — adding a second
-hook every time it was run on Windows.
-"""
-
-
-def _is_our_hook(command: Any) -> bool:
-    return bool(OUR_HOOK_COMMAND.match(str(command or "").strip()))
-
-
-def _hook_entry(command: str, event: str) -> dict[str, Any]:
-    return {"type": "command", "command": command, "timeout": _timeout_for(event)}
-
-
-def _timeout_for(event: str) -> int:
-    return HOOK_TIMEOUTS.get(event, HOOK_TIMEOUT_SECONDS)
-
-
-def _our_entries(groups: list[Any]) -> list[dict[str, Any]]:
-    """The entries in one event's hook groups that run this hook.
-
-    Skips anything that is not the shape Claude Code writes rather than
-    failing on it: this is somebody's own settings file, and a stray value in
-    it is theirs to keep.
-    """
-    found: list[dict[str, Any]] = []
-    for group in groups:
-        if not isinstance(group, dict):
-            continue
-        for entry in group.get("hooks", []):
-            if isinstance(entry, dict) and _is_our_hook(entry.get("command")):
-                found.append(entry)
-    return found
-
-
-@dataclass(frozen=True)
-class CommandFile:
-    """One slash command the install wrote, and whether it had to."""
-
-    path: Path
-    wrote: bool
-    hint: str
-    """What to tell the user they can now type."""
-
-
-@dataclass(frozen=True)
-class HookInstall:
-    """What installing the hooks changed, for whoever wants to report it.
-
-    ``cylist setup`` prints one line of this among several; ``cylist hook
-    install`` prints all of it. Separating the doing from the saying is what
-    lets both exist without one of them shelling out to the other.
-    """
-
-    settings_path: Path
-    command: str
-    added: list[str]
-    commands: list[CommandFile]
-
-
-def install_hooks() -> HookInstall:
-    """Wire ``cylist hook`` into Claude Code's user settings, idempotently.
-
-    Never duplicates the hook and never touches anybody else's: an install
-    that finds ours already there only re-points it at wherever the binary is
-    now, which is what makes this safe to run again after a reinstall.
-    """
-    command = hook_command()
-    settings_path = claude_config_dir() / "settings.json"
-    settings = _read_settings(settings_path)
-    hooks = settings.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        raise _not_a_settings_file(settings_path, "'hooks' is not an object")
-
-    added: list[str] = []
-    for event in HOOK_EVENTS:
-        groups = hooks.setdefault(event, [])
-        if not isinstance(groups, list):
-            raise _not_a_settings_file(settings_path, f"hooks.{event} is not a list")
-        ours = _our_entries(groups)
-        if ours:
-            # Ours already, possibly from an older install elsewhere on disk:
-            # point it at where the binary is now rather than adding a second.
-            for entry in ours:
-                entry["command"] = command
-                entry["timeout"] = _timeout_for(event)
-            continue
-        fresh: dict[str, Any] = {"hooks": [_hook_entry(command, event)]}
-        if event == "Notification":
-            fresh = {"matcher": NOTIFICATION_MATCHER, **fresh}
-        groups.append(fresh)
-        added.append(event)
-
-    _write_settings(settings_path, settings)
-
-    return HookInstall(
-        settings_path=settings_path,
-        command=command,
-        added=added,
-        commands=_write_slash_commands(),
-    )
-
-
-def _write_slash_commands() -> list[CommandFile]:
-    """Put every ``SLASH_COMMANDS`` entry in ``commands/``, rewriting only what differs.
-
-    A file whose bytes already match is left alone so that an install says
-    "kept" rather than "wrote" — and so that an editor watching the directory
-    is not woken by a run that changed nothing. One edited by hand *is*
-    overwritten: the contract these carry has to be the one this version of
-    the CLI ships, not whatever somebody tried last month.
-    """
-    directory = claude_config_dir() / "commands"
-    directory.mkdir(parents=True, exist_ok=True)
-    written: list[CommandFile] = []
-    for name, body, hint in SLASH_COMMANDS:
-        path = directory / name
-        differs = not path.exists() or path.read_text("utf-8") != body
-        if differs:
-            path.write_text(body, "utf-8")
-        written.append(CommandFile(path=path, wrote=differs, hint=hint))
-    return written
-
-
-def _install(_: argparse.Namespace, ctx: Context) -> None:
-    report = install_hooks()
-
-    if ctx.as_json:
-        output.emit_json(
-            {
-                "settings": str(report.settings_path),
-                "command": report.command,
-                "added": report.added,
-                "commands": [str(command.path) for command in report.commands],
-            }
-        )
-        return
-    if report.added:
-        output.echo(
-            f"Added the Cylist hook to {report.settings_path} for: {', '.join(report.added)}."
-        )
-    else:
-        output.echo(f"The Cylist hook was already in {report.settings_path}; nothing to add.")
-    output.echo(f"Hook command: {report.command}")
-    for command in report.commands:
-        output.echo(f"{'Wrote' if command.wrote else 'Kept'} {command.path} — {command.hint}.")
-    output.echo("Open a new Claude Code session for the hooks to load.")
-
-
-def _uninstall(_: argparse.Namespace, ctx: Context) -> None:
-    settings_path = claude_config_dir() / "settings.json"
-    settings = _read_settings(settings_path)
-    hooks = settings.get("hooks")
-    removed: list[str] = []
-    if isinstance(hooks, dict):
-        removed = _remove_our_hooks(hooks)
-        _write_settings(settings_path, settings)
-
-    directory = claude_config_dir() / "commands"
-    removed_commands = [
-        directory / name for name, _, _ in SLASH_COMMANDS if (directory / name).exists()
-    ]
-    for path in removed_commands:
-        path.unlink(missing_ok=True)
-
-    # Uninstalling has to leave nothing running. Nothing would start a daemon
-    # again once the hooks are gone, so any still holding a session would sit
-    # there until their own idle window — which is a background process left
-    # behind by an uninstall, and there is no good version of that.
-    stopped = [
-        session
-        for session in presence.supervisor.running_sessions()
-        if presence.supervisor.stop(session)
-    ]
-
-    if ctx.as_json:
-        output.emit_json(
-            {
-                "settings": str(settings_path),
-                "removed": sorted(set(removed)),
-                "commands_removed": [str(path) for path in removed_commands],
-                "daemons_stopped": stopped,
-            }
-        )
-        return
-    if stopped:
-        output.echo(f"Stopped {len(stopped)} presence daemon(s).")
-    if removed:
-        output.echo(f"Removed the Cylist hook from {settings_path}.")
-    else:
-        output.echo(f"No Cylist hook in {settings_path}; nothing to remove.")
-    for path in removed_commands:
-        output.echo(f"Removed {path}.")
-
-
-def _remove_our_hooks(hooks: dict[str, Any]) -> list[str]:
-    """Take this hook out of every event, in place, and say which events had it.
-
-    Everybody else's entries stay exactly where they were. A group left with
-    no entries goes, and so does an event left with no groups, so that an
-    uninstall leaves the file as it would have been without us.
-    """
-    removed: list[str] = []
-    for event in list(hooks):
-        groups = hooks.get(event)
-        if not isinstance(groups, list):
-            continue
-        kept: list[Any] = []
-        for group in groups:
-            if not isinstance(group, dict):
-                kept.append(group)
-                continue
-            entries = [
-                entry
-                for entry in group.get("hooks", [])
-                if not (isinstance(entry, dict) and _is_our_hook(entry.get("command")))
-            ]
-            if len(entries) != len(group.get("hooks", [])):
-                removed.append(event)
-            if entries:
-                kept.append({**group, "hooks": entries})
-        if kept:
-            hooks[event] = kept
-        else:
-            del hooks[event]
-    return removed
-
-
-def _read_settings(path: Path) -> dict[str, Any]:
-    try:
-        loaded = json.loads(path.read_text("utf-8"))
-    except FileNotFoundError:
-        return {}
-    except ValueError as exc:
-        raise _not_a_settings_file(path, str(exc)) from exc
-    if not isinstance(loaded, dict):
-        raise _not_a_settings_file(path, "the top level is not an object")
-    return loaded
-
-
-def _write_settings(path: Path, settings: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n", "utf-8")
-
-
-def _not_a_settings_file(path: Path, why: str) -> CylistError:
-    return CylistError(f"{path} is not a Claude Code settings file I can edit: {why}.")
+# --- Names from before the split -----------------------------------------------
+# Session state and the installer were part of this module once, and the suite
+# still reaches them through it. Aliases rather than copies, so there is one
+# definition of each.
+
+_now = hook_state.now
+_state_path = hook_state.state_path
+_load_state = hook_state.load_state
+_save_state = hook_state.save_state
+_handoff_path = hook_state.handoff_path
+_write_handoff = hook_state.write_handoff
+_write_private = system.write_private
+_is_our_hook = hook_install.is_our_hook

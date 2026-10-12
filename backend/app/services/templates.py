@@ -6,7 +6,7 @@ in (:func:`permitted_columns`, asked at creation and on every move), the
 sub-stages a card passes through in each (:func:`landing_sub_stages`, asked
 whenever a card lands in a column — at creation and on every move — and
 loaded onto the card's own ``sub_statuses``; the leaving-is-refused half of
-that rule lives in :func:`app.services.tasks._refuse_stage_incomplete`, since
+that rule lives in :func:`app.services.tasks.moves.refuse_stage_incomplete`, since
 it only needs the stage already on the task, not the template lookup again),
 and — on the board's last column alone — which of its outcomes the cards may
 end on (:func:`require_outcome_permitted`).

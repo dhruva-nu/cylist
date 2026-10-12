@@ -32,6 +32,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMatchRoute } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
 import { api, type Task } from '../api/client'
+import { useIdentity } from '../api/queries'
 import { formatDue, formatDueLong, localToday } from './dates'
 import { Modal, ModalBody } from './Modal'
 import { OpenCard } from './OpenCard'
@@ -42,7 +43,7 @@ import styles from './Today.module.css'
 
 /** The gloss rather than the bare level, because a row shows the icon and this
  * is what a pointer or a screen reader gets instead of it. Worded as the board
- * words them — see `PRIORITY_LABELS` in `ProjectBoard.tsx`. */
+ * words them — see `priorityInFull` in `taskLabels.ts`. */
 const PRIORITY_LABELS = {
   p0: 'P0 — drop what you are doing',
   p1: 'P1 — as soon as P0 is clear',
@@ -136,7 +137,7 @@ function useTodaysWork(projectKey: string | null): TodayWork | null {
     queryFn: () => api.listColumns(projectKey ?? ''),
     enabled,
   })
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
 
   if (!tasks.data || !board.data) return null
   return todaysWork(tasks.data, board.data.columns, identity.data?.person ?? null, localToday())

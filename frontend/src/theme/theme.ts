@@ -7,13 +7,12 @@
  * the moment it was written, and the point of following the system is that it
  * keeps following when the system changes at dusk.
  *
- * Every touch of localStorage is wrapped, because reading it throws outright
- * in a Safari private window and in Chrome with third-party cookies blocked —
- * a preference nobody can save is a smaller problem than a page that will not
- * start.
+ * Remembered through `storage.ts`, so a browser that refuses localStorage
+ * still gets a theme — just not a remembered one.
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { readStored, writeStored } from '../storage'
 
 export type ThemeChoice = 'light' | 'dark' | 'system'
 
@@ -26,21 +25,8 @@ function isChoice(value: unknown): value is ThemeChoice {
 }
 
 export function readTheme(): ThemeChoice {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    return isChoice(stored) ? stored : 'system'
-  } catch {
-    return 'system'
-  }
-}
-
-function writeTheme(choice: ThemeChoice): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, choice)
-  } catch {
-    // Nothing to do and nothing worth saying: the theme still applies to this
-    // tab, it just will not be remembered for the next one.
-  }
+  const stored = readStored(STORAGE_KEY)
+  return isChoice(stored) ? stored : 'system'
 }
 
 function stamp(choice: ThemeChoice): void {
@@ -69,7 +55,7 @@ export function useTheme(): { theme: ThemeChoice; setTheme: (choice: ThemeChoice
   useEffect(() => stamp(theme), [theme])
 
   const setTheme = useCallback((choice: ThemeChoice) => {
-    writeTheme(choice)
+    writeStored(STORAGE_KEY, choice)
     setThemeState(choice)
   }, [])
 

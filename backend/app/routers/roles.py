@@ -20,11 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.errors import ForbiddenError
 from app.db import SessionDependency
 from app.models.person import Person
 from app.models.project import Project
 from app.models.role import ProjectRole
+from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.roles import (
     MemberRoleUpdate,
@@ -64,32 +64,20 @@ async def resolved_role(
     return await roles.resolve(session, project, role_ref)
 
 
-async def project_admin(
-    project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = SessionDependency,
-) -> Principal:
-    """Admit only a caller who may manage this project's roles.
+project_admin = guards.project_admin_only("manage its roles", Scope.WRITE)
+"""Admit only a caller who may manage this project's roles.
 
-    Two guards in one, and they answer different questions. ``Scope.WRITE``
-    asks what the *credential* may do, so a read-only token is refused here as
-    it is everywhere. The admin check asks who the *person* behind it is on
-    this board — which is the question the ticket asks, and the one scopes
-    have never been able to answer, since they say nothing about which project
-    is in front of them.
+Two guards in one, and they answer different questions. ``Scope.WRITE`` asks
+what the *credential* may do, so a read-only token is refused here as it is
+everywhere. The admin check asks who the *person* behind it is on this board —
+which is the question the ticket asks, and the one scopes have never been able
+to answer, since they say nothing about which project is in front of them.
 
-    A credential acts as whoever minted it, so an agent token owned by an
-    admin passes: that is the admin working through a program, and it is what
-    ``api_token.person_id`` has meant since CYLIST-44. Keeping an agent out
-    while letting its owner in is a job for a narrower scope on the token, not
-    for this.
-    """
-    if not await roles.may_administer(session, project, principal):
-        raise ForbiddenError(
-            f"Only an admin of {project.key} can manage its roles.",
-            details={"project_key": project.key},
-        )
-    return principal
+A credential acts as whoever minted it, so an agent token owned by an admin
+passes: that is the admin working through a program, and it is what
+``api_token.person_id`` has meant since CYLIST-44. Keeping an agent out while
+letting its owner in is a job for a narrower scope on the token, not for this.
+"""
 
 
 def _role_read(role: ProjectRole) -> RoleRead:

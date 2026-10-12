@@ -22,7 +22,6 @@ The two refusals are deliberately different shapes:
 
 from __future__ import annotations
 
-import logging
 from urllib.parse import urlsplit
 
 from fastapi import WebSocket
@@ -34,8 +33,6 @@ from app.auth.scopes import Scope
 from app.config import Settings
 from app.core.errors import UnauthorizedError
 from app.models.activity import Channel
-
-logger = logging.getLogger(__name__)
 
 # --- Close codes -----------------------------------------------------------
 # 4000-4999 is the range an application may define. These are the vocabulary
@@ -73,6 +70,10 @@ BAD_ORIGIN = 1008
 the handshake completes and the application range is not available there."""
 
 
+class SocketForbiddenError(Exception):
+    """Authenticated, and still not allowed. Becomes :data:`FORBIDDEN`."""
+
+
 def origin_allowed(websocket: WebSocket, settings: Settings) -> bool:
     """Whether this handshake's ``Origin`` may open a socket here.
 
@@ -108,10 +109,9 @@ async def admit(
 ) -> Principal:
     """Resolve and authorise the caller of an accepted socket, or raise.
 
-    Raises :class:`UnauthorizedError` or :class:`PermissionError`-shaped
-    refusals for the caller to turn into a close code; it does not close the
-    socket itself, because the handler owns that and has a frame to send
-    first.
+    Raises :class:`UnauthorizedError` or :class:`SocketForbiddenError` for the
+    caller to turn into a close code; it does not close the socket itself,
+    because the handler owns that and has a frame to send first.
     """
     principal = await resolve_principal(websocket, session)
 
@@ -122,10 +122,6 @@ async def admit(
     if principal.missing(frozenset({scope})):
         raise SocketForbiddenError("This token is not allowed to open that socket.")
     return principal
-
-
-class SocketForbiddenError(Exception):
-    """Authenticated, and still not allowed. Becomes :data:`FORBIDDEN`."""
 
 
 __all__ = [

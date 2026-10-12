@@ -3,14 +3,14 @@
   position: fixed;
   top: 8px;
   left: 8px;
-  z-index: 30;
+  z-index: var(--layer-skip-link);
   padding: 10px 16px;
   border-radius: var(--radius-control);
   background: var(--paper);
   box-shadow: var(--shadow-lg);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-decoration: none;
   transform: translateY(-200%);
 }
@@ -79,7 +79,7 @@
 .top {
   position: sticky;
   top: 0;
-  z-index: 5;
+  z-index: var(--layer-raised);
   background: var(--bg);
 }
 
@@ -149,8 +149,8 @@
   background: none;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 20px;
-  font-weight: 800;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-heavy);
   text-decoration: none;
   cursor: pointer;
 }
@@ -163,8 +163,8 @@
   border-radius: var(--radius-control);
   background: var(--brand);
   color: var(--on-brand);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-heavy);
 }
 
 .right {
@@ -181,14 +181,14 @@
   margin: 0 auto;
   padding: 6px 24px 0;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .crumbs a {
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--ink-2);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: none;
 }
 
@@ -199,7 +199,7 @@
 
 .crumbs b {
   color: var(--ink);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .separator {
@@ -227,7 +227,7 @@
   position: absolute;
   top: 100%;
   left: 0;
-  z-index: 20;
+  z-index: var(--layer-dialog);
   min-width: 220px;
   padding-top: 6px;
   animation: switcher-in 0.16s ease-out;
@@ -270,7 +270,7 @@
 
 .crumbs .switcherList a.switcherActive {
   color: var(--ink);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 /* Where a page longer than the window scrolls, now that `#root` is exactly the
@@ -401,7 +401,7 @@
   max-width: 62ch;
   margin: 0;
   color: var(--ink-2);
-  font-size: 16px;
+  font-size: var(--text-xl);
 }
 
 .actions {

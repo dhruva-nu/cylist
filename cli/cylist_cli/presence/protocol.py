@@ -138,6 +138,11 @@ def ask_message(
     )
 
 
+def ping_message(session: str) -> str:
+    """Asks for the ack and nothing else: what ``cylist hook status`` shows."""
+    return _line({"t": "ping", "session": session})
+
+
 def ran_message(session: str) -> str:
     """A tool just ran, so any permission still on the card was answered in the terminal."""
     return _line({"t": "ran", "session": session})

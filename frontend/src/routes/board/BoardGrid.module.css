@@ -1,0 +1,69 @@
+/* `safe center` rather than plain `center`: this row scrolls, and a centred
+   flex row that overflows spills equally off both ends — the leftmost column
+   ends up behind the start of the scroll range, where nothing can reach it.
+   `safe` centres while the columns fit and falls back to the left edge the
+   moment they do not. */
+.board {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+
+  /* The columns take the board's height rather than naming one of their own,
+     which is what makes the board exactly as tall as the window leaves it. */
+  align-items: stretch;
+  justify-content: safe center;
+  min-height: 0;
+  /* The pair of `min-height: 0`: a flex item will not shrink below its content
+     on either axis without being told it may, and a board that cannot be
+     narrower than its columns cannot scroll them. */
+  min-width: 0;
+
+  /* Wide enough for a focus ring: this scrolls, so anything nearer the edge
+     than the ring is thick gets clipped rather than merely crowded. */
+  padding: 6px 6px 20px;
+
+  /* Both axes named, as in `.cards`: a lone `overflow-x` computes the other to
+     `auto` too, and it may as well say which one it means. Sideways to reach a
+     column past the edge; downwards only on a window too short for the floor a
+     column stops shrinking at. */
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* --- Grouped by goal ------------------------------------------------------
+
+   The board, read by goal instead of by column. The columns are still the
+   columns — same order, same fold, same drop rules — but each one is split
+   into a stack of cells, one per goal, with a heading above the lot.
+
+   The whole thing scrolls as one box rather than lane by lane: two rows that
+   scrolled sideways independently would stop being columns the moment either
+   of them moved. */
+.lanes {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 6px 20px;
+  overflow: auto;
+}
+
+/* One grid, shared by the heading row and every lane, so a lane's cells sit
+   under the columns they belong to. The track list is written in by the board
+   from the columns themselves — 52px where one is folded, and a range where it
+   is not — because only the board knows which are folded. */
+.laneRow {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: safe center;
+  min-width: min-content;
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

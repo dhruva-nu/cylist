@@ -1,0 +1,427 @@
+/* One height for every column, and a width that shares out the row.
+
+   The height comes from the board, which takes what the window leaves under
+   the bar and the heading. It used to be `100vh` less a number standing for
+   everything above it, which is a number that is wrong the day anything up
+   there changes — as it was the day the heading lost its paragraph.
+
+   What matters is only that the height does not answer to the cards: a column
+   sized to its own changed height every time one was dropped, and moved every
+   neighbour on the row while the pointer was still over it. The cards scroll
+   inside instead.
+
+   The width has no such problem, because it answers to how many columns are
+   open rather than to what any of them is holding — so it grows to fill the
+   board when three columns are showing and shrinks when eight are. Between a
+   floor and a ceiling: a card stops being readable under about 280px, and past
+   400px a column is mostly the empty right-hand side of its own cards. Past
+   the floor the board scrolls rather than squeezing any further. */
+.column {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  min-width: 280px;
+  max-width: 400px;
+  min-height: 320px;
+
+  /* No box. The cards are the surface; a column is the heading over them and
+     the space they stand in, and a card on paper inside a box of paper was
+     two outlines saying one thing. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+
+  /* So a fold wipes rather than spills: while the box is narrowing, whatever
+     is inside it is still laid out at its own width. */
+  overflow: hidden;
+  transition:
+    flex-basis 240ms ease,
+    min-width 240ms ease,
+    max-width 240ms ease;
+}
+
+/* Folded. All three widths move together and land on the same number, and
+   they have to: min-width beats max-width in the cascade, so animating one
+   without the other would hold the column open at 280px for the whole of a
+   fold that is supposedly closing it. */
+.collapsed {
+  flex-basis: 52px;
+  min-width: 52px;
+  max-width: 52px;
+}
+
+.over {
+  border-color: var(--line-2);
+  background: color-mix(in srgb, var(--paper-2) 60%, transparent);
+}
+
+/* What a folded column holds: narrowed to what you need to recognise it and
+   to drop onto it. The box around it keeps the row's height, so folding a
+   column changes its width and nothing else — which is the whole of what
+   there is to animate.
+
+   Both fillings are sized in their own right rather than to the box, so
+   neither reflows while the box is on its way between the two widths: the
+   rail is 52px throughout, and the unfolded column never narrows past the
+   width it would be readable at anyway. What is too wide to fit yet is
+   clipped, so a fold reads as a wipe. */
+.rail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  width: 52px;
+  min-height: 0;
+}
+
+/* `flex: 1` rather than `height: 100%`, for both: the column no longer names a
+   height of its own — it takes the board's — and a percentage wants a number
+   to be a percentage of. */
+.unfolded {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-width: 280px;
+  min-height: 0;
+}
+
+/* The two fillings are a swap, and a swap in the middle of a resize is a
+   flicker unless it is faded. Keyed in the markup so React remounts them,
+   which is what runs this again on every fold rather than only the first. */
+.rail,
+.unfolded {
+  animation: unfurl 240ms ease;
+}
+
+@keyframes unfurl {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.railBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.railBody:hover {
+  color: var(--brand-ink);
+}
+
+/* Reading upwards, which is the convention every vertical tab strip uses: the
+   name starts at the bottom of the rail and runs towards the count. */
+.railName {
+  color: var(--ink);
+  font-size: var(--text-lg);
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.railAdd {
+  padding: 0 0 12px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.railAdd:hover {
+  color: var(--go);
+}
+
+.head {
+  padding: 6px 4px 10px;
+}
+
+.headRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Grip rather than the whole header: buttons inside the header still need to
+   be their own click targets, not the start of a drag. */
+.dragHandle {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragHandle:hover {
+  color: var(--ink-2);
+  background: var(--paper-2);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.columnDragging {
+  opacity: 0.5;
+}
+
+.headRow h3 {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+}
+
+.headActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.count {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.head p {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-md);
+}
+
+/* Both axes named. A lone `overflow-y` computes the other axis to `auto` as
+   well, which gave a column a sideways scrollbar of its own and let its cards
+   be dragged out of view inside it. */
+.cards {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 60px;
+  padding: 4px 2px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* A divided column: one stack per way the work can have ended, filling the
+   column between them the way a single stack of cards fills it. Padded and
+   gapped rather than run edge to edge, so the boxes inside read as sitting
+   in the column rather than as the column itself cut into thirds. */
+.sections {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+}
+
+/* Its own bordered, rounded panel — not a rule between two otherwise
+   identical stretches of the column. A 1px line reads as noise the moment
+   there is a third section to tell apart from the other two; a box that
+   looks like a place of its own reads at a glance regardless of how many
+   there are. */
+.section {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+}
+
+/* The heading sits on its own faint strip so it reads as the section's own
+   header rather than a caption floating over the cards. Sentence case, like
+   every other heading on the board. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 4px 10px 4px 4px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+}
+
+/* The label between the fold button and the count, given the room to take —
+   and to give up first, eliding, when the section is narrower than its name. */
+.sectionLabel {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Its own surface against the tinted strip round it, the way `.count`
+   everywhere else on the board sits against `--paper-2`. */
+.sectionHead .count {
+  background: var(--paper);
+}
+
+/* The same welcome a column gives a card held over it, drawn a section at a
+   time — otherwise a card in the air over a divided column has three targets
+   and no way to tell which one has it. A ring rather than just a wash, so it
+   reads next to the section's own border rather than blending into it. */
+.sectionOver {
+  border-color: var(--ink-3);
+  box-shadow: inset 0 0 0 1px var(--ink-3);
+}
+
+.sectionOver .sectionHead {
+  background: var(--paper-2);
+}
+
+.sectionOver .cards {
+  background: var(--paper-2);
+}
+
+/* Inside a section the stack is as short as its cards: the section's own
+   heading is already the floor a drop can land on. */
+.section .cards {
+  flex: 0 0 auto;
+  min-height: 34px;
+  overflow: visible;
+}
+
+.addTask {
+  padding: 8px 6px 14px;
+  border: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.addTask:hover {
+  color: var(--go);
+}
+
+/* A column being dropped into takes a faint ground, and the line under it
+   one step more ink to stay readable on it. */
+.over .addTask {
+  color: var(--ink-2);
+}
+
+.foot {
+  height: 10px;
+}
+
+/* The line at the foot of a column that lets its on-hold cards out.
+
+   Quiet on purpose: it is the last thing in the column and it is about work
+   that is not moving, so it reads at the weight of a caption until you go
+   looking for it, and takes the hold tone only on hover — the colour is the
+   answer to "what is this about", which is a question you ask with the
+   pointer already on it.
+
+   Full width and left-aligned so it lines up with the cards above rather than
+   floating in the middle of the column, and separated by a hairline: without
+   one it reads as another card in the stack, which is exactly what it is not. */
+.holdFoot {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  margin: 0 4px;
+  padding: 8px 0 10px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.holdFoot:hover {
+  color: var(--hold);
+}
+
+/* The sign, sized to be the thing you aim at. Tabular so + and − occupy the
+   same width and the words beside them do not shift as it opens and shuts. */
+.holdFoot > span {
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* The same correction .addTask makes, for the same reason. */
+.over .holdFoot {
+  color: var(--ink-2);
+}
+
+/* A column the card in the air is not allowed in — see `forbiddenColumnsFor`. Faded
+   rather than hidden: the board keeps its shape, and a column that vanished
+   mid-drag would move every other one out from under the pointer. */
+.forbidden {
+  opacity: 0.35;
+  filter: saturate(0.4);
+}
+
+/* A column drawn in halves. The heading keeps its own box and stops there;
+   a lane's cell has no heading and is as tall as the cards in it, with a
+   floor so an empty lane is still something you can drop a card onto. */
+.headOnly {
+  min-height: 0;
+}
+
+.headOnly .unfolded {
+  flex: none;
+}
+
+.cardsOnly {
+  min-height: 96px;
+}
+
+.cardsOnly .cards {
+  overflow: visible;
+  padding-top: 12px;
+}
+
+/* A folded column's share of a lane: a strip wide enough to drop a card on,
+   with the count of what is already in it. */
+.railCell {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  min-height: 96px;
+  color: var(--ink-3);
+}

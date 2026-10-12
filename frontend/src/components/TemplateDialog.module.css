@@ -25,13 +25,13 @@
 .rowText strong {
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .muted {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .columnToggles {
@@ -48,8 +48,8 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -91,7 +91,7 @@
 .stageHead strong {
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .checklistEditor {
@@ -114,7 +114,7 @@
 .checklistTitle {
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .composer {

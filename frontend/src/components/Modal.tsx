@@ -179,6 +179,52 @@ export function Modal({
   )
 }
 
+/**
+ * The footer most dialogs end in: Cancel, then the one button that does what
+ * the dialog is for.
+ *
+ * The button is held down while its request is under way and says so, which is
+ * what stops a second click sending the same thing twice. `note` is anything
+ * worth saying beside the buttons — why the button is not ready yet, say.
+ */
+export function DialogActions({
+  submitLabel,
+  pendingLabel,
+  pending,
+  disabled = false,
+  danger = false,
+  note,
+  onSubmit,
+  onCancel,
+}: {
+  submitLabel: string
+  /** What the button says while its request is out — "Saving…". */
+  pendingLabel: string
+  pending: boolean
+  /** Not ready to submit, for a reason other than being under way. */
+  disabled?: boolean
+  /** A destructive action, drawn in the danger colour rather than as the go button. */
+  danger?: boolean
+  note?: ReactNode
+  onSubmit: () => void
+  onCancel: () => void
+}) {
+  return (
+    <>
+      {note}
+      <Button onClick={onCancel}>Cancel</Button>
+      <Button
+        variant={danger ? 'plain' : 'go'}
+        danger={danger}
+        disabled={pending || disabled}
+        onClick={onSubmit}
+      >
+        {pending ? pendingLabel : submitLabel}
+      </Button>
+    </>
+  )
+}
+
 export function ModalBody({ children }: { children: ReactNode }) {
   return <div className={styles.body}>{children}</div>
 }

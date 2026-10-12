@@ -44,7 +44,7 @@ import { localToday } from './dates'
 import { Modal, ModalBody } from './Modal'
 import { OpenCard } from './OpenCard'
 import { SidebarAction } from './SidebarSection'
-import { Button, EmptyState, ErrorBanner } from './ui'
+import { Button, EmptyState, ErrorNotice } from './ui'
 import styles from './DayReport.module.css'
 
 /** The zone this browser is in, as an IANA name the server can cut a day by. */
@@ -208,7 +208,7 @@ function ReportDialog({
           </Button>
         </div>
 
-        {report.error ? <ErrorBanner>{report.error.message}</ErrorBanner> : null}
+        <ErrorNotice error={report.error} />
         {loadedReport === undefined && report.isFetching ? (
           <EmptyState>Reading the day…</EmptyState>
         ) : null}

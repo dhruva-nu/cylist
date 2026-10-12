@@ -31,8 +31,9 @@ from contextlib import asynccontextmanager
 
 import pytest
 from argon2 import PasswordHasher, profiles
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -44,6 +45,9 @@ from app.db import Database
 from app.main import create_app
 from app.models import Base
 from app.models.person import Person, PersonKind
+from app.realtime.hub import Hub
+from app.services.doc_engine import engine_for
+from app.services.hook_delivery import Courier
 
 # Before anything below hashes a password. The deployed parameters cost ~70 ms
 # a hash or a check, and the suite does one or more of those in nearly every
@@ -162,10 +166,16 @@ async def database(settings: Settings) -> AsyncIterator[Database]:
 
 @pytest.fixture(autouse=True)
 async def clean_tables(database: Database) -> AsyncIterator[None]:
-    """Empty every table before each test so order never matters."""
-    tables = ", ".join(f'"{table.name}"' for table in reversed(Base.metadata.sorted_tables))
+    """Empty every table before each test so order never matters.
+
+    DELETE rather than TRUNCATE: a test leaves a handful of rows behind, and
+    TRUNCATE replaces every table's files whether it held any or not, which
+    cost more than the deleting. Children before parents, so no foreign key
+    is left pointing at a deleted row.
+    """
     async with database.engine.begin() as connection:
-        await connection.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        for table in reversed(Base.metadata.sorted_tables):
+            await connection.execute(table.delete())
     yield
 
 
@@ -174,6 +184,44 @@ async def session(database: Database) -> AsyncIterator[AsyncSession]:
     """A session for tests that talk to the database directly."""
     async with database.session() as db_session:
         yield db_session
+
+
+APP_STATE = {"settings", "hub", "courier", "hook_transport", "doc_engine", "metrics", "mcp"}
+"""Everything ``create_app`` hangs on ``app.state``, which :func:`as_new` must
+know how to put back. Checked, so a new one cannot be added and quietly carry
+one test's leftovers into the next."""
+
+
+def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
+    """Give an already-built app the state a freshly built one would have.
+
+    What the session-scoped ``app`` fixture is for. Building an app is cheap,
+    but FastAPI works out each route's dependencies and response models the
+    first time an app routes a request — some 80 ms for this one — and keeps
+    the result on that app. A new app per test paid it in every test, which was
+    most of the suite's time.
+    """
+    # Less the database, which is put there by whoever skips the lifespan.
+    built = set(app.state._state) - {"database"}
+    assert built == APP_STATE, (
+        f"create_app sets {sorted(built ^ APP_STATE)} on app.state; "
+        "teach as_new() to reset it and add it to APP_STATE"
+    )
+    app.state.settings = settings
+    app.state.database = database
+    app.state.hub = Hub()
+    app.state.courier = Courier()
+    app.state.hook_transport = None
+    app.state.doc_engine = engine_for(settings)
+    # In place, not replaced: MetricsMiddleware holds this object.
+    app.state.metrics.__init__()
+    return app
+
+
+@pytest.fixture(scope="session")
+def shared_app(settings: Settings) -> FastAPI:
+    """One app for every test of a worker that uses the default settings."""
+    return create_app(settings)
 
 
 @asynccontextmanager
@@ -185,9 +233,14 @@ async def client_for(settings: Settings, database: Database) -> AsyncIterator[As
     inlined into the fixture because a test that needs different configuration
     — a smaller upload cap, say — has to build its own app to get it.
     """
-    app = create_app(settings)
-    app.state.settings = settings
-    app.state.database = database
+    async with client_on(as_new(create_app(settings), settings, database)) as http:
+        yield http
+
+
+@asynccontextmanager
+async def client_on(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """An HTTP client wired to an app that :func:`as_new` has prepared."""
+    database: Database = app.state.database
     # The lifespan would have done this; without it the shared pool has
     # nobody to tell about a commit. Rebound per test, so each app's sockets
     # hear only their own test's writes.
@@ -264,9 +317,15 @@ async def bootstrap_sign_in(client: AsyncClient) -> AsyncClient:
 
 
 @pytest.fixture
-async def client(settings: Settings, database: Database) -> AsyncIterator[AsyncClient]:
+def app(shared_app: FastAPI, settings: Settings, database: Database) -> FastAPI:
+    """The worker's app, reset to how a new deployment starts."""
+    return as_new(shared_app, settings, database)
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """An HTTP client wired to the app, sharing the test database."""
-    async with client_for(settings, database) as http:
+    async with client_on(app) as http:
         yield http
 
 
@@ -283,7 +342,7 @@ async def owner(signed_in: AsyncClient) -> Person:
 
 
 @pytest.fixture
-async def other_client(settings: Settings, database: Database) -> AsyncIterator[AsyncClient]:
+async def other_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """A second browser against the same deployment, signed in as nobody yet.
 
     Not ``client``: that fixture and ``signed_in`` are the same object, so a
@@ -292,7 +351,7 @@ async def other_client(settings: Settings, database: Database) -> AsyncIterator[
     goes on to use the first — and then fails somewhere that looks nothing
     like the mistake.
     """
-    async with client_for(settings, database) as http:
+    async with client_on(app) as http:
         yield http
 
 
