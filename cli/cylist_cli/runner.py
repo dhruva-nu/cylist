@@ -59,14 +59,14 @@ from claude_agent_sdk import (
     create_sdk_mcp_server,
     tool,
 )
-from claude_agent_sdk.types import PermissionRuleValue, PermissionUpdate
+from claude_agent_sdk.types import PermissionMode, PermissionRuleValue, PermissionUpdate
 
 from cylist_cli import endpoints, output
 from cylist_cli.client import Client
 from cylist_cli.context import Context
 from cylist_cli.errors import CylistError
 from cylist_cli.presence import narrate, protocol
-from cylist_cli.presence.machine import KEEPALIVE_EVERY
+from cylist_cli.presence.machine import KEEPALIVE_EVERY, backoff
 from cylist_cli.presence.transcript import FeedEntry, Narrator
 
 logger = logging.getLogger(__name__)
@@ -83,8 +83,6 @@ CONNECT_TIMEOUT = 10.0
 FIRST_LINK_WAIT = 20.0
 """Seconds to get onto the card before giving up. The agent does not start
 until it is: a question asked before the session has a row would be refused."""
-
-BACKOFF = (0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
 
 REFUSALS = frozenset({"unauthorized", "forbidden", "not_found"})
 """Error frames that no reconnect will cure."""
@@ -350,8 +348,8 @@ class Link:
                     await self._pump(socket, bridge)
                 if self.refused is not None or self._bye_sent.is_set():
                     return
+            await asyncio.sleep(backoff(attempt))
             attempt += 1
-            await asyncio.sleep(BACKOFF[min(attempt, len(BACKOFF)) - 1])
 
     async def _pump(self, socket: Any, bridge: Bridge) -> None:
         reader = asyncio.ensure_future(self._read(socket, bridge))
@@ -527,7 +525,7 @@ async def run_agent(
     prompt: str,
     *,
     model: str | None = None,
-    permission_mode: str | None = None,
+    permission_mode: PermissionMode | None = None,
     interactive: bool = True,
 ) -> None:
     """Put a session on the card, run the agent until it is done, take it off."""
@@ -551,7 +549,7 @@ async def run_agent(
         session_id=session_id,
         cwd=str(Path.cwd()),
         model=model,
-        permission_mode=permission_mode,  # type: ignore[arg-type]
+        permission_mode=permission_mode,
         system_prompt={"type": "preset", "preset": "claude_code", "append": system_note(ref)},
         mcp_servers={"board": board_server(http, ref, session_id)},
         allowed_tools=[ASK_TOOL],
