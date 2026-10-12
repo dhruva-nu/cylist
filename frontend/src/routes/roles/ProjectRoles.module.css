@@ -2,7 +2,7 @@
   max-width: 62ch;
   margin-bottom: 14px;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* Said in a quiet box rather than as an error: a reader who is not an admin
@@ -28,7 +28,7 @@
 .title {
   overflow: hidden;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -36,11 +36,11 @@
 .you {
   padding: 1px 6px;
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .picker select {
@@ -50,7 +50,7 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .srOnly {
@@ -98,8 +98,8 @@
   color: var(--ink);
   font: inherit;
   font-family: var(--font-ui);
-  font-size: 14.5px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
 }
@@ -111,7 +111,7 @@
 .listRow.selected {
   background: var(--brand-soft);
   color: var(--brand-ink);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .listName {
@@ -128,8 +128,8 @@
 .listCount {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .listRow.selected .listCount {
@@ -193,7 +193,7 @@
 }
 
 .detailTitle h2 {
-  font-size: 20px;
+  font-size: var(--text-3xl);
 }
 
 /* --- Who holds it -------------------------------------------------------- */
@@ -245,8 +245,8 @@
 .axis > header b {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .axis > header .count {
@@ -256,7 +256,7 @@
 .columns {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .columns th,
@@ -270,8 +270,8 @@
 .columns thead th {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .columns thead th:not(:first-child),
@@ -284,8 +284,8 @@
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -337,7 +337,7 @@
 
 .levels b {
   font-family: var(--font-ui);
-  font-size: 13.5px;
+  font-size: var(--text-base);
 }
 
 /* --- Pieces the detail pane shares --------------------------------------- */
@@ -345,7 +345,7 @@
 .dot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   flex: none;
 }
 
@@ -354,19 +354,19 @@
    the same shape of question about the line they sit on. */
 .count {
   padding: 1px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 
 .why {
   margin: 8px 0 0;
   color: var(--ink-3);
-  font-size: 13.5px;
+  font-size: var(--text-base);
 }
 
 .permissions {
@@ -409,12 +409,12 @@
 
 .tick b {
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .summary {
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 /* Said before the round trip rather than after it, so "Reviewer" and
@@ -422,7 +422,7 @@
 .clash {
   margin-top: -6px;
   color: var(--blocked);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* --- The end of a project ------------------------------------------------ */
@@ -443,14 +443,14 @@
 .ending h2 {
   margin: 0 0 4px;
   color: var(--blocked);
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
 .ending p {
   max-width: 68ch;
   margin: 0;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* The warning inside the dialog. Not `.note`, which is the quiet box this page
@@ -463,5 +463,5 @@
   border-radius: var(--radius-card);
   background: var(--blocked-soft);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-base);
 }

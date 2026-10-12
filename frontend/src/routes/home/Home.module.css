@@ -42,7 +42,7 @@
 
 .meText b {
   font-family: var(--font-ui);
-  font-size: 16px;
+  font-size: var(--text-xl);
 }
 
 .meName {
@@ -54,28 +54,28 @@
 .youTag {
   padding: 1px 6px;
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .meRole {
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-base);
 }
 
 .meNote {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .meAdd {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 
@@ -114,16 +114,16 @@
   width: 64px;
   height: 64px;
   margin-bottom: 6px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
 
   /* The ink is set inline: it depends on the project's own colour. */
   font-family: var(--font-ui);
-  font-size: 24px;
-  font-weight: 800;
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-heavy);
 }
 
 .project h3 {
-  font-size: 20px;
+  font-size: var(--text-3xl);
 }
 
 .project p {
@@ -139,7 +139,7 @@
   margin-top: auto;
   padding-top: 8px;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .new {
@@ -152,8 +152,8 @@
   box-shadow: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 

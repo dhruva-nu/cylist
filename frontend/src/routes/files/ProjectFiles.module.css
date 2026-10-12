@@ -21,25 +21,25 @@
   border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 /* The right pane's header is a path, not a label, so it takes the page's own
    ink at reading size rather than the quiet grey of a label. */
 .crumbs {
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .tally {
   flex: none;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .tree {
   padding: 10px;
-  font-size: 14.5px;
+  font-size: var(--text-lg);
 }
 
 .node {
@@ -49,12 +49,12 @@
   width: 100%;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink);
   font-family: inherit;
   font-size: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
 }
@@ -66,7 +66,7 @@
 .node.on {
   background: var(--brand-soft);
   color: var(--brand-ink);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .node span:last-child {
@@ -79,7 +79,7 @@
   flex: none;
   width: 14px;
   color: var(--ink-3);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   text-align: center;
   transition: transform 0.12s;
 }
@@ -106,7 +106,7 @@
   border: 2px dashed var(--line-2);
   border-radius: var(--radius-card);
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
   text-align: center;
 }
 
@@ -137,7 +137,7 @@
   display: block;
   width: 100%;
   min-width: 750px;
-  font-size: 14.5px;
+  font-size: var(--text-lg);
 }
 
 .table thead,
@@ -186,8 +186,8 @@
   padding: 12px 18px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   text-align: left;
 }
 
@@ -226,7 +226,7 @@
   gap: 10px;
   min-width: 0;
   align-items: center;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 /*
@@ -250,7 +250,7 @@
   background: none;
   color: inherit;
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
 }
@@ -264,8 +264,8 @@
   border-radius: var(--radius-control);
   color: var(--on-accent);
   font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
 }
 
 /*
@@ -309,8 +309,8 @@
 
 .muted {
   color: var(--ink-3);
-  font-size: 12.5px;
-  font-weight: 400;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
 }
 
 .url {
@@ -318,8 +318,8 @@
   max-width: 40ch;
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -329,7 +329,7 @@
    than read one row at a time. */
 .mono {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
 }
 
@@ -393,7 +393,7 @@
   display: block;
   margin-top: 6px;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 @media (max-width: 860px) {

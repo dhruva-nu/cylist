@@ -5,7 +5,7 @@
   place-items: center;
   padding: 20px;
   background: var(--scrim);
-  z-index: 20;
+  z-index: var(--layer-dialog);
 }
 
 .modal {
@@ -13,7 +13,7 @@
   max-height: 92vh;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--paper);
   box-shadow: var(--shadow-lg);
 }
@@ -54,7 +54,7 @@
   justify-content: flex-end;
   padding: 16px 26px;
   border-top: 1px solid var(--line);
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   background: var(--paper-2);
 }
 
@@ -67,8 +67,8 @@
 .field label {
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .required {
@@ -100,7 +100,7 @@
 
 .hint {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .headerActions {

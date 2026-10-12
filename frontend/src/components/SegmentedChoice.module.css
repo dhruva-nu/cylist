@@ -13,8 +13,8 @@
   background: var(--paper);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 

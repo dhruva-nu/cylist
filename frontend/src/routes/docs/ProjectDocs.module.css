@@ -87,8 +87,8 @@
   margin: 0 6px 2px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .topics,
@@ -128,8 +128,8 @@
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -137,12 +137,12 @@
 .count {
   min-width: 20px;
   padding: 0 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   text-align: center;
 }
 
@@ -177,12 +177,12 @@
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
   cursor: pointer;
 }
 
@@ -209,11 +209,11 @@
   overflow: hidden;
   padding: 5px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--text-base);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -231,7 +231,7 @@
 .docOn:hover {
   background: var(--brand-soft);
   color: var(--brand-ink);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .addTopic {
@@ -239,12 +239,12 @@
   margin: 2px 0 0 2px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--link);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -267,7 +267,7 @@
   background: var(--paper);
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .nameFormButtons {
@@ -278,13 +278,13 @@
 .quiet {
   margin: 0 6px;
   color: var(--ink-3);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .inlineError {
   margin: 2px 6px;
   color: var(--blocked);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* --- Asking the docs --- */
@@ -301,8 +301,8 @@
   margin: 0 4px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .askRow {
@@ -319,7 +319,7 @@
   background: var(--paper);
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* How sure the answer is: the word in the status's ink behind a dot of the
@@ -330,15 +330,15 @@
   align-items: center;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .status::before {
   content: '';
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: currentColor;
 }
 
@@ -357,7 +357,7 @@
 .miss {
   margin: 0;
   color: var(--ink-2);
-  font-size: 15px;
+  font-size: var(--text-lg);
   line-height: 1.55;
 }
 
@@ -385,7 +385,7 @@
   margin: 0;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .weighed {
@@ -419,12 +419,12 @@
 .weighedScore {
   flex: none;
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 .howRouted {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .howRouted summary {
@@ -434,7 +434,7 @@
 .howRouted p {
   margin: 6px 0 0;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   line-height: 1.5;
 }
 
@@ -443,12 +443,12 @@
   margin: -10px 0 -6px -8px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--link);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -458,7 +458,7 @@
 
 /* The part of a doc an answer came from, marked where the reader lands. */
 .answered {
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--brand-soft);
   box-shadow: 0 0 0 6px var(--brand-soft);
   scroll-margin-top: 16px;
@@ -508,7 +508,7 @@
   margin: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 26px;
+  font-size: var(--text-display);
   line-height: 1.2;
 }
 
@@ -516,8 +516,8 @@
   margin: 0;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .byline {
@@ -527,7 +527,7 @@
   align-items: center;
   margin: 0;
   color: var(--ink-3);
-  font-size: 13.5px;
+  font-size: var(--text-base);
 }
 
 .readerTools {
@@ -546,7 +546,7 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .visuallyHidden {
@@ -572,7 +572,7 @@
   margin: 0;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
 .titleInput {
@@ -582,8 +582,8 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 22px;
-  font-weight: 700;
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-bold);
 }
 
 .split {
@@ -601,7 +601,7 @@
   background: var(--paper-2);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 13.5px;
+  font-size: var(--text-base);
   line-height: 1.6;
   resize: vertical;
 }
@@ -620,8 +620,8 @@
   background: var(--paper);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 

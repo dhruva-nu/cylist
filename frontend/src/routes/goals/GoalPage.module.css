@@ -5,7 +5,7 @@
   width: 4px;
   height: 13px;
   margin-right: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   vertical-align: -2px;
 }
 
@@ -21,8 +21,8 @@
   border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -92,7 +92,7 @@
 .refusal {
   margin: 0;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 
@@ -116,15 +116,15 @@
 .about h2 {
   margin: 0 0 6px;
   color: var(--ink-3);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
 }
 
 .about p {
   margin: 0;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .stat {
@@ -134,7 +134,7 @@
 }
 
 .stat b {
-  font-size: 20px;
+  font-size: var(--text-3xl);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -142,8 +142,8 @@
 .statLabel {
   display: block;
   color: var(--ink-3);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
 }
 
@@ -162,7 +162,7 @@
 }
 
 .owner b {
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .group {
@@ -179,17 +179,17 @@
   padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
   color: var(--ink-3);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
 }
 
 .count {
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   letter-spacing: 0;
 }
 
@@ -228,7 +228,7 @@
   min-width: 0;
   padding: 8px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: inherit;
   font: inherit;
@@ -242,7 +242,7 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-2);
 }
@@ -251,7 +251,7 @@
   flex: none;
   color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -299,7 +299,7 @@
 .offerColumn {
   flex: none;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* The two filters over the list: a word, and a row of column chips. */
@@ -334,7 +334,7 @@
 .showing {
   flex: none;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
 }
 
@@ -354,8 +354,8 @@
   background: var(--paper);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
@@ -377,9 +377,9 @@
 
 .chipCount {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .chips button.chipOn .chipCount {

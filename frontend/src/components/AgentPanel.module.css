@@ -14,8 +14,8 @@
   margin: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
 }
 
 /* One session. The rule down its side is the agent teal the board uses. */
@@ -45,24 +45,24 @@
 .name {
   overflow-wrap: anywhere;
   color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
 }
 
 .quiet {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* Says a person did not do this — the history's own wording. */
 .agentTag {
   padding: 0 5px;
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   font-family: var(--font-ui);
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
 }
 
@@ -78,14 +78,14 @@
   padding: 5px 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .pillDot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--pill-ink);
 }
 
@@ -111,13 +111,13 @@
   padding: 7px 10px;
   border-radius: var(--radius-control);
   background: var(--paper-2);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .nowLabel {
   flex: none;
   color: var(--agent);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .nowText {
@@ -125,7 +125,7 @@
   overflow-wrap: anywhere;
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 /* The answer, once given: a rule in the agent's teal, since it is working
@@ -137,19 +137,19 @@
   border-radius: var(--radius-card);
   background: var(--paper);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .answeredLabel {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .answeredNote {
   margin-top: 4px;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 .actions {
@@ -162,8 +162,8 @@
 .feedHead {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
 }
 
@@ -188,7 +188,7 @@
   align-items: baseline;
   padding: 5px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.4;
 }
 
@@ -207,8 +207,8 @@
   flex: none;
   width: 48px;
   color: var(--feed-ink);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
 }
 
@@ -221,7 +221,7 @@
 
 .feedCode {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 .feed_said {

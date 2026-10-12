@@ -34,27 +34,27 @@
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
 }
 
 .treeHead b {
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
 .treeCount {
   color: var(--ink-3);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
 .branchList {
   padding: 10px;
   border-top: 1px solid var(--line);
-  font-size: 14.5px;
+  font-size: var(--text-lg);
 }
 
 .tier,
@@ -87,11 +87,11 @@
   width: 100%;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink);
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
 }
@@ -103,7 +103,7 @@
 .node.selected {
   background: var(--brand-soft);
   color: var(--brand-ink);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .node svg {
@@ -126,7 +126,7 @@
 .caret {
   width: 14px;
   color: var(--ink-3);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   text-align: center;
   transition: transform 0.12s;
 }
@@ -204,7 +204,7 @@
 .path {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 
 /* A measure of its own as well as the column's: 720px is 90-odd characters at
@@ -222,14 +222,14 @@
   grid-template-columns: 120px minmax(0, 1fr);
   gap: 12px 18px;
   align-items: center;
-  font-size: 14.5px;
+  font-size: var(--text-lg);
 }
 
 .key {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .value {
@@ -319,7 +319,7 @@
 
 .hint {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 @media (max-width: 860px) {

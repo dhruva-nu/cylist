@@ -146,8 +146,56 @@
   --font-body: 'Figtree', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
-  --radius-card: 10px;
+  /*
+   * Type sizes. Eleven steps sound like many, but the interface is dense —
+   * a card's meta line, its title, the dialog heading and the page heading
+   * all want distinct sizes — and each step here is one the screens were
+   * already drawing. The strays — half pixels, and the odd 9, 17, 19 and 24
+   * — were folded onto their nearest step: the difference was never visible,
+   * only the inconsistency.
+   */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 15px;
+  --text-xl: 16px;
+  --text-2xl: 18px;
+  --text-3xl: 20px;
+  --text-4xl: 22px;
+  --text-display: 26px;
+
+  /* Weights. Figtree is loaded at exactly these five. */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+
+  /*
+   * Corners. Cards and controls keep their own names because most rounding
+   * is one or the other; the small steps are for chips, tags and marks
+   * inside them, and `round` is for anything drawn as a circle.
+   */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
   --radius-control: 8px;
+  --radius-card: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --radius-round: 50%;
+
+  /*
+   * Stacking, for things that float above the page. Numbers that only order
+   * siblings inside one component stay where they are; these are the layers
+   * that have to agree across files: sticky bars and popovers sit just above
+   * the page, dialogs above those, and a tooltip clears everything.
+   */
+  --layer-raised: 5;
+  --layer-dialog: 20;
+  --layer-skip-link: 30;
+  --layer-tooltip: 40;
 
   /*
    * The dark palette, declared once. Nothing reads these directly; the two
@@ -287,7 +335,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.55 var(--font-body);
+  font: var(--text-lg)/1.55 var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
