@@ -1,7 +1,8 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type TaskHistoryEntry } from '../../api/client'
-import { Button, ErrorBanner } from '../ui'
+import { Button, ErrorNotice } from '../ui'
+import { taskHistoryKey } from './useRefreshTask'
 import shared from './shared.module.css'
 import styles from './History.module.css'
 
@@ -29,7 +30,7 @@ export function History({ taskId }: { taskId: string }) {
   const [page, setPage] = useState(1)
 
   const history = useQuery({
-    queryKey: ['task-history', taskId, page],
+    queryKey: [...taskHistoryKey(taskId), page],
     queryFn: () => api.getTaskHistory(taskId, page),
     enabled: open,
     // The previous page stays on screen while the next one loads. A pager that
@@ -50,7 +51,7 @@ export function History({ taskId }: { taskId: string }) {
         <span className={styles.historyHint}>what changed, and who changed it</span>
       </summary>
 
-      {history.error ? <ErrorBanner>{history.error.message}</ErrorBanner> : null}
+      <ErrorNotice error={history.error} />
 
       <div className={styles.historyList}>
         {historyPage === undefined && history.isFetching ? (

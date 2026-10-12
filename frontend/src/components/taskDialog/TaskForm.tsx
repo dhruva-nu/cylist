@@ -16,11 +16,12 @@
  * card that already reads the way it will after the save.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type TaskDetail, type TaskInput } from '../../api/client'
-import { Field, Modal, ModalBody } from '../Modal'
-import { Button, ErrorBanner } from '../ui'
+import { useIdentity } from '../../api/queries'
+import { DialogActions, Field, Modal, ModalBody } from '../Modal'
+import { Button, ErrorNotice } from '../ui'
 import { Comments } from './Comments'
 import type { DialogData, TaskDialogProps } from './dialogProps'
 import { BasicsFields, ColumnDatesFields, TrackingFields } from './FormFields'
@@ -71,7 +72,7 @@ export function TaskForm({
   // the API gives a card created without an assignee. Read from the cache the
   // auth gate already filled; a card started before it lands falls through to
   // the first member, which is what it used to do for everybody.
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
   const deleting = useCommentDeleting({ projectKey, announce, onDone })
   const [form, setForm] = useState<TaskInput>(() =>
     initialFormFields(task, members, identity.data, defaultGoalId),
@@ -192,7 +193,6 @@ export function TaskForm({
 
   const blank = blankRequiredFields(form, statusChange.reasonMissing)
   const readyToSave = !blank.basics && !blank.details
-  const error = save.error ?? remove.error
 
   const tabs = formTabs({
     blank,
@@ -225,31 +225,31 @@ export function TaskForm({
       // is the detail view rather than the board.
       onClose={onCancel}
       footer={
-        <>
-          {task ? (
-            <Button
-              variant="ghost"
-              danger
-              className={styles.spacer}
-              disabled={remove.isPending}
-              onClick={() => remove.mutate(task)}
-            >
-              Delete
-            </Button>
-          ) : null}
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button
-            variant="go"
-            disabled={save.isPending || !readyToSave}
-            onClick={() => save.mutate()}
-          >
-            {saveButtonLabel(save.isPending, task, parentRef)}
-          </Button>
-        </>
+        <DialogActions
+          submitLabel={saveButtonLabel(task, parentRef)}
+          pendingLabel="Saving…"
+          pending={save.isPending}
+          disabled={!readyToSave}
+          onSubmit={() => save.mutate()}
+          onCancel={onCancel}
+          note={
+            task ? (
+              <Button
+                variant="ghost"
+                danger
+                className={styles.spacer}
+                disabled={remove.isPending}
+                onClick={() => remove.mutate(task)}
+              >
+                Delete
+              </Button>
+            ) : null
+          }
+        />
       }
     >
       <ModalBody>
-        {error ? <ErrorBanner>{error.message}</ErrorBanner> : null}
+        <ErrorNotice error={save.error ?? remove.error} />
 
         <Tabs tabs={tabs} current={tab} onSelect={setTab} />
 

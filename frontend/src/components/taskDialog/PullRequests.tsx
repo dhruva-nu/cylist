@@ -5,7 +5,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { api, type PrRef, type PrState, type TaskDetail } from '../../api/client'
 import { addPrRef, removePrRefAt, setPrRefAt, setPrStateAt } from '../prRefs'
-import { Button, ErrorBanner, prRefLabel, TaskRef } from '../ui'
+import { Button, ErrorNotice, prRefLabel, TaskRef } from '../ui'
 import { useRefreshTask } from './useRefreshTask'
 import styles from './PullRequests.module.css'
 
@@ -94,7 +94,7 @@ export function PrRefsRead({
 
   return (
     <>
-      {move.error ? <ErrorBanner>{move.error.message}</ErrorBanner> : null}
+      <ErrorNotice error={move.error} />
       <ul className={styles.prRefs}>
         {task.pr_refs.map((ref, index) => (
           <li key={ref.url} className={styles.prRefRow}>

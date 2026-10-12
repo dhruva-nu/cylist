@@ -40,25 +40,24 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type TaskDetail } from '../api/client'
+import { useMembers } from '../api/queries'
 import { Modal, ModalBody } from './Modal'
 import { useProjectFiles } from './projectFiles'
 import type { DialogData, TaskDialogProps } from './taskDialog/dialogProps'
 import { TaskDetailView } from './taskDialog/TaskDetailView'
 import { TaskForm } from './taskDialog/TaskForm'
-import { Button, ErrorBanner } from './ui'
+import { taskKey } from './taskDialog/useRefreshTask'
+import { Button, ErrorNotice } from './ui'
 
 export function TaskDialog(props: TaskDialogProps) {
   const { projectKey, taskId, onClose } = props
 
   const task = useQuery({
-    queryKey: ['task', taskId],
+    queryKey: taskKey(taskId),
     queryFn: () => api.getTask(taskId ?? ''),
     enabled: taskId !== null,
   })
-  const members = useQuery({
-    queryKey: ['members', projectKey],
-    queryFn: () => api.listMembers(projectKey),
-  })
+  const members = useMembers(projectKey)
   /** The project's files, for the `>` tags. Not waited for — see the hook. */
   const files = useProjectFiles(projectKey)
 
@@ -73,9 +72,7 @@ export function TaskDialog(props: TaskDialogProps) {
         onClose={onClose}
         footer={<Button onClick={onClose}>Close</Button>}
       >
-        <ModalBody>
-          {error ? <ErrorBanner>{error.message}</ErrorBanner> : <p>Loading…</p>}
-        </ModalBody>
+        <ModalBody>{error ? <ErrorNotice error={error} /> : <p>Loading…</p>}</ModalBody>
       </Modal>
     )
   }

@@ -1,4 +1,17 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys, useInvalidate } from '../../api/queries'
+
+/** One card's detail — its fields, sub-tasks and timeline — under the key every reader shares. */
+export function taskKey(taskId: string | null) {
+  return [...queryKeys.allTasks, taskId]
+}
+
+/**
+ * The history under a card's timeline. A prefix of every page's key, so
+ * invalidating it refreshes whichever page is showing.
+ */
+export function taskHistoryKey(taskId: string) {
+  return ['task-history', taskId]
+}
 
 /**
  * Bring a card back up to date after something on it was changed in place —
@@ -10,11 +23,10 @@ import { useQueryClient } from '@tanstack/react-query'
  * for all three.
  */
 export function useRefreshTask(onDone: () => Promise<void>) {
-  const queryClient = useQueryClient()
+  const invalidate = useInvalidate()
 
   return async function refreshTask(taskId: string) {
-    await queryClient.invalidateQueries({ queryKey: ['task', taskId] })
-    await queryClient.invalidateQueries({ queryKey: ['task-history', taskId] })
+    await invalidate(taskKey(taskId), taskHistoryKey(taskId))
     await onDone()
   }
 }

@@ -99,11 +99,9 @@ export function formTitle(task: TaskDetail | null, parentRef: string | null | un
 
 /** What the Save button says it will do. */
 export function saveButtonLabel(
-  saving: boolean,
   task: TaskDetail | null,
   parentRef: string | null | undefined,
 ): string {
-  if (saving) return 'Saving…'
   if (task) return 'Save changes'
   if (parentRef) return 'Create sub-task'
   return 'Create task'

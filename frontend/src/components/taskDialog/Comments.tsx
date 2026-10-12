@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { FiledItem, Person, TaskComment, TaskDetail } from '../../api/client'
 import { Field } from '../Modal'
 import { MentionBox } from '../Mentions'
-import { Avatar, ErrorBanner, Tagged } from '../ui'
+import { Avatar, ErrorNotice, Tagged } from '../ui'
 import type { CommentDeleting } from './useCommentDeleting'
 import shared from './shared.module.css'
 import styles from './Comments.module.css'
@@ -96,7 +96,7 @@ export function Timeline({
 }) {
   return (
     <>
-      {deleting?.error ? <ErrorBanner>{deleting.error.message}</ErrorBanner> : null}
+      <ErrorNotice error={deleting?.error} />
       <div className={styles.timeline}>
         {comments.length ? (
           comments.map((entry) => (

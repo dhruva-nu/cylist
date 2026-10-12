@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { api, type TaskComment } from '../../api/client'
+import { useIdentity, usePermissionGrid } from '../../api/queries'
 import { can } from '../../routes/projectPermissions'
 import { mayDelete, type Viewer } from '../commentDelete'
 import { useRefreshTask } from './useRefreshTask'
@@ -37,11 +38,8 @@ export function useCommentDeleting({
   onDone: () => Promise<void>
 }): CommentDeleting {
   const refreshTask = useRefreshTask(onDone)
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
-  const grid = useQuery({
-    queryKey: ['permissions', projectKey],
-    queryFn: () => api.getPermissions(projectKey),
-  })
+  const identity = useIdentity()
+  const grid = usePermissionGrid(projectKey)
 
   const viewer: Viewer = {
     identity: identity.data,

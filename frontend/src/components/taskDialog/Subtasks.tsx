@@ -24,7 +24,7 @@ import {
 import { Field } from '../Modal'
 import { MentionBox } from '../Mentions'
 import { STATUS_LABELS } from '../taskLabels'
-import { Avatar, Button, ErrorBanner, Tagged } from '../ui'
+import { Avatar, Button, ErrorNotice, Tagged } from '../ui'
 import { CHECKLIST_LABELS, useSubtaskTicking } from './useSubtaskTicking'
 import shared from './shared.module.css'
 import styles from './Subtasks.module.css'
@@ -77,7 +77,6 @@ export function Subtasks({
     onSuccess: ticking.refresh,
   })
 
-  const error = add.error ?? ticking.error ?? remove.error
   const busy = ticking.busy || remove.isPending
 
   function addItem() {
@@ -86,7 +85,7 @@ export function Subtasks({
 
   return (
     <Field label="Sub-tasks">
-      {error ? <ErrorBanner>{error.message}</ErrorBanner> : null}
+      <ErrorNotice error={add.error ?? ticking.error ?? remove.error} />
 
       <div className={styles.subtasks}>
         <SubtaskRows
@@ -164,7 +163,7 @@ export function SubtasksRead({
 
   return (
     <div className={styles.subtasks}>
-      {ticking.error ? <ErrorBanner>{ticking.error.message}</ErrorBanner> : null}
+      <ErrorNotice error={ticking.error} />
 
       <SubtaskRows
         task={task}
