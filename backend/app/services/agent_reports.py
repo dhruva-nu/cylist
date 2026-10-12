@@ -31,12 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.db import publish_into
-from app.models.activity import Channel
 from app.models.agent_session import AgentSession, AgentSessionReason
 from app.models.api_token import ApiToken
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
 from app.services import activity, agent_prompts, agent_sessions
+
+logger = logging.getLogger(__name__)
 
 
 class OpenRow(NamedTuple):
@@ -50,9 +51,6 @@ class OpenRow(NamedTuple):
     row: AgentSession
     project_id: UUID
     person_id: UUID | None
-
-
-logger = logging.getLogger(__name__)
 
 
 async def report(
@@ -77,7 +75,7 @@ async def report(
     # anything else.
     data = await agent_prompts.settle_for_report(session, task, client_session_id, data)
     upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
-    await agent_prompts.withdraw_for_sessions(session, upserted.ended, "session_ended")
+    await agent_prompts.withdraw_for_sessions(session, upserted.ended, agent_prompts.SESSION_ENDED)
     for transition in upserted.transitions:
         await activity.record(
             session,
@@ -136,11 +134,7 @@ async def end_session(
     which card — a session that walked the board mid-connection has exactly
     one open row, and this finds it without being told which.
     """
-    rows = [
-        entry
-        for entry in await _open_rows(session)
-        if entry.row.client_session_id == client_session_id
-    ]
+    rows = await _open_rows(session, client_session_id=client_session_id)
     return await _end_each(session, rows, cause=cause, reason=reason)
 
 
@@ -168,8 +162,13 @@ async def _open_rows(
     session: AsyncSession,
     *,
     quiet_before: datetime | None = None,
+    client_session_id: str | None = None,
 ) -> list[OpenRow]:
     """Every open session, with the project its card belongs to and whose it is.
+
+    Narrowed to the ones quiet since ``quiet_before``, or to one client
+    session's, when asked — in the query rather than after it, because the
+    open rows of every board are read on every socket that closes.
 
     The person comes along on an outer join rather than a lookup per row: the
     trail entry this ends up writing has to name the same person every other
@@ -186,6 +185,8 @@ async def _open_rows(
     )
     if quiet_before is not None:
         query = query.where(AgentSession.last_seen_at < quiet_before)
+    if client_session_id is not None:
+        query = query.where(AgentSession.client_session_id == client_session_id)
     return [
         OpenRow(row, project_id, person_id)
         for row, project_id, person_id in (await session.execute(query)).all()
@@ -210,13 +211,13 @@ async def _end_each(
 
     moment = clock_now()
     await agent_prompts.withdraw_for_sessions(
-        session, [entry.row for entry in rows], "session_ended"
+        session, [entry.row for entry in rows], agent_prompts.SESSION_ENDED
     )
     for row, project_id, person_id in rows:
         transition = agent_sessions.close(row, reason, project_id, moment, cause=cause)
         await activity.record(
             session,
-            _principal_of(row, person_id),
+            agent_sessions.acting_principal(row, person_id),
             transition.verb,
             entity_type="task",
             entity_id=transition.task_id,
@@ -230,21 +231,3 @@ async def _end_each(
         extra={"context": {"cause": cause, "count": len(rows)}},
     )
     return len(rows)
-
-
-def _principal_of(row: AgentSession, person_id: UUID | None) -> Principal:
-    """Attribute the ending to the agent it happened to, not to the server.
-
-    The trail reads "the agent's session ended", and the actor it names should
-    be the agent — under the label the row was written with, which outlives
-    the token that made it — acting for whoever's token it was. No scopes:
-    nothing downstream of ``activity.record`` checks them, and inventing some
-    would be claiming authority this has not been given.
-    """
-    return Principal(
-        token_id=row.token_id,
-        person_id=person_id,
-        label=row.actor_label,
-        scopes=frozenset(),
-        channel=Channel.API,
-    )
