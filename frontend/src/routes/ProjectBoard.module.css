@@ -1024,8 +1024,12 @@
   background: var(--card-rail, var(--line-2));
 }
 
+/* Keyboard focus only, never `:focus-within`. A click leaves focus on
+   whatever was clicked — the owner's select, a stage, a tick — and a card
+   that answered to that stayed open after the pointer had long gone. */
 .task:hover,
-.task:focus-within {
+.task:focus-visible,
+.task:has(:focus-visible) {
   z-index: 3;
   border-color: var(--line-2);
 }
@@ -1473,7 +1477,8 @@
 }
 
 .task:hover .more,
-.task:focus-within .more {
+.task:focus-visible .more,
+.task:has(:focus-visible) .more {
   grid-template-rows: 1fr;
   margin-top: 0;
   opacity: 1;
@@ -1706,9 +1711,8 @@ button.partWhole:hover .partTick {
   border-color: var(--ink-2);
 }
 
-.partOpen:disabled,
-.partWhole:disabled,
-.partTick:disabled {
+.partWhole[aria-disabled='true'],
+.partTick[aria-disabled='true'] {
   cursor: progress;
 }
 

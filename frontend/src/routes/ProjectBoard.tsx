@@ -71,6 +71,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
 } from 'react'
 import {
@@ -2735,18 +2736,22 @@ function useCardFocus() {
   }
   const keep = () => window.clearTimeout(closeTimer.current)
 
-  /** What a mark spreads onto itself. */
+  /** What a mark spreads onto itself. Focus opens only when it came from the
+   * keyboard: a click has its own say, below, and focus a click leaves behind
+   * outlives the pointer that gave it. */
   const mark = (which: CardFocus) => ({
     onPointerEnter: () => arm(which),
     onPointerLeave: letGo,
-    onFocus: () => show(which),
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      if (event.currentTarget.matches(':focus-visible')) show(which)
+    },
     onBlur: letGo,
     onPick: () => show(which),
   })
   /** What the slot under the bottom line spreads onto itself. */
   const slot = { onPointerEnter: keep, onPointerLeave: letGo, onFocus: keep, onBlur: letGo }
 
-  return { focus, arming, opened, mark, slot }
+  return { focus, arming, opened, mark, slot, letGo }
 }
 
 /** The handlers `useCardFocus` hands a mark. */
@@ -2800,7 +2805,7 @@ function TaskCardBody({
   const { owed, stage } = owedDateOf(task)
   const viewerId = useViewerId()
   const agent = agentIndicator(task.agent_session, new Date(), viewerId)
-  const { focus, arming, opened, mark, slot } = useCardFocus()
+  const { focus, arming, opened, mark, slot, letGo } = useCardFocus()
   const staged = task.sub_statuses.length > 0
   // While an agent is on the card, the line saying what it is doing takes the
   // place of the stages: that is the progress worth reading right then, and
@@ -2808,7 +2813,13 @@ function TaskCardBody({
   const progress = !agent && (staged || task.subtask_count > 0)
 
   return (
-    <div className={[styles.cardBody, focus && styles[`focus_${focus}`]].filter(Boolean).join(' ')}>
+    <div
+      className={[styles.cardBody, focus && styles[`focus_${focus}`]].filter(Boolean).join(' ')}
+      // Leaving the card lets go too, not only leaving a mark or the slot: a
+      // row that re-renders under the pointer — a tick that just landed — can
+      // swallow the leave its own list was waiting for.
+      onPointerLeave={letGo}
+    >
       {/* Named on the rail rather than written on the card. The rail is the
           goal already, and one card that says so teaches the column. */}
       {task.goal_name && !agent ? (
@@ -3175,11 +3186,11 @@ function SubtaskList({
                 finished ? `Open ${subtask.reference} again` : `Finish ${subtask.reference}`
               }
               title={finished ? 'Open it again' : 'Finish it'}
-              disabled={busy}
+              aria-disabled={busy}
               {...stop}
               onClick={(event) => {
                 event.stopPropagation()
-                finish.mutate({ part: subtask, finished: !finished })
+                if (!busy) finish.mutate({ part: subtask, finished: !finished })
               }}
             >
               <TickIcon />
@@ -3214,11 +3225,11 @@ function SubtaskList({
               type="button"
               className={styles.partWhole}
               aria-pressed={done}
-              disabled={busy}
+              aria-disabled={busy}
               {...stop}
               onClick={(event) => {
                 event.stopPropagation()
-                tick.mutate({ id: item.id, done: !done })
+                if (!busy) tick.mutate({ id: item.id, done: !done })
               }}
             >
               <span className={styles.partTick} aria-hidden="true">
