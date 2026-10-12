@@ -9,7 +9,7 @@
  * a board that has stopped looking like one thing.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   api,
@@ -20,11 +20,12 @@ import {
   type Identity,
   type Person,
 } from '../api/client'
+import { useIdentity } from '../api/queries'
 import { GOAL_STATUS_LABELS } from './GoalMarks'
 import { MentionBox } from './Mentions'
 import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { useProjectFiles } from './projectFiles'
-import { Button, ErrorBanner, readableInkOn } from './ui'
+import { Button, ErrorNotice, readableInkOn } from './ui'
 import styles from './GoalDialog.module.css'
 
 /**
@@ -76,7 +77,7 @@ export function GoalDialog({
   // Who is looking, so a new goal defaults to being owned by them. Read from
   // the cache the auth gate already filled; a goal started before it lands
   // falls through to the first member, which is what it used to do anyway.
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
   const [form, setForm] = useState<GoalInput>(initialGoalFields(goal, members, identity.data))
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   /** For the `>` tag in the description, which is read like a card's. */
@@ -98,11 +99,12 @@ export function GoalDialog({
     },
   })
 
+  // Only ever run with the goal being edited; a new one has no Delete button.
   const remove = useMutation({
-    mutationFn: () => api.deleteGoal(goal!.reference),
-    onSuccess: async () => {
+    mutationFn: (doomed: Goal) => api.deleteGoal(doomed.reference),
+    onSuccess: async (_deleted, doomed) => {
       await onDone()
-      announce(`${goal!.name} deleted. Its cards are still on the board.`)
+      announce(`${doomed.name} deleted. Its cards are still on the board.`)
       onClose()
       onDeleted?.()
     },
@@ -121,7 +123,7 @@ export function GoalDialog({
             <Button
               danger
               disabled={remove.isPending}
-              onClick={() => (confirmingDelete ? remove.mutate() : setConfirmingDelete(true))}
+              onClick={() => (confirmingDelete ? remove.mutate(goal) : setConfirmingDelete(true))}
             >
               {confirmingDelete ? 'Delete — its cards stay' : 'Delete'}
             </Button>
@@ -138,8 +140,8 @@ export function GoalDialog({
       }
     >
       <ModalBody>
-        {save.error ? <ErrorBanner>{save.error.message}</ErrorBanner> : null}
-        {remove.error ? <ErrorBanner>{remove.error.message}</ErrorBanner> : null}
+        <ErrorNotice error={save.error} />
+        <ErrorNotice error={remove.error} />
 
         <Field label="Name" required hint="What it is called on every card written under it.">
           <input
