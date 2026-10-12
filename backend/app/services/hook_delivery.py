@@ -145,6 +145,10 @@ class _Parcel:
     secret: str
     payload: dict[str, Any]
 
+    @classmethod
+    def of(cls, delivery: HookDelivery, hook: Hook, secret: str) -> _Parcel:
+        return cls(delivery.id, delivery.event, hook.url, secret, delivery.payload)
+
 
 @dataclass(frozen=True)
 class Attempt:
@@ -180,21 +184,27 @@ async def _send(client: httpx.AsyncClient, parcel: _Parcel) -> Attempt:
         return Attempt(
             at=at,
             status_code=None,
-            error=(f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__)[
-                :ERROR_MAX_LENGTH
-            ],
+            error=_clipped(f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__),
             duration_ms=_since(started),
         )
+
     error = None
     if not 200 <= response.status_code < 300:
+        error = f"HTTP {response.status_code}"
         said = " ".join(response.text.split())
-        error = f"HTTP {response.status_code}" + (f": {said}" if said else "")
+        if said:
+            error = _clipped(f"{error}: {said}")
     return Attempt(
         at=at,
         status_code=response.status_code,
-        error=error[:ERROR_MAX_LENGTH] if error else None,
+        error=error,
         duration_ms=_since(started),
     )
+
+
+def _clipped(error: str) -> str:
+    """Keep as much of a refusal as :data:`ERROR_MAX_LENGTH` allows."""
+    return error[:ERROR_MAX_LENGTH]
 
 
 def _since(started: float) -> int:
@@ -244,10 +254,7 @@ async def send_now(
     """
     secret = hooks.secret_of(cipher_for(vault_key), hook)
     await session.flush()
-    attempt = await _send(
-        client,
-        _Parcel(delivery.id, delivery.event, hook.url, secret, delivery.payload),
-    )
+    attempt = await _send(client, _Parcel.of(delivery, hook, secret))
     record(delivery, attempt)
     return delivery
 
@@ -306,15 +313,7 @@ async def _claim(database: Database, vault_key: str, moment: datetime) -> list[_
         parcels = []
         for delivery, hook in rows:
             delivery.next_attempt_at = moment + LEASE
-            parcels.append(
-                _Parcel(
-                    delivery.id,
-                    delivery.event,
-                    hook.url,
-                    hooks.secret_of(cipher, hook),
-                    delivery.payload,
-                )
-            )
+            parcels.append(_Parcel.of(delivery, hook, hooks.secret_of(cipher, hook)))
         return parcels
 
 
