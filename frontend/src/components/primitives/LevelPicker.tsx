@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { api, type Sensitivity } from '../../api/client'
+import type { Sensitivity } from '../../api/client'
+import { usePermissionGrid } from '../../api/queries'
 
 /**
  * A picker for one of the three levels.
@@ -18,15 +18,12 @@ export function LevelPicker({
   value: Sensitivity | ''
   onChange: (level: Sensitivity | '') => void
   /** Offer "take the folder's default", which is what omitting it does. */
-  includeInherit?: string
+  includeInherit?: string | undefined
 }) {
   // The same query the roles screen draws its clearances from, so a level is
   // worded identically wherever it appears and the catalogue is fetched once
   // per project rather than once per picker.
-  const permissions = useQuery({
-    queryKey: ['permissions', projectKey],
-    queryFn: () => api.getPermissions(projectKey),
-  })
+  const permissions = usePermissionGrid(projectKey)
   const levels = permissions.data?.levels ?? []
 
   return (

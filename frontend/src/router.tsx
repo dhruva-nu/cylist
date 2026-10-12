@@ -18,7 +18,7 @@ import { ProjectGoals } from './routes/ProjectGoals'
 import { ProjectPeople } from './routes/ProjectPeople'
 import { ProjectHooks } from './routes/ProjectHooks'
 import { ProjectRoles } from './routes/ProjectRoles'
-import { ProjectVault } from './routes/ProjectVault'
+import { ProjectVault } from './routes/vault/ProjectVault'
 
 const rootRoute = createRootRoute({ component: Shell })
 

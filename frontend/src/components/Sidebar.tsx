@@ -47,20 +47,15 @@
  * showing.
  */
 
-import { useQuery } from '@tanstack/react-query'
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { withBase } from '../api/basePath'
-import { ApiError, api } from '../api/client'
+import { api, errorMessage } from '../api/client'
+import { useIdentity } from '../api/queries'
+import { readStored, writeStored } from '../storage'
 import { THEME_CHOICES, useTheme, type ThemeChoice } from '../theme/theme'
 import { DayReportPanel } from './DayReport'
 import { ProjectNav } from './ProjectNav'
+import { SegmentedChoice } from './SegmentedChoice'
 import { SidebarSection } from './SidebarSection'
 import { Today, TodayCount } from './Today'
 import { Button } from './ui'
@@ -71,6 +66,11 @@ const THEME_LABELS: Record<ThemeChoice, string> = {
   dark: 'Dark',
   system: 'System',
 }
+
+const THEME_OPTIONS = THEME_CHOICES.map((choice) => ({
+  value: choice,
+  label: THEME_LABELS[choice],
+}))
 
 /**
  * Not `cylist.sidebar.open`, which this replaces.
@@ -94,17 +94,11 @@ const FOLDED_KEY = 'cylist.sidebar.folded'
  * the one thing in the panel worth seeing before you have asked for it.
  * Anybody who wants the panel opens it once and it stays open.
  *
- * Every touch of localStorage is wrapped, for the reason `theme.ts` gives:
- * reading it throws outright in a private window, and a frame that will not
- * render is a worse outcome than a preference that is not remembered.
+ * A browser that will not keep it — a private window — reads as a first
+ * visit, which is collapsed anyway.
  */
 function readShowing(): boolean {
-  try {
-    return window.localStorage.getItem(SHOWING_KEY) === 'true'
-  } catch {
-    // A private window. Collapsed is the answer for a first visit anyway.
-    return false
-  }
+  return readStored(SHOWING_KEY) === 'true'
 }
 
 /**
@@ -122,13 +116,9 @@ function readShowing(): boolean {
 const FOLDED_TO_BEGIN_WITH: string[] = []
 
 function readFolded(): string[] {
-  let stored: string | null = null
-  try {
-    stored = window.localStorage.getItem(FOLDED_KEY)
-  } catch {
-    // A private window. The defaults are the right answer there too.
-    return FOLDED_TO_BEGIN_WITH
-  }
+  // Nothing stored, or a private window that cannot store: the defaults are
+  // the right answer either way.
+  const stored = readStored(FOLDED_KEY)
   if (stored === null) return FOLDED_TO_BEGIN_WITH
 
   try {
@@ -153,30 +143,22 @@ export function Sidebar() {
    * Written here, on the press, rather than in an effect watching `open`.
    * An effect would also fire on the first render, storing the default as
    * though it had been chosen — which is exactly what made the old key
-   * useless.
+   * useless. The folds below are remembered the same way, for the same
+   * reason.
    */
   const showSidebar = useCallback((showing: boolean) => {
     setOpen(showing)
-    try {
-      window.localStorage.setItem(SHOWING_KEY, String(showing))
-    } catch {
-      // It still holds for this visit; it just will not be remembered.
-    }
+    writeStored(SHOWING_KEY, String(showing))
   }, [])
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(FOLDED_KEY, JSON.stringify(folded))
-    } catch {
-      // As above: the fold holds for this visit and is not remembered.
-    }
-  }, [folded])
-
-  const toggleSection = useCallback((name: string) => {
-    setFolded((current) =>
-      current.includes(name) ? current.filter((one) => one !== name) : [...current, name],
-    )
-  }, [])
+  const toggleSection = useCallback(
+    (name: string) => {
+      const next = folded.includes(name) ? folded.filter((one) => one !== name) : [...folded, name]
+      setFolded(next)
+      writeStored(FOLDED_KEY, JSON.stringify(next))
+    },
+    [folded],
+  )
 
   return (
     <aside
@@ -312,7 +294,7 @@ function SettingsSection() {
  * way out.
  */
 function SignOut() {
-  const identity = useQuery({ queryKey: ['me'], queryFn: api.me })
+  const identity = useIdentity()
   const person = identity.data?.person ?? null
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -324,7 +306,7 @@ function SignOut() {
       await api.signOut()
       window.location.assign(withBase('/'))
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Something went wrong.')
+      setError(errorMessage(caught))
       setBusy(false)
     }
   }
@@ -357,57 +339,21 @@ function Setting({ label, hint, children }: { label: string; hint?: string; chil
 /**
  * Light / dark / system.
  *
- * A radio group rather than three buttons: the three are one choice with one
- * answer, so a screen reader should say "2 of 3" and the arrow keys should
- * move between them. Roving tabindex keeps the whole control to a single tab
- * stop.
- *
  * It used to sit in the header. Three words of chrome on every screen, for a
  * choice made once and then left alone, is the sort of thing the bar is better
  * without — and a Settings section with nothing in it would have been worse.
  */
 function ThemeChoiceGroup() {
   const { theme, setTheme } = useTheme()
-  const group = useRef<HTMLDivElement>(null)
-
-  function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) return
-    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
-
-    event.preventDefault()
-    const currentIndex = THEME_CHOICES.indexOf(theme)
-    // The fallback never fires — the modulo keeps the index in range — but
-    // saying so costs less than an assertion that stops being true.
-    const next =
-      THEME_CHOICES[(currentIndex + step + THEME_CHOICES.length) % THEME_CHOICES.length] ?? theme
-    setTheme(next)
-    // Focus follows selection in a radio group, and the button for `next` is
-    // the only one that will be tabbable after this render.
-    group.current?.querySelector<HTMLElement>(`[data-choice="${next}"]`)?.focus()
-  }
 
   return (
-    <div
-      ref={group}
+    <SegmentedChoice
+      label="Colour theme"
+      options={THEME_OPTIONS}
+      value={theme}
+      onChange={setTheme}
       className={styles.theme}
-      role="radiogroup"
-      aria-label="Colour theme"
-      onKeyDown={onKeyDown}
-    >
-      {THEME_CHOICES.map((choice) => (
-        <button
-          key={choice}
-          type="button"
-          data-choice={choice}
-          role="radio"
-          aria-checked={theme === choice}
-          tabIndex={theme === choice ? 0 : -1}
-          className={theme === choice ? styles.themeOn : undefined}
-          onClick={() => setTheme(choice)}
-        >
-          {THEME_LABELS[choice]}
-        </button>
-      ))}
-    </div>
+      selectedClassName={styles.themeOn}
+    />
   )
 }
