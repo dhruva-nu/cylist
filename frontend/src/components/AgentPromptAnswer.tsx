@@ -14,6 +14,7 @@
 
 import { useId, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../api/queries'
 
 import {
   api,
@@ -48,18 +49,18 @@ export function useAnswerPrompt(taskRef: string, onAnswered?: (answered: AgentPr
       queryClient.setQueriesData<Task[]>({ queryKey: ['tasks'] }, (old) =>
         old ? tasksWithPromptAnswered(old, answered) : old,
       )
-      queryClient.setQueriesData<TaskDetail>({ queryKey: ['task'] }, (old) =>
+      queryClient.setQueriesData<TaskDetail>({ queryKey: queryKeys.allTasks }, (old) =>
         old ? detailWithPromptAnswered(old, answered) : old,
       )
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      void queryClient.invalidateQueries({ queryKey: ['task'] })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
       onAnswered?.(answered)
     },
     onError: (error) => {
       // Closed before we got there: the card on screen is out of date.
       if (promptClosedUnderUs(error)) {
         void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-        void queryClient.invalidateQueries({ queryKey: ['task'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
       }
     },
   })

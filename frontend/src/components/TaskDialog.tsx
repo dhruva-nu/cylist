@@ -40,20 +40,19 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type TaskDetail } from '../api/client'
-import { useMembers } from '../api/queries'
+import { queryKeys, useMembers } from '../api/queries'
 import { Modal, ModalBody } from './Modal'
 import { useProjectFiles } from './projectFiles'
 import type { DialogData, TaskDialogProps } from './taskDialog/dialogProps'
 import { TaskDetailView } from './taskDialog/TaskDetailView'
 import { TaskForm } from './taskDialog/TaskForm'
-import { taskKey } from './taskDialog/useRefreshTask'
 import { Button, ErrorNotice } from './ui'
 
 export function TaskDialog(props: TaskDialogProps) {
   const { projectKey, taskId, onClose } = props
 
   const task = useQuery({
-    queryKey: taskKey(taskId),
+    queryKey: queryKeys.task(taskId),
     queryFn: () => api.getTask(taskId ?? ''),
     enabled: taskId !== null,
   })

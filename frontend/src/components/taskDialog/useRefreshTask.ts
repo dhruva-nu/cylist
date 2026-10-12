@@ -1,18 +1,5 @@
 import { queryKeys, useInvalidate } from '../../api/queries'
 
-/** One card's detail — its fields, sub-tasks and timeline — under the key every reader shares. */
-export function taskKey(taskId: string | null) {
-  return [...queryKeys.allTasks, taskId]
-}
-
-/**
- * The history under a card's timeline. A prefix of every page's key, so
- * invalidating it refreshes whichever page is showing.
- */
-export function taskHistoryKey(taskId: string) {
-  return ['task-history', taskId]
-}
-
 /**
  * Bring a card back up to date after something on it was changed in place —
  * a comment taken back, a sub-task ticked, a pull request moved along.
@@ -26,7 +13,7 @@ export function useRefreshTask(onDone: () => Promise<void>) {
   const invalidate = useInvalidate()
 
   return async function refreshTask(taskId: string) {
-    await invalidate(taskKey(taskId), taskHistoryKey(taskId))
+    await invalidate(queryKeys.task(taskId), queryKeys.taskHistory(taskId))
     await onDone()
   }
 }

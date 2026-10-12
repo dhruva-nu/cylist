@@ -8,6 +8,7 @@
  */
 
 import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../api/queries'
 import { useEffect, useRef, useState } from 'react'
 import { backoffDelay, boardSocketUrl, isFinal, parseEvent } from '../api/realtime'
 
@@ -54,7 +55,7 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
       debounce.current = setTimeout(() => {
         void queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] })
         // An open card is looking at the same change from the other side.
-        void queryClient.invalidateQueries({ queryKey: ['task'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
         // And so is its agent feed, whose own nudge may have been the one
         // the server coalesced away.
         void queryClient.invalidateQueries({ queryKey: ['agent-feed'] })

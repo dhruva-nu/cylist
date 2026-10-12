@@ -29,6 +29,7 @@
 
 import { useId } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../api/queries'
 
 import { api, type AgentPrompt, type AgentSessionRead } from '../api/client'
 import {
@@ -64,7 +65,7 @@ export function AgentPanel({
     mutationFn: () => api.dismissAgentSessions(taskRef),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.task(taskId) }),
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
         queryClient.invalidateQueries({ queryKey: ['board'] }),
       ])

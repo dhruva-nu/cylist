@@ -28,6 +28,12 @@ export const queryKeys = {
   tasks: (projectKey: string) => ['tasks', projectKey],
   /** Every card's detail, whichever project it is on. */
   allTasks: ['task'],
+  task: (taskId: string | null) => ['task', taskId],
+  /**
+   * The history under a card's timeline. A prefix of every page's key, so
+   * invalidating it refreshes whichever page is showing.
+   */
+  taskHistory: (taskId: string) => ['task-history', taskId],
   goals: (projectKey: string) => ['goals', projectKey],
   /** Every goal's page, whichever project it is on. */
   allGoals: ['goal'],

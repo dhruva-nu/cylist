@@ -77,7 +77,7 @@ function stageState(position: number, index: number, last: number): string {
 
 /** The card's own detail, under the key its dialog reads too. */
 function cardDetailKey(task: Task) {
-  return [...queryKeys.allTasks, task.id]
+  return queryKeys.task(task.id)
 }
 
 /**
