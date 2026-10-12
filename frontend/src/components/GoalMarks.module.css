@@ -9,7 +9,7 @@
   overflow: hidden;
   width: 100%;
   height: 6px;
-  border-radius: 999px;
+  border-radius: 3px;
   background: var(--line);
 }
 
@@ -33,25 +33,24 @@
 
 /* A goal's target date, on the same five-step ramp a card's due date uses.
    Fixed height and no border, so a row of goals keeps one line however near
-   or far each of their dates is. */
+   or far each of their dates is. The ramp is carried by the ink and the icon
+   alone, never a filled ground: a page of goals with a red block on every
+   late one shouts the same word down the page. */
 .target {
   display: inline-flex;
   gap: 4px;
   align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-control);
+  padding: 2px 0;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .late {
-  background: var(--blocked);
-  color: var(--on-accent);
+  color: var(--blocked);
 }
 
 .today {
-  background: var(--hold-soft);
   color: var(--hold);
 }
 
@@ -87,26 +86,35 @@
 }
 
 /* How a goal ended, where its name is. Never drawn for an open goal — see the
-   note on GoalStatusPill — so these are the only two. */
+   note on GoalStatusPill — so these are the only two. A word in the status's
+   ink behind a small dot of the same, rather than a tinted chip: the colour
+   is there to be read, not to fill a box. */
 .pill {
+  display: inline-flex;
   flex: none;
-  padding: 1px 9px;
-  border-radius: var(--radius-control);
+  gap: 6px;
+  align-items: center;
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0;
   text-transform: none;
 }
 
+.pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .achieved {
-  background: var(--ok-soft);
   color: var(--ok);
 }
 
 /* A dropped goal is not a failure to be marked in red; it is work that stopped.
    The quietest ink there is says that without arguing about it. */
 .dropped {
-  background: var(--paper-2);
   color: var(--ink-3);
 }

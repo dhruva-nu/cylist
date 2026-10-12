@@ -160,7 +160,7 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: var(--brand);
   color: var(--on-brand);
   font-size: 15px;
@@ -258,9 +258,9 @@
   flex-direction: column;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: var(--paper);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow-lg);
 }
 
 .crumbs .switcherList a {

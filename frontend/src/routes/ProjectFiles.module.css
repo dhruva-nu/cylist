@@ -7,9 +7,9 @@
 
 .pane {
   overflow: hidden;
-  border-radius: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
   background: var(--paper);
-  box-shadow: var(--shadow);
 }
 
 .paneHead {
@@ -21,25 +21,20 @@
   border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 600;
 }
 
-/* The right pane's header is a path, not a label, so it drops the shouting. */
+/* The right pane's header is a path, not a label, so it takes the page's own
+   ink at reading size rather than the quiet grey of a label. */
 .crumbs {
   color: var(--ink);
   font-size: 14px;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .tally {
   flex: none;
   font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .tree {
@@ -54,7 +49,7 @@
   width: 100%;
   padding: 6px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: none;
   color: var(--ink);
   font-family: inherit;
@@ -109,7 +104,7 @@
   margin: 12px;
   padding: 18px;
   border: 2px dashed var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   color: var(--ink-3);
   font-size: 13px;
   text-align: center;
@@ -191,11 +186,9 @@
   padding: 12px 18px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-size: 12.5px;
+  font-weight: 600;
   text-align: left;
-  text-transform: uppercase;
 }
 
 .table td {
@@ -268,7 +261,7 @@
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--on-accent);
   font-family: var(--font-ui);
   font-size: 10px;

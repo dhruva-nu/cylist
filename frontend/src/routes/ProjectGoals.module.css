@@ -119,13 +119,16 @@
   color: var(--ink-3);
 }
 
+/* A label over a hairline: the settled goals are the same cards as the open
+   ones above, and the rule is all that is needed to say where one list ends. */
 .settledHead {
   margin: 34px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 /*
@@ -180,13 +183,12 @@
 
 .weekday {
   padding: 8px 10px;
-  background: var(--paper-2);
+  background: var(--paper);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 .day {
@@ -225,7 +227,7 @@
   width: 22px;
   height: 22px;
   margin: -2px 0 -2px -2px;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--brand);
   color: var(--on-brand);
   font-weight: 800;
@@ -251,8 +253,7 @@
 }
 
 .pin:hover {
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  background: var(--line);
 }
 
 .pinRef {
@@ -299,9 +300,8 @@
   margin: 0;
   color: var(--ink-3);
   font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 .undatedRow {

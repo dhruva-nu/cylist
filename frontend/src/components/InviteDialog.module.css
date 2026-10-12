@@ -17,7 +17,7 @@
   overflow-x: auto;
   padding: 10px 12px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--paper-2);
   color: var(--ink);
   font-family: var(--font-mono);
@@ -30,7 +30,7 @@
 .warning {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--hold-soft);
   color: var(--hold);
   font-size: 13px;

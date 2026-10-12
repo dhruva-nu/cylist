@@ -66,10 +66,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearch } from '@tanstack/react-router'
 import {
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
   type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
 } from 'react'
 import {
@@ -80,6 +82,7 @@ import {
   type ColumnInput,
   type Goal,
   type Person,
+  type PrRef,
   type Task,
 } from '../api/client'
 import {
@@ -102,10 +105,10 @@ import {
 } from './agentState'
 import { BoardAnnounce, CardPromptPopover, useCardPopover } from './CardPromptPopover'
 import { useBoardSocket } from './useBoardSocket'
-import { daysUntilDue, dueBucket, formatDue, formatDueLong } from '../components/dates'
-import { GoalChip, GoalStatusPill } from '../components/GoalMarks'
+import { leastAdvancedPrState } from '../components/prRefs'
+import { dueBucket, formatDue, formatDueLong } from '../components/dates'
+import { GoalStatusPill } from '../components/GoalMarks'
 import { Field, Modal, ModalBody } from '../components/Modal'
-import { PageHead } from '../components/Shell'
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
 import {
@@ -119,8 +122,13 @@ import {
   ErrorBanner,
   LiveRegion,
   PriorityIcon,
-  SubStatusBar,
+  JiraIcon,
+  PrIcon,
+  Tagged,
   TaskRef,
+  jiraRefLabel,
+  prRefLabel,
+  prRefRepo,
   useAnnouncer,
 } from '../components/ui'
 import styles from './ProjectBoard.module.css'
@@ -1074,17 +1082,28 @@ export function ProjectBoard() {
           the only one with a "+", and a card is dragged by dragging it. The
           keyboard's share of it is the part that is not self-evident, and that
           is spoken by SCREEN_READER_INSTRUCTIONS to the people it is for. */}
-      <PageHead title="Kanban board" />
-
       {moveTask.error ? <ErrorBanner>{moveTask.error.message}</ErrorBanner> : null}
       <LiveRegion message={message} />
 
-      {/* The search takes the row and the buttons sit together at the end of
-          it. They are one group in the markup as well as on the screen: the
-          toolbar used to be a two-cell grid holding a search box and one
-          button, and every button added since had been landing in a row of its
-          own underneath, stretched across the board. */}
+      {/* One bar: what the page is, the two counts worth glancing at, then the
+          search and the board's own controls. The title used to be a heading
+          of its own above a toolbar of six buttons, which spent two rows of
+          the window before the first card.
+
+          The counts sit with the title rather than with the controls. They
+          are a signal — how many cards wait on a person, how many have an
+          agent busy — and a signal drawn the size of a button beside the
+          search box was read as one more thing to press. */}
       <div className={styles.toolbar}>
+        <div className={styles.titleGroup}>
+          <h1 className={styles.pageTitle}>Kanban board</h1>
+          <AgentChips
+            value={quickAgent}
+            onChange={setQuickAgent}
+            needsYou={agentTally.needsYou}
+            working={agentTally.working}
+          />
+        </div>
         <SearchBar
           query={search}
           onChange={setSearch}
@@ -1093,49 +1112,6 @@ export function ProjectBoard() {
           goals={goalList}
         />
         <div className={styles.tools}>
-          <AgentChips
-            value={quickAgent}
-            onChange={setQuickAgent}
-            needsYou={agentTally.needsYou}
-            working={agentTally.working}
-          />
-          {/* A toggle rather than a second page: lanes are the same board read
-              by goal instead of by column, and a board you have to leave to
-              group is one you group once and then stop using. */}
-          <Button
-            small
-            aria-pressed={lanesOn}
-            className={lanesOn ? styles.groupedOn : undefined}
-            onClick={() => setLanesOn(!lanesOn)}
-            title="Split the board into one lane per goal"
-          >
-            ▤ Lanes
-            <span className={styles.hint}>{lanesOn ? 'on' : 'off'}</span>
-          </Button>
-          {/* Only while there are lanes to fold. Off the board, it is a button
-              about nothing. */}
-          {inLanes ? (
-            <Button
-              small
-              onClick={onFoldAllLanes}
-              title={
-                everyLaneFolded ? 'Open every goal back up' : 'Fold every goal down to its heading'
-              }
-            >
-              {everyLaneFolded ? '⌄ Open all' : '⌃ Fold all'}
-            </Button>
-          ) : null}
-          {/* Both change the shape of the board rather than what is on it,
-              which is one permission, and neither is drawn without it. */}
-          {may('board') ? (
-            <>
-              <Button small onClick={() => setTemplatesOpen(true)}>
-                + Templates
-                <span className={styles.hint}>{templateList.length}</span>
-              </Button>
-              <AddColumnButton board={board.data} onClick={() => setColumnDialog('new')} />
-            </>
-          ) : null}
           <QuickFilters
             goals={goalList}
             goal={quickGoal}
@@ -1147,6 +1123,49 @@ export function ProjectBoard() {
             cancelledCount={cancelledCount}
             hiding={hidingCancelled}
           />
+          {/* Columns or lanes: the same board read by column, or split into
+              one lane per goal. Two segments rather than a button that says
+              "on" and "off", so the board says which way it is being read. */}
+          <div className={styles.segmented} role="group" aria-label="Board layout">
+            <button type="button" aria-pressed={!lanesOn} onClick={() => setLanesOn(false)}>
+              <ColumnsIcon />
+              Columns
+            </button>
+            <button
+              type="button"
+              aria-pressed={lanesOn}
+              onClick={() => setLanesOn(true)}
+              title="Split the board into one lane per goal"
+            >
+              <LanesIcon />
+              Lanes
+            </button>
+          </div>
+          {/* Only while there are lanes to fold. Off the board, it is a button
+              about nothing. */}
+          {inLanes ? (
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={onFoldAllLanes}
+              aria-label={everyLaneFolded ? 'Open every lane' : 'Fold every lane'}
+              title={
+                everyLaneFolded ? 'Open every goal back up' : 'Fold every goal down to its heading'
+              }
+            >
+              {everyLaneFolded ? '⌄' : '⌃'}
+            </button>
+          ) : null}
+          {/* Both change the shape of the board rather than what is on it,
+              which is one permission, and neither is drawn without it. */}
+          {may('board') ? (
+            <BoardMenu
+              board={board.data}
+              templateCount={templateList.length}
+              onTemplates={() => setTemplatesOpen(true)}
+              onAddColumn={() => setColumnDialog('new')}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -1399,6 +1418,7 @@ function SearchBar({
 }) {
   const [highlighted, setHighlighted] = useState(0)
   const [dismissed, setDismissed] = useState(false)
+  const [focused, setFocused] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const suggestions = dismissed ? [] : suggestionsFor(activeToken(query), columns, members, goals)
 
@@ -1450,7 +1470,9 @@ function SearchBar({
           setHighlighted(0)
         }}
         onKeyDown={onKeyDown}
-        placeholder='Search, or tag it: col:"In progress"  who:Aditi  goal:Search  blk:  hld:  cnl:'
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Search cards"
         aria-label="Search tasks"
         aria-autocomplete="list"
         aria-expanded={suggestions.length > 0}
@@ -1470,6 +1492,29 @@ function SearchBar({
         >
           ×
         </button>
+      ) : null}
+      {/* The tags, offered while the box is empty and waiting. They used to
+          be the placeholder, which made the box a line of syntax to read
+          past every visit; here they are a list to pick from the once you
+          want one, and gone the moment you type. */}
+      {focused && !query && !dismissed ? (
+        <ul className={styles.suggestions} aria-label="Search tags">
+          {SEARCH_TAGS.map((tag) => (
+            <li key={tag.token}>
+              <button
+                type="button"
+                tabIndex={-1}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  onChange(tag.token)
+                }}
+              >
+                <code className={styles.tagToken}>{tag.token}</code>
+                <span className={styles.tagSays}>{tag.says}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : null}
       {suggestions.length ? (
         <ul className={styles.suggestions} role="listbox">
@@ -1509,6 +1554,16 @@ function SearchBar({
   )
 }
 
+/** The tags the search box understands, as offered under it — see `boardSearch.ts`. */
+const SEARCH_TAGS = [
+  { token: 'col:', says: 'in a column' },
+  { token: 'who:', says: 'owned by someone' },
+  { token: 'goal:', says: 'on a goal' },
+  { token: 'blk:', says: 'blocked' },
+  { token: 'hld:', says: 'on hold' },
+  { token: 'cnl:', says: 'cancelled' },
+] as const
+
 const SUGGESTION_KINDS: Record<Suggestion['kind'], string> = {
   column: 'Column',
   assignee: 'Assignee',
@@ -1516,29 +1571,53 @@ const SUGGESTION_KINDS: Record<Suggestion['kind'], string> = {
 }
 
 /**
- * Two dropdowns and a hide, narrowing the board by goal and by status — tucked
- * behind a toggle rather than sitting on the toolbar all the time.
+ * Open and shut for a popover anchored under its button: shut again by a
+ * press anywhere outside it or by Escape, which hands focus back to the
+ * button — the place a keyboard user opened it from.
+ */
+function usePopover() {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: PointerEvent) {
+      if (root.current && !root.current.contains(event.target as Node)) setOpen(false)
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      button.current?.focus()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  return { open, setOpen, root, button }
+}
+
+/**
+ * Goal, status and the cancelled hide, narrowing the board — in a popover
+ * under one button rather than sitting on the toolbar all the time.
  *
- * A pair of selects rather than a row of chips: a project's goal list is
- * open-ended, and a chip for each would be the one control on the board that
- * grows with the data instead of the columns. All of it ANDed onto whatever
- * the search box is already narrowing to — see the `.filter` calls around
- * `visibleTasks`.
+ * All of it ANDed onto whatever the search box is already narrowing to — see
+ * the `.filter` calls around `visibleTasks`. Closing it does not clear it: a
+ * filter left on while the popover is shut is still doing its job, which is
+ * what the number on the button is for.
  *
- * The cancelled hide is a button rather than a third select because it has one
+ * The cancelled hide is a switch rather than a third list because it has one
  * question and two answers, and because it is the one of the three the board
- * arrives with already set: the status select asks "show me only these", the
+ * arrives with already set: the status list asks "show me only these", the
  * hide asks "stop showing me those", and it is on from the first visit — which
  * is why it says how many it is holding back, and why it says so even while it
  * is standing down. The cards on hold are not here at all; they are held back
  * and let out at the foot of each column, because which of them matters is a
  * question about one column rather than about the board.
- *
- * Collapsed by default and opened from the button at its right, which is also
- * where it closes back to: a board with two more selects parked on the
- * toolbar permanently is a toolbar that grew for a filter most visits do not
- * use. Closing it does not clear it — a filter left on while the drawer is
- * shut is still doing its job, which is what the dot on the button is for.
  */
 function QuickFilters({
   goals,
@@ -1566,99 +1645,147 @@ function QuickFilters({
   /** Whether the hide is actually in force — see `hidesCancelled`. */
   hiding: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  // The cancelled hide is on by default, so it is not what makes the drawer
-  // worth looking in — the dot means somebody changed something, and the
-  // ordinary board would otherwise wear one permanently. Turning the hide off
-  // is the change worth marking.
-  const active = goal !== 'all' || status !== 'all' || showCancelled
+  const { open, setOpen, root, button } = usePopover()
+  // The cancelled hide is on by default, so it is not what makes the filter
+  // worth looking in — the number counts what somebody changed, and the
+  // ordinary board would otherwise wear one permanently.
+  const active = [goal !== 'all', status !== 'all', showCancelled].filter(Boolean).length
+  const goalOptions: { value: QuickGoal; name: string; colour: string | null }[] = [
+    { value: 'all', name: 'All goals', colour: null },
+    { value: 'none', name: 'No goal', colour: null },
+    ...goals.map((candidate) => ({
+      value: candidate.id,
+      name: candidate.name,
+      colour: candidate.colour,
+    })),
+  ]
 
   return (
-    <div className={styles.quickFilters}>
-      <div
-        className={`${styles.filterDrawer} ${open ? styles.filterDrawerOpen : ''}`}
-        // Hidden from screen readers while shut, and each select pulled out of
-        // tab order with it: the drawer's width collapses to nothing but the
-        // selects inside it stay in the document, and a control a sighted user
-        // cannot see is still one a keyboard user could tab into.
-        aria-hidden={!open}
-      >
-        <select
-          value={goal}
-          onChange={(event) => onGoal(event.target.value)}
-          tabIndex={open ? undefined : -1}
-          aria-label="Filter the board by goal"
-        >
-          <option value="all">All goals</option>
-          <option value="none">No goal</option>
-          {goals.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={status}
-          onChange={(event) => onStatus(event.target.value as QuickStatus)}
-          tabIndex={open ? undefined : -1}
-          aria-label="Filter the board by status"
-        >
-          <option value="all">All statuses</option>
-          {(Object.keys(STATUS_LABELS) as Task['status'][]).map((candidate) => (
-            <option key={candidate} value={candidate}>
-              {STATUS_LABELS[candidate]}
-            </option>
-          ))}
-        </select>
-        {/* Pressed, but not necessarily doing anything: `hiding` is what the
-            board actually did, and the two part company when the status
-            select is asking for the very cards this puts away. The button
-            stays pressed and says so in its own words rather than silently
-            un-pressing itself — the setting is still on, it is just being
-            overruled by the more specific question next to it. */}
-        <Button
-          small
-          aria-pressed={!showCancelled}
-          className={hiding ? styles.groupedOn : undefined}
-          tabIndex={open ? undefined : -1}
-          onClick={() => onShowCancelled(!showCancelled)}
-          title={
-            showCancelled
-              ? 'Hide the cancelled cards again'
-              : 'Show the cancelled cards on the board'
-          }
-        >
-          ⊘ Cancelled
-          <span className={styles.hint}>
-            {cancelledHint(hiding, showCancelled, cancelledCount)}
-          </span>
-        </Button>
-      </div>
-      <Button
-        small
-        aria-pressed={open}
+    <div className={styles.popRoot} ref={root}>
+      <button
+        ref={button}
+        type="button"
+        className={`${styles.toolButton} ${open ? styles.toolButtonOpen : ''}`}
         aria-expanded={open}
-        className={open ? styles.groupedOn : undefined}
+        aria-haspopup="dialog"
         onClick={() => setOpen(!open)}
-        title={open ? 'Hide the quick filters' : 'Filter the board by goal or status'}
+        title={open ? 'Hide the filters' : 'Filter the board by goal or status'}
       >
-        ⏷ Filters
-        {active ? <span className={styles.filterDot} aria-hidden="true" /> : null}
-      </Button>
+        <FilterIcon />
+        Filter
+        {active ? (
+          <span className={styles.toolBadge}>
+            {active}
+            <span className="visually-hidden"> on</span>
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div
+          className={`${styles.popover} ${styles.filterPopover}`}
+          role="dialog"
+          aria-label="Filter"
+        >
+          <div className={styles.popHead}>
+            <span className={styles.popTitle}>Filter</span>
+            {active ? (
+              <button
+                type="button"
+                className={styles.popLink}
+                onClick={() => {
+                  onGoal('all')
+                  onStatus('all')
+                  onShowCancelled(false)
+                }}
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          <div className={styles.popLabel} id="filter-goal">
+            Goal
+          </div>
+          <div className={styles.optionList} role="group" aria-labelledby="filter-goal">
+            {goalOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={styles.option}
+                aria-pressed={goal === option.value}
+                onClick={() => onGoal(option.value)}
+              >
+                <span
+                  className={styles.optionSwatch}
+                  style={option.colour ? { background: option.colour } : undefined}
+                  aria-hidden="true"
+                />
+                <span className={styles.optionName}>{option.name}</span>
+                {goal === option.value ? <TickIcon /> : null}
+              </button>
+            ))}
+          </div>
+
+          <div className={styles.popLabel} id="filter-status">
+            Status
+          </div>
+          <div className={styles.statusPicks} role="group" aria-labelledby="filter-status">
+            {(['all', ...Object.keys(STATUS_LABELS)] as QuickStatus[]).map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                className={styles.statusPick}
+                aria-pressed={status === candidate}
+                onClick={() => onStatus(candidate)}
+              >
+                {candidate === 'all' ? 'All' : STATUS_LABELS[candidate]}
+              </button>
+            ))}
+          </div>
+
+          <div className={styles.popRule} />
+
+          {/* Pressed, but not necessarily doing anything: `hiding` is what the
+              board actually did, and the two part company when the status
+              list is asking for the very cards this puts away. The switch
+              stays on and says so in its own words rather than silently
+              turning itself off — the setting is still on, it is just being
+              overruled by the more specific question next to it. */}
+          <button
+            type="button"
+            className={styles.switchRow}
+            role="switch"
+            aria-checked={!showCancelled}
+            onClick={() => onShowCancelled(!showCancelled)}
+          >
+            <span className={styles.switchText}>
+              Hide cancelled
+              <span className={styles.switchHint}>
+                {cancelledHint(hiding, showCancelled, cancelledCount)}
+              </span>
+            </span>
+            <span className={styles.switch} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
 
 /**
- * "Needs you" and "Agents working" (CYLIST-90): the two questions a board with
- * agents on it gets asked most, as a pair of chips with live counts.
+ * "Needs you" and "working" (CYLIST-90): the two questions a board with agents
+ * on it gets asked most, as two small counts beside the page's title.
  *
- * Chips rather than two more options in the Filters drawer: the drawer is shut
- * by default, and a count of cards waiting on you is worth nothing if it is
- * behind a button. Pressing one narrows the board to those cards, ANDed with
- * the search box and the drawer like every other filter; pressing it again,
- * or the other one, lets go. One at a time, because "needs you or working" is
- * just "has a live agent", which the borders already show.
+ * Small and quiet on purpose: a dot, a number and two words, with no fill
+ * until one is pressed. They are worth a glance, not a toolbar's worth of
+ * chrome — and drawn the size of buttons beside the search box they were read
+ * as the board's main controls. A zero goes grey rather than away, so the
+ * pair never moves the title.
+ *
+ * Pressing one narrows the board to those cards, ANDed with the search box and
+ * the filter like every other filter; pressing it again, or the other one,
+ * lets go. One at a time, because "needs you or working" is just "has a live
+ * agent", which the borders already show.
  *
  * The counts move with the board's own socket: a `board.changed` refetches the
  * cards and these are counted off them, so there is no polling of their own.
@@ -1677,14 +1804,14 @@ function AgentChips({
   const chips = [
     {
       key: 'needs_you' as const,
-      label: 'Needs you',
+      label: 'need you',
       count: needsYou,
       title: 'Only the cards whose agent is waiting on a person',
       className: styles.needsChip,
     },
     {
       key: 'working' as const,
-      label: 'Agents working',
+      label: 'working',
       count: working,
       title: 'Only the cards whose agent is working',
       className: styles.workingChip,
@@ -1696,9 +1823,9 @@ function AgentChips({
       {chips.map((chip) => {
         const on = value === chip.key
         return (
-          <Button
+          <button
             key={chip.key}
-            small
+            type="button"
             aria-pressed={on}
             className={[
               styles.agentChip,
@@ -1712,9 +1839,9 @@ function AgentChips({
             onClick={() => onChange(on ? 'all' : chip.key)}
           >
             <span className={styles.agentChipDot} aria-hidden="true" />
-            {chip.label}
             <span className={styles.agentChipCount}>{chip.count}</span>
-          </Button>
+            {chip.label}
+          </button>
         )
       })}
     </div>
@@ -1728,7 +1855,7 @@ function AgentChips({
  */
 function cancelledHint(hiding: boolean, showCancelled: boolean, cancelledCount: number) {
   if (hiding) return `${cancelledCount} hidden`
-  if (!showCancelled) return 'overruled'
+  if (!showCancelled) return 'overruled by the status'
   return `${cancelledCount} shown`
 }
 
@@ -2303,6 +2430,7 @@ function CardList({
           task={task}
           members={members}
           onOpen={() => onOpenTask(task.id)}
+          onOpenTask={onOpenTask}
           onMoveSubStatus={(index) => onMoveSubStatus(task.id, index)}
           onSetAssignee={(assigneeId) => onSetAssignee(task.id, task.reference, assigneeId)}
         />
@@ -2410,12 +2538,15 @@ function TaskCard({
   task,
   members,
   onOpen,
+  onOpenTask,
   onMoveSubStatus,
   onSetAssignee,
 }: {
   task: Task
   members: Person[]
   onOpen: () => void
+  /** Opens another card's dialog — one of this card's sub-tasks. */
+  onOpenTask: (taskId: string) => void
   onMoveSubStatus: (index: number) => void
   onSetAssignee: (assigneeId: string) => void
 }) {
@@ -2498,6 +2629,7 @@ function TaskCard({
           members={members}
           onMoveSubStatus={onMoveSubStatus}
           onSetAssignee={onSetAssignee}
+          onOpenTask={onOpenTask}
         />
       </article>
       {popover.open && answerable ? (
@@ -2515,28 +2647,15 @@ function TaskCard({
 }
 
 /**
- * What a card says, without any of what a card does.
- *
- * Drawn twice while a card is being dragged — dimmed in the column it came
- * from, and solid in the overlay — so it lives apart from the drag wiring that
- * only the one in the column has.
- *
- * `onMoveSubStatus` is optional because the overlay's copy has nothing to
- * click: it is a picture of a card moving, and the stage it is on cannot be
- * advanced in mid-air.
- */
-/**
- * The date a card is being asked for now, the column it is wanted in by then,
- * and the tab that date has earned — nulls throughout for a card that owes
- * nothing.
+ * The date a card is being asked for now, and the column it is wanted in by
+ * then — nulls for a card that owes nothing.
  */
 function owedDateOf(task: Task) {
   /* Cancelling the work is what stops it owing anybody a date, and finishing
      it does the same — a card already in the board's last column has nothing
-     left to be late for. Neither wears the tab nor the date that would
-     otherwise stand in for it: a red "12d late" shouting from a card that is
-     done, same as one nobody is going to do, is the loudest wrong thing the
-     board could say. */
+     left to be late for. A red "12d late" shouting from a card that is done,
+     same as one nobody is going to do, is the loudest wrong thing the board
+     could say. */
   const dated = task.status !== 'cancelled' && task.finished_at === null
   /* The next date owed rather than the last column's: a card wanted in Review
      by Friday is late on Saturday, whatever the end of the board says. The
@@ -2547,69 +2666,760 @@ function owedDateOf(task: Task) {
   const stage =
     task.column_due_dates.find((entry) => !entry.met && entry.due_date === owed)?.column_name ??
     null
-  return { owed, stage, tab: dueTabMark(owed, stage) }
+  return { owed, stage }
 }
 
+/**
+ * The marks on a card that open into what they stand for: the pull-request
+ * mark into the list of them, the stage bar into the stages, the sub-task
+ * count into the sub-tasks.
+ */
+type CardFocus = 'prs' | 'stages' | 'subs'
+
+/** How long a mark has to be rested on before it opens: long enough that
+ * passing over one on the way to another does nothing. */
+const MARK_REST_MS = 200
+
+/** How long an open list waits after the pointer leaves before it shuts —
+ * long enough to travel from one mark to the next, so the slot goes straight
+ * from one list to the other instead of dropping back to the facts between. */
+const MARK_GRACE_MS = 350
+
+/**
+ * Which of those marks has opened its list, and which is waiting to.
+ *
+ * A mark opens only after the pointer has rested on it, never as it passes:
+ * the stage bar and the sub-task count sit on the row above the pull-request
+ * mark, and a mark that opened on contact opened on the way down to the one
+ * below it. Focus opens at once, because a keyboard does not pass over
+ * anything, and so does a click — for a pointer that cannot hover. A click
+ * never shuts: the pointer that clicked has usually just watched the list
+ * open, and shutting it then would undo what it came for. Leaving shuts.
+ *
+ * Whatever opens goes into the one slot under the card's bottom line, and the
+ * slot holds itself open while the pointer is in it, so its rows can be used.
+ */
+function useCardFocus() {
+  const [focus, setFocus] = useState<CardFocus | null>(null)
+  const [arming, setArming] = useState<CardFocus | null>(null)
+  // Each list mounts the first time it opens and stays, so it has something
+  // to slide out with when the next one takes the slot.
+  const [opened, setOpened] = useState<ReadonlySet<CardFocus>>(() => new Set())
+  const openTimer = useRef<number | undefined>(undefined)
+  const closeTimer = useRef<number | undefined>(undefined)
+  useEffect(
+    () => () => {
+      window.clearTimeout(openTimer.current)
+      window.clearTimeout(closeTimer.current)
+    },
+    [],
+  )
+
+  const show = useCallback((which: CardFocus | null) => {
+    window.clearTimeout(openTimer.current)
+    window.clearTimeout(closeTimer.current)
+    setArming(null)
+    setFocus(which)
+    if (which) setOpened((seen) => (seen.has(which) ? seen : new Set(seen).add(which)))
+  }, [])
+  const arm = (which: CardFocus) => {
+    window.clearTimeout(openTimer.current)
+    window.clearTimeout(closeTimer.current)
+    if (focus === which) return
+    setArming(which)
+    openTimer.current = window.setTimeout(() => show(which), MARK_REST_MS)
+  }
+  const letGo = () => {
+    window.clearTimeout(openTimer.current)
+    setArming(null)
+    closeTimer.current = window.setTimeout(() => setFocus(null), MARK_GRACE_MS)
+  }
+  const keep = () => window.clearTimeout(closeTimer.current)
+
+  /** What a mark spreads onto itself. Focus opens only when it came from the
+   * keyboard: a click has its own say, below, and focus a click leaves behind
+   * outlives the pointer that gave it. */
+  const mark = (which: CardFocus) => ({
+    onPointerEnter: () => arm(which),
+    onPointerLeave: letGo,
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      if (event.currentTarget.matches(':focus-visible')) show(which)
+    },
+    onBlur: letGo,
+    onPick: () => show(which),
+  })
+  /** What the slot under the bottom line spreads onto itself. */
+  const slot = { onPointerEnter: keep, onPointerLeave: letGo, onFocus: keep, onBlur: letGo }
+
+  return { focus, arming, opened, mark, slot, letGo }
+}
+
+/** The handlers `useCardFocus` hands a mark. */
+type MarkHandlers = ReturnType<ReturnType<typeof useCardFocus>['mark']>
+
+/** A mark's own events, without the click it takes for itself. */
+function markEvents(handlers: MarkHandlers) {
+  const { onPointerEnter, onPointerLeave, onFocus, onBlur } = handlers
+  return { onPointerEnter, onPointerLeave, onFocus, onBlur }
+}
+
+/** A mark's classes: open, or filling its hairline while it waits to open. */
+function markClass(kind: string | undefined, open: boolean, arming: boolean) {
+  return [styles.mark, kind, open && styles.markOpen, arming && styles.markArming]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * What a card says, without any of what a card does.
+ *
+ * Drawn twice while a card is being dragged — dimmed in the column it came
+ * from, and solid in the overlay — so it lives apart from the drag wiring that
+ * only the one in the column has. The callbacks are optional because the
+ * overlay's copy has nothing to click: it is a picture of a card moving.
+ *
+ * The face is what every card in a column is compared on, and nothing else:
+ * the title and its priority, how far through its stages and sub-tasks it is,
+ * and one line of which card it is, when it is owed, where it is tracked and
+ * whose it is. Under that is one slot, and only one: the card's other facts
+ * after a short rest on the card, or — after a short rest on a mark — the
+ * stages, the sub-tasks or the pull requests. Nothing that opens ever takes
+ * the place of a row, so nothing the pointer is aiming at moves. The goal is
+ * the rail down the card's left edge, named when the rail is pointed at.
+ */
 function TaskCardBody({
   task,
   members,
   onMoveSubStatus,
   onSetAssignee,
+  onOpenTask,
 }: {
   task: Task
   members: Person[]
   onMoveSubStatus?: (index: number) => void
   /** Undefined for the overlay's copy — see `onMoveSubStatus`. */
   onSetAssignee?: (assigneeId: string) => void
+  /** Opens a sub-task's own dialog. Undefined for the overlay's copy. */
+  onOpenTask?: (taskId: string) => void
 }) {
-  const { owed, stage, tab } = owedDateOf(task)
+  const { owed, stage } = owedDateOf(task)
+  const viewerId = useViewerId()
+  const agent = agentIndicator(task.agent_session, new Date(), viewerId)
+  const { focus, arming, opened, mark, slot, letGo } = useCardFocus()
+  const staged = task.sub_statuses.length > 0
+  // While an agent is on the card, the line saying what it is doing takes the
+  // place of the stages: that is the progress worth reading right then, and
+  // the two together were a card made of status lines.
+  const progress = !agent && (staged || task.subtask_count > 0)
 
   return (
-    <>
-      {/* Above the title and outside the card's outline, which is the whole of
-          what makes it findable — see `DueTab`. */}
-      {tab ? <DueTab mark={tab} /> : null}
-
-      <div className={styles.title}>{task.title}</div>
-
-      {task.sub_statuses.length && onMoveSubStatus ? (
-        <SubStatusBar
-          labels={task.sub_statuses}
-          index={task.sub_status_index ?? 0}
-          members={members}
-          onMove={onMoveSubStatus}
-        />
+    <div
+      className={[styles.cardBody, focus && styles[`focus_${focus}`]].filter(Boolean).join(' ')}
+      // Leaving the card lets go too, not only leaving a mark or the slot: a
+      // row that re-renders under the pointer — a tick that just landed — can
+      // swallow the leave its own list was waiting for.
+      onPointerLeave={letGo}
+    >
+      {/* Named on the rail rather than written on the card. The rail is the
+          goal already, and one card that says so teaches the column. */}
+      {task.goal_name && !agent ? (
+        <span className={styles.goalHit} aria-hidden="true">
+          <span className={styles.goalTab}>{task.goal_name}</span>
+        </span>
       ) : null}
 
-      <AgentLine session={task.agent_session} />
-
-      <WaitingOnLine people={task.waiting_on} />
-
-      {/* Every piece of chrome the card has, on one line under the title.
-          There used to be a row above the title as well, and between them they
-          gave the same six-element tax to every card whether or not it had
-          anything urgent to say — so the eye had to read three rows down to
-          find the one sentence that differs between cards.
-
-          The line has two halves and a gap that grows between them. On the
-          left is what the card is: which one, whose part of what, and how it
-          stands. On the right is what has accumulated around it — how much has
-          been said, what it is tracked as elsewhere, how far through its parts
-          it is, and who has it. The gap is what keeps the faces on one margin
-          down the column however much or little sits to their left. */}
-      <div className={styles.strip}>
-        <StripIdentity task={task} owed={owed} stage={stage} dueOnTab={tab !== null} />
-        <span className={styles.stripGap} />
-        <StripAccumulated task={task} members={members} onSetAssignee={onSetAssignee} />
+      <div className={styles.headLine}>
+        <div className={styles.title}>{task.title}</div>
+        <PriorityMark priority={task.priority} />
       </div>
-    </>
+
+      {agent ? <AgentLine session={task.agent_session} /> : null}
+
+      {progress ? (
+        <div className={styles.progress}>
+          {staged ? (
+            <StageMark
+              task={task}
+              onMove={onMoveSubStatus}
+              open={focus === 'stages'}
+              arming={arming === 'stages'}
+              handlers={mark('stages')}
+            />
+          ) : null}
+          {task.subtask_count ? (
+            <SubtaskMark
+              task={task}
+              open={focus === 'subs'}
+              arming={arming === 'subs'}
+              handlers={mark('subs')}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.faceLine}>
+        <span className={styles.reference}>{task.reference}</span>
+        <DueMark iso={owed} column={stage} />
+        {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
+        {task.pr_refs.length ? (
+          <PrMark
+            refs={task.pr_refs}
+            open={focus === 'prs'}
+            arming={arming === 'prs'}
+            handlers={mark('prs')}
+          />
+        ) : null}
+        <span className={styles.faceGap} />
+        {onSetAssignee ? (
+          <AssigneePicker task={task} members={members} onSetAssignee={onSetAssignee} />
+        ) : (
+          <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
+        )}
+      </div>
+
+      {/* The one slot. Opened by a short rest on the card rather than the
+          moment the pointer crosses it — a column you are only moving across
+          should not ripple — or at once by a mark that has opened. Every list
+          shares the one cell, in the order of the marks, so switching from
+          one to another slides the way the pointer moved. */}
+      <div className={styles.more} {...slot}>
+        <div className={styles.slotStack}>
+          <div className={`${styles.slotPane} ${styles.factsPane}`}>
+            <div className={styles.paneInner}>
+              <CardFacts task={task} />
+            </div>
+          </div>
+          {staged && progress ? (
+            <div className={`${styles.slotPane} ${styles.stagesPane}`}>
+              <div className={styles.paneInner}>
+                <StageList task={task} members={members} onMove={onMoveSubStatus} />
+              </div>
+            </div>
+          ) : null}
+          {task.subtask_count && progress && opened.has('subs') ? (
+            <div className={`${styles.slotPane} ${styles.subsPane}`}>
+              <div className={styles.paneInner}>
+                <SubtaskList task={task} onOpenTask={onOpenTask} />
+              </div>
+            </div>
+          ) : null}
+          {task.pr_refs.length ? (
+            <div className={`${styles.slotPane} ${styles.prsPane}`}>
+              <div className={styles.paneInner}>
+                <PrList refs={task.pr_refs} />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
   )
 }
 
 /**
- * The one line the border needs words for. Drawn in the same slot and at the
- * same weight as "Waiting on @First": both are the card saying who it is
- * waiting on, and this one is waiting on you.
+ * The priority, as its glyph and its name. P3 is the baseline every card
+ * starts on, so flagging it too would be noise on every single card.
+ */
+function PriorityMark({ priority }: { priority: Task['priority'] }) {
+  if (priority === 'p3') return null
+
+  return (
+    <span
+      className={`${styles.prio} ${styles[`priority_${priority}`]}`}
+      title={PRIORITY_LABELS[priority]}
+    >
+      <PriorityIcon priority={priority} size={12} />
+      <span aria-hidden="true">{priority.toUpperCase()}</span>
+      <span className="visually-hidden">{PRIORITY_LABELS[priority]}</span>
+    </span>
+  )
+}
+
+/**
+ * The stage a card is on, as a short bar and its name — and the control that
+ * moves it, from the keyboard. Pointed at, it opens the stages themselves
+ * (see `StageList`), which is where a pointer moves it.
+ *
+ * Every key and press stops here: the card around this is dnd-kit's drag
+ * handle and the button that opens the dialog, and an Enter left to bubble
+ * would open a task the reader was only stepping through.
+ */
+function StageMark({
+  task,
+  onMove,
+  open,
+  arming,
+  handlers,
+}: {
+  task: Task
+  onMove: ((index: number) => void) | undefined
+  open: boolean
+  arming: boolean
+  handlers: MarkHandlers
+}) {
+  const labels = task.sub_statuses
+  const index = task.sub_status_index ?? 0
+  const current = labels[index] ?? ''
+  const done = index === labels.length - 1
+
+  return (
+    <span
+      className={markClass(styles.stageMark, open, arming)}
+      role={onMove ? 'slider' : undefined}
+      tabIndex={onMove ? 0 : undefined}
+      aria-label={onMove ? 'Stage' : undefined}
+      aria-valuemin={onMove ? 1 : undefined}
+      aria-valuemax={onMove ? labels.length : undefined}
+      aria-valuenow={onMove ? index + 1 : undefined}
+      aria-valuetext={`Stage ${index + 1} of ${labels.length}: ${current}`}
+      aria-expanded={open}
+      {...markEvents(handlers)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        handlers.onPick()
+      }}
+      onKeyDown={(event) => {
+        if (!onMove) return
+        event.stopPropagation()
+        const to = {
+          ArrowLeft: index - 1,
+          ArrowDown: index - 1,
+          ArrowRight: index + 1,
+          ArrowUp: index + 1,
+          Home: 0,
+          End: labels.length - 1,
+        }[event.key]
+        if (to === undefined) return
+        event.preventDefault()
+        if (to !== index && to >= 0 && to < labels.length) onMove(to)
+      }}
+    >
+      <span className={styles.stageTrack} aria-hidden="true">
+        {labels.map((label, position) => (
+          <span
+            key={`${position}-${label}`}
+            className={[
+              styles.stageStep,
+              (position < index || (position === index && done)) && styles.stageStepDone,
+              position === index && !done && styles.stageStepHere,
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          />
+        ))}
+      </span>
+      <span className={styles.stageName}>{current}</span>
+      <span className={styles.stageCount}>
+        {index + 1}/{labels.length}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Every stage on one line, where the bar was a picture of them: done, here,
+ * and still to come. Each is a button while the card can be moved, so a click
+ * on a stage is a move to it.
+ */
+function StageList({
+  task,
+  members,
+  onMove,
+}: {
+  task: Task
+  members: Person[]
+  onMove: ((index: number) => void) | undefined
+}) {
+  const index = task.sub_status_index ?? 0
+  const last = task.sub_statuses.length - 1
+
+  return (
+    <div className={styles.stageList}>
+      {task.sub_statuses.map((label, position) => {
+        const state =
+          position < index || (position === index && index === last)
+            ? styles.stageDone
+            : position === index
+              ? styles.stageHere
+              : ''
+        const text = <Tagged text={label} members={members} />
+        return onMove ? (
+          <button
+            key={`${position}-${label}`}
+            type="button"
+            className={`${styles.stage} ${state}`}
+            aria-current={position === index ? 'step' : undefined}
+            title={position === index ? 'You are here' : `Move to ${label}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              if (position !== index) onMove(position)
+            }}
+          >
+            {text}
+          </button>
+        ) : (
+          <span key={`${position}-${label}`} className={`${styles.stage} ${state}`}>
+            {text}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * How much of the card's work is split off and how much of that is done: a
+ * tick and a count. Pointed at, it opens the parts themselves.
+ */
+function SubtaskMark({
+  task,
+  open,
+  arming,
+  handlers,
+}: {
+  task: Task
+  open: boolean
+  arming: boolean
+  handlers: MarkHandlers
+}) {
+  const done = task.subtask_count - task.open_subtask_count
+  const label = `${done} of ${task.subtask_count} sub-tasks finished`
+
+  return (
+    <button
+      type="button"
+      className={markClass(styles.subtaskMark, open, arming)}
+      aria-label={label}
+      aria-expanded={open}
+      {...markEvents(handlers)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        handlers.onPick()
+      }}
+    >
+      <TickIcon />
+      <span aria-hidden="true">
+        {done}/{task.subtask_count}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * The card's parts, one short row each: the sub-tasks with a reference of
+ * their own, then the tick boxes. Fetched when first asked for, since the
+ * board itself only carries the counts — and kept, under the same key the
+ * card's dialog reads, so opening the card after looking costs nothing.
+ *
+ * Every row is something to act on, not a picture of one. The tick finishes
+ * the part, or opens it again; the rest of a sub-task's row opens that
+ * sub-task. A tick box has no dialog of its own, so its whole row is the tick.
+ * Every click stops at the row: the card underneath would otherwise open the
+ * parent as well.
+ */
+function SubtaskList({
+  task,
+  onOpenTask,
+}: {
+  task: Task
+  onOpenTask: ((taskId: string) => void) | undefined
+}) {
+  const queryClient = useQueryClient()
+  const announce = useContext(BoardAnnounce)
+  const detail = useQuery({
+    queryKey: ['task', task.id],
+    queryFn: () => api.getTask(task.reference),
+  })
+
+  async function refresh() {
+    await queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+    // The count on the card is the board's, so the board is out of date too.
+    await queryClient.invalidateQueries({ queryKey: ['tasks'] })
+  }
+  const finish = useMutation({
+    mutationFn: ({ part, finished }: { part: Task; finished: boolean }) =>
+      api.finishTask(part.id, finished),
+    onSuccess: async (part, { finished }) => {
+      announce(`${part.reference} is ${finished ? 'finished' : 'open again'}.`)
+      await refresh()
+    },
+    onError: (error) => announce(error.message),
+  })
+  const tick = useMutation({
+    mutationFn: ({ id, done }: { id: string; done: boolean }) =>
+      api.updateChecklistItem(id, { state: done ? 'done' : 'open' }),
+    onSuccess: async (item) => {
+      announce(`${item.title} is ${item.state === 'done' ? 'done' : 'open again'}.`)
+      await refresh()
+    },
+    onError: (error) => announce(error.message),
+  })
+  const busy = finish.isPending || tick.isPending
+
+  if (!detail.data) {
+    return <div className={styles.partNote}>{detail.error ? 'Could not load' : 'Loading…'}</div>
+  }
+
+  const subtasks = detail.data.subtasks.filter((subtask) => subtask.status !== 'cancelled')
+  const ticks = detail.data.checklist.filter((item) => item.state !== 'cancelled')
+  const stop = {
+    onPointerDown: (event: { stopPropagation: () => void }) => event.stopPropagation(),
+    onKeyDown: (event: { stopPropagation: () => void }) => event.stopPropagation(),
+  }
+
+  return (
+    <ul className={styles.parts}>
+      {subtasks.map((subtask) => {
+        const finished = subtask.finished_at !== null
+        return (
+          <li key={subtask.id} className={`${styles.part} ${finished ? styles.partDone : ''}`}>
+            <button
+              type="button"
+              className={styles.partTick}
+              aria-pressed={finished}
+              aria-label={
+                finished ? `Open ${subtask.reference} again` : `Finish ${subtask.reference}`
+              }
+              title={finished ? 'Open it again' : 'Finish it'}
+              aria-disabled={busy}
+              {...stop}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (!busy) finish.mutate({ part: subtask, finished: !finished })
+              }}
+            >
+              <TickIcon />
+            </button>
+            {onOpenTask ? (
+              <button
+                type="button"
+                className={styles.partOpen}
+                title={`Open ${subtask.reference}`}
+                {...stop}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenTask(subtask.id)
+                }}
+              >
+                <PartLabel subtask={subtask} />
+                <ChevronIcon />
+              </button>
+            ) : (
+              <span className={styles.partOpen}>
+                <PartLabel subtask={subtask} />
+              </span>
+            )}
+          </li>
+        )
+      })}
+      {ticks.map((item) => {
+        const done = item.state === 'done'
+        return (
+          <li key={item.id} className={`${styles.part} ${done ? styles.partDone : ''}`}>
+            <button
+              type="button"
+              className={styles.partWhole}
+              aria-pressed={done}
+              aria-disabled={busy}
+              {...stop}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (!busy) tick.mutate({ id: item.id, done: !done })
+              }}
+            >
+              <span className={styles.partTick} aria-hidden="true">
+                <TickIcon />
+              </span>
+              <span className={styles.partTitle}>{item.title}</span>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/** A sub-task's reference, title and owner, as its row says them. */
+function PartLabel({ subtask }: { subtask: Task }) {
+  return (
+    <>
+      <span className={styles.partRef}>{subtask.reference}</span>
+      <span className={styles.partTitle}>{subtask.title}</span>
+      <Avatar name={subtask.assignee.name} colour={subtask.assignee.colour} small />
+    </>
+  )
+}
+
+/** A row that opens something: shown on hover, so a list at rest stays quiet. */
+function ChevronIcon() {
+  return (
+    <svg className={styles.go} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m6 3.5 4.5 4.5L6 12.5" />
+    </svg>
+  )
+}
+
+/** A row that opens elsewhere, in a new tab. */
+function OutIcon() {
+  return (
+    <svg className={styles.go} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5M12 9.5V13a.5.5 0 0 1-.5.5h-8A.5.5 0 0 1 3 13V5a.5.5 0 0 1 .5-.5H7" />
+    </svg>
+  )
+}
+
+/**
+ * Every pull request on the card as one mark: the furthest behind decides its
+ * colour and drawing, since the card is not merged while any of its work is
+ * still in review, and a count says how many it stands for. Pointed at, it
+ * swaps the card's line of facts for the list of them.
+ */
+function PrMark({
+  refs,
+  open,
+  arming,
+  handlers,
+}: {
+  refs: PrRef[]
+  open: boolean
+  arming: boolean
+  handlers: MarkHandlers
+}) {
+  const state = leastAdvancedPrState(refs) ?? 'raised'
+  const only = refs.length === 1 ? refs[0] : undefined
+  const label = only
+    ? `Pull request ${prRefLabel(only.url)}, ${state}`
+    : `${refs.length} pull requests, the furthest behind ${state}`
+
+  return (
+    <button
+      type="button"
+      className={`${markClass(styles.prMark, open, arming)} ${styles[`pr_${state}`]}`}
+      aria-label={label}
+      aria-expanded={open}
+      title={label}
+      {...markEvents(handlers)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        handlers.onPick()
+      }}
+    >
+      <PrIcon state={state} size={13} />
+      {refs.length > 1 ? <span className={styles.prCount}>×{refs.length}</span> : null}
+    </button>
+  )
+}
+
+/**
+ * Each pull request on its own line: where it is, which one, how far it got.
+ * The whole line is the link, so it opens wherever on it you click; one that
+ * is not a URL has nowhere to go and is only the line.
+ */
+function PrList({ refs }: { refs: PrRef[] }) {
+  return (
+    <ul className={styles.prList}>
+      {refs.map((ref) => {
+        const repo = prRefRepo(ref.url)
+        const href = /^https?:\/\//i.test(ref.url) ? ref.url : null
+        const line = (
+          <>
+            <PrIcon state={ref.state} size={12} />
+            {repo ? <span className={styles.prRepo}>{repo}</span> : null}
+            <span className={styles.prNumber}>{prRefLabel(ref.url)}</span>
+            <span className={`${styles.prState} ${styles[`pr_${ref.state}`]}`}>{ref.state}</span>
+          </>
+        )
+        return (
+          <li key={ref.url}>
+            {href ? (
+              <a
+                className={`${styles.prRow} ${styles.prRowLink}`}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open ${repo ? `${repo} ` : ''}${prRefLabel(ref.url)} in a new tab`}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                {line}
+                <OutIcon />
+              </a>
+            ) : (
+              <span className={styles.prRow}>{line}</span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/**
+ * The facts a card keeps off its face: how much has been said, how it stands,
+ * who it waits on, what it is part of, who owns its parts and the Jira key the
+ * face only drew the mark for. Icon and value, one line, nothing labelled —
+ * the icon is the label.
+ */
+function CardFacts({ task }: { task: Task }) {
+  return (
+    <div className={styles.facts}>
+      {task.comment_count ? (
+        <span className={styles.fact} title={`${task.comment_count} comments`}>
+          <CommentIcon size={13} />
+          <span aria-hidden="true">{task.comment_count}</span>
+          <span className="visually-hidden">{task.comment_count} comments</span>
+        </span>
+      ) : null}
+      {task.status === 'active' ? null : (
+        <span className={`${styles.fact} ${styles.status} ${styles[`status_${task.status}`]}`}>
+          {STATUS_LABELS[task.status]}
+        </span>
+      )}
+      {task.waiting_on.length ? (
+        <span className={styles.fact} title="Waiting on">
+          <ClockIcon size={13} />
+          {task.waiting_on.map((person) => `@${person.name.split(' ')[0]}`).join(' ')}
+          <span className="visually-hidden">waiting on them</span>
+        </span>
+      ) : null}
+      {task.parent_reference ? (
+        <span className={styles.fact} title={`Sub-task of ${task.parent_reference}`}>
+          <span aria-hidden="true">↳</span>
+          <span className={styles.factMono}>{task.parent_reference}</span>
+        </span>
+      ) : null}
+      {task.subtask_assignees.length ? (
+        <span
+          className={`${styles.fact} ${styles.owners}`}
+          title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
+        >
+          {task.subtask_assignees.map((person) => (
+            <Avatar key={person.id} name={person.name} colour={person.colour} small />
+          ))}
+        </span>
+      ) : null}
+      {task.jira_ref ? (
+        <span className={styles.fact}>
+          <JiraIcon size={13} />
+          <span className={styles.factMono}>{jiraRefLabel(task.jira_ref)}</span>
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * What an agent on the card is doing. Drawn in the slot the stages take, behind
+ * a rule in the colour the card's border is in, so the line and the border can
+ * never disagree about what state it is.
  */
 function AgentLine({ session }: { session: AgentPresence | null }) {
   const viewerId = useViewerId()
@@ -2618,182 +3428,38 @@ function AgentLine({ session }: { session: AgentPresence | null }) {
 
   return (
     <div
-      className={`${styles.waiting} ${styles.agentLine}`}
+      className={styles.agentLine}
       // The line is cut to the card's width; the whole of it is a hover away.
       title={agent.detail ? `${agent.label} · ${agent.detail}` : agent.label}
     >
-      <span className={styles.agentDot} aria-hidden="true" />
-      <span className={styles.at}>{agent.label}</span>
-      {agent.detail ? <span className={styles.agentDetail}>· {agent.detail}</span> : null}
+      <span className={styles.agentLabel}>{agent.label}</span>
+      {agent.detail ? <span className={styles.agentDetail}>{agent.detail}</span> : null}
       {session && session.count > 1 ? (
         <span className={styles.agentCount} title={`${session.count} sessions`}>
-          {session.count}
+          ×{session.count}
         </span>
       ) : null}
     </div>
   )
 }
 
-/** Who the card is waiting on, by first name, when it is waiting on anybody. */
-function WaitingOnLine({ people }: { people: Person[] }) {
-  if (!people.length) return null
-
+/** A tick, for a finished part — the same one the sub-task count leads with. */
+function TickIcon() {
   return (
-    <div className={styles.waiting}>
-      Waiting on{' '}
-      {people.map((person) => (
-        <span key={person.id} className={styles.at}>
-          @{person.name.split(' ')[0]}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-/**
- * The left half of a card's strip: what the card is — which one, whose part
- * of what, and how it stands.
- *
- * `dueOnTab` says the owed date has already been drawn as a tab above the
- * card, which is what keeps it out of the strip.
- */
-function StripIdentity({
-  task,
-  owed,
-  stage,
-  dueOnTab,
-}: {
-  task: Task
-  owed: string | null
-  stage: string | null
-  dueOnTab: boolean
-}) {
-  return (
-    <>
-      {/* P3 is the baseline every card starts on, so flagging it too would
-          be noise on every single card — the same reasoning that keeps the
-          status pill off an active task.
-
-          Only P0 gets a filled pill. The four levels escalate in chrome and
-          never in width, so a column of cards keeps one margin down its
-          right-hand side however its work is prioritised. */}
-      {task.priority !== 'p3' ? (
-        <span
-          className={`${styles.prio} ${styles[`priority_${task.priority}`]}`}
-          title={PRIORITY_LABELS[task.priority]}
-        >
-          <PriorityIcon priority={task.priority} />
-          <span className="visually-hidden">{PRIORITY_LABELS[task.priority]}</span>
-        </span>
-      ) : null}
-      <span className={styles.reference}>{task.reference}</span>
-      {/* A sub-task's own reference already carries its parent's number, but
-          `ATL-41-2` only says so to a reader who knows the scheme — and on a
-          board, where the two cards may be columns apart, the parent is the
-          thing you need to recognise the card at all. */}
-      {task.parent_reference ? (
-        <span className={styles.parent} title={`Sub-task of ${task.parent_reference}`}>
-          of {task.parent_reference}
-        </span>
-      ) : null}
-      {/* The word the tile used to carry. It is the only thing left saying
-          which of the four states a card is in, the tint underneath it
-          aside, so it says it in full. */}
-      {task.status === 'active' ? null : (
-        <span className={`${styles.pill} ${styles[`pill_${task.status}`]}`}>
-          {STATUS_LABELS[task.status]}
-        </span>
-      )}
-      {/* Only the dates the tab did not take. A date near enough to be asked
-          something of is up on the tab; one further out is only reporting,
-          so it stays down here as the date itself and the card never says it
-          twice. No date, no mark either way — a dash where a date goes reads
-          as a date that failed to load. */}
-      {dueOnTab ? null : <DueMark iso={owed} column={stage} />}
-      {/* The name of the colour on the rail. A rail on its own is a legend
-          you have to have learned; with the name beside it, one card teaches
-          you the rest of the column. Last of the left-hand half and hard
-          against the gap, because it is the one thing here that can afford
-          to be cut. */}
-      {task.goal_name && task.goal_colour ? (
-        <GoalChip
-          name={task.goal_name}
-          colour={task.goal_colour}
-          title={`On ${task.goal_name} (${task.goal_reference})`}
-        />
-      ) : null}
-    </>
-  )
-}
-
-/**
- * The right half of a card's strip: what has accumulated around it — how much
- * has been said, what it is tracked as elsewhere, how far through its parts it
- * is, and who has it.
- */
-function StripAccumulated({
-  task,
-  members,
-  onSetAssignee,
-}: {
-  task: Task
-  members: Person[]
-  /** Undefined for the overlay's copy, which draws the owner but cannot hand the card to anyone. */
-  onSetAssignee: ((assigneeId: string) => void) | undefined
-}) {
-  return (
-    <>
-      {task.comment_count ? (
-        <span className={styles.meta} title={`${task.comment_count} comments`}>
-          <CommentIcon />
-          <span className={styles.metaValue} aria-hidden="true">
-            {task.comment_count}
-          </span>
-          <span className="visually-hidden">{task.comment_count} comments</span>
-        </span>
-      ) : null}
-      {/* Marks rather than identifiers here, and spelled out in the dialog.
-          Quieting a board is only honest if what it stopped saying is one
-          click away — see `TaskRef`. */}
-      {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
-      {task.pr_refs.map((ref) => (
-        <TaskRef key={ref.url} kind="pr" value={ref.url} state={ref.state} compact />
-      ))}
-      {/* Sits on the line rather than above it. The stage bar and these dots
-          are drawn as different things because they are different things —
-          the bar is one journey with a position along it, the dots are a set
-          of items with some of them ticked — but a set of counts is what
-          this half of the line already is, and given a row of its own the
-          set read as a second bar. */}
-      {task.subtask_count ? (
-        <SubtaskDots total={task.subtask_count} open={task.open_subtask_count} />
-      ) : null}
-      {/* Everyone who owes this card something, beside the person who owns
-          it. The board stopped showing where a sub-task is when it stopped
-          putting one in a column, so this is what it shows instead. */}
-      {task.subtask_assignees.length ? (
-        <span
-          className={styles.owners}
-          title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
-        >
-          {task.subtask_assignees.map((person) => (
-            <Avatar key={person.id} name={person.name} colour={person.colour} small />
-          ))}
-        </span>
-      ) : null}
-      {/* Small, like everything else on the line. The owner is still the
-          last thing on the card and the only face at full strength, but it
-          is no longer a 26px disc anchoring a row of 11px print — which is
-          what made the line read as a second row of chrome.
-
-          A control when the card can offer one: see `AssigneePicker`. The
-          overlay's copy gets the plain disc, same as `onMoveSubStatus`. */}
-      {onSetAssignee ? (
-        <AssigneePicker task={task} members={members} onSetAssignee={onSetAssignee} />
-      ) : (
-        <Avatar name={task.assignee.name} colour={task.assignee.colour} small />
-      )}
-    </>
+    <svg
+      className={styles.tick}
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+    </svg>
   )
 }
 
@@ -2805,8 +3471,8 @@ function StripAccumulated({
  * Every event the select can fire is stopped here before it reaches the
  * card underneath: the card is both a drag handle and a button that opens
  * the task, and a click, a keystroke or a pointer-down left to bubble would
- * do one of those instead of reassigning anybody — see `SubStatusBar` for
- * the same guard around the sub-status slider.
+ * do one of those instead of reassigning anybody — see `StageMark` for
+ * the same guard around the stage slider.
  */
 function AssigneePicker({
   task,
@@ -2843,90 +3509,121 @@ function AssigneePicker({
 }
 
 /**
- * How much of a card exists yet: one dot per sub-task, filled as each is done.
+ * The board's shape, behind one button: its card templates, and another
+ * column. Both are pressed once or twice in a board's life, and two buttons
+ * for them on the toolbar every day was a toolbar mostly about setup.
  *
- * When a sub-task was a card of its own you could see the split by looking at
- * the board — three cards in three columns. Nothing on the board says it any
- * more, so this does.
- *
- * Dots rather than a bar, and that is the whole design. A card may carry the
- * stage bar as well, and the two are not the same kind of fact: a bar is one
- * journey with a position along it, where the part behind you is finished and
- * the part ahead is not. Sub-tasks have no order and no position — they are a
- * set of things, ticked off in whatever order they get done — and drawn as a
- * second bar they read as the first one split in half. Countable marks say
- * "some of these" the way a filled track cannot.
- *
- * Not a control. Every other mark on a card moves when you click it; these
- * stand for work that is settled elsewhere, and the way to get at it is to open
- * the card, which is what clicking anywhere on them already does.
+ * The column item says how many of the board's columns are used, and at the
+ * limit greys rather than goes: this is where the limit is explained, and a
+ * missing item cannot say why it is missing.
  */
-function SubtaskDots({ total, open }: { total: number; open: number }) {
-  const done = total - open
-  const label = `${done} of ${total} sub-tasks finished`
-  /* Six, then a number. Past about half a dozen the dots stop being countable
-     at a glance — which is the whole reason they are dots — and a seventh
-     line of them only pushes the row they share wider. The six drawn are the
-     finished ones first, so the mark still says how far along the card is;
-     what the number says is that there is more of this than a card can show,
-     and the place to look at it is the card itself. */
-  const shown = Math.min(total, 6)
-  const rest = total - shown
+function BoardMenu({
+  board,
+  templateCount,
+  onTemplates,
+  onAddColumn,
+}: {
+  board: Board
+  templateCount: number
+  onTemplates: () => void
+  onAddColumn: () => void
+}) {
+  const { open, setOpen, root, button } = usePopover()
+  const used = board.columns.length
+  const full = used >= board.max_columns
 
   return (
-    // The dots are decoration twice over — they are the label drawn — so the
-    // sentence is what is read out and they are passed over in silence.
-    <span className={styles.dots} title={label}>
-      {Array.from({ length: shown }, (_, index) => (
-        <span
-          key={index}
-          aria-hidden="true"
-          className={`${styles.dot} ${index < done ? styles.dotDone : ''}`}
-        />
-      ))}
-      {rest ? (
-        <span className={styles.dotRest} aria-hidden="true">
-          +{rest}
-        </span>
+    <div className={styles.popRoot} ref={root}>
+      <button
+        ref={button}
+        type="button"
+        className={`${styles.toolButton} ${open ? styles.toolButtonOpen : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen(!open)}
+      >
+        Board
+        <span aria-hidden="true">⌄</span>
+      </button>
+      {open ? (
+        <div className={`${styles.popover} ${styles.menuPopover}`} role="menu" aria-label="Board">
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuItem}
+            onClick={() => {
+              setOpen(false)
+              onTemplates()
+            }}
+          >
+            <span className={styles.menuText}>
+              Card templates
+              <span className={styles.menuHint}>
+                {templateCount === 1 ? '1 saved' : `${templateCount} saved`}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuItem}
+            // aria-disabled rather than disabled, so it can still be reached
+            // and read: see the note on the component.
+            aria-disabled={full}
+            onClick={() => {
+              if (full) return
+              setOpen(false)
+              onAddColumn()
+            }}
+          >
+            <span className={styles.menuText}>
+              Add a column
+              <span className={styles.menuHint}>
+                {full
+                  ? `All ${board.max_columns} used — a board holds ${board.max_columns} columns`
+                  : `${used} of ${board.max_columns} used`}
+              </span>
+              <span className={styles.meter} aria-hidden="true">
+                {Array.from({ length: board.max_columns }, (_, index) => (
+                  <i key={index} className={index < used ? styles.meterOn : undefined} />
+                ))}
+              </span>
+            </span>
+          </button>
+        </div>
       ) : null}
-      <span className="visually-hidden">{label}</span>
-    </span>
+    </div>
   )
 }
 
-/**
- * Adds a column, from the toolbar rather than from a tile on the row's end.
- *
- * A full-height dashed tile spent a column's worth of the board on a button
- * pressed once or twice in a board's life, and pushed the last real column off
- * the edge to do it. Greyed at the limit rather than removed, so the button is
- * still there to say why it will not open.
- */
-function AddColumnButton({ board, onClick }: { board: Board; onClick: () => void }) {
-  const full = board.columns.length >= board.max_columns
-
+/** Three columns, for the board read by column. */
+function ColumnsIcon() {
   return (
-    <Button
-      small
-      className={styles.addColumn}
-      // aria-disabled rather than disabled: this is where the limit is
-      // explained, and a disabled button cannot be focused to read it. Greying
-      // itself at that point is the Button's own — see `[aria-disabled]`.
-      aria-disabled={full}
-      title={
-        full
-          ? `Column limit reached — a board holds ${board.max_columns} columns.`
-          : `${board.columns.length} of ${board.max_columns} columns used`
-      }
-      onClick={() => {
-        if (!full) onClick()
-      }}
-    >
-      + Column
-      <span className={styles.hint}>
-        {board.columns.length}/{board.max_columns}
-      </span>
-    </Button>
+    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="2.5" width="3.2" height="11" rx="1" />
+      <rect x="6.4" y="2.5" width="3.2" height="7.5" rx="1" />
+      <rect x="10.8" y="2.5" width="3.2" height="9.5" rx="1" />
+    </svg>
+  )
+}
+
+/** Stacked bands, for the board split into a lane per goal. */
+function LanesIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="2.5" width="12" height="3" rx="1" />
+      <rect x="2" y="6.5" width="12" height="3" rx="1" />
+      <rect x="2" y="10.5" width="12" height="3" rx="1" />
+    </svg>
+  )
+}
+
+/** A funnel, for the filter. */
+function FilterIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 3.5h11l-4.2 5v3.8l-2.6 1.2v-5z" />
+    </svg>
   )
 }
 
@@ -3123,119 +3820,13 @@ function OutcomesField({
 }
 
 /**
- * How near a date has to be before the card grows a tab for it.
- *
- * One day, so: today and tomorrow. A team that works a week ahead wants 3 or
- * 5, and this line is the whole edit — everything downstream reads the number
- * rather than repeating the rule.
- */
-const DUE_TAB_DAYS = 1
-
-/** A date near enough to be worth breaking the card's outline for. */
-interface DueTabMark {
-  tone: 'late' | 'soon'
-  /** The abbreviation on the tab. */
-  text: string
-  /** The same thing at length, for the tooltip and for a screen reader. */
-  said: string
-}
-
-/**
- * Whether a date has earned a tab, and what it says if it has.
- *
- * Null for everything else, which is most cards: a date three weeks out is
- * only telling you something, and it stays down in the small print as the date
- * itself. Nothing that returns null here has been dropped — see the strip.
- */
-function dueTabMark(iso: string | null, column: string | null = null): DueTabMark | null {
-  if (!iso) return null
-
-  const days = daysUntilDue(iso)
-  // Named only in the sentence, never on the tab: the tab is four characters
-  // wide by design, and what it is asking for is the same either way.
-  const on = `${formatDueLong(iso)}${column ? ` in ${column}` : ''}`
-
-  // Overdue always earns one, however long ago. A date does not stop mattering
-  // because it passed a fortnight ago, and the count is the part anybody acts
-  // on: one day over is a card to finish, three weeks over is a conversation
-  // to have.
-  if (days < 0) {
-    const late = -days
-    return {
-      tone: 'late',
-      text: `${late}d late`,
-      said: `${late} ${late === 1 ? 'day' : 'days'} late, due ${on}`,
-    }
-  }
-
-  if (days > DUE_TAB_DAYS) return null
-
-  // Said as a countdown rather than as a date. "Due in 2 days" is the thing
-  // being decided about; "8 Sep" is a fact you would have to work that out
-  // from, and a card asking for something today should not make you.
-  const text = countdownText(days)
-
-  return { tone: 'soon', text, said: `${text}, ${on}` }
-}
-
-/** "Due today", "Due tomorrow", "Due in 3 days" — a date said as the time left. */
-function countdownText(days: number): string {
-  if (days === 0) return 'Due today'
-  if (days === 1) return 'Due tomorrow'
-  return `Due in ${days} days`
-}
-
-/**
- * The one shape allowed to break the card.
- *
- * Everything else a card says is said inside its rectangle, and that is what
- * lets a column scan as a list rather than as a pile. A date that has arrived
- * or already gone is the one fact worth costing that: the tab is the only
- * silhouette on the board that is not a rounded rectangle, so a column of them
- * can be counted without reading a word.
- *
- * Cut rather than drawn — a clip path over a fill, overlapping the card's own
- * border by the pixel it is thick, so the two read as one outline rather than
- * as a shape parked on a box. No glyph inside it either: breaking the outline
- * is already the alarm, and a warning triangle on top would be the second
- * voice the filled due pill used to be.
- *
- * Because the tab carries lateness, the rail underneath is free to go on
- * saying what kind of work this is even while the card is overdue — which is
- * how the card keeps to one alarm apiece.
- */
-function DueTab({ mark }: { mark: DueTabMark }) {
-  return (
-    <span
-      className={`${styles.dueTab} ${mark.tone === 'late' ? styles.dueTabLate : styles.dueTabSoon}`}
-      title={mark.said}
-    >
-      {/* Two elements because the cut and the join cannot be the same one: a
-          clip path takes the element's own children and pseudo-elements with
-          it, so anything meant to reach past the tab's edge has to hang off
-          something outside the clip. The outer span is that something, and it
-          is exactly as wide as the shape inside it. */}
-      <span className={styles.dueTabFace} aria-hidden="true">
-        {mark.text}
-      </span>
-      <span className="visually-hidden">{mark.said}</span>
-    </span>
-  )
-}
-
-/**
  * A due date on a card, drawn as near or as far as it is.
  *
- * The near end of this ramp is the tab's now, and which steps those are is
- * `DUE_TAB_DAYS`' to decide — so the five states stay written out here rather
- * than trimmed to the two a threshold of one day leaves reachable. Turning
- * that knob up is meant to be one line, not one line and an archaeology.
- *
  * The two ends of the ramp are the design: a date that has passed or is
- * passing today gets a filled pill and says what it means in words, because it
- * is asking for something; a date further out is the date itself in quieter
- * and quieter ink, because it is only telling you. Nothing between them
- * changes size, so a column of cards keeps one edge down its right-hand side.
+ * passing today says what it means in words and in colour, because it is
+ * asking for something; a date further out is the date itself in quiet ink,
+ * because it is only telling you. Nothing between them changes size, so a
+ * column of cards keeps one edge down its right-hand side.
  *
  * The visible text is abbreviated in four of the five states, so each mark
  * carries the whole sentence as well — spoken instead of the abbreviation, and

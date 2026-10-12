@@ -38,14 +38,17 @@
   line-height: 1.4;
 }
 
+/* A label over a hairline, so the report's parts are told apart by a rule
+   rather than by a shouted heading. */
 .section {
   margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 .finished {
@@ -104,7 +107,7 @@
 
 /* The head as a button: the same row, with everything a button brings of its
    own taken back off it. The width is stated because a button shrinks to its
-   content, and a head that did would pull the column pill in against the
+   content, and a head that did would pull the column label in against the
    title instead of leaving it out at the edge where the other cards' are. */
 .cardOpen {
   width: 100%;
@@ -117,9 +120,9 @@
   cursor: pointer;
 }
 
-/* Only the title, because the reference is grey by design and the pill beside
-   it carries a background of its own — underlining all three would draw a rule
-   across the row. */
+/* Only the title, because the reference is grey by design and the mark beside
+   it is a label of its own — underlining all three would draw a rule across
+   the row. */
 .cardOpen:hover .title {
   text-decoration: underline;
 }
@@ -136,22 +139,36 @@
   font-weight: 700;
 }
 
-/* Where the card stands now — the column it is in, or that it is gone. */
+/* Where the card stands now — the column it is in, or that it is gone. A
+   column is a plain grey label; finished is the one with a colour, said as
+   the ok ink behind a dot rather than as a green box. */
 .where,
 .done {
   margin-left: auto;
-  padding: 1px 9px;
-  border-radius: var(--radius-control);
+  padding: 1px 7px;
+  border-radius: 5px;
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .done {
-  background: var(--ok-soft);
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding-inline: 0;
+  background: none;
   color: var(--ok);
+}
+
+.done::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .entries {
@@ -188,8 +205,8 @@
 
 .agent {
   flex: 0 0 auto;
-  padding: 0 7px;
-  border-radius: var(--radius-control);
+  padding: 0 6px;
+  border-radius: 5px;
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
