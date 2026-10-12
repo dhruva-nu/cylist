@@ -16,6 +16,7 @@ import type { PrRef, PrState } from '../api/client'
 import {
   addPrRef,
   cleanPrRefs,
+  leastAdvancedPrState,
   removePrRefAt,
   samePrRefs,
   setPrRefAt,
@@ -184,5 +185,22 @@ describe('samePrRefs', () => {
 
   it('is false when they are in a different order, which is a real edit', () => {
     expect(samePrRefs([pr('#212'), pr('#219')], [pr('#219'), pr('#212')])).toBe(false)
+  })
+})
+
+describe('leastAdvancedPrState', () => {
+  const at = (state: PrState): PrRef => ({ url: '#1', state })
+
+  it('says nothing for a card with no pull requests', () => {
+    expect(leastAdvancedPrState([])).toBeNull()
+  })
+
+  it('takes the one furthest behind, wherever it is in the list', () => {
+    expect(leastAdvancedPrState([at('merged'), at('raised'), at('approved')])).toBe('raised')
+    expect(leastAdvancedPrState([at('merged'), at('approved')])).toBe('approved')
+  })
+
+  it('is merged only when every one of them is', () => {
+    expect(leastAdvancedPrState([at('merged'), at('merged')])).toBe('merged')
   })
 })

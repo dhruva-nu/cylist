@@ -32,21 +32,21 @@
  * centre in the second. */
 .count,
 .countLate {
-  padding: 1px 8px;
-  border-radius: var(--radius-control);
+  padding: 1px 6px;
+  border-radius: 5px;
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
 
-/* Anything overdue turns the count, because that is the part of the number
-   that changes what you do next. */
+/* Anything overdue turns the count's ink, because that is the part of the
+   number that changes what you do next. The ink only — the grey ground stays,
+   so the count is the same shape whatever it says. */
 .countLate {
-  background: var(--blocked-soft);
   color: var(--blocked);
 }
 
@@ -55,10 +55,9 @@
   margin: 0 0 6px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 .groupNameLate {
@@ -84,7 +83,7 @@
   width: 100%;
   padding: 7px 8px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   font: inherit;
@@ -159,24 +158,31 @@
 
 /* Which of the four states a card is in, said in full, because a row here
    carries no tint of its own to say it. Active is never drawn: it is the
-   baseline, and a word on every row would be a word carrying nothing. */
+   baseline, and a word on every row would be a word carrying nothing. The
+   word in the state's ink behind a dot of the same — no ground, so a list of
+   held cards does not turn into a stripe of amber boxes. */
 .pill {
-  padding: 0 7px;
-  border-radius: var(--radius-control);
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
   font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .pill_hold {
-  background: var(--hold-soft);
   color: var(--hold);
 }
 
 .pill_blocked {
-  background: var(--blocked-soft);
   color: var(--blocked);
 }
 
@@ -186,7 +192,6 @@
    the filter changes. */
 .pill_cancelled,
 .pill_active {
-  background: var(--paper-2);
   color: var(--ink-3);
 }
 

@@ -23,7 +23,7 @@
 
 /* The card that scrolls is the tree itself and, beside it, the reader or the
    editor inside the pane rather than the pane — so the scrollbar sits inside
-   the card and the card's shadow is not clipped by a scrolling box around it. */
+   the card and the card's edge is not clipped by a scrolling box around it. */
 .nav {
   max-height: 100%;
   overflow-y: auto;
@@ -72,9 +72,9 @@
   flex-direction: column;
   gap: 18px;
   padding: 16px 12px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--paper);
-  box-shadow: var(--shadow);
 }
 
 .section {
@@ -87,10 +87,8 @@
   margin: 0 6px 2px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .topics,
@@ -139,12 +137,12 @@
 .count {
   min-width: 20px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: 5px;
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -179,7 +177,7 @@
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
@@ -211,7 +209,7 @@
   overflow: hidden;
   padding: 5px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
@@ -241,7 +239,7 @@
   margin: 2px 0 0 2px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: none;
   color: var(--link);
   font-family: var(--font-ui);
@@ -265,7 +263,7 @@
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
   font: inherit;
@@ -303,10 +301,8 @@
   margin: 0 4px;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .askRow {
@@ -319,35 +315,42 @@
   min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
   font: inherit;
   font-size: 14px;
 }
 
+/* How sure the answer is: the word in the status's ink behind a dot of the
+   same, and no ground — it sits in the byline, among plain text. */
 .status {
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--paper-2);
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   color: var(--ink-2);
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: 600;
+}
+
+.status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .statusOk {
-  background: var(--ok-soft);
   color: var(--ok);
 }
 
 .statusHold {
-  background: var(--hold-soft);
   color: var(--hold);
 }
 
 .statusBlocked {
-  background: var(--blocked-soft);
   color: var(--blocked);
 }
 
@@ -440,7 +443,7 @@
   margin: -10px 0 -6px -8px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: none;
   color: var(--link);
   font-family: var(--font-ui);
@@ -473,9 +476,9 @@
   flex-direction: column;
   gap: 18px;
   padding: 26px 30px 32px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--paper);
-  box-shadow: var(--shadow);
 }
 
 @media (max-width: 599px) {
@@ -513,10 +516,8 @@
   margin: 0;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .byline {
@@ -577,7 +578,7 @@
 .titleInput {
   padding: 8px 12px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
@@ -596,7 +597,7 @@
   min-height: 460px;
   padding: 14px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--paper-2);
   color: var(--ink);
   font-family: var(--font-mono);

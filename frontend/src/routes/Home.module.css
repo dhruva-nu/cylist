@@ -29,8 +29,7 @@
 }
 
 .meEmpty:hover {
-  border-color: var(--brand-ink);
-  background: var(--brand-soft);
+  border-color: var(--ink-3);
 }
 
 .meText {
@@ -53,15 +52,13 @@
 }
 
 .youTag {
-  padding: 2px 8px;
-  border: 1px solid var(--brand-ink);
-  border-radius: var(--radius-control);
-  color: var(--brand-ink);
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .meRole {
@@ -83,7 +80,7 @@
 }
 
 .meEmpty:hover .meAdd {
-  color: var(--brand-ink);
+  color: var(--ink);
 }
 
 /* A tile keeps its size and the row centres. Widening the page adds cards to
@@ -117,7 +114,7 @@
   width: 64px;
   height: 64px;
   margin-bottom: 6px;
-  border-radius: 20px;
+  border-radius: 14px;
 
   /* The ink is set inline: it depends on the project's own colour. */
   font-family: var(--font-ui);
@@ -161,7 +158,6 @@
 }
 
 .new:hover {
-  border-color: var(--brand-ink);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  border-color: var(--ink-3);
+  color: var(--ink);
 }

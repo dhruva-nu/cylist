@@ -89,7 +89,7 @@ div.prose p {
 
 .prose blockquote {
   padding: 2px 0 2px 14px;
-  border-left: 3px solid var(--line-2);
+  border-left: 2px solid var(--line-2);
   color: var(--ink-2);
 }
 
@@ -105,7 +105,7 @@ div.prose p {
   overflow-x: auto;
   padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--paper-2);
   line-height: 1.5;
 }
@@ -124,16 +124,21 @@ div.prose p {
   font-size: 14px;
 }
 
+/* Rows divided by hairlines rather than every cell boxed, and the header a
+   label over a heavier line rather than a filled bar: the table should read
+   as the doc's text laid out in columns, not as a grid drawn round it. */
 .prose th,
 .prose td {
   padding: 6px 12px;
-  border: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   text-align: left;
 }
 
 .prose th {
-  background: var(--paper-2);
+  border-bottom-color: var(--line-2);
+  color: var(--ink-2);
   font-family: var(--font-ui);
+  font-weight: 600;
 }
 
 .prose hr {

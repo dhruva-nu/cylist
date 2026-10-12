@@ -5,14 +5,14 @@
   font-size: 14px;
 }
 
-/* Said in the brand tone rather than as an error: a reader who is not an
-   admin has not done anything wrong, they are just looking. */
+/* Said in a quiet box rather than as an error: a reader who is not an admin
+   has not done anything wrong, they are just looking. */
 .note {
   padding: 10px 14px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  background: var(--paper-2);
+  color: var(--ink-2);
 }
 
 /* --- Who is what here ---------------------------------------------------- */
@@ -34,15 +34,13 @@
 }
 
 .you {
-  padding: 2px 8px;
-  border: 1px solid var(--brand-ink);
-  border-radius: var(--radius-control);
-  color: var(--brand-ink);
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .picker select {
@@ -82,9 +80,9 @@
   gap: 2px;
   align-content: start;
   padding: 10px;
-  border-radius: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
   background: var(--paper);
-  box-shadow: var(--shadow);
   height: fit-content;
 }
 
@@ -95,7 +93,7 @@
   width: 100%;
   padding: 9px 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   font: inherit;
@@ -245,10 +243,10 @@
 }
 
 .axis > header b {
+  color: var(--ink-3);
   font-family: var(--font-ui);
   font-size: 13px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .axis > header .count {
@@ -352,11 +350,11 @@
 }
 
 /* How much of the catalogue is ticked, how far along the board, how far up the
-   levels — the same pill in all three places, because they answer the same
-   shape of question about the line they sit on. */
+   levels — the same small grey count in all three places, because they answer
+   the same shape of question about the line they sit on. */
 .count {
-  padding: 2px 9px;
-  border-radius: var(--radius-control);
+  padding: 1px 7px;
+  border-radius: 5px;
   background: var(--paper-2);
   color: var(--ink-2);
   font-family: var(--font-ui);
@@ -455,8 +453,8 @@
   font-size: 14px;
 }
 
-/* The warning inside the dialog. Not `.note`, which is the brand-soft box this
-   page tells a non-admin they are only looking in. */
+/* The warning inside the dialog. Not `.note`, which is the quiet box this page
+   tells a non-admin they are only looking in. */
 .warning {
   max-width: 62ch;
   margin: 0 0 4px;

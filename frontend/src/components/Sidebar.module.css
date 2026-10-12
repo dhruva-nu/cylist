@@ -124,10 +124,9 @@
 .railName {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
   white-space: nowrap;
   writing-mode: vertical-rl;
 }
@@ -265,11 +264,10 @@
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
   text-align: left;
-  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -319,7 +317,7 @@
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .settingHint {
@@ -344,7 +342,7 @@
   flex: 1;
   padding: 6px 12px;
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: 6px;
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);

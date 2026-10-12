@@ -10,7 +10,7 @@
   width: 34px;
   height: 34px;
   border: 2px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   font-size: 15px;
   font-weight: 700;
   line-height: 1;

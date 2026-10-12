@@ -81,9 +81,9 @@
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--line);
-  /* --radius-control is the pill shape used for one-line controls; on a box
-     this tall it caps at half the height and bulges into a capsule. Cards get
-     --radius-card instead. */
+  /* A box of fields rather than a one-line control, so it takes the card
+     radius: --radius-control is sized for a button's height and reads as
+     pinched on something this tall. */
   border-radius: var(--radius-card);
   background: var(--paper-2);
 }

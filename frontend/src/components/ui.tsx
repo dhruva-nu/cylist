@@ -577,7 +577,7 @@ export function CommentIcon({ size = 14 }: { size?: number }) {
 }
 
 /** Jira's four-diamond mark, near enough to be recognised at 14px. */
-function JiraIcon({ size = 14 }: { size?: number }) {
+export function JiraIcon({ size = 14 }: { size?: number }) {
   return (
     <Glyph size={size}>
       <path d="M8 2.4 13.6 8 8 13.6 2.4 8Z" />
@@ -600,7 +600,7 @@ function JiraIcon({ size = 14 }: { size?: number }) {
  * this is* before it says anything about its state. A bare tick in the state's
  * place would have been read as a finished sub-task.
  */
-function PrIcon({ state, size = 14 }: { state: PrState; size?: number }) {
+export function PrIcon({ state, size = 14 }: { state: PrState; size?: number }) {
   if (state === 'approved') {
     return (
       <Glyph size={size}>
@@ -697,17 +697,16 @@ export function KindTag({ kind }: { kind: PersonKind }) {
  * What somebody is on a project, worn beside their name.
  *
  * Coloured inline rather than by class, because a role is invented by whoever
- * runs the board and so has no name this stylesheet could have known. The fill
- * is the role's own colour and the ink is whatever reads on it — the same
- * calculation an avatar makes, for the same reason.
+ * runs the board and so has no name this stylesheet could have known. The
+ * role's own colour is a dot in front of the name rather than a ground behind
+ * it: the colour can be any hex at all, and a row of people each wearing a
+ * block of a different one is a row of shouting. The name stays in the
+ * ordinary ink, so it reads whatever the colour turns out to be.
  */
 export function RoleTag({ role }: { role: Pick<Role, 'name' | 'colour' | 'description'> }) {
   return (
-    <span
-      className={styles.tag}
-      style={{ background: role.colour, color: readableInkOn(role.colour) }}
-      title={role.description || undefined}
-    >
+    <span className={`${styles.tag} ${styles.roleTag}`} title={role.description || undefined}>
+      <span className={styles.roleDot} style={{ background: role.colour }} aria-hidden="true" />
       {role.name}
     </span>
   )
@@ -963,6 +962,29 @@ function jiraRefDisplay(value: string): RefDisplay {
  */
 export function prRefLabel(value: string): string {
   return prRefDisplay(value).label
+}
+
+/**
+ * The repository a pull-request URL is in: `cylist` for
+ * `github.com/dhruva-nu/cylist/pull/212`. Null when the value is not a URL or
+ * names no repository — `#212` typed by hand says nothing about where it is.
+ *
+ * The board's list of a card's pull requests leads with this, because three
+ * `#212`s in three repositories are otherwise three identical lines.
+ */
+export function prRefRepo(value: string): string | null {
+  const url = asUrl(value)
+  if (!url) return null
+  const segments = url.pathname.split('/').filter((segment) => segment && segment !== '-')
+  const at = segments.findIndex((segment) =>
+    /^(?:pull|pulls|pull-requests|merge_requests)$/i.test(segment),
+  )
+  return at > 0 ? (segments[at - 1] ?? null) : null
+}
+
+/** How a stored Jira reference reads as an identifier: `ATL-41`. */
+export function jiraRefLabel(value: string): string {
+  return jiraRefDisplay(value).label
 }
 
 function prRefDisplay(value: string): RefDisplay {

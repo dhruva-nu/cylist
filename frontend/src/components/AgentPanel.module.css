@@ -5,8 +5,8 @@
   flex-direction: column;
   gap: 14px;
   padding: 16px 18px;
-  border: 1px solid var(--line-2);
-  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
   background: var(--paper);
 }
 
@@ -58,27 +58,24 @@
 .agentTag {
   padding: 0 5px;
   border: 1px solid var(--line-2);
-  border-radius: 999px;
+  border-radius: 5px;
   background: var(--paper-2);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
-/* The state, in the colour the card's border wears for it. */
+/* The state, in the colour the card's border wears for it — carried by the
+   dot alone, with the word beside it in the ordinary ink and no ground. */
 .pill {
   --pill-ink: var(--agent);
-  --pill-ground: var(--agent-soft);
 
   display: inline-flex;
   flex: none;
   gap: 7px;
   align-items: center;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: var(--pill-ground);
+  padding: 5px 0;
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: 13px;
@@ -86,37 +83,34 @@
 }
 
 .pillDot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--pill-ink);
 }
 
 .pill_waiting {
   --pill-ink: var(--hold);
-  --pill-ground: var(--hold-soft);
 }
 
 .pill_done {
   --pill-ink: var(--ok);
-  --pill-ground: var(--ok-soft);
 }
 
 .pill_stale {
   --pill-ink: var(--ink-3);
-  --pill-ground: var(--paper-2);
 }
 
 /* The session's current action. Mono, because it is usually a command or a
-   file name, and on a tinted ground so it reads as live rather than as one
-   more line of the record around it. */
+   file name, and on a grey ground so it reads as live rather than as one more
+   line of the record around it. The teal is in its label, not its ground. */
 .now {
   display: flex;
   gap: 8px;
   align-items: baseline;
   padding: 7px 10px;
-  border-radius: 8px;
-  background: var(--agent-soft);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
   font-size: 13px;
 }
 
@@ -134,12 +128,14 @@
   font-size: 12.5px;
 }
 
-/* The answer, once given: the agent's teal, since it is working again. */
+/* The answer, once given: a rule in the agent's teal, since it is working
+   again. */
 .answered {
   padding: 12px 14px;
-  border: 1px solid var(--agent);
-  border-radius: 12px;
-  background: var(--agent-soft);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--agent);
+  border-radius: var(--radius-card);
+  background: var(--paper);
   color: var(--ink);
   font-size: 14px;
   line-height: 1.45;
@@ -164,12 +160,11 @@
 }
 
 .feedHead {
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 /* The feed: time, a one-word label, the line. A fixed-height window that
@@ -212,10 +207,9 @@
   flex: none;
   width: 48px;
   color: var(--feed-ink);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 .feedText,
