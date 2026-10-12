@@ -16,7 +16,7 @@ import { ProjectBoard } from './routes/ProjectBoard'
 import { ProjectFiles } from './routes/files/ProjectFiles'
 import { ProjectGoals } from './routes/ProjectGoals'
 import { ProjectPeople } from './routes/ProjectPeople'
-import { ProjectHooks } from './routes/ProjectHooks'
+import { ProjectHooks } from './routes/webhooks/ProjectHooks'
 import { ProjectRoles } from './routes/roles/ProjectRoles'
 import { ProjectVault } from './routes/vault/ProjectVault'
 

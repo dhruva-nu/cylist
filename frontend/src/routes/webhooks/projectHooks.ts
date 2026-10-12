@@ -14,7 +14,7 @@ import type {
   HookEvent,
   HookInput,
   TaskType,
-} from '../api/client'
+} from '../../api/client'
 
 /** What the form holds. Strings throughout, '' meaning "no filter". */
 export interface HookDraft {

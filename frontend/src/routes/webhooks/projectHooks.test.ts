@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Hook, HookDelivery, HookEvent } from '../api/client'
+import type { Hook, HookDelivery, HookEvent } from '../../api/client'
 import {
   EMPTY_DRAFT,
   groupEvents,
