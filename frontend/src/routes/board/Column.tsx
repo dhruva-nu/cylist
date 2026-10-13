@@ -287,17 +287,21 @@ function ColumnHead({
   return (
     <div className={styles.head}>
       <div className={styles.headRow}>
-        <button
-          type="button"
-          className={styles.dragHandle}
-          {...dragAttributes}
-          {...dragListeners}
-          aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
-          title="Drag to reorder"
-        >
-          ⠿
-        </button>
-        <h3>{column.name}</h3>
+        {/* The name is the handle: there is nothing else in the heading worth
+            aiming at to move a column, and a grip beside it was one more mark
+            on every column saying what the name could say itself. */}
+        <h3>
+          <button
+            type="button"
+            className={styles.dragHandle}
+            {...dragAttributes}
+            {...dragListeners}
+            aria-label={`Reorder ${column.name}. Press space to pick up, then the left and right arrow keys to move it.`}
+            title="Drag to reorder"
+          >
+            {column.name}
+          </button>
+        </h3>
         <span className={styles.headActions}>
           <span className={styles.count}>{count}</span>
           <Button
@@ -314,7 +318,7 @@ function ColumnHead({
           </Button>
         </span>
       </div>
-      <p>{column.description}</p>
+      <p title={column.description || undefined}>{column.description}</p>
     </div>
   )
 }

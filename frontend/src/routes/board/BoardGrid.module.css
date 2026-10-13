@@ -6,7 +6,10 @@
 .board {
   display: flex;
   flex: 1;
-  gap: 16px;
+
+  /* Half the space between two columns: the other half is on the far side of
+     the rule that stands between them. */
+  gap: 8px;
 
   /* The columns take the board's height rather than naming one of their own,
      which is what makes the board exactly as tall as the window leaves it. */
@@ -28,6 +31,26 @@
      column stops shrinking at. */
   overflow-x: auto;
   overflow-y: auto;
+}
+
+/* The mark between two columns. The columns have no box of their own — the
+   cards are the surface — so without it a wide board is one field of cards
+   with nothing to say where a column ends.
+
+   Only the middle of the column's height, and tapered: a needle that is a
+   hairline at either end and swells to 3px at its centre. A full-height rule
+   would frame the columns into a table; this only says there is a seam here.
+   The element runs the column's height so the shape can be placed in
+   percentages of it, and the clip draws the needle out of the middle.
+
+   Its own element rather than a column's border: a column clips what it holds
+   for the fold, and a border would sit hard against its cards rather than in
+   the middle of the space between them. */
+.rule {
+  flex: none;
+  width: 3px;
+  background: var(--line-2);
+  clip-path: polygon(50% 30%, 100% 50%, 50% 70%, 0 50%);
 }
 
 /* --- Grouped by goal ------------------------------------------------------
