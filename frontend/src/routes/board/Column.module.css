@@ -152,33 +152,56 @@
   color: var(--go);
 }
 
+/* Each heading stands on a hairline of its own, broken at the gap between
+   columns: the headings are a row of separate things rather than one band of
+   text across the board, which is what they read as with nothing under them. */
 .head {
+  margin-bottom: 6px;
   padding: 6px 4px 10px;
+  border-bottom: 1px solid var(--line-2);
 }
 
+/* The name in the middle of the column, the column's own controls at its
+   right. The empty first track is as wide as the last, which is what puts the
+   name in the middle of the column rather than the middle of what is left;
+   when the name is too long for that, the empty side gives way first. */
 .headRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, auto) 1fr;
   gap: 8px;
   align-items: center;
-  justify-content: space-between;
 }
 
-/* Grip rather than the whole header: buttons inside the header still need to
-   be their own click targets, not the start of a drag. */
+.headRow::before {
+  content: '';
+}
+
+.headRow h3 {
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+}
+
+/* The name, and the handle a column is moved by. It looks like the heading it
+   is — a grab cursor and a faint ground on hover are what say it moves. */
 .dragHandle {
-  padding: 2px 4px;
+  display: block;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--ink-3);
-  font-size: var(--text-lg);
-  line-height: 1;
+  color: var(--ink);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: grab;
   touch-action: none;
 }
 
 .dragHandle:hover {
-  color: var(--ink-2);
   background: var(--paper-2);
 }
 
@@ -190,14 +213,9 @@
   opacity: 0.5;
 }
 
-.headRow h3 {
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0;
-}
-
 .headActions {
   display: flex;
+  justify-self: end;
   gap: 6px;
   align-items: center;
 }
@@ -211,10 +229,24 @@
   font-weight: var(--weight-semibold);
 }
 
+/* Centred under the heading, which sits in the middle of its row.
+
+   Always two lines tall, and never more: the hairline under the heading has
+   to sit at the same height in every column to read as one row of headings,
+   and a description that wrapped in one column would drop its line below its
+   neighbours'. Two is what most of them need at a column's width; a longer one
+   is cut, and kept whole in its tooltip. */
 .head p {
+  display: -webkit-box;
+  min-height: calc(2 * 1.4em);
   margin: 4px 0 0;
+  overflow: hidden;
   color: var(--ink-2);
   font-size: var(--text-md);
+  line-height: 1.4;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* Both axes named. A lone `overflow-y` computes the other axis to `auto` as

@@ -6,7 +6,7 @@
  * columns share the row out between them and fold one to give the rest more.
  */
 
-import type { RefObject } from 'react'
+import { Fragment, type RefObject } from 'react'
 import type { BoardColumn, Task } from '../../api/client'
 import { Column, type ColumnProps } from './Column'
 import { LaneHead } from './LaneHead'
@@ -48,8 +48,11 @@ export function BoardGrid({
   if (!lanes) {
     return (
       <div ref={boardRef} className={styles.board}>
-        {columns.map((column) => (
-          <Column key={column.id} {...columnProps(column)} tasks={tasksIn(column)} />
+        {columns.map((column, i) => (
+          <Fragment key={column.id}>
+            {i > 0 ? <div className={styles.rule} aria-hidden="true" /> : null}
+            <Column {...columnProps(column)} tasks={tasksIn(column)} />
+          </Fragment>
         ))}
       </div>
     )
