@@ -98,6 +98,12 @@ async def goal_ref(client: Api, project_ref: str, name: str) -> str:
     return str(pick(goals, name, kind="goal", where=f"{project_ref}'s goals")["reference"])
 
 
+async def goal_id(client: Api, project_ref: str, name: str) -> str:
+    """A goal's id, from its name, reference or id — what a card is linked by."""
+    reference = await goal_ref(client, project_ref, name)
+    return str((await client.get(f"/goals/{reference}"))["id"])
+
+
 async def folder_id(client: Api, project_ref: str, path: str) -> str:
     """Walk ``Contracts/2026`` down the project's folder tree to an id."""
     if is_uuid(path):

@@ -13,6 +13,7 @@ the wrong shape.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -76,65 +77,79 @@ def _sensitivity_levels() -> list[SensitivityInfoRead]:
     ]
 
 
-async def _grid_line(
-    session: AsyncSession,
-    project: Project,
-    *,
-    role_id: UUID | None,
-    name: str,
-    colour: str,
-    is_admin: bool,
-    member_count: int,
-) -> RolePermissions:
-    """One line of the grid, read back from what is stored.
+@dataclass(frozen=True)
+class _Grid:
+    """Everything stored about a project's grid, read once.
 
-    Every endpoint on this router returns one of these, and all of them build
-    it here: a PUT that echoed a hand-assembled line would be the place where
-    the grid and the server quietly stopped agreeing.
+    Every endpoint on this router answers with lines built from one of these:
+    a PUT that echoed a hand-assembled line would be the place where the grid
+    and the server quietly stopped agreeing. Read whole rather than per line
+    because the GET draws every line at once, and a handful of queries for the
+    whole grid beats a handful per role.
     """
-    granted = await permissions.for_project(session, project)
-    cleared = await permissions.clearances(session, project)
-    rules = await permissions.column_rules(session, project, role_id)
-    board = await columns.list_for_project(session, project)
 
-    return RolePermissions(
-        role_id=role_id,
-        name=name,
-        colour=colour,
-        is_admin=is_admin,
-        member_count=member_count,
-        # An admin's line is what it is rather than what is stored, and
-        # nothing is stored: see `app.models.permission`.
-        permissions=sorted(Permission) if is_admin else sorted(granted.get(role_id, ())),
-        columns=_column_line(board, rules, unrestricted=is_admin),
-        clearance=DEFAULT_CLEARANCE if is_admin else cleared.get(role_id, DEFAULT_CLEARANCE),
+    members: int
+    holders: dict[UUID, int]
+    granted: dict[UUID | None, frozenset[Permission]]
+    cleared: dict[UUID | None, Sensitivity]
+    rules: dict[UUID | None, dict[UUID, tuple[bool, bool]]]
+    board: list[BoardColumn]
+
+    def line(
+        self, *, role_id: UUID | None, name: str, colour: str, is_admin: bool, member_count: int
+    ) -> RolePermissions:
+        """One line of the grid, read back from what is stored."""
+        return RolePermissions(
+            role_id=role_id,
+            name=name,
+            colour=colour,
+            is_admin=is_admin,
+            member_count=member_count,
+            # An admin's line is what it is rather than what is stored, and
+            # nothing is stored: see `app.models.permission`.
+            permissions=sorted(Permission) if is_admin else sorted(self.granted.get(role_id, ())),
+            columns=_column_line(self.board, self.rules.get(role_id, {}), unrestricted=is_admin),
+            clearance=(
+                DEFAULT_CLEARANCE if is_admin else self.cleared.get(role_id, DEFAULT_CLEARANCE)
+            ),
+        )
+
+    def role_line(self, role: ProjectRole) -> RolePermissions:
+        return self.line(
+            role_id=role.id,
+            name=role.name,
+            colour=role.colour,
+            is_admin=role.is_admin,
+            member_count=self.holders.get(role.id, 0),
+        )
+
+    def baseline_line(self) -> RolePermissions:
+        return self.line(
+            role_id=EVERYONE_ELSE,
+            name=EVERYONE_ELSE_NAME,
+            colour=EVERYONE_ELSE_COLOUR,
+            is_admin=False,
+            member_count=self.members - sum(self.holders.values()),
+        )
+
+
+async def _grid(session: AsyncSession, project: Project) -> _Grid:
+    return _Grid(
+        members=len(project.members),
+        holders=await roles.holder_counts(session, project),
+        granted=await permissions.for_project(session, project),
+        cleared=await permissions.clearances(session, project),
+        rules=await permissions.all_column_rules(session, project),
+        board=await columns.list_for_project(session, project),
     )
 
 
 async def _role_line(session: AsyncSession, project: Project, role: ProjectRole) -> RolePermissions:
-    counts = await roles.holder_counts(session, project)
-    return await _grid_line(
-        session,
-        project,
-        role_id=role.id,
-        name=role.name,
-        colour=role.colour,
-        is_admin=role.is_admin,
-        member_count=counts.get(role.id, 0),
-    )
+    return (await _grid(session, project)).role_line(role)
 
 
 async def _baseline_line(session: AsyncSession, project: Project) -> RolePermissions:
-    counts = await roles.holder_counts(session, project)
-    return await _grid_line(
-        session,
-        project,
-        role_id=EVERYONE_ELSE,
-        name=EVERYONE_ELSE_NAME,
-        colour=EVERYONE_ELSE_COLOUR,
-        is_admin=False,
-        member_count=len(project.members) - sum(counts.values()),
-    )
+    return (await _grid(session, project)).baseline_line()
 
 
 def _column_line(
@@ -178,33 +193,9 @@ async def get_permissions(
     is simply broken, and would have to offer every button and let half of
     them refuse.
     """
-    found = await roles.list_roles(session, project)
-    counts = await roles.holder_counts(session, project)
-    members = len(project.members)
-
-    lines = [
-        await _grid_line(
-            session,
-            project,
-            role_id=role.id,
-            name=role.name,
-            colour=role.colour,
-            is_admin=role.is_admin,
-            member_count=counts.get(role.id, 0),
-        )
-        for role in found
-    ]
-    lines.append(
-        await _grid_line(
-            session,
-            project,
-            role_id=EVERYONE_ELSE,
-            name=EVERYONE_ELSE_NAME,
-            colour=EVERYONE_ELSE_COLOUR,
-            is_admin=False,
-            member_count=members - sum(counts.values()),
-        )
-    )
+    grid = await _grid(session, project)
+    lines = [grid.role_line(role) for role in await roles.list_roles(session, project)]
+    lines.append(grid.baseline_line())
 
     return ProjectPermissions(
         catalogue=_permission_catalogue(),

@@ -124,10 +124,9 @@
 .railName {
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
   white-space: nowrap;
   writing-mode: vertical-rl;
 }
@@ -234,8 +233,8 @@
   background: var(--paper);
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
   line-height: 1;
   cursor: pointer;
 }
@@ -265,11 +264,10 @@
   background: none;
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
   text-align: left;
-  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -294,7 +292,7 @@
 
 .chevron {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--text-sm);
   letter-spacing: 0;
 }
 
@@ -318,13 +316,13 @@
 .settingLabel {
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
 }
 
 .settingHint {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 
@@ -344,12 +342,12 @@
   flex: 1;
   padding: 6px 12px;
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 

@@ -33,19 +33,22 @@
   margin: 0;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 17px;
-  font-weight: 700;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
   line-height: 1.4;
 }
 
+/* A label over a hairline, so the report's parts are told apart by a rule
+   rather than by a shouted heading. */
 .section {
   margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
 }
 
 .finished {
@@ -57,7 +60,7 @@
 
 .finished b {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* A line of the report that opens the card it names.
@@ -104,7 +107,7 @@
 
 /* The head as a button: the same row, with everything a button brings of its
    own taken back off it. The width is stated because a button shrinks to its
-   content, and a head that did would pull the column pill in against the
+   content, and a head that did would pull the column label in against the
    title instead of leaving it out at the edge where the other cards' are. */
 .cardOpen {
   width: 100%;
@@ -117,9 +120,9 @@
   cursor: pointer;
 }
 
-/* Only the title, because the reference is grey by design and the pill beside
-   it carries a background of its own — underlining all three would draw a rule
-   across the row. */
+/* Only the title, because the reference is grey by design and the mark beside
+   it is a label of its own — underlining all three would draw a rule across
+   the row. */
 .cardOpen:hover .title {
   text-decoration: underline;
 }
@@ -127,31 +130,45 @@
 .reference {
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .title {
   color: var(--ink);
   font-family: var(--font-ui);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
-/* Where the card stands now — the column it is in, or that it is gone. */
+/* Where the card stands now — the column it is in, or that it is gone. A
+   column is a plain grey label; finished is the one with a colour, said as
+   the ok ink behind a dot rather than as a green box. */
 .where,
 .done {
   margin-left: auto;
-  padding: 1px 9px;
-  border-radius: var(--radius-control);
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .done {
-  background: var(--ok-soft);
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding-inline: 0;
+  background: none;
   color: var(--ok);
+}
+
+.done::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: currentColor;
 }
 
 .entries {
@@ -182,19 +199,19 @@
   flex: 0 0 auto;
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .agent {
   flex: 0 0 auto;
-  padding: 0 7px;
-  border-radius: var(--radius-control);
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
   background: var(--paper-2);
   color: var(--ink-3);
   font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
 }
 
 /* Which window the report covered, kept beside the button that copies it. */
@@ -202,5 +219,5 @@
   margin-right: auto;
   align-self: center;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }

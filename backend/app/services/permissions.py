@@ -22,8 +22,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.auth.permissions import ALL_PERMISSIONS, INFO, Permission, parse_permissions
 from app.auth.principal import Principal
@@ -70,9 +71,7 @@ async def grant(
     await session.execute(
         delete(ProjectPermission).where(
             ProjectPermission.project_id == project.id,
-            ProjectPermission.role_id.is_(None)
-            if role_id is None
-            else ProjectPermission.role_id == role_id,
+            _is_role(ProjectPermission.role_id, role_id),
         )
     )
     # Flushed before the inserts: the delete and the insert both touch the
@@ -174,6 +173,19 @@ async def enforce_on(
     return await enforce(session, project, principal, permission)
 
 
+def _is_role(
+    column: InstrumentedAttribute[UUID | None], role_id: UUID | None
+) -> ColumnElement[bool]:
+    """Match one role's rows, where :data:`EVERYONE_ELSE` is the null role.
+
+    Spelled out rather than left to ``== role_id``, which would render
+    ``IS NULL`` only by accident of the operator overload.
+    """
+    if role_id is None:
+        return column.is_(None)
+    return column == role_id
+
+
 async def _role_of(session: AsyncSession, project: Project, principal: Principal) -> UUID | None:
     """Which of the project's roles this caller wears, if any.
 
@@ -212,12 +224,28 @@ async def column_rules(
     rows = await session.scalars(
         select(RoleColumnRule).where(
             RoleColumnRule.project_id == project.id,
-            RoleColumnRule.role_id.is_(None)
-            if role_id is None
-            else RoleColumnRule.role_id == role_id,
+            _is_role(RoleColumnRule.role_id, role_id),
         )
     )
     return {row.column_id: (row.may_enter, row.may_stage) for row in rows}
+
+
+async def all_column_rules(
+    session: AsyncSession, project: Project
+) -> dict[UUID | None, dict[UUID, tuple[bool, bool]]]:
+    """:func:`column_rules` for every role at once, keyed by role id.
+
+    For the grid, which draws every role's line on one page and would
+    otherwise ask once per line. A role restricted nowhere is absent, so read
+    it with ``.get(role_id, {})``.
+    """
+    rows = await session.scalars(
+        select(RoleColumnRule).where(RoleColumnRule.project_id == project.id)
+    )
+    rules: dict[UUID | None, dict[UUID, tuple[bool, bool]]] = {}
+    for row in rows:
+        rules.setdefault(row.role_id, {})[row.column_id] = (row.may_enter, row.may_stage)
+    return rules
 
 
 async def set_column_rules(
@@ -237,9 +265,7 @@ async def set_column_rules(
     await session.execute(
         delete(RoleColumnRule).where(
             RoleColumnRule.project_id == project.id,
-            RoleColumnRule.role_id.is_(None)
-            if role_id is None
-            else RoleColumnRule.role_id == role_id,
+            _is_role(RoleColumnRule.role_id, role_id),
         )
     )
     await session.flush()
@@ -287,8 +313,7 @@ async def enforce_column_entry(
     if may_enter:
         return
 
-    column = await session.get(BoardColumn, column_id)
-    where = column.name if column is not None else "that column"
+    where = await _column_label(session, column_id)
     raise ForbiddenError(
         f"Your role on {project.key} does not let you move cards into {where}.",
         details={"project_key": project.key, "column_id": str(column_id)},
@@ -303,12 +328,17 @@ async def enforce_column_staging(
     if may_stage:
         return
 
-    column = await session.get(BoardColumn, column_id)
-    where = column.name if column is not None else "that column"
+    where = await _column_label(session, column_id)
     raise ForbiddenError(
         f"Your role on {project.key} does not let you set the sub-stages for {where}.",
         details={"project_key": project.key, "column_id": str(column_id)},
     )
+
+
+async def _column_label(session: AsyncSession, column_id: UUID) -> str:
+    """How a column-rule refusal names the column: by name, where it still has one."""
+    column = await session.get(BoardColumn, column_id)
+    return column.name if column is not None else "that column"
 
 
 # --- How far a role may read -----------------------------------------------
@@ -338,9 +368,7 @@ async def set_clearance(
     await session.execute(
         delete(RoleClearance).where(
             RoleClearance.project_id == project.id,
-            RoleClearance.role_id.is_(None)
-            if role_id is None
-            else RoleClearance.role_id == role_id,
+            _is_role(RoleClearance.role_id, role_id),
         )
     )
     await session.flush()
@@ -390,7 +418,9 @@ async def visible_levels_for(
     path that names the project."""
     project = await session.get(Project, project_id)
     if project is None:  # pragma: no cover - a resolved row's project exists
-        return sensitivity.at_most(DEFAULT_CLEARANCE)
+        # Cleared for nothing rather than for everything: if this ever does
+        # happen, a listing comes back empty instead of unfiltered.
+        return frozenset()
     return await readable_levels(session, project, principal)
 
 

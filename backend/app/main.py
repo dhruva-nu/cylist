@@ -171,7 +171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Cylist",
-        version="0.2.1",
+        version="0.3.0",
         description=DESCRIPTION,
         lifespan=build_lifespan(settings),
         openapi_url=f"{API_PREFIX}/openapi.json",
@@ -202,7 +202,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # built.
     app.state.doc_engine = engine_for(settings)
 
-    # Read by GET /health/metrics. Set on app.state, not module-level, so each
+    # Read by GET /health/requests. Set on app.state, not module-level, so each
     # app built by the test suite starts its own counters.
     app.state.metrics = Metrics()
     app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)

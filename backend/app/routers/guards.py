@@ -11,6 +11,10 @@ addressed by the thing itself — ``/tasks/ATL-41``, ``/folders/{id}`` — and
 their routers build their own guard out of :func:`for_entity`, resolving the
 row on the way in and taking the project off it.
 
+A third, :func:`project_admin_only`, is for the parts of a project no role can
+be granted at all — its roles, and its hooks — which belong to whoever
+administers the board.
+
 Each guard returns the :class:`~app.auth.principal.Principal`, so swapping one
 in is a one-line change at the call site and the handler below it is untouched.
 
@@ -36,9 +40,10 @@ from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.errors import ForbiddenError
 from app.db import SessionDependency
 from app.models.project import Project
-from app.services import permissions
+from app.services import permissions, roles
 
 Guard = Callable[..., Awaitable[Principal]]
 
@@ -105,5 +110,36 @@ def for_entity(
     ) -> Principal:
         project_id = await locate(session, entity)
         return await permissions.enforce_on(session, project_id, principal, permission)
+
+    return dependency
+
+
+def project_admin_only(refused_action: str, *scopes: Scope) -> Guard:
+    """A guard admitting only whoever may administer the project in the path.
+
+    For the parts of a project that are not a permission a role can carry, so
+    the question is not what somebody's role allows but whether they are the
+    admin — which :func:`app.services.roles.may_administer` answers, the same
+    way it does everywhere else.
+
+    Args:
+        refused_action: How the refusal finishes "Only an admin of ATL can …",
+            so each caller says in its own words what was refused.
+        scopes: What the credential has to carry, checked before the role.
+    """
+    # Imported here for the reason `on_project` does it.
+    from app.routers.projects import resolved_project
+
+    async def dependency(
+        project: Project = Depends(resolved_project),
+        principal: Principal = Depends(require(*scopes)),
+        session: AsyncSession = SessionDependency,
+    ) -> Principal:
+        if not await roles.may_administer(session, project, principal):
+            raise ForbiddenError(
+                f"Only an admin of {project.key} can {refused_action}.",
+                details={"project_key": project.key},
+            )
+        return principal
 
     return dependency

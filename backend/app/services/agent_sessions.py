@@ -284,6 +284,44 @@ def _trail_payload(
     return payload
 
 
+async def open_on_card(
+    session: AsyncSession, task: Task, client_session_id: str
+) -> AgentSession | None:
+    """This client session's open row on this card, if it has one.
+
+    The question every message from a session's own socket starts with: a
+    daemon names its conversation, and only a row that is still open on the
+    card it names is anything a feed line or a prompt can belong to.
+    """
+    found: AgentSession | None = await session.scalar(
+        select(AgentSession).where(
+            AgentSession.task_id == task.id,
+            AgentSession.client_session_id == client_session_id,
+            AgentSession.ended_at.is_(None),
+        )
+    )
+    return found
+
+
+def acting_principal(row: AgentSession, person_id: UUID | None = None) -> Principal:
+    """The agent a row belongs to, for a trail line nobody in particular caused.
+
+    The trail reads "the agent's session ended" or "nobody answered it", and
+    the actor it names should be the agent — under the label the row was
+    written with, which outlives the token that made it — acting for whoever's
+    token it was, when that is known. No scopes: nothing downstream of
+    ``activity.record`` checks them, and inventing some would be claiming
+    authority this has not been given.
+    """
+    return Principal(
+        token_id=row.token_id,
+        person_id=person_id,
+        label=row.actor_label,
+        scopes=frozenset(),
+        channel=Channel.API,
+    )
+
+
 async def dismiss(session: AsyncSession, task: Task) -> int:
     """Clear every finished session off a card. Returns how many were cleared.
 

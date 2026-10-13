@@ -123,16 +123,6 @@ def _nested_folders(folders: list[Folder]) -> list[FolderNode]:
 # --- Folders ---------------------------------------------------------------
 
 
-async def _project_of_item(session: AsyncSession, item: FileItem) -> UUID:
-    """Which project a file or link is on, by way of the folder holding it.
-
-    A file knows its folder and nothing above it — the tree is what has a
-    project — so this is the one hop the default guard cannot make on its own.
-    """
-    folder = await files.get_folder(session, item.folder_id)
-    return folder.project_id
-
-
 async def visible_item(
     item: FileItem = Depends(resolved_item),
     principal: Principal = Depends(current_principal),
@@ -148,15 +138,15 @@ async def visible_item(
     it wants, and a second `read` check here would refuse a `write`-only token
     on a path its own guard had allowed.
     """
-    folder = await files.get_folder(session, item.folder_id)
-    allowed = await permissions.visible_levels_for(session, folder.project_id, principal)
+    project_id = await files.project_id_of_item(session, item)
+    allowed = await permissions.visible_levels_for(session, project_id, principal)
     permissions.enforce_visible(item.sensitivity, allowed, "file or link")
     return item
 
 
 WRITE_FILES = guards.on_project(Permission.FILES)
 WRITE_IN_THIS_FOLDER = guards.for_entity(Permission.FILES, resolved_folder)
-WRITE_THIS_ITEM = guards.for_entity(Permission.FILES, visible_item, locate=_project_of_item)
+WRITE_THIS_ITEM = guards.for_entity(Permission.FILES, visible_item, locate=files.project_id_of_item)
 
 
 @router.get(
@@ -473,14 +463,13 @@ async def update_item(
 ) -> ItemRead:
     """Rename an item, correct a link's target, or change who added it."""
     updated = await files.update_item(session, item, body)
-    folder = await files.get_folder(session, updated.folder_id)
     await activity.record(
         session,
         principal,
         "item.updated",
         entity_type="item",
         entity_id=updated.id,
-        project_id=folder.project_id,
+        project_id=await files.project_id_of_item(session, updated),
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
     )
     return _file_item_read(updated)
@@ -499,14 +488,14 @@ async def delete_item(
     from the same bytes and still needs it.
     """
     name = item.name
-    folder = await files.get_folder(session, item.folder_id)
+    project_id = await files.project_id_of_item(session, item)
     await files.delete_item(session, store, item)
     await activity.record(
         session,
         principal,
         "item.deleted",
         entity_type="item",
-        project_id=folder.project_id,
+        project_id=project_id,
         payload={"name": name},
     )
     return Acknowledged()

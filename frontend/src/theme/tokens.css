@@ -1,5 +1,9 @@
 /*
- * Design tokens, taken from the approved mock and then retuned for contrast.
+ * Design tokens. Retuned for the quiet look (iteration B of the board
+ * redesign): a warm graphite ground in dark and a warm paper in light, status
+ * colours muted and meant to be used as text or small marks — a dot, a 2px
+ * rule — rather than as fills, 8px corners on controls instead of pills, and
+ * borders rather than shadows.
  *
  * Three theme states must all resolve:
  *   1. no attribute + light OS  -> the bare :root block
@@ -25,40 +29,39 @@
 
 :root {
   /* Surfaces — a warm, paper-like ground rather than a neutral grey. */
-  --bg: #f5f3ee;
+  --bg: #f6f5f1;
   --paper: #ffffff;
-  --paper-2: #f8f6f1;
-  --line: #e6e1d6;
-  --line-2: #d3ccbc;
+  --paper-2: #f2f0eb;
+  --line: #e6e3db;
+  --line-2: #d5d1c7;
 
-  /* Text. 11.5:1 / 7.8:1 / 5.2:1 on paper — three readable steps. */
-  --ink: #283c46;
-  --ink-2: #49545b;
-  --ink-3: #626e76;
+  /* Text. 15.1:1 / 8.1:1 / 5.2:1 on paper — three readable steps. */
+  --ink: #23272a;
+  --ink-2: #4b5055;
+  --ink-3: #686d72;
 
   /* Brand: yellow marks and selects; green confirms. */
-  --brand: #f7c948;
+  --brand: #e2b84a;
   --brand-ink: #5a4300;
-  --brand-soft: #fff3c7;
-  --go: #1d7d46;
-  --go-hover: #166a3a;
+  --brand-soft: #f7efd6;
+  --go: #2e6a45;
+  --go-hover: #25583a;
   --go-ink: #ffffff;
-  --link: #1e5a8a;
+  --link: #2f5b86;
 
   /* Task status — semantic, deliberately separate from the brand hue. */
-  --ok: #247b4e;
-  --ok-soft: #e1f3e8;
-  --hold: #9b6100;
-  --hold-soft: #fff0cc;
-  --blocked: #bd3939;
-  --blocked-soft: #fbe3e3;
+  --ok: #3d7748;
+  --ok-soft: #ebf2ec;
+  --hold: #8a5d10;
+  --hold-soft: #f7f0e2;
+  --blocked: #a5433b;
+  --blocked-soft: #f8ebe9;
 
-  /* An agent on a card — the card's outer border while a session is working.
-     A teal, so it stays readable beside every other colour a card can wear:
-     the goal violet (#8B5CF6 on CYLIST-G3), the amber of hold, the red of
-     blocked, the green of done. 4.6:1 on --paper-2 as text. */
-  --agent: #0e7c86;
-  --agent-soft: #d9f0f2;
+  /* An agent on a card — the card's border while a session is working. A
+     muted teal, so it stays distinct beside every other colour a card can
+     wear without being the loudest thing on the board. */
+  --agent: #2f6d6a;
+  --agent-soft: #e9f1f0;
 
   /*
    * How far a pull request on a card got. Two of the three are inks the card
@@ -79,11 +82,11 @@
    */
   --pr-raised: var(--ink-3);
   --pr-approved: var(--ok);
-  --pr-merged: #6a4fa3;
+  --pr-merged: #67589a;
 
-  --scrim: rgb(40 60 70 / 50%);
-  --shadow: 0 1px 3px rgb(40 60 70 / 8%), 0 10px 30px -18px rgb(40 60 70 / 25%);
-  --shadow-lg: 0 2px 6px rgb(40 60 70 / 8%), 0 24px 60px -24px rgb(40 60 70 / 35%);
+  --scrim: rgb(35 39 42 / 45%);
+  --shadow: 0 1px 2px rgb(30 30 30 / 5%);
+  --shadow-lg: 0 1px 2px rgb(30 30 30 / 6%), 0 12px 32px -12px rgb(30 30 30 / 22%);
 
   /*
    * The focus ring. Not the brand yellow: at 1.7:1 on paper it is a decoration
@@ -91,7 +94,7 @@
    * Painted with an offset so it always lands on the surrounding surface,
    * never on the control it is marking.
    */
-  --focus: #20455a;
+  --focus: #23272a;
 
   /*
    * Colours that do not flip, because what sits on them does not either.
@@ -134,65 +137,108 @@
    * every other ink here, and the dark values are at the bottom of the file
    * with the rest.
    */
-  --priority-p0: #b3261e;
-  --priority-p1: #a76900;
-  --priority-p2: #3b6fc2;
-  --priority-p3: #5c6b73;
+  --priority-p0: #a5433b;
+  --priority-p1: #8a5d10;
+  --priority-p2: #3f5f86;
+  --priority-p3: #686d72;
 
   --font-ui: 'Figtree', system-ui, sans-serif;
-  --font-body: 'Source Sans 3', system-ui, sans-serif;
+  --font-body: 'Figtree', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
-  --radius-card: 18px;
-  --radius-control: 999px;
+  /*
+   * Type sizes. Eleven steps sound like many, but the interface is dense —
+   * a card's meta line, its title, the dialog heading and the page heading
+   * all want distinct sizes — and each step here is one the screens were
+   * already drawing. The strays — half pixels, and the odd 9, 17, 19 and 24
+   * — were folded onto their nearest step: the difference was never visible,
+   * only the inconsistency.
+   */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 15px;
+  --text-xl: 16px;
+  --text-2xl: 18px;
+  --text-3xl: 20px;
+  --text-4xl: 22px;
+  --text-display: 26px;
+
+  /* Weights. Figtree is loaded at exactly these five. */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+
+  /*
+   * Corners. Cards and controls keep their own names because most rounding
+   * is one or the other; the small steps are for chips, tags and marks
+   * inside them, and `round` is for anything drawn as a circle.
+   */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-control: 8px;
+  --radius-card: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --radius-round: 50%;
+
+  /*
+   * Stacking, for things that float above the page. Numbers that only order
+   * siblings inside one component stay where they are; these are the layers
+   * that have to agree across files: sticky bars and popovers sit just above
+   * the page, dialogs above those, and a tooltip clears everything.
+   */
+  --layer-raised: 5;
+  --layer-dialog: 20;
+  --layer-skip-link: 30;
+  --layer-tooltip: 40;
 
   /*
    * The dark palette, declared once. Nothing reads these directly; the two
    * blocks at the end of this file are what put them to work.
    */
-  --dark-bg: #1c2429;
-  --dark-paper: #26313a;
-  --dark-paper-2: #2e3a44;
-  --dark-line: #39464f;
-  --dark-line-2: #4a5963;
-  --dark-ink: #eef1f2;
-  --dark-ink-2: #c2cbcf;
-  --dark-ink-3: #9ca7ad;
-  --dark-brand-ink: #ffe79a;
-  --dark-brand-soft: #4a3f14;
-  --dark-go: #41b675;
-  --dark-go-hover: #5cc98a;
-  --dark-go-ink: #0d2a1a;
-  --dark-link: #7db7e8;
-  --dark-ok: #4fbf80;
-  --dark-ok-soft: #1e3a2a;
-  --dark-hold: #f0a93a;
-  --dark-hold-soft: #463617;
-  --dark-blocked: #f18080;
-  --dark-blocked-soft: #472222;
-  --dark-agent: #4fc3cf;
-  --dark-agent-soft: #16383c;
-  --dark-pr-merged: #b79ce8;
-  --dark-scrim: rgb(0 0 0 / 62%);
-  --dark-focus: #f7c948;
-  --dark-shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 10px 30px -18px rgb(0 0 0 / 60%);
-  --dark-shadow-lg: 0 2px 6px rgb(0 0 0 / 30%), 0 24px 60px -24px rgb(0 0 0 / 70%);
+  --dark-bg: #191b1d;
+  --dark-paper: #212427;
+  --dark-paper-2: #292c30;
+  --dark-line: #2f3337;
+  --dark-line-2: #3d4247;
+  --dark-ink: #e8e6e1;
+  --dark-ink-2: #bab7b0;
+  --dark-ink-3: #9a968f;
+  --dark-brand-ink: #ecd38f;
+  --dark-brand-soft: #2f2a1a;
+  --dark-go: #8ab38e;
+  --dark-go-hover: #9fc4a3;
+  --dark-go-ink: #121a14;
+  --dark-link: #94b4d6;
+  --dark-ok: #8ab38e;
+  --dark-ok-soft: #232b24;
+  --dark-hold: #d6a654;
+  --dark-hold-soft: #2d281d;
+  --dark-blocked: #dc8f86;
+  --dark-blocked-soft: #2f2422;
+  --dark-agent: #86b5b2;
+  --dark-agent-soft: #222b2b;
+  --dark-pr-merged: #ab9cc9;
+  --dark-scrim: rgb(0 0 0 / 55%);
+  --dark-focus: #e2b84a;
+  --dark-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+  --dark-shadow-lg: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -12px rgb(0 0 0 / 60%);
 
   /*
    * The four priorities again, lightened until each clears AA on the darkest
-   * card it can land on. Measured against `--dark-paper-2` (#2e3a44), which is
-   * the plain card and the worst of the four surfaces a priority mark sits on:
-   * p0 4.9:1, p1 5.4:1, p2 5.5:1, p3 4.7:1.
-   *
-   * P3 lands on the same value as `--dark-ink-3` on purpose. In light it
-   * is a hair off `--ink-3` too — the level that means "no rush" is meant to
-   * read as quiet text and nothing more, and giving it a hue of its own here
-   * would say something the light theme does not.
+   * card it can land on (`--dark-paper-2`). P3 lands on the same value as
+   * `--dark-ink-3` on purpose: the level that means "no rush" is meant to read
+   * as quiet text and nothing more.
    */
-  --dark-priority-p0: #f58a80;
-  --dark-priority-p1: #e5a343;
-  --dark-priority-p2: #8ab4f0;
-  --dark-priority-p3: #9ca7ad;
+  --dark-priority-p0: #dc8f86;
+  --dark-priority-p1: #d6a654;
+  --dark-priority-p2: #94a9c4;
+  --dark-priority-p3: #9a968f;
 }
 
 /*
@@ -289,7 +335,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.55 var(--font-body);
+  font: var(--text-lg)/1.55 var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 

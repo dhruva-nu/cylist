@@ -83,33 +83,6 @@ async def resolved_node(node_id: UUID, session: AsyncSession = SessionDependency
 # --- Trees -----------------------------------------------------------------
 
 
-async def _project_of_node(session: AsyncSession, node: VaultNode) -> UUID:
-    """Which project a node is in, by way of its tree. A node knows only the
-    tree; the tree is what belongs to a project."""
-    tree = await vault.get_tree(session, node.tree_id)
-    return tree.project_id
-
-
-def _cleared_nodes(nodes: list[VaultNode], allowed: frozenset[Sensitivity]) -> list[VaultNode]:
-    """Drop the nodes this caller is not cleared for, and their subtrees.
-
-    A branch above the clearance takes everything under it, whatever those
-    children are classified as. A tree that showed "Production" standing empty
-    would have told the reader which branch is the interesting one, which is
-    most of what there was to learn.
-    """
-    hidden: set[UUID] = set()
-    kept: list[VaultNode] = []
-    # `nodes_in_tree` returns them parent-before-child, so one pass is enough
-    # to carry a hidden branch down onto everything beneath it.
-    for node in nodes:
-        if node.parent_id in hidden or not permissions.readable(node.sensitivity, allowed):
-            hidden.add(node.id)
-            continue
-        kept.append(node)
-    return kept
-
-
 async def visible_node(
     node: VaultNode = Depends(resolved_node),
     principal: Principal = Depends(current_principal),
@@ -117,31 +90,31 @@ async def visible_node(
 ) -> VaultNode:
     """The node, if this caller is cleared to know it exists — else a 404.
 
-    Walks up to the tree's root, because a secret inside a restricted branch
-    is restricted whatever it says about itself: hiding the branch and serving
-    its children by id would be a lock on the door and a window beside it.
+    Every branch above it counts, not only the node itself — see
+    :func:`app.services.vault.require_visible`.
 
     No scope check of its own — every endpoint below states the one it wants,
     and this runs inside their guards as well as beside them.
     """
-    project_id = await _project_of_node(session, node)
-    allowed = await permissions.visible_levels_for(session, project_id, principal)
-
-    everything = {row.id: row for row in await vault.nodes_in_tree(session, node.tree_id)}
-    walking: VaultNode | None = node
-    while walking is not None:
-        permissions.enforce_visible(walking.sensitivity, allowed, "node")
-        walking = everything.get(walking.parent_id) if walking.parent_id else None
+    allowed = await _visible_levels(session, node, principal)
+    vault.require_visible(node, await vault.nodes_in_tree(session, node.tree_id), allowed)
     return node
+
+
+async def _visible_levels(
+    session: AsyncSession, node: VaultNode, principal: Principal
+) -> frozenset[Sensitivity]:
+    project_id = await vault.project_id_of(session, node)
+    return await permissions.visible_levels_for(session, project_id, principal)
 
 
 CHANGE_VAULT = guards.on_project(Permission.VAULT, Scope.WRITE, Scope.VAULT_READ)
 CHANGE_THIS_TREE = guards.for_entity(Permission.VAULT, resolved_tree, Scope.WRITE, Scope.VAULT_READ)
 CHANGE_THIS_NODE = guards.for_entity(
-    Permission.VAULT, visible_node, Scope.WRITE, Scope.VAULT_READ, locate=_project_of_node
+    Permission.VAULT, visible_node, Scope.WRITE, Scope.VAULT_READ, locate=vault.project_id_of
 )
 REVEAL_THIS_SECRET = guards.for_entity(
-    Permission.VAULT_REVEAL, visible_node, Scope.VAULT_REVEAL, locate=_project_of_node
+    Permission.VAULT_REVEAL, visible_node, Scope.VAULT_REVEAL, locate=vault.project_id_of
 )
 """Both gates, and they are a pair worth reading together. ``vault:reveal`` is
 what the credential carries; the permission is what this person is on this
@@ -229,7 +202,7 @@ async def get_tree(
     header over a filtered tree agrees with the rows under it.
     """
     allowed = await permissions.visible_levels_for(session, tree.project_id, principal)
-    nodes = _cleared_nodes(await vault.nodes_in_tree(session, tree.id), allowed)
+    nodes = vault.cleared_nodes(await vault.nodes_in_tree(session, tree.id), allowed)
     size = vault.TreeSize(nodes=len(nodes), secrets=sum(1 for node in nodes if node.is_secret))
     return VaultTreeDetail(
         **_tree_read(tree, size).model_dump(),
@@ -308,8 +281,9 @@ async def create_node(
     `secret.value`; it is encrypted before it is stored and the response does
     not contain it.
     """
-    node = await vault.create_node(session, cipher, body)
-    tree = await vault.get_tree(session, node.tree_id)
+    tree = await vault.get_tree(session, body.tree_id)
+    allowed = await permissions.visible_levels_for(session, tree.project_id, principal)
+    node = await vault.create_node(session, cipher, body, cleared_for=allowed)
     await activity.record(
         session,
         principal,
@@ -331,10 +305,8 @@ async def get_node(
     session: AsyncSession = SessionDependency,
 ) -> VaultNodeRead:
     """One node and its subtree — metadata only, never a secret value."""
-    allowed = await permissions.visible_levels_for(
-        session, await _project_of_node(session, node), principal
-    )
-    nodes = _cleared_nodes(await vault.nodes_in_tree(session, node.tree_id), allowed)
+    allowed = await _visible_levels(session, node, principal)
+    nodes = vault.cleared_nodes(await vault.nodes_in_tree(session, node.tree_id), allowed)
     return _node_read(node, children=_nested_nodes(nodes, parent_id=node.id))
 
 
@@ -415,7 +387,8 @@ async def move_node(
     "leave it where it is". Moving a branch into its own subtree is refused —
     it would detach that subtree from the tree entirely.
     """
-    moved = await vault.move_node(session, node, body)
+    allowed = await _visible_levels(session, node, principal)
+    moved = await vault.move_node(session, node, body, cleared_for=allowed)
     tree = await vault.get_tree(session, moved.tree_id)
     await activity.record(
         session,

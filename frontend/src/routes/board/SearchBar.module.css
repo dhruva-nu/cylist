@@ -1,0 +1,138 @@
+/* The search tags, offered under the empty box. */
+.tagToken {
+  min-width: 52px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.tagSays {
+  color: var(--ink-2);
+  font-size: var(--text-base);
+}
+
+/* Takes every pixel the title and the buttons leave, right up to the filter.
+   The basis is the width below which the two drop onto separate lines rather
+   than squeezing the box down to nothing. */
+.search {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.search input {
+  width: 100%;
+  height: var(--control, 40px);
+  padding: 0 14px;
+  font-size: var(--text-base);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+}
+
+/* Only while there is something to clear, so the placeholder — which is the
+   longest string the box ever holds — keeps the full width it is written
+   for. Nothing the user is reading moves: the text is left-aligned, and the
+   button appears on the same keystroke that makes room for it. */
+.search input.clearable {
+  padding-right: 42px;
+}
+
+/* Inside the box rather than beside it: a control that empties the input is
+   part of the input, and one parked in the toolbar would be a fourth button
+   in a strip that already reads as three.
+
+   Square, so the round shape it takes on hover is a circle, and offset from
+   the input's own height rather than the wrapper's — the wrapper grows by the
+   suggestion list, which would otherwise drag the × down the box every time
+   a tag is typed. */
+.clearSearch {
+  --size: 28px;
+
+  position: absolute;
+  top: calc((var(--control, 40px) - var(--size)) / 2);
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size);
+  height: var(--size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: none;
+  color: var(--ink-2);
+
+  /* The glyph is a multiplication sign, which sits small in the font at the
+     size the label around it is set in. */
+  font-size: var(--text-3xl);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clearSearch:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.suggestions {
+  position: absolute;
+  z-index: var(--layer-raised);
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+
+  /* Long enough to need it, short enough that the list never reaches past
+     the fold on a small window. */
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.suggestions button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestions button:hover,
+.suggestionActive {
+  background: var(--paper-2);
+}
+
+.suggestionKind {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+/* A goal's colour in the search box's suggestions, so picking `goal:` off the
+   list is picking the rail you can see on the board behind it. */
+.suggestionDot {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-round);
+}

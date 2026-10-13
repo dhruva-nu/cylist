@@ -11,43 +11,43 @@
  * type the password you have just this second chosen.
  */
 
-import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { ApiError, MIN_PASSWORD_LENGTH, api } from '../api/client'
-import { Button, ErrorBanner } from '../components/ui'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, type FormEvent } from 'react'
+import { withBase } from '../api/basePath'
+import { MIN_PASSWORD_LENGTH, api } from '../api/client'
+import { queryKeys } from '../api/queries'
+import { Button, ErrorBanner, ErrorNotice } from '../components/ui'
 import styles from './SignIn.module.css'
 
 export function AcceptInvite({ token }: { token: string }) {
   const queryClient = useQueryClient()
   const [password, setPassword] = useState('')
   const [repeated, setRepeated] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const tooShort = password.length > 0 && password.length < MIN_PASSWORD_LENGTH
   const mismatched = repeated.length > 0 && repeated !== password
   const ready = password.length >= MIN_PASSWORD_LENGTH && repeated === password
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
+  const accept = useMutation({
+    mutationFn: async () => {
       await api.acceptInvite(token, password)
-      await queryClient.invalidateQueries({ queryKey: ['me'] })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.identity })
       // Drop the token out of the address bar on the way in. It is spent now,
       // but a used credential sitting in browser history and in whatever reads
-      // it is not something to leave behind on purpose.
-      window.history.replaceState(null, '', '/')
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Something went wrong.')
-      setBusy(false)
-    }
+      // it is not something to leave behind on purpose. The deployment's root
+      // rather than the server's, so a dev slot lands back inside its slot.
+      window.history.replaceState(null, '', withBase('/'))
+    },
+  })
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    accept.mutate()
   }
 
   return (
     <div className={styles.centred}>
-      <form className={styles.card} onSubmit={(event) => void submit(event)}>
+      <form className={styles.card} onSubmit={submit}>
         <h1 className={styles.wordmark}>
           <span className={styles.mark}>C</span> Cylist
         </h1>
@@ -86,10 +86,10 @@ export function AcceptInvite({ token }: { token: string }) {
           </p>
         ) : null}
         {mismatched ? <ErrorBanner>Those two do not match.</ErrorBanner> : null}
-        {error ? <ErrorBanner>{error}</ErrorBanner> : null}
+        <ErrorNotice error={accept.error} />
 
-        <Button variant="go" type="submit" disabled={busy || !ready}>
-          {busy ? 'Setting it…' : 'Set password and sign in'}
+        <Button variant="go" type="submit" disabled={accept.isPending || !ready}>
+          {accept.isPending ? 'Setting it…' : 'Set password and sign in'}
         </Button>
       </form>
     </div>

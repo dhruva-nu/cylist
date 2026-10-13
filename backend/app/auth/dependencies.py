@@ -53,12 +53,16 @@ _LAST_USED_RESOLUTION = timedelta(minutes=1)
 """``last_used_at`` is only refreshed once per minute per token, so a busy
 client does not turn every read into a write."""
 
+_BEARER = "bearer "
+"""The ``Authorization`` scheme a token arrives under, lowercased: the scheme
+is case-insensitive, so the header is compared lowercased too."""
+
 
 def _presented_credential(connection: HTTPConnection) -> tuple[str, Channel] | None:
     """Extract the credential and note which door it came through."""
     header = connection.headers.get("Authorization")
-    if header and header.lower().startswith("bearer "):
-        return header[7:].strip(), Channel.API
+    if header and header.lower().startswith(_BEARER):
+        return header[len(_BEARER) :].strip(), Channel.API
 
     # Only this deployment's own cookie: a dev slot shares its host with
     # staging and the other slots, and the browser sends it all of theirs.

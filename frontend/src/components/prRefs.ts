@@ -109,3 +109,20 @@ export function samePrRefs(a: PrRef[], b: PrRef[]): boolean {
     left.every((ref, index) => ref.url === right[index]?.url && ref.state === right[index]?.state)
   )
 }
+
+/** The order a pull request moves through, earliest first. */
+const PR_PROGRESS: readonly PrState[] = ['raised', 'approved', 'merged']
+
+/**
+ * The state of the pull request furthest behind, which is the one a card with
+ * several of them is drawn in: a card is not merged while any of its work is
+ * still waiting for review. Null on a card with none.
+ */
+export function leastAdvancedPrState(refs: readonly PrRef[]): PrState | null {
+  if (!refs.length) return null
+  return refs.reduce<PrState>(
+    (least, ref) =>
+      PR_PROGRESS.indexOf(ref.state) < PR_PROGRESS.indexOf(least) ? ref.state : least,
+    'merged',
+  )
+}

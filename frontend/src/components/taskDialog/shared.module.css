@@ -1,0 +1,37 @@
+/* The few pieces more than one part of the task dialog draws, kept in one
+   place so the detail view, the form and the lists inside them say these the
+   same way. */
+
+/* The quiet half of a line — "Aditi K · Backend engineer", "Done · shipped".
+   Named for what it does rather than for what it first held: it carries a job
+   title, an outcome and a column name, and calling it .role stopped being
+   true the moment a role became a thing of its own. */
+.aside {
+  font-weight: var(--weight-regular);
+  opacity: 0.75;
+}
+
+/* What a list says in place of the entries it does not have yet. */
+.empty {
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}
+
+/* A box to write in and whatever goes with it, on one line: a comment and
+   who it is from, or a new checklist item and its Add button. */
+.composer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.composer select {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 40%;
+}
+
+.composer .grow {
+  flex: 1;
+  min-width: 0;
+}

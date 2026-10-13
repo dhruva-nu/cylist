@@ -280,7 +280,8 @@ def _bullets(text: str) -> list[str]:
             items[-1].append(line.strip())
         else:
             return []
-    return [" ".join(item).strip() for item in items if " ".join(item).strip()]
+    joined = (" ".join(item).strip() for item in items)
+    return [text for text in joined if text]
 
 
 def _bullet_title(item: str) -> str:

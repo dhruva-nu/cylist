@@ -6,16 +6,14 @@ Answers "what changed, who changed it, and did a human or an agent do it?".
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.models.activity import Activity
 from app.schemas.activity import ActivityRead
-from app.services import projects
+from app.services import activity, projects
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -38,12 +36,8 @@ async def list_activity(
     project-scoped path — otherwise each client has to spend a request
     resolving the key before it can ask this one question.
     """
-    statement = select(Activity).order_by(Activity.occurred_at.desc()).limit(limit)
-    if project is not None:
-        resolved = await projects.resolve(session, project)
-        statement = statement.where(Activity.project_id == resolved.id)
-    if entity_type is not None:
-        statement = statement.where(Activity.entity_type == entity_type)
-
-    entries = await session.scalars(statement)
+    project_id = (await projects.resolve(session, project)).id if project is not None else None
+    entries = await activity.recent(
+        session, limit=limit, project_id=project_id, entity_type=entity_type
+    )
     return [ActivityRead.model_validate(entry) for entry in entries]

@@ -82,6 +82,10 @@ IGNORED = re.compile(r"(^|/)(__MACOSX/|\.DS_Store$|Thumbs\.db$)")
 and a ``__MACOSX/`` beside the real folder would otherwise hide that the
 archive has a single root to look through."""
 
+DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
+"""A Windows path's first part, ``C:``. A zip made there can carry one, and
+joined onto a folder it means the root of a drive rather than a file in it."""
+
 FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(?P<body>.*?)^---[ \t]*(?:\r?\n|\Z)", re.S | re.M)
 TOP_LEVEL_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_-]+)[ \t]*:(?P<value>.*)$")
 
@@ -111,7 +115,7 @@ def unpack(filename: str, description: str | None, content: bytes) -> SkillFolde
             zip without a ``SKILL.md``, an entry that escapes the folder, or a
             single file that is not text.
     """
-    if filename.lower().endswith(".zip") or zipfile.is_zipfile(BytesIO(content)):
+    if filename.lower().endswith(ZIP_SUFFIX) or zipfile.is_zipfile(BytesIO(content)):
         return _from_zip(filename, description, content)
     return _from_document(filename, description, content)
 
@@ -288,10 +292,10 @@ def _checked_path(subject: str, raw: str) -> PurePosixPath:
     cleaned = raw.replace("\\", "/")
     parts = [part for part in cleaned.split("/") if part not in ("", ".")]
     escapes = (
-        cleaned.startswith("/")
+        not parts
+        or cleaned.startswith("/")
         or ".." in parts
-        or (parts and re.match(r"^[A-Za-z]:", parts[0]) is not None)
-        or not parts
+        or DRIVE_LETTER.match(parts[0]) is not None
     )
     if escapes:
         raise _refuse(subject, f"its entry {raw!r} points outside the skill's folder")

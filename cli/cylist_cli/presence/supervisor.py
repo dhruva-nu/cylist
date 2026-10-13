@@ -84,8 +84,11 @@ class Singleton:
 
     def release(self) -> None:
         if self._fd is not None:
+            # Apart, so that a lock that will not come off still closes the
+            # descriptor; closing it releases the lock anyway.
             with contextlib.suppress(OSError):
                 _unlock(self._fd)
+            with contextlib.suppress(OSError):
                 os.close(self._fd)
             self._fd = None
 

@@ -12,10 +12,10 @@
  * gate exists to keep out.
  */
 
-import { useQuery } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { stripBase } from './api/basePath'
-import { ApiError, api } from './api/client'
+import { ApiError } from './api/client'
+import { useIdentity } from './api/queries'
 import { AcceptInvite } from './routes/AcceptInvite'
 import { SignIn } from './routes/SignIn'
 import { router } from './router'
@@ -32,13 +32,7 @@ export function inviteTokenIn(pathname: string): string | null {
 export function App() {
   const invitation = inviteTokenIn(stripBase(window.location.pathname))
 
-  const identity = useQuery({
-    queryKey: ['me'],
-    queryFn: api.me,
-    retry: (failureCount, error) =>
-      // Not being signed in is an answer, not a failure worth retrying.
-      !(error instanceof ApiError && error.isUnauthenticated) && failureCount < 2,
-  })
+  const identity = useIdentity()
 
   if (invitation) return <AcceptInvite token={invitation} />
 

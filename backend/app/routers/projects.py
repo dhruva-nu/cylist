@@ -13,7 +13,7 @@ from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.errors import ForbiddenError, UnprocessableRequestError
+from app.core.errors import ForbiddenError
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
 from app.models.project import Project
@@ -287,11 +287,7 @@ async def delete_project(
     meaning has to say something new before the new one runs, and gets a 422
     rather than a destroyed board.
     """
-    if confirm.strip().upper() != project.key:
-        raise UnprocessableRequestError(
-            f"Name the project to delete it: confirm must be {project.key}.",
-            details={"project_key": project.key},
-        )
+    projects.require_confirmation(project, confirm)
 
     key, name, project_id = project.key, project.name, project.id
     await projects.delete(session, store, project)

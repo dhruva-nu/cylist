@@ -1,0 +1,505 @@
+/* Said in a quiet box rather than as an error: a reader who is not an admin
+   has not done anything wrong, they are just looking. */
+.note {
+  max-width: 62ch;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--text-base);
+}
+
+/* --- Hooks down the left, one hook on the right --------------------------- */
+
+/* The Roles page's split and its 320px, for the same reason it gives. */
+.split {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (width <= 900px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.listRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.listRow:hover {
+  background: var(--paper-2);
+}
+
+.listRow.selected {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: var(--weight-bold);
+}
+
+.listName {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listOff {
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* How its last delivery went, at a glance down the list. */
+.dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-round);
+  background: var(--line-2);
+}
+
+.dot.delivered {
+  background: var(--ok);
+}
+
+.dot.pending {
+  background: var(--hold);
+}
+
+.dot.failed {
+  background: var(--blocked);
+}
+
+.dot.off {
+  opacity: 0.4;
+}
+
+.pane {
+  min-width: 0;
+}
+
+.detailHead {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.detailHead h2 {
+  overflow-wrap: anywhere;
+  font-size: var(--text-3xl);
+}
+
+.switch {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.facts dt {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+@media (width <= 600px) {
+  .facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .facts dd {
+    margin-bottom: 8px;
+  }
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.warn {
+  color: var(--blocked);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quiet {
+  color: var(--ink-3);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+}
+
+/* --- The delivery log ----------------------------------------------------- */
+
+.logTitle {
+  margin-top: 10px;
+  font-size: var(--text-lg);
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.delivery {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.delivery summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+/* How a delivery went: the word in its status ink behind a dot of the same,
+   with no ground — the dot down the list says the same thing at a glance. */
+.state {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.state::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: currentColor;
+}
+
+.state.delivered {
+  color: var(--ok);
+}
+
+.state.pending {
+  color: var(--hold);
+}
+
+.state.failed {
+  color: var(--blocked);
+}
+
+.event {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+}
+
+.when {
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}
+
+.outcome {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-size: var(--text-base);
+}
+
+.more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 0 12px 12px;
+}
+
+.attempts {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.payload,
+.secret {
+  overflow: auto;
+  width: 100%;
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+}
+
+.secret {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: all;
+}
+
+/* --- The form ------------------------------------------------------------- */
+
+/* The event picker: everything, or what is ticked in the groups below. */
+.when {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.whenLegend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.mode {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+}
+
+.seg {
+  min-height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.segOn {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+/* Groups down the left, one group's events on the right. */
+.picker {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-right: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.group:hover {
+  background: var(--line);
+}
+
+.groupOn,
+.groupOn:hover {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: var(--weight-bold);
+}
+
+.badge {
+  flex: none;
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* Some of the group ticked: the count turns green and heavier, without a
+   filled box — the selected group beside it is already the one with a ground. */
+.badgeOn {
+  color: var(--go);
+  font-weight: var(--weight-semibold);
+}
+
+.groupPane {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.groupHead {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.groupHead h3 {
+  font-size: var(--text-xl);
+}
+
+.bulk {
+  display: flex;
+  gap: 4px;
+}
+
+.linkish {
+  min-height: 32px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.eventRow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 8px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.eventRow:hover {
+  background: var(--paper-2);
+}
+
+.eventRow input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--go);
+}
+
+.eventText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eventName {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.eventHint {
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}
+
+/* On a phone the groups become a wrapping row above the events. */
+@media (width <= 640px) {
+  .picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .groups {
+    flex-flow: row wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .group {
+    width: auto;
+  }
+}
+
+.blocked {
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}

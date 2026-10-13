@@ -1,0 +1,423 @@
+/* The goal's colour, beside its reference in the eyebrow: the page opens by
+   saying which rail on the board it is. */
+.rail {
+  display: inline-block;
+  width: 4px;
+  height: 13px;
+  margin-right: 2px;
+  border-radius: var(--radius-xs);
+  vertical-align: -2px;
+}
+
+/* The eyebrow is a line of text rather than a row of boxes, so the pill in it
+   buys its own space. Everything else about it is GoalMarks'. */
+.pill {
+  margin-left: 8px;
+}
+
+.boardLink {
+  padding: 9px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.boardLink:hover {
+  border-color: var(--ink-3);
+}
+
+/*
+ * The page: the cards on the left, the goal itself in a column on the right.
+ *
+ * The aside is written first in the source and placed second by the grid, so
+ * that the one-column layout underneath — a phone, or a narrow window — opens
+ * with what the goal is rather than with a list of cards belonging to a goal
+ * it has not said the name of yet.
+ */
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 28px;
+  align-items: start;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  grid-row: 1;
+  grid-column: 2;
+  /* Follows the list down: the counts are what you check a card against, and
+     a summary that scrolls away is a summary you scroll back up to. */
+  position: sticky;
+  top: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 0;
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+/* Two columns of counts rather than a row of six: down the side there is no
+   width to spread them across, and a number under its own label reads faster
+   stacked than wrapped. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+/* Why the goal cannot be marked achieved yet, under the counts it is counted
+   from rather than beside the button it holds shut: the button is a few words
+   wide and this is a sentence, and the reader is looking at the counts when
+   they ask the question. The button points at it with aria-describedby. */
+.refusal {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.about {
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.about h2 {
+  margin: 0 0 6px;
+  color: var(--ink-3);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
+}
+
+.about p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-base);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat b {
+  font-size: var(--text-3xl);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.statLabel {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
+}
+
+.blocked b {
+  color: var(--blocked);
+}
+
+.hold b {
+  color: var(--hold);
+}
+
+.owner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.owner b {
+  font-size: var(--text-base);
+}
+
+.group {
+  margin-bottom: 26px;
+}
+
+/* The column's name over a hairline, with its count beside it — a label for
+   the rows under it rather than a heading competing with the goal's own. */
+.group h2 {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
+}
+
+.count {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A row rather than a card: these are already grouped under a heading that
+   says where they are, and eight boxed cards under three headings is a board
+   drawn badly. The unlink button sits outside the button that opens the card,
+   because a control inside a control is a control you cannot reach. */
+.card {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.card:hover {
+  border-color: var(--line-2);
+}
+
+.cardOpen {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cardMark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+
+.cardRef {
+  flex: none;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.cardTitle {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.struck {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.offered {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.offer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.offer:hover {
+  border-color: var(--line-2);
+  background: var(--paper-2);
+}
+
+.offerColumn {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+/* The two filters over the list: a word, and a row of column chips. */
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.search input::placeholder {
+  color: var(--ink-3);
+}
+
+.showing {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chips button {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.chips button:hover {
+  border-color: var(--line-2);
+}
+
+.chips button.chipOn {
+  border-color: var(--brand-ink);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+/* A column with nothing in it under the current word. Still pressable — the
+   answer "none, here" is worth being able to ask for. */
+.chipEmpty {
+  opacity: 0.55;
+}
+
+.chipCount {
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+}
+
+.chips button.chipOn .chipCount {
+  color: inherit;
+}
+
+.clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Below this the side column and the list are both too narrow to be
+   themselves: 320px of summary out of a 900px window leaves the card rows
+   ellipsing their titles at the reference. They stack instead, the goal
+   first. */
+@media (max-width: 1080px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+  }
+
+  .side {
+    position: static;
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .list {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .stats {
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  }
+}
