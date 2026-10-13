@@ -31,25 +31,26 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 PORT = 8090
 
-# The Tokyo ingress this tailnet's Funnel traffic actually passes through
-# (see ~/.claude/CLAUDE.md — "nearest DERP blr; funnel ingress is
-# ingress-tok-01"). Forcing a request through it, rather than letting MagicDNS
-# resolve locally, is the only way to catch the failure mode already seen once
-# here: the on-box serve config and the node both correctly believe Funnel is
-# on, but the ingress-side registration has gone stale and nothing public ever
-# arrives. A plain local health check cannot see that at all.
-FUNNEL_INGRESS_IP = "103.84.155.153"
+# Production is published through a Cloudflare Tunnel (cloudflared on this
+# box, outbound only — the ISP line is behind carrier-grade NAT, so nothing
+# inbound could ever reach it directly). The only check worth making is the
+# one a browser makes: a real request to cylist.in through Cloudflare's edge,
+# which proves the tunnel is registered and relaying, not merely that the app
+# answers on loopback. The host's resolver can hold a stale answer for this
+# name (MagicDNS first, negative cache), so the probe pins the zone to one of
+# Cloudflare's anycast addresses for it.
+CLOUDFLARE_EDGE_IP = "172.67.151.168"
 
 ENVIRONMENTS = [
     {
         "name": "prod",
         "label": "Production",
         "port": 8000,
-        "url": "https://dnu-home-1.tail222f46.ts.net",
+        "url": "https://cylist.in",
         "public_check": ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
                           "--max-time", "15",
-                          "--resolve", f"dnu-home-1.tail222f46.ts.net:443:{FUNNEL_INGRESS_IP}",
-                          "https://dnu-home-1.tail222f46.ts.net/api/v1/health"],
+                          "--resolve", f"cylist.in:443:{CLOUDFLARE_EDGE_IP}",
+                          "https://cylist.in/api/v1/health"],
     },
     {
         "name": "staging",

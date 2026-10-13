@@ -212,7 +212,7 @@ jobs:
     runs-on: [self-hosted, cylist]
     environment:
       name: production
-      url: https://dnu-home-1.tail222f46.ts.net
+      url: https://cylist.in
 
     steps:
       - uses: actions/checkout@v5

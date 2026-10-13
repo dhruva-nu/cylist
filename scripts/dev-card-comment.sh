@@ -56,7 +56,7 @@ post() {
     return 0
   fi
 
-  local base="${CYLIST_URL:-https://dnu-home-1.tail222f46.ts.net}"
+  local base="${CYLIST_URL:-https://cylist.in}"
   local work agent_id status
   work="$(mktemp -d)"
   # shellcheck disable=SC2064  # expanded now: $work is local, gone by EXIT

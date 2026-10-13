@@ -90,5 +90,5 @@ jobs:
           BRANCH: ${{ steps.deploy.outputs.branch }}
           SHA: ${{ steps.deploy.outputs.sha }}
           CYLIST_AGENT_TOKEN: ${{ secrets.CYLIST_AGENT_TOKEN }}
-          CYLIST_URL: ${{ vars.CYLIST_URL || 'https://dnu-home-1.tail222f46.ts.net' }}
+          CYLIST_URL: ${{ vars.CYLIST_URL || 'https://cylist.in' }}
         run: scripts/dev-card-comment.sh post

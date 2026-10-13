@@ -14,13 +14,13 @@ the same board you do.
 | **Docs** | A project's markdown, filed section → topic → doc. Agents read it before they start and write back what they learn. |
 | **Agents** | Skills for a project's agents to follow, and the line that connects Claude Code to the board. |
 
-Cylist is deployed at **<https://dnu-home-1.tail222f46.ts.net>**.
+Cylist is deployed at **<https://cylist.in>**.
 
 ---
 
 ## Using the board
 
-1. Open <https://dnu-home-1.tail222f46.ts.net> and sign in with the email and
+1. Open <https://cylist.in> and sign in with the email and
    password from your invitation. If you don't have an account, ask a project's
    admin to invite you from its **People** tab.
 2. Pick a project from the home screen. Its **Board**, **Goals**, **People**,
@@ -62,7 +62,7 @@ comment, set goals, browse files, use the vault, and read and write docs.
    machine:
 
    ```bash
-   claude mcp add --transport http --scope user cylist https://dnu-home-1.tail222f46.ts.net/mcp --header "Authorization: Bearer cyl_…"
+   claude mcp add --transport http --scope user cylist https://cylist.in/mcp --header "Authorization: Bearer cyl_…"
    ```
 
    The line is the same in PowerShell.
@@ -90,13 +90,13 @@ don't have it, then the `cylist` CLI and the `cylist-mcp` server, then runs
 ```bash
 # Linux and macOS
 curl -fsSL https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.sh \
-  | sh -s -- --url https://dnu-home-1.tail222f46.ts.net
+  | sh -s -- --url https://cylist.in
 ```
 
 ```powershell
 # Windows PowerShell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.ps1))) `
-  -Url https://dnu-home-1.tail222f46.ts.net
+  -Url https://cylist.in
 ```
 
 `cylist setup` asks for your email and password once. It then mints a token for
