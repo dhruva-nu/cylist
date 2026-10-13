@@ -19,8 +19,48 @@ env:
   CYLIST_TEST_DATABASE_URL: postgresql+asyncpg://cylist:cylist@localhost:5432/cylist_test
 
 jobs:
+  # Which suites this run needs. Going to `main` — a pull request into it, or
+  # the push that deploys — runs every one, unconditionally. Anywhere else a
+  # suite runs only when something it reads has changed: a frontend-only pull
+  # request does not wait on Postgres and pytest. The backend imports the MCP
+  # server and the vendored jev packages (backend/pyproject.toml), so a change
+  # to either reruns the backend too. A change to this file reruns everything,
+  # as does any diff that cannot be worked out (a new branch's first push).
+  #
+  # A job skipped by its `if:` reports as passing, so a required check on a
+  # suite that did not need to run does not hold a pull request up.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      agents: ${{ steps.filter.outputs.agents }}
+      installers: ${{ steps.filter.outputs.installers }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Filter
+        id: filter
+        # Through the environment, not `${{ }}` inside the script: a branch
+        # name is attacker-shaped text.
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: scripts/ci-changes.sh
+
   backend:
     name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,25 +116,23 @@ jobs:
   # an httpx.MockTransport, so neither needs a database or a running backend.
   agents:
     name: ${{ matrix.package.name }} on ${{ matrix.os }}
+    needs: changes
+    # The legs are worked out by the changes job (scripts/ci-changes.sh): CLI
+    # on Linux and on Windows when cli/ changed, MCP server on Linux when mcp/
+    # did. The CLI installs the Claude Code hook and runs its presence daemon
+    # on the developer's own machine, so "the developer's own machine" is part
+    # of its contract. Windows is the one that differs in kind rather than in
+    # detail — no AF_UNIX, no fcntl, no catchable SIGTERM — and each of those
+    # is a way for the daemon to be silently unusable there. mypy is worth as
+    # much as the tests here: it is the only run that reads the msvcrt
+    # branches at all.
+    if: needs.changes.outputs.agents != '[]'
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        package:
-          - { name: CLI, dir: cli }
-          - { name: MCP server, dir: mcp }
-        include:
-          # The CLI installs the Claude Code hook and runs its presence
-          # daemon on the developer's own machine, so "the developer's own
-          # machine" is part of its contract. Windows is the one that differs
-          # in kind rather than in detail — no AF_UNIX, no fcntl, no
-          # catchable SIGTERM — and each of those is a way for the daemon to
-          # be silently unusable there. mypy is worth as much as the tests
-          # here: it is the only run that reads the msvcrt branches at all.
-          - os: windows-latest
-            package: { name: CLI, dir: cli }
+        include: ${{ fromJSON(needs.changes.outputs.agents) }}
 
     defaults:
       run:
@@ -139,6 +177,8 @@ jobs:
   # runner — but both are parsed, which is what a typo fails.
   installers:
     name: Bootstrap scripts
+    needs: changes
+    if: needs.changes.outputs.installers == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -165,6 +205,8 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
