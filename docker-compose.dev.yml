@@ -27,10 +27,10 @@
 #     tag: building one slot must not move the tag another environment, or
 #     another slot, restarts from;
 #   * port 801N, because production holds 8000 and staging 8001;
-#   * CYLIST_BASE_PATH=/dev_N, because every slot is served under its own path
-#     on :9443 (`tailscale serve --set-path /dev_N`) rather than a port of its
-#     own. It is passed as a build argument as well as at runtime, so it reaches
-#     the SPA's build if that is where it is needed;
+#   * a hostname of its own, devN.cylist.in, on the Cloudflare Tunnel, so it is
+#     served at the site root like production and staging and CYLIST_BASE_PATH
+#     stays empty. (The slots used to share one tailnet port and be told apart
+#     by path, /dev_N; Settings still accepts a base path for that shape);
 #   * CYLIST_ENVIRONMENT=preview, which Settings.is_deployed treats as
 #     deployed (Secure session cookie, make seed refused) without touching
 #     what CYLIST_ENVIRONMENT=dev means for someone's own machine — see the
@@ -52,8 +52,9 @@ services:
       target: runtime
       args:
         # Harmless if the Dockerfile declares no such ARG; there for when the
-        # SPA has to know its prefix at build time.
-        CYLIST_BASE_PATH: /dev_${CYLIST_DEV_SLOT}
+        # SPA has to know its prefix at build time. Empty: each slot has a
+        # hostname of its own (devN.cylist.in) and is served at the root.
+        CYLIST_BASE_PATH: ""
     # Not cylist:latest, cylist:staging or another slot's tag. See the note at
     # the top of this file.
     image: cylist:dev-${CYLIST_DEV_SLOT}
@@ -71,20 +72,23 @@ services:
       # Not "dev" — see the note at the top of this file and the docstring on
       # Settings.is_deployed.
       CYLIST_ENVIRONMENT: preview
-      CYLIST_BASE_PATH: /dev_${CYLIST_DEV_SLOT}
+      # Unset on purpose: slot N is https://devN.cylist.in/, at the root, so
+      # there is no prefix for the app to add back or the cookie to be scoped
+      # to. (Settings still accepts one, for a slot served under a path.)
+      CYLIST_BASE_PATH: ""
       CYLIST_DATA_DIR: /data
       CYLIST_WEB_DIR: /app/web
       # Empty on purpose, as in production and staging: the SPA is served by
       # this same process, so every request is same-origin and no CORS
       # middleware is installed at all.
       CYLIST_CORS_ORIGINS: "[]"
-      # As production and staging, for this slot. Tailnet only. Loopback reaches
-      # the container directly, so it has no prefix; :9443 needs the slot's.
-      CYLIST_CLIENT_URLS: '["http://localhost:801${CYLIST_DEV_SLOT}","https://dnu-home-1.tail222f46.ts.net:9443/dev_${CYLIST_DEV_SLOT}"]'
+      # As production and staging, for this slot: loopback, then the slot's
+      # own hostname through the Cloudflare Tunnel (see DEPLOY.md, "Dev").
+      CYLIST_CLIENT_URLS: '["http://localhost:801${CYLIST_DEV_SLOT}","https://dev${CYLIST_DEV_SLOT}.cylist.in"]'
     ports:
-      # Loopback only, 8011–8015. `tailscale serve --https 9443 --set-path
-      # /dev_N` terminates HTTPS in front of it, stripping the prefix on the
-      # way; nothing else should reach it directly.
+      # Loopback only, 8011–8015. cloudflared relays devN.cylist.in here
+      # (ingress rule in /etc/cloudflared/config.yml); nothing else should
+      # reach it directly.
       - "127.0.0.1:801${CYLIST_DEV_SLOT}:8000"
     volumes:
       # The slot's own logs, and below them the blobs every slot shares: a file

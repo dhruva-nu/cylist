@@ -127,7 +127,7 @@ staging-down: ## Stop the staging stack and remove its containers (volumes kept)
 # Five slots, not one stack, so five branches can be up side by side. None is
 # tied to a branch: the "Deploy dev" workflow is workflow_dispatch, so you pick
 # the branch in the "Run workflow" dropdown and the slot as its input. Slot N
-# listens on :801N and is served at :9443/dev_N. All five share one database
+# listens on :801N and is served at devN.cylist.in. All five share one database
 # (docker-compose.dev-db.yml) and its secrets in ~/cylist-dev-shared — see
 # docker-compose.dev.yml. Every slot target here names the slot:
 #

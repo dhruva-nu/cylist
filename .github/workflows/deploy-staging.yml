@@ -26,7 +26,7 @@ jobs:
     runs-on: [self-hosted, cylist]
     environment:
       name: staging
-      url: https://dnu-home-1.tail222f46.ts.net:8443
+      url: https://stage.cylist.in
 
     steps:
       # GitHub's "Run workflow" dropdown offers every branch, and the checkout

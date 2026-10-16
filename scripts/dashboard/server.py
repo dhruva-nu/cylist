@@ -56,32 +56,33 @@ ENVIRONMENTS = [
         "name": "staging",
         "label": "Staging",
         "port": 8001,
-        "url": "https://dnu-home-1.tail222f46.ts.net:8443",
+        "url": "https://stage.cylist.in",
         "public_check": ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
-                          "--max-time", "10",
-                          "https://dnu-home-1.tail222f46.ts.net:8443/api/v1/health"],
+                          "--max-time", "15",
+                          "--resolve", f"stage.cylist.in:443:{CLOUDFLARE_EDGE_IP}",
+                          "https://stage.cylist.in/api/v1/health"],
     },
     # Five dev slots, one card each. Their names follow the same
     # cylist-<name>-app-1 and ~/cylist-<name> pattern as the other two, which
-    # is all container_status and backup_age need; all five share :9443 and
-    # are told apart by path.
+    # is all container_status and backup_age need; each has a hostname of its
+    # own on the same tunnel.
     *(
         {
             "name": f"dev-{n}",
             "label": f"Dev {n}",
             "port": 8010 + n,
-            "url": f"https://dnu-home-1.tail222f46.ts.net:9443/dev_{n}/",
+            "url": f"https://dev{n}.cylist.in/",
             "public_check": ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
-                              "--max-time", "10",
-                              f"https://dnu-home-1.tail222f46.ts.net:9443/dev_{n}/api/v1/health"],
+                              "--max-time", "15",
+                              "--resolve", f"dev{n}.cylist.in:443:{CLOUDFLARE_EDGE_IP}",
+                              f"https://dev{n}.cylist.in/api/v1/health"],
         }
         for n in range(1, 6)
     ),
 ]
 
-# The public checks leave the loopback interface — for prod, leave the
-# tailnet entirely and come back through Tokyo — so they are seconds slower
-# than everything else here. Run them on their own clock instead of blocking
+# The public checks leave the machine entirely and come back through
+# Cloudflare's edge, so they are seconds slower than everything else here. Run them on their own clock instead of blocking
 # every /api/status poll on the slowest one.
 PUBLIC_CHECK_INTERVAL_SECONDS = 45
 _public_status: dict[str, str] = {env["name"]: "checking" for env in ENVIRONMENTS}

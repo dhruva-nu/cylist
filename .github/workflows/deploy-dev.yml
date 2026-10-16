@@ -4,9 +4,9 @@ name: Deploy dev
 # you pick whichever branch to run this from, and actions/checkout below
 # follows that same ref by default. That is the whole mechanism — no branch
 # input to maintain here. What you do pick is the slot: dev is five stacks,
-# dev_1 to dev_5, so five branches can be up side by side. Each is served at
-# https://dnu-home-1.tail222f46.ts.net:9443/dev_N/, and the root of :9443 lists
-# which branch and commit is in each.
+# dev_1 to dev_5, so five branches can be up side by side. Slot N is served at
+# https://devN.cylist.in/, and https://dev.cylist.in/ lists which branch and
+# commit is in each.
 #
 #   gh workflow run deploy-dev.yml --ref <branch> -f slot=2 -f card=CYLIST-79
 #
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       slot:
-        description: Dev slot to deploy into (served at :9443/dev_N)
+        description: Dev slot to deploy into (served at devN.cylist.in)
         required: true
         type: choice
         options: ["1", "2", "3", "4", "5"]
@@ -62,8 +62,8 @@ jobs:
       # jev key into them, builds the image, dumps the database, migrates,
       # restarts the slot and waits for /api/v1/health — the same script
       # production and staging use — then records branch / sha / time in
-      # ~/cylist-dev-N, regenerates the :9443 index, points tailscale at the
-      # slot and checks it answers through it. See scripts/dev-slot.sh.
+      # ~/cylist-dev-N, regenerates the dev.cylist.in index and checks the
+      # slot answers at devN.cylist.in. See scripts/dev-slot.sh.
       #
       # Its outputs (slot, url, branch, sha) are there for a later step that
       # reports where this branch went.

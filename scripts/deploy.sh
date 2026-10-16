@@ -8,7 +8,7 @@
 #
 #   scripts/deploy.sh            production, on :8000   (the default)
 #   scripts/deploy.sh staging    staging, on :8001
-#   scripts/deploy.sh dev N      dev slot N (1-5), on :801N, served at :9443/dev_N
+#   scripts/deploy.sh dev N      dev slot N (1-5), on :801N, served at devN.cylist.in
 #
 # One script rather than three, because the interesting part is the order of
 # the steps and that order is not something staging or dev should get their own,
