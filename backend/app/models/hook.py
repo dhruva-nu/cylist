@@ -109,6 +109,13 @@ class Hook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     task_type: Mapped[TaskType | None] = mapped_column(_enum(TaskType, "task_type"))
     """Only cards of this type match."""
 
+    agent_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Only cards assigned to the agent — :attr:`app.models.person.Person.is_agent`
+    — match. Off matches every owner: a flag rather than a person's id, because
+    there is only ever one agent and the rule is about the machine, not a name."""
+
     url: Mapped[str] = mapped_column(String(URL_MAX_LENGTH), nullable=False)
     """Where events are POSTed. ``http`` or ``https``."""
 

@@ -59,6 +59,9 @@ class HookCreate(_HookBody):
     )
     template_id: UUID | None = Field(default=None, description="Only cards of this template.")
     task_type: TaskType | None = Field(default=None, description="Only cards of this type.")
+    agent_only: bool = Field(
+        default=False, description="Only cards assigned to the agent after the change."
+    )
     secret: str | None = Field(
         default=None,
         description="The signing secret to use. Omit to have one generated.",
@@ -77,6 +80,9 @@ class HookUpdate(_HookBody):
     from_column_id: UUID | None = None
     template_id: UUID | None = None
     task_type: TaskType | None = None
+    agent_only: bool | None = Field(
+        default=None, description="Only cards assigned to the agent. `null` turns it off."
+    )
 
 
 class HookSecretRotate(Schema):
@@ -108,6 +114,7 @@ class HookRead(Schema):
     template_id: UUID | None
     template_name: str | None
     task_type: TaskType | None
+    agent_only: bool = Field(description="Only cards assigned to the agent match.")
     secret_hint: str = Field(description="The signing secret's last four characters.")
     last_delivery: DeliverySummary | None
     created_at: datetime

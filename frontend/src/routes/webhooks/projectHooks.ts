@@ -31,6 +31,7 @@ export interface HookDraft {
   fromColumnId: string
   templateId: string
   taskType: '' | TaskType
+  agentOnly: boolean
   secret: string
 }
 
@@ -43,6 +44,7 @@ export const EMPTY_DRAFT: HookDraft = {
   fromColumnId: '',
   templateId: '',
   taskType: '',
+  agentOnly: false,
   secret: '',
 }
 
@@ -56,6 +58,7 @@ export function draftOf(hook: Hook): HookDraft {
     fromColumnId: hook.from_column_id ?? '',
     templateId: hook.template_id ?? '',
     taskType: hook.task_type ?? '',
+    agentOnly: hook.agent_only,
     secret: '',
   }
 }
@@ -73,6 +76,7 @@ export function inputOf(draft: HookDraft, creating: boolean): HookInput {
     from_column_id: draft.fromColumnId || null,
     template_id: draft.templateId || null,
     task_type: draft.taskType || null,
+    agent_only: draft.agentOnly,
   }
   if (creating && draft.secret.trim() !== '') input.secret = draft.secret.trim()
   return input
@@ -178,6 +182,7 @@ export function describeRule(hook: Hook, events: HookEvent[]): string {
   const parts = [eventsPhrase(hook.verbs, events)]
   if (hook.template_id) parts.push(`${hook.template_name ?? 'a deleted template'} cards`)
   if (hook.task_type) parts.push(TYPE_WORDS[hook.task_type])
+  if (hook.agent_only) parts.push("the agent's cards")
   if (hook.from_column_id) parts.push(`from ${hook.from_column_name ?? 'a deleted column'}`)
   if (hook.to_column_id) {
     const movesOnly = hook.verbs.length === 1 && hook.verbs[0] === 'task.moved'

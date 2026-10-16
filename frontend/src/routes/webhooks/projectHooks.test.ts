@@ -44,6 +44,7 @@ const HOTFIX_TO_STAGING: Hook = {
   template_id: 'tpl-hotfix',
   template_name: 'Hotfix',
   task_type: null,
+  agent_only: false,
   secret_hint: 'abcd',
   last_delivery: null,
   created_at: '2026-10-06T00:00:00Z',
@@ -76,6 +77,13 @@ describe('describeRule', () => {
   it('says "in" a column for a hook that is not only about moves', () => {
     const hook = { ...HOTFIX_TO_STAGING, verbs: [], template_id: null, template_name: null }
     expect(describeRule(hook, EVENTS)).toBe('Any change · in In staging')
+  })
+
+  it("says when only the agent's cards fire it", () => {
+    const hook = { ...HOTFIX_TO_STAGING, agent_only: true }
+    expect(describeRule(hook, EVENTS)).toBe(
+      "Moved to another column · Hotfix cards · the agent's cards · into In staging",
+    )
   })
 
   it('names a filter whose column has been deleted', () => {
@@ -129,6 +137,8 @@ describe('the form', () => {
     expect(input.template_id).toBeNull()
     expect(input.to_column_id).toBe('col-staging')
     expect(input).not.toHaveProperty('secret')
+    expect(input.agent_only).toBe(false)
+    expect(inputOf({ ...draft, agentOnly: true }, false).agent_only).toBe(true)
   })
 
   it('sends a secret only when making a hook, and only if one was typed', () => {
