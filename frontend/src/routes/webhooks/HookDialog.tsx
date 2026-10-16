@@ -171,6 +171,19 @@ export function HookDialog({
             </select>
           </Field>
         </FieldPair>
+        <label className={styles.eventRow}>
+          <input
+            type="checkbox"
+            checked={draft.agentOnly}
+            onChange={(event) => set({ agentOnly: event.target.checked })}
+          />
+          <span className={styles.eventText}>
+            <span className={styles.eventName}>Only cards assigned to the agent</span>
+            <span className={styles.eventHint}>
+              Fires when the card's owner is the agent after the change.
+            </span>
+          </span>
+        </label>
 
         {hook === null ? (
           <Field

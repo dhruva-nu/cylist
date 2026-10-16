@@ -23,6 +23,8 @@ filter set only ever fires for a card's events:
   of In staging has not arrived in In staging again.
 * ``from_column_id`` — only a move out of that column.
 * ``template_id``, ``task_type`` — the card's template and type.
+* ``agent_only`` — the card's owner, after the change, is the agent. A card
+  handed to the agent fires; one taken back from it does not.
 """
 
 from __future__ import annotations
@@ -180,6 +182,8 @@ class _Card:
     moved_column: bool
     """A move that changed column — not a reorder, not a change of section."""
     from_column_id: UUID | None
+    assigned_to_agent: bool
+    """Whether the card's owner, after the change, is the agent."""
 
 
 async def queue_for(session: AsyncSession, entry: Activity) -> int:
@@ -236,10 +240,12 @@ async def _card_of(session: AsyncSession, entry: Activity) -> _Card:
         change.get("field") == "column" for change in changes
     )
     from_column = entry.payload.get("from_column_id") if moved_column else None
+    assignee = await session.get(Person, task.assignee_id) if task is not None else None
     return _Card(
         task=task,
         moved_column=moved_column,
         from_column_id=UUID(from_column) if from_column else None,
+        assigned_to_agent=assignee is not None and assignee.is_agent,
     )
 
 
@@ -247,7 +253,9 @@ def matches(hook: Hook, verb: str, card: _Card) -> bool:
     """Whether one hook fires for one change. See the module docstring for the rules."""
     if hook.verbs and verb not in hook.verbs:
         return False
-    filtered = any((hook.to_column_id, hook.from_column_id, hook.template_id, hook.task_type))
+    filtered = any(
+        (hook.to_column_id, hook.from_column_id, hook.template_id, hook.task_type, hook.agent_only)
+    )
     if not filtered:
         return True
 
@@ -257,6 +265,8 @@ def matches(hook: Hook, verb: str, card: _Card) -> bool:
     if hook.template_id is not None and task.template_id != hook.template_id:
         return False
     if hook.task_type is not None and task.type != hook.task_type:
+        return False
+    if hook.agent_only and not card.assigned_to_agent:
         return False
     if hook.from_column_id is not None and (
         not card.moved_column or card.from_column_id != hook.from_column_id
@@ -362,6 +372,7 @@ class HookFilters:
     from_column_id: UUID | None = None
     template_id: UUID | None = None
     task_type: TaskType | None = None
+    agent_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -610,6 +621,9 @@ async def _apply_filters(
     if "task_type" in filters.given and hook.task_type != filters.task_type:
         hook.task_type = filters.task_type
         changed.append("task_type")
+    if "agent_only" in filters.given and hook.agent_only != filters.agent_only:
+        hook.agent_only = filters.agent_only
+        changed.append("agent_only")
     return changed
 
 

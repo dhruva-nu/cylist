@@ -68,6 +68,12 @@ async def _project(client: AsyncClient) -> str:
     return str(person)
 
 
+async def _agent(client: AsyncClient) -> str:
+    """The agent's id. Every project has it on, so it can own an ATL card."""
+    people = (await client.get("/people")).json()
+    return str(next(person["id"] for person in people if person["is_agent"]))
+
+
 async def _add_column(client: AsyncClient, name: str, project: str = "ATL") -> str:
     response = await client.post(
         f"/projects/{project}/columns", json={"name": name, "description": f"{name}."}
@@ -411,6 +417,56 @@ class TestMatching:
         await _hook(signed_in, task_type="bug")
         await _add_column(signed_in, "Review")
         assert await _queued(signed_in) == []
+
+    async def test_an_agent_only_hook_fires_only_for_the_agents_cards(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _project(signed_in)
+        agent = await _agent(signed_in)
+        columns = await _columns(signed_in)
+        hook = await _hook(signed_in, verbs=["task.moved"], agent_only=True)
+        assert hook["agent_only"] is True
+
+        await _move(signed_in, await _task(signed_in, person), columns["Done"])
+        assert await _queued(signed_in, hook["id"]) == []
+
+        mine = await _task(signed_in, agent)
+        await _move(signed_in, mine, columns["In staging"])
+        [delivery] = await _queued(signed_in, hook["id"])
+        assert delivery.payload["task"]["reference"] == mine
+        assert delivery.payload["task"]["assignee"]["id"] == agent
+
+    async def test_handing_a_card_to_the_agent_fires_and_taking_it_back_does_not(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _project(signed_in)
+        agent = await _agent(signed_in)
+        hook = await _hook(signed_in, verbs=["task.updated"], agent_only=True)
+        card = await _task(signed_in, person)
+
+        handed = await signed_in.patch(f"/tasks/{card}", json={"assignee_id": agent})
+        assert handed.status_code == 200, handed.text
+        assert len(await _queued(signed_in, hook["id"])) == 1
+
+        taken = await signed_in.patch(f"/tasks/{card}", json={"assignee_id": person})
+        assert taken.status_code == 200, taken.text
+        assert len(await _queued(signed_in, hook["id"])) == 1
+
+    async def test_agent_only_is_off_unless_asked_and_null_turns_it_off(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await _project(signed_in)
+        assert (await _hook(signed_in))["agent_only"] is False
+        hook = await _hook(signed_in, name="Agent work", agent_only=True)
+
+        cleared = await signed_in.patch(
+            f"/projects/ATL/hooks/{hook['id']}", json={"agent_only": None}
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["agent_only"] is False
+
+        left = await signed_in.patch(f"/projects/ATL/hooks/{hook['id']}", json={"enabled": False})
+        assert left.json()["agent_only"] is False
 
     async def test_a_disabled_hook_queues_nothing(self, signed_in: AsyncClient) -> None:
         person = await _project(signed_in)
