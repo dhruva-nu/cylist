@@ -101,6 +101,7 @@ def _task_read(
         outcome=task.outcome,
         outcome_index=task.outcome_index,
         finished_at=task.finished_at,
+        archived_at=task.archived_at,
         open_subtask_count=split.open,
         subtask_count=split.total,
         subtask_assignees=[PersonRead.model_validate(person) for person in owners],

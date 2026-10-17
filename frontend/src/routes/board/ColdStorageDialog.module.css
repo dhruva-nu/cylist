@@ -1,0 +1,110 @@
+/* The half that empties the last column: what it will do, then the button. */
+.store {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lead {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.storeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.note {
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}
+
+/* What the last press did. Quiet, because the button already said it would. */
+.done {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-md);
+}
+
+.heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 16px 0 8px;
+  font-size: var(--text-base);
+}
+
+.count {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One stored card a line: which, what, whose and when, then the way back. */
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.reference {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* A button that reads as the card's title, since that is what it opens. */
+.title {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.title:hover {
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+/* The way to the folder and to the file, in the board's own link colour. */
+.lead a,
+.done a {
+  color: var(--link);
+}

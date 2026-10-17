@@ -106,6 +106,7 @@ function card(
     comment_count: 0,
     checklist: [],
     finished_at: null,
+    archived_at: null,
     open_subtask_count: 0,
     subtask_count: 0,
     subtask_assignees: [],

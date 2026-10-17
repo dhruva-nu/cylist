@@ -144,7 +144,9 @@ def board_dates(task: Task, board: list[BoardColumn]) -> BoardDates:
         )
     entries.sort(key=lambda entry: columns_by_id[entry.column_id].position)
 
-    if task.parent_id is not None:
+    # Off the board — a sub-task, or a card in cold storage — there is no
+    # column to read done from, and ``finished_at`` is what says it.
+    if task.column_id is None:
         finished = task.finished_at is not None
     else:
         finished = bool(board) and task.column_id == board[-1].id
