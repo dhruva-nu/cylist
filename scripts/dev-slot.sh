@@ -229,7 +229,8 @@ _dev_database_url() {
 _dev_psql() {
   # shellcheck disable=SC2016  # expanded in the container, not here
   db_compose exec -T postgres sh -c \
-    'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres' <<< "$1"
+    'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres' \
+    <<< "SET client_min_messages = warning; $1"
 }
 
 # Once the slot is up on the shared database, the copy it had before is nothing
