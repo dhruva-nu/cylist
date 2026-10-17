@@ -106,6 +106,12 @@ CATEGORIES: tuple[EventCategory, ...] = (
             EventKind(
                 "task.deleted", "Card deleted", "Only the reference is sent; the card is gone."
             ),
+            EventKind(
+                "task.archived",
+                "Moved to cold storage",
+                "Taken off the board with the rest of its last column, into a CSV.",
+            ),
+            EventKind("task.restored", "Restored from cold storage", "Back in the last column."),
         ),
     ),
     EventCategory(

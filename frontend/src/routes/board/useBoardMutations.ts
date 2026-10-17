@@ -88,6 +88,7 @@ export function useBoardMutations(
     await invalidate(
       boardKey,
       tasksKey,
+      queryKeys.coldStorage(projectKey),
       queryKeys.allTasks, // every open card's timeline
       queryKeys.templates(projectKey),
       queryKeys.goals(projectKey),

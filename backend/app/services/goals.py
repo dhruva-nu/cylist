@@ -258,6 +258,10 @@ async def progress(
     )
 
     for goal_id, column_id, status, total in rows.tuples():
+        # A card in no column is in cold storage — only cards are counted, and
+        # a card leaves its column for nowhere else. It went there from the
+        # last column, so it is done just as it was the day it was stored.
+        stored = column_id is None
         if goal_id is None:
             continue  # unreachable: the WHERE named the goals. Narrowing only.
         tally = counts[goal_id]
@@ -267,7 +271,7 @@ async def progress(
         # is what keeps done + cancelled + open equal to total.
         if status is TaskStatus.CANCELLED:
             tally.cancelled += total
-        elif column_id == finished.id:
+        elif stored or column_id == finished.id:
             tally.done += total
         else:
             tally.open += total

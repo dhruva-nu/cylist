@@ -178,7 +178,7 @@ class TestRules:
         # Grouped: every category's events are listed together.
         categories = [event["category"] for event in events]
         assert categories == sorted(categories, key=categories.index)
-        assert len(set(verbs)) == len(verbs) == 22
+        assert len(set(verbs)) == len(verbs) == 24
 
     async def test_a_new_hook_shows_its_secret_once(self, signed_in: AsyncClient) -> None:
         await _project(signed_in)

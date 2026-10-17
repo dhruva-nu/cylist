@@ -26,6 +26,8 @@ export const queryKeys = {
   board: (projectKey: string) => ['board', projectKey],
   templates: (projectKey: string) => ['templates', projectKey],
   tasks: (projectKey: string) => ['tasks', projectKey],
+  /** The board's cards in cold storage — off the board, so not in `tasks`. */
+  coldStorage: (projectKey: string) => ['cold-storage', projectKey],
   /** Every card's detail, whichever project it is on. */
   allTasks: ['task'],
   task: (taskId: string | null) => ['task', taskId],

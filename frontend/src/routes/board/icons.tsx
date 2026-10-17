@@ -74,3 +74,13 @@ export function FilterIcon() {
     </svg>
   )
 }
+
+/** A storage box, for cold storage: where the last column's cards are put away. */
+export function StoreIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="3.2" rx="0.8" />
+      <path d="M3.2 6.2v6.3a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1V6.2M6.5 8.8h3" />
+    </svg>
+  )
+}

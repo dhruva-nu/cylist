@@ -23,6 +23,7 @@ import { Button } from '../../components/ui'
 import { splitOnHold } from '../boardHiding'
 import { ColumnCards, countedCards } from './ColumnCards'
 import { columnDragId, laneCellDropId } from './dropTargets'
+import { StoreIcon } from './icons'
 import styles from './Column.module.css'
 
 export interface ColumnProps {
@@ -52,6 +53,12 @@ export interface ColumnProps {
    */
   onAddTask: (() => void) | null
   onEdit: () => void
+  /**
+   * Open cold storage, where this column's cards are put away and brought
+   * back. Given to the board's last column alone — that is the column cold
+   * storage empties — and null on every other.
+   */
+  onColdStorage: (() => void) | null
   /**
    * Whether this column is keeping its on-hold cards back — decided by
    * `hidesHold` out of this column's own foot and what the board is being
@@ -86,6 +93,7 @@ export function Column({
   onToggleOutcome,
   onAddTask,
   onEdit,
+  onColdStorage,
   hidingHold,
   onToggleHold,
   part = 'all',
@@ -186,6 +194,7 @@ export function Column({
               dragListeners={listeners}
               onCollapse={onToggleCollapse}
               onEdit={onEdit}
+              onColdStorage={onColdStorage}
             />
           )}
 
@@ -264,7 +273,8 @@ function ColumnRail({
 
 /**
  * An open column's heading: the handle it is reordered by, its name and
- * count, and its fold and edit buttons.
+ * count, and its fold and edit buttons — and, on the last column, the way into
+ * cold storage.
  *
  * The drag wiring is handed in rather than set up here, because it belongs to
  * the whole column — see `Column` — and only the handle carries it.
@@ -276,6 +286,7 @@ function ColumnHead({
   dragListeners,
   onCollapse,
   onEdit,
+  onColdStorage,
 }: {
   column: BoardColumn
   count: number
@@ -283,6 +294,7 @@ function ColumnHead({
   dragListeners: DraggableSyntheticListeners
   onCollapse: () => void
   onEdit: () => void
+  onColdStorage: (() => void) | null
 }) {
   return (
     <div className={styles.head}>
@@ -313,6 +325,17 @@ function ColumnHead({
           >
             ‹
           </Button>
+          {onColdStorage ? (
+            <Button
+              variant="ghost"
+              small
+              onClick={onColdStorage}
+              aria-label={`Cold storage for ${column.name}`}
+              title={`Cold storage: put ${column.name} away into a CSV, or bring a card back`}
+            >
+              <StoreIcon />
+            </Button>
+          ) : null}
           <Button variant="ghost" small onClick={onEdit} aria-label={`Edit ${column.name}`}>
             ···
           </Button>

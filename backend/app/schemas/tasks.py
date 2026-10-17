@@ -21,6 +21,7 @@ from app.models.task import (
 from app.schemas.activity import HistoryEntry
 from app.schemas.agent_sessions import AgentPresence, AgentSessionRead
 from app.schemas.common import Schema
+from app.schemas.files import ItemRead
 from app.schemas.people import PersonRead
 
 
@@ -525,10 +526,12 @@ class TaskRead(Schema):
         description="Position in the parent's numbering. `2` in `ATL-41-2`."
     )
     column_id: UUID | None = Field(
-        description="Which column the card is in. Null on a sub-task, which is not on the board."
+        description="Which column the card is in. Null on a sub-task, which is not on the board, "
+        "and on a card in cold storage, which has left it."
     )
     position: int | None = Field(
-        description="Where the card sits in its column, from the top. Null on a sub-task."
+        description="Where the card sits in its column, from the top. Null on a sub-task and on "
+        "a card in cold storage."
     )
     title: str
     description: str
@@ -595,6 +598,12 @@ class TaskRead(Schema):
         "finished by being ticked off; a card is finished by being moved into the board's last "
         "column, and moving it back out clears this."
     )
+    archived_at: datetime | None = Field(
+        default=None,
+        description="When this card was put in cold storage, or null while it is on the board. "
+        "A stored card is off the board but still finished, and `POST /tasks/{ref}/restore` puts "
+        "it back in the board's last column.",
+    )
     open_subtask_count: int = Field(
         description="Sub-tasks — cards and tick boxes together — that are neither finished nor "
         "cancelled. While this is above zero the card cannot reach the last column."
@@ -651,3 +660,16 @@ class TaskHistoryPage(Schema):
     page: int = Field(description="Which page this is, counting from 1.")
     pages: int = Field(description="How many pages there are. At least 1, even when empty.")
     per_page: int = Field(description="How many entries a page holds.")
+
+
+class ColdStorageRun(Schema):
+    """What putting a board's finished cards in cold storage did."""
+
+    column: str = Field(description="The column the cards were taken from: the board's last.")
+    references: list[str] = Field(
+        description="The cards stored, top to bottom as they stood in the column.",
+        examples=[["ATL-12", "ATL-17"]],
+    )
+    file: ItemRead = Field(
+        description="The CSV they were written to, in the project's `Cold storage` folder."
+    )
