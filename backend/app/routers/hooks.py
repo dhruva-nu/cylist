@@ -40,7 +40,7 @@ from app.services.hooks import HookFields, HookFilters
 
 router = APIRouter(tags=["hooks"])
 
-_FILTERS = ("to_column_id", "from_column_id", "template_id", "task_type")
+_FILTERS = ("to_column_id", "from_column_id", "template_id", "task_type", "agent_only")
 
 
 # The project's admin, and nobody else — the same test roles use. Reading is
@@ -72,6 +72,7 @@ def _hook_read(hook: Hook, labels: hooks.HookLabels) -> HookRead:
         template_id=hook.template_id,
         template_name=labels.template_name,
         task_type=hook.task_type,
+        agent_only=hook.agent_only,
         secret_hint=hook.secret_hint,
         last_delivery=DeliverySummary.model_validate(last) if last is not None else None,
         created_at=hook.created_at,
@@ -92,6 +93,7 @@ def _filters_of(body: HookCreate | HookUpdate) -> HookFilters:
         from_column_id=body.from_column_id,
         template_id=body.template_id,
         task_type=body.task_type,
+        agent_only=bool(body.agent_only),
     )
 
 

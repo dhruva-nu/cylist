@@ -60,7 +60,7 @@ without asking for the password, because a token that already works is kept.
 $ cylist setup
 Cylist owner password for http://localhost:8000 (input is hidden).
 Password:
-Cylist at http://localhost:8000 (dev), also on https://dnu-home-1.tail222f46.ts.net.
+Cylist at http://localhost:8000 (dev), also on https://cylist.in.
 Minted 'my-laptop agent' with read, write.
 Wrote /home/you/.config/cylist/config.toml (mode 0600 — owner only).
 Claude Code hooks in /home/you/.claude/settings.json: SessionStart, UserPromptSubmit, PostToolUse, Stop, Notification, SessionEnd.
@@ -111,7 +111,7 @@ runs on, a tailnet name from your laptop, a public hostname from anywhere.
 
 ```toml
 url = "http://localhost:8000"
-urls = ["http://localhost:8000", "https://dnu-home-1.tail222f46.ts.net"]
+urls = ["http://localhost:8000", "https://cylist.in"]
 token = "cyl_…"
 ```
 

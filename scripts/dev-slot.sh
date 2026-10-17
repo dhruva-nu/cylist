@@ -6,12 +6,15 @@
 # at side by side. Slot N is its own compose project (cylist-dev-N), with its own
 # image tag and port 801N. All five share one database (docker-compose.dev-db.yml)
 # and one blob volume, so they show the same data, with the secrets for both in
-# ~/cylist-dev-shared; ~/cylist-dev-N holds only what slot N is running. All
-# five share one HTTPS port, :9443, and are told apart by path:
+# ~/cylist-dev-shared; ~/cylist-dev-N holds only what slot N is running. Each
+# has a hostname of its own on the Cloudflare Tunnel that also carries
+# production (see DEPLOY.md, "Serving it"):
 #
-#   https://<host>:9443/          an index: which branch and commit is in each slot
-#   https://<host>:9443/dev_N/    slot N — `tailscale serve --set-path /dev_N`,
-#                                 which strips the prefix before proxying to :801N
+#   https://dev.cylist.in/        an index: which branch and commit is in each slot
+#   https://devN.cylist.in/       slot N — cloudflared relays it to :801N
+#
+# Those ingress rules are static, in /etc/cloudflared/config.yml, so a deploy
+# has nothing to point anywhere; it only has to be up on its port.
 #
 # Around deploy.sh's ordinary build-migrate-restart, a slot deploy:
 #
@@ -20,21 +23,24 @@
 #            (dev_slot_prepare)
 #   after    writes what it deployed into the slot directory, retires the
 #            slot's own Postgres and the old single dev stack, regenerates the
-#            index, points tailscale at the slot and checks the slot answers
-#            through it (dev_slot_publish)
+#            index, drops any old tailscale path mapping for the slot and
+#            checks the slot answers at its hostname (dev_slot_publish)
 #
 # shellcheck shell=bash
 
 DEV_ROOT="${CYLIST_DEV_ROOT:-$HOME}"
-DEV_HOST="${CYLIST_DEV_HOST:-dnu-home-1.tail222f46.ts.net}"
-DEV_HTTPS_PORT=9443
+# The domain the slots hang off: slot N is https://devN.$DEV_DOMAIN/ and the
+# index https://dev.$DEV_DOMAIN/.
+DEV_DOMAIN="${CYLIST_DEV_DOMAIN:-cylist.in}"
+# Where the slots used to be served, by path on one tailnet port. A deploy
+# removes its slot's old mapping so nothing keeps answering there.
+DEV_OLD_HTTPS_PORT=9443
 DEV_SLOTS=(1 2 3 4 5)
 # Only index.html lives here, because the index server serves the whole
 # directory. The slot directories hold secrets and must never be what it serves.
 DEV_INDEX_DIR="${CYLIST_DEV_INDEX_DIR:-$DEV_ROOT/cylist-dev-index}"
-# tailscale will not serve a directory for an operator who cannot also run
-# `sudo tailscale`, so the index is served over loopback by a busybox httpd
-# container and tailscale proxies `/` to it, as it does each slot.
+# The index is a static page served over loopback by a busybox httpd
+# container; cloudflared relays dev.$DEV_DOMAIN to it, as it does each slot.
 DEV_INDEX_PORT=8010
 DEV_INDEX_CONTAINER=cylist-dev-index
 DEV_INDEX_IMAGE=busybox:stable
@@ -43,7 +49,8 @@ DEV_BLOB_VOLUME=cylist-dev-blobs
 DEV_REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-dhruva-nu/cylist}"
 
 dev_slot_dir() { printf '%s/cylist-dev-%s' "$DEV_ROOT" "$1"; }
-dev_slot_url() { printf 'https://%s:%s/dev_%s/' "$DEV_HOST" "$DEV_HTTPS_PORT" "$1"; }
+dev_slot_url() { printf 'https://dev%s.%s/' "$1" "$DEV_DOMAIN"; }
+dev_index_url() { printf 'https://dev.%s/' "$DEV_DOMAIN"; }
 
 # --- Before the build ---------------------------------------------------------
 
@@ -136,9 +143,9 @@ dev_slot_publish() {
 
   _dev_retire_slot_postgres
 
-  # Two slots can deploy at once (by hand, or two runners), and the index and
-  # tailscale's serve config are each one thing shared by all five: read,
-  # changed, written. Serialise just that part.
+  # Two slots can deploy at once (by hand, or two runners), and the index is
+  # one thing shared by all five: read, changed, written. Serialise just that
+  # part.
   if command -v flock > /dev/null; then
     (flock 9; _dev_slot_publish_shared) 9> "$DEV_LOCK"
   else
@@ -161,11 +168,11 @@ dev_slot_publish() {
 
 _dev_slot_publish_shared() {
   _dev_retire_single_stack
-  step "Regenerating the index at https://$DEV_HOST:$DEV_HTTPS_PORT/"
+  step "Regenerating the index at $(dev_index_url)"
   dev_index_write
   echo "   $DEV_INDEX_DIR/index.html"
   _dev_index_server
-  _dev_slot_serve
+  _dev_slot_unserve_old
 }
 
 # Before the slots shared a database, each had a Postgres of its own in its
@@ -204,31 +211,18 @@ _dev_retire_single_stack() {
   docker image rm cylist:dev > /dev/null 2>&1 || true
 }
 
-# tailscale wants root to change serve config unless this user was made its
-# operator (`sudo tailscale set --operator=$USER`, once). Try as ourselves, then
-# a sudo that may not prompt, and say which one-liner fixes it if neither works.
-_dev_ts() {
-  tailscale "$@" > /dev/null && return 0
-  command -v sudo > /dev/null && sudo -n tailscale "$@" > /dev/null 2>&1
-}
-
-_dev_slot_serve() {
-  step "Serving slot $SLOT at $(dev_slot_url "$SLOT")"
-  # Re-applying a mapping that is already there is a no-op, so this runs on
-  # every deploy. --yes, where this tailscale has it, so nothing waits on a
-  # prompt nobody will answer.
-  local yes=()
-  if tailscale serve --help 2>&1 | grep -q -- '--yes'; then yes=(--yes); fi
-  if ! _dev_ts serve --bg "${yes[@]}" --https "$DEV_HTTPS_PORT" \
-         --set-path "/dev_$SLOT" "http://127.0.0.1:$PORT" ||
-     ! _dev_ts serve --bg "${yes[@]}" --https "$DEV_HTTPS_PORT" \
-         "http://127.0.0.1:$DEV_INDEX_PORT"; then
-    echo "   tailscale would not change its serve config. Once, on this machine:" >&2
-    echo "     sudo tailscale set --operator=$(id -un)" >&2
-    echo "   and deploy again. The slot itself is up on 127.0.0.1:$PORT." >&2
-    exit 1
+# Before the hostnames, the slots were served by path on one tailnet port,
+# :9443, through `tailscale serve --set-path /dev_N`. A slot built for its own
+# hostname has no base path, so the old mapping would answer with a broken
+# app; take it down if it is still there. Best effort: the serve config is
+# only writable by tailscale's operator, and a slot that cannot clean up after
+# itself is still a working slot.
+_dev_slot_unserve_old() {
+  command -v tailscale > /dev/null || return 0
+  tailscale serve status 2> /dev/null | grep -q ":$DEV_OLD_HTTPS_PORT " || return 0
+  if tailscale serve --https "$DEV_OLD_HTTPS_PORT" --set-path "/dev_$SLOT" off > /dev/null 2>&1; then
+    echo "   removed the old :$DEV_OLD_HTTPS_PORT/dev_$SLOT mapping"
   fi
-  echo "   :$DEV_HTTPS_PORT/dev_$SLOT → 127.0.0.1:$PORT, :$DEV_HTTPS_PORT/ → 127.0.0.1:$DEV_INDEX_PORT"
 }
 
 # Starts the index's httpd if it is not already running. It mounts the index
@@ -245,7 +239,7 @@ _dev_index_server() {
 }
 
 # The loopback health check has already passed; this one goes the way a browser
-# does, through tailscale and the prefix, so a slot that is up but not served
+# does, through Cloudflare and the tunnel, so a slot that is up but not served
 # fails the deploy instead of passing it.
 _dev_slot_check_served() {
   local url
@@ -257,15 +251,15 @@ _dev_slot_check_served() {
       return 0
     fi
     if [[ $attempt -eq 15 ]]; then
-      echo "   $url never answered. tailscale serve status:" >&2
-      tailscale serve status >&2 || true
+      echo "   $url never answered. Is cloudflared up, and does /etc/cloudflared/config.yml route this hostname to 127.0.0.1:$PORT?" >&2
+      systemctl status cloudflared --no-pager >&2 || true
       exit 1
     fi
     sleep 2
   done
 }
 
-# --- The index at :9443/ ------------------------------------------------------
+# --- The index at dev.<domain>/ ------------------------------------------------
 
 # A static page, rewritten on every slot deploy from the five slot directories'
 # `deployed` files — so it is only ever as stale as the last deploy, and needs
@@ -284,7 +278,7 @@ dev_index_write() {
       else
         commit="<code>$(_html "$sha")</code>"
       fi
-      rows+="<tr><th><a href=\"/dev_$n/\">dev_$n</a></th><td><code>$(_html "$branch")</code></td><td>$commit</td><td><time>$(_html "$deployed_at")</time></td></tr>"$'\n'
+      rows+="<tr><th><a href=\"$(dev_slot_url "$n")\">dev_$n</a></th><td><code>$(_html "$branch")</code></td><td>$commit</td><td><time>$(_html "$deployed_at")</time></td></tr>"$'\n'
     else
       rows+="<tr class=\"empty\"><th>dev_$n</th><td colspan=\"3\">empty</td></tr>"$'\n'
     fi

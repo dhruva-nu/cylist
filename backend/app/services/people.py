@@ -121,6 +121,19 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
     person = await get(session, person_id)
 
     fields = data.model_dump(exclude_unset=True, exclude={"archived"})
+    if "email" in fields and (
+        person.password_hash is not None or person.invite_token_hash is not None
+    ):
+        # Changing an account's email changes the name it signs in under, so
+        # the uniqueness the login lookup depends on has to be re-checked. The
+        # index would catch it at flush, but as an IntegrityError naming a
+        # constraint rather than as a sentence about the address. Asked of
+        # every row the index holds — an archived account and a lapsed
+        # invitation included — because the index does not know the
+        # difference either; and asked before the address is written, so a
+        # lapsed invitation it clears is gone before the index sees this row.
+        await _require_email_free(session, fields["email"], excluding=person.id)
+
     for field, value in fields.items():
         setattr(person, field, value)
 
@@ -130,13 +143,6 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
         # Archiving through a PATCH is the same act as through a DELETE, and
         # leaves the same way: without credentials to come back to.
         await _withdraw_access(session, person)
-
-    if "email" in fields and (person.has_account or person.invite_is_pending):
-        # Changing an account's email changes the name it signs in under, so
-        # the uniqueness the login lookup depends on has to be re-checked. The
-        # index would catch it at flush, but as an IntegrityError naming a
-        # constraint rather than as a sentence about the address.
-        await _require_email_free(session, person.email, excluding=person.id)
 
     await session.flush()
     return person
@@ -356,23 +362,49 @@ async def set_password(session: AsyncSession, person: Person, new_password: str)
 
 
 async def _require_email_free(session: AsyncSession, email: str | None, *, excluding: UUID) -> None:
-    """Refuse an email already spoken for by somebody who can sign in.
+    """Refuse an email already spoken for by somebody who can sign in, or soon will.
 
     Mirrors ``ix_person_account_email``: the same rows, folded the same way.
     Checked here so the caller gets a sentence naming the address rather than
     an integrity error naming an index.
+
+    One of those rows is not really spoken for: somebody with no password whose
+    invitation has lapsed. Their link already opens nothing — see
+    :attr:`Person.invite_is_pending` — but the index cannot tell, because a
+    partial index cannot ask what time it is. Leaving it would hold the address
+    forever, so it is spent here instead, and flushed before the caller writes
+    the address anywhere else so the index sees the order things happened in.
+
+    Raises:
+        ConflictError: if the address belongs to an account, archived or not,
+            or to somebody with an invitation still waiting to be accepted.
     """
     if not email:
         return
-    clash = await session.scalar(
-        select(Person.name).where(
+    clashes = await session.scalars(
+        select(Person).where(
             func.lower(Person.email) == email.strip().lower(),
             Person.id != excluding,
             (Person.password_hash.is_not(None)) | (Person.invite_token_hash.is_not(None)),
         )
     )
-    if clash is not None:
-        raise ConflictError(
-            f"{email} is already the sign-in address for {clash}.",
-            details={"email": email},
-        )
+    lapsed = False
+    for clash in clashes:
+        if clash.password_hash is not None:
+            raise ConflictError(
+                f"{email} is already the sign-in address for {clash.name}.",
+                details={"email": email},
+            )
+        if clash.invite_is_pending:
+            # Said as an invitation, because the usual way here is somebody
+            # added twice — and "sign-in address" would send whoever reads it
+            # looking for an account that does not exist yet.
+            raise ConflictError(
+                f"{clash.name} has already been invited at {email}, and the invitation "
+                "has not expired yet. Withdraw it, or re-invite them instead.",
+                details={"email": email},
+            )
+        _clear_invitation(clash)
+        lapsed = True
+    if lapsed:
+        await session.flush()

@@ -2,7 +2,7 @@
 # Tell a Cylist card which dev slot its branch went to. Run by the Deploy dev
 # workflow after a successful deploy, when it was given a `card`:
 #
-#   Deployed to dev_2 — https://dnu-home-1.tail222f46.ts.net:9443/dev_2/ — branch feature/x @ 0123456789ab
+#   Deployed to dev_2 — https://dev2.cylist.in/ — branch feature/x @ 0123456789ab
 #
 # That line is the same one the deploy-dev skill (docs/skills/deploy-dev) has an
 # agent post through MCP, so a deploy started by hand from GitHub leaves the
@@ -56,7 +56,7 @@ post() {
     return 0
   fi
 
-  local base="${CYLIST_URL:-https://dnu-home-1.tail222f46.ts.net}"
+  local base="${CYLIST_URL:-https://cylist.in}"
   local work agent_id status
   work="$(mktemp -d)"
   # shellcheck disable=SC2064  # expanded now: $work is local, gone by EXIT

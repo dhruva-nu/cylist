@@ -274,7 +274,7 @@ rsync -a "$CYLIST_DATA_DIR"/ backup/data/     # the uploaded files
 
 `main` deploys itself. Every push that passes CI is built and released to
 **dnu-home-1** by a self-hosted runner on that machine, and served over HTTPS at
-<https://dnu-home-1.tail222f46.ts.net> — one container holding the API and the
+<https://cylist.in> — one container holding the API and the
 built SPA, in front of a Postgres that publishes no port at all.
 
 `make deploy` runs the same script by hand on the server. See
@@ -305,7 +305,7 @@ project's **Agents** page, press **Get the line**, and run what it shows on the
 machine:
 
 ```bash
-claude mcp add --transport http --scope user cylist https://dnu-home-1.tail222f46.ts.net/mcp --header "Authorization: Bearer cyl_…"
+claude mcp add --transport http --scope user cylist https://cylist.in/mcp --header "Authorization: Bearer cyl_…"
 ```
 
 It is the same line in PowerShell. It needs no CLI, no uv and no Python, and
@@ -321,13 +321,13 @@ installed outside your home directory:
 ```bash
 # Linux and macOS
 curl -fsSL https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.sh \
-  | sh -s -- --url https://dnu-home-1.tail222f46.ts.net
+  | sh -s -- --url https://cylist.in
 ```
 
 ```powershell
 # Windows PowerShell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/dhruva-nu/cylist/main/scripts/install.ps1))) `
-  -Url https://dnu-home-1.tail222f46.ts.net
+  -Url https://cylist.in
 ```
 
 Both install [uv](https://docs.astral.sh/uv/) if it is missing, install the
@@ -455,7 +455,7 @@ Set it up once per machine, pointed at the board you actually use:
 
 ```bash
 uv tool install ./cli        # puts `cylist` on your PATH — see below for why that matters
-cylist login --url https://dnu-home-1.tail222f46.ts.net
+cylist login --url https://cylist.in
 cylist hook install          # eight hooks in ~/.claude/settings.json, plus a /work command
 ```
 
@@ -464,9 +464,9 @@ Mint one against production the way any agent's token is minted — sign in, the
 ask for it. `read` and `write` are the whole of what the hook needs:
 
 ```bash
-curl -sc /tmp/cyl -X POST https://dnu-home-1.tail222f46.ts.net/api/v1/auth/login \
+curl -sc /tmp/cyl -X POST https://cylist.in/api/v1/auth/login \
   -H 'content-type: application/json' -d '{"password":"…"}'
-curl -sb /tmp/cyl -X POST https://dnu-home-1.tail222f46.ts.net/api/v1/tokens \
+curl -sb /tmp/cyl -X POST https://cylist.in/api/v1/tokens \
   -H 'content-type: application/json' \
   -d '{"name":"claude on this machine","scopes":["read","write"]}'
 ```

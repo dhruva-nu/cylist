@@ -28,7 +28,7 @@ export type DeliveryState = 'pending' | 'delivered' | 'failed'
  *
  * `verbs` empty means every change. Each filter narrows to cards: the column a
  * card is in after the change (on a move, only a move *into* it), the column a
- * move left, its template, its type. A filter naming a column or template
+ * move left, its template, its type, and whether its owner is the agent. A filter naming a column or template
  * since deleted comes back with a null name and matches nothing.
  */
 export interface Hook {
@@ -44,6 +44,8 @@ export interface Hook {
   template_id: string | null
   template_name: string | null
   task_type: TaskType | null
+  /** Only cards assigned to the agent, after the change. */
+  agent_only: boolean
   /** The signing secret's last four characters. The secret itself is shown once. */
   secret_hint: string
   last_delivery: {
@@ -74,6 +76,7 @@ export interface HookInput {
   from_column_id: string | null
   template_id: string | null
   task_type: TaskType | null
+  agent_only: boolean
   /** Only on creation. Leave out to have one generated. */
   secret?: string
 }

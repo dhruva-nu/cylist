@@ -2,7 +2,7 @@
 
 Cylist runs on **dnu-home-1**, a machine at home. Every push to `main` that
 passes CI deploys itself there, and the result is served over HTTPS at
-<https://dnu-home-1.tail222f46.ts.net>.
+<https://cylist.in>.
 
 ## The shape of it
 
@@ -24,16 +24,18 @@ push to main
                                      │ alembic upgrade head
                                      │ restart, wait for health
                                      ↓
-                              tailscale funnel :443
+                         cloudflared tunnel → cylist.in
                                      ↓
                               127.0.0.1:8000  ← app container
                                      ↓
                               postgres (no published port)
 ```
 
-Nothing is exposed to your router. The runner reaches GitHub outbound, and
-Tailscale terminates HTTPS — so there is no inbound port forward, no deploy key,
-and no secret of any kind stored in this repository.
+Nothing is exposed to your router — it cannot be, the ISP line is behind
+carrier-grade NAT. The runner reaches GitHub outbound, and `cloudflared` reaches
+Cloudflare outbound, which terminates HTTPS for `cylist.in` — so there is no
+inbound port forward, no deploy key, and no secret of any kind stored in this
+repository.
 
 ## What a deploy does
 
@@ -126,23 +128,66 @@ cd ~/actions-runner && ./config.sh --unattended --replace \
 
 ### Serving it
 
-```bash
-sudo tailscale funnel --bg --https 443 http://127.0.0.1:8000
-```
-
-Note the shape of that. `tailscale funnel --bg 443` looks like it means "turn
-Funnel on for port 443" and does not: the argument is the *target*, so it
-quietly repoints the proxy at `127.0.0.1:443`, where nothing is listening — and
-the site answers 502 while `funnel status` cheerfully reports Funnel on.
-
-That terminates HTTPS, proxies to the app on loopback — the only thing that
-reaches it — and puts the URL on the public internet, with the app's own
-password login as the only gate. Which is why production sets
+Production is on the public internet as <https://cylist.in> through a
+Cloudflare Tunnel: `cloudflared` on the server holds outbound connections to
+Cloudflare's edge, Cloudflare terminates HTTPS, and requests for `cylist.in` are
+relayed down the tunnel to the app on loopback — the only thing that reaches it.
+The app's own password login is the only gate, which is why production sets
 `CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
 
-It needs root unless you run `sudo tailscale set --operator=$USER` once, after
-which it does not. `tailscale serve status` shows where it currently points, and
-`sudo tailscale funnel --https=443 off` takes it back off the public internet.
+It is a *locally-managed* tunnel, created from the CLI (the Zero Trust
+dashboard asks for a payment method; this path does not):
+
+```bash
+cloudflared tunnel login                   # browser; writes ~/.cloudflared/cert.pem
+cloudflared tunnel create cylist           # writes ~/.cloudflared/<id>.json
+cloudflared tunnel route dns cylist cylist.in
+```
+
+`~/.cloudflared/config.yml` names the tunnel, its credentials file, and one
+ingress rule per deployment on this machine — a hostname each, every target a
+loopback port — with a `http_status:404` catch-all:
+
+| hostname | → | what |
+| --- | --- | --- |
+| `cylist.in` | `127.0.0.1:8000` | production |
+| `stage.cylist.in` | `127.0.0.1:8001` | staging |
+| `dev.cylist.in` | `127.0.0.1:8010` | the dev index |
+| `devN.cylist.in` | `127.0.0.1:801N` | dev slot N, 1–5 |
+
+Each hostname is a CNAME to the tunnel (`cloudflared tunnel route dns cylist
+<hostname>`, once). The rules are static: a deploy never touches them, it only
+has to be up on its port. To change them, edit `~/.cloudflared/config.yml`,
+validate, and copy it over `/etc/cloudflared/config.yml`, which is what the
+service reads. `cloudflared tunnel ingress validate` checks it, and
+`cloudflared tunnel run cylist` serves it in the foreground for a test. The
+real thing is the `cloudflared` systemd service, installed with
+`sudo cloudflared --config ~/.cloudflared/config.yml service install --no-update-service`
+(the `--config` matters: sudo changes `$HOME`). That copies `config.yml` to
+`/etc/cloudflared/` but keeps reading the credentials JSON from
+`~/.cloudflared/`, so that directory must stay:
+
+```bash
+systemctl status cloudflared
+journalctl -u cloudflared -f               # "Registered tunnel connection" ×4 when healthy
+```
+
+To check it from outside, the MCP endpoint should answer `401` from Cylist
+itself, not an error page from Cloudflare:
+
+```bash
+curl -si -X POST https://cylist.in/mcp | head -1
+```
+
+Everything above is on the public internet, each behind its own password
+login; only the dashboard (`:7443`) is still `tailscale serve`, tailnet-only.
+The old Funnel route for production is off (`tailscale funnel --https=443
+off`).
+
+**Turn on "Always Use HTTPS"** for the zone (Cloudflare dashboard → SSL/TLS →
+Edge Certificates). Cloudflare otherwise serves plain `http://` as-is, and
+every deployed environment issues its session cookie `Secure`, so a login over
+`http://` succeeds and the very next request is `401`.
 
 ### Telling clients where to find it
 
@@ -153,14 +198,14 @@ asks (`GET /api/v1/setup`, unauthenticated: it is read before a client has a
 token):
 
 ```yaml
-CYLIST_CLIENT_URLS: '["http://localhost:8000","https://dnu-home-1.tail222f46.ts.net"]'
+CYLIST_CLIENT_URLS: '["http://localhost:8000","https://cylist.in"]'
 ```
 
 | | production | staging | dev slot N |
 |---|---|---|---|
 | local | `http://localhost:8000` | `http://localhost:8001` | `http://localhost:801N` |
-| remote | `…ts.net` | `…ts.net:8443` | `…ts.net:9443/dev_N` |
-| off the tailnet | yes, via Funnel | no | no |
+| remote | `cylist.in` | `stage.cylist.in` | `devN.cylist.in` |
+| off the tailnet | yes | yes | yes — all through the one Cloudflare Tunnel |
 
 `cylist setup` stores every address it is given, and the CLI and the MCP server
 try them in order, moving on when one will not *connect*. That is what makes
@@ -173,10 +218,10 @@ Two things to keep straight:
   `localhost` in the list means *the caller's* localhost — right for something
   running on this machine, an instant refusal (and then the next address) for
   anything else. Cheap either way, which is why it stays first.
-* **Only production's remote address works off the tailnet**, because only
-  production is funnelled. Staging and dev are `tailscale serve`, so a laptop
-  that leaves the tailnet cannot reach them at all — the failover mechanism is
-  address-agnostic, but it cannot invent reachability.
+* **Every remote address works from anywhere**, since all of them are
+  hostnames on the one tunnel; nothing here is tailnet-only any more. The
+  failover mechanism is address-agnostic either way — it steps over what does
+  not connect, it cannot invent reachability.
 
 Change one of these and the client keeps the old list until its next `cylist
 setup` or `cylist login`. Neither is urgent: an address that has gone away
@@ -185,7 +230,7 @@ costs one connection failure and is stepped over.
 ### MCP at `/mcp`
 
 The same process serves the MCP tools over streamable HTTP at `/mcp`, beside
-`/api/v1` and on the same funnel. That means one `claude mcp add --transport
+`/api/v1` and on the same tunnel. That means one `claude mcp add --transport
 http` line connects a machine anywhere production is reachable, off the tailnet
 included (see [`mcp/README.md`](mcp/README.md)). There is nothing to configure:
 the `mcp/` package is a path dependency, copied into the image by
@@ -227,7 +272,7 @@ curl -isk -N --http1.1 \
 | `101 Switching Protocols` | The upgrade survived the proxy. This is the answer you want. |
 | `200` with HTML | The SPA mount swallowed it — wrong path, or a route registered after `mount_spa`. |
 | `403` | The origin check refused it. |
-| `502` | The `tailscale funnel --bg 443` foot-gun above. |
+| `502` / Cloudflare error page | `cloudflared` is down or cannot reach `127.0.0.1:8000` — `journalctl -u cloudflared`. |
 
 A `101` does **not** prove the token is good: a bad credential is accepted
 and then closed with 4401, deliberately, because a browser cannot read a
@@ -333,8 +378,8 @@ still serving. Fix the migration and deploy again, or restore the dump
 ## Staging
 
 Staging runs on the same machine, from the **`staging` branch**, on **:8001** —
-served at <https://dnu-home-1.tail222f46.ts.net:8443>, on the tailnet only. It
-is not funnelled to the public internet the way production is.
+served at <https://stage.cylist.in>, through the same Cloudflare Tunnel as
+production and just as public, behind its own password login.
 
 It is deliberately production's shape, not development's: the same
 `backend/Dockerfile` `runtime` image, the same one-container deploy, the same
@@ -366,7 +411,7 @@ A merge into `staging` leaves whatever is running on :8001 running.
 | compose project | `cylist-prod` | `cylist-staging` |
 | image tag | `cylist:latest` | `cylist:staging` |
 | port | `127.0.0.1:8000` | `127.0.0.1:8001` |
-| served at | `:443`, funnelled publicly | `:8443`, tailnet only |
+| served at | `cylist.in` | `stage.cylist.in` — both public, via the tunnel |
 | secrets | `~/cylist-prod` | `~/cylist-staging` |
 | `CYLIST_ENVIRONMENT` | `prod` | `staging` |
 
@@ -420,23 +465,17 @@ decrypt, which is the trade.
   backups/       the dumps staging deploys leave behind
 ```
 
-Both files `chmod 600`, as production's are. Then put it on the tailnet:
-
-```bash
-sudo tailscale serve --bg --https 8443 http://127.0.0.1:8001
-```
-
-`serve` and not `funnel`: staging is reachable from your devices, and from
-nowhere else.
+Both files `chmod 600`, as production's are. Serving it is the
+`stage.cylist.in` ingress rule in the tunnel config — see *Serving it* — and
+nothing per deploy.
 
 ## Dev
 
 Dev is **five slots**, `dev_1` to `dev_5`, on the same machine — so five
 branches can be up side by side instead of taking turns on one stack. Slot N
-listens on **:801N** and is served at
-`https://dnu-home-1.tail222f46.ts.net:9443/dev_N/`, tailnet only. The root,
-<https://dnu-home-1.tail222f46.ts.net:9443/>, is a small index of which branch
-and commit is in each slot and when it went there.
+listens on **:801N** and is served at `https://devN.cylist.in/`, through the
+same Cloudflare Tunnel as everything else. <https://dev.cylist.in/> is a small
+index of which branch and commit is in each slot and when it went there.
 
 The slots differ in the code they run, not in the data they show: all five use
 **one Postgres** and **one blob volume**, so a project, card or file made on
@@ -448,7 +487,7 @@ triggered by hand from the Actions tab (`workflow_dispatch`). GitHub's own
 "Run workflow" dropdown lets you pick any branch, and the checkout step follows
 whatever you picked; the inputs are the **slot** and, optionally, the **card**
 to tell. So the loop is: push work to a branch, run this workflow against that
-branch into a free slot, poke at it on the tailnet, and only once it looks right
+branch into a free slot, poke at it at its hostname, and only once it looks right
 does it earn a place on `staging`.
 
 ```bash
@@ -480,7 +519,7 @@ make dev-down SLOT=2     # stop it (volumes kept)
 commenting on that card in production Cylist, as **Agent**:
 
 ```
-Deployed to dev_2 — https://dnu-home-1.tail222f46.ts.net:9443/dev_2/ — branch feature/my-branch @ 0123456789ab
+Deployed to dev_2 — https://dev2.cylist.in/ — branch feature/my-branch @ 0123456789ab
 ```
 
 That is the same line the `deploy-dev` project skill
@@ -499,7 +538,7 @@ acts as whoever minted it, so their role decides what it may do. Comments need
 the `comments` permission. To mint one:
 
 ```bash
-curl -sX POST https://dnu-home-1.tail222f46.ts.net/api/v1/tokens \
+curl -sX POST https://cylist.in/api/v1/tokens \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"deploy-dev workflow","scopes":["read","write"]}'
 gh secret set CYLIST_AGENT_TOKEN          # paste the token; add --env dev to scope it to the dev environment
@@ -520,23 +559,25 @@ the repository variable `CYLIST_URL`.
 | compose project | `cylist-staging` | `cylist-dev-N` |
 | image tag | `cylist:staging` | `cylist:dev-N` |
 | port | `127.0.0.1:8001` | `127.0.0.1:801N` |
-| served at | `:8443` | `:9443/dev_N` |
+| served at | `stage.cylist.in` | `devN.cylist.in` |
 | secrets | `~/cylist-staging` | `~/cylist-dev-shared`, the same for every slot |
 | deploy trigger | manual, `staging` only | manual, any branch, pick a slot |
 | data | copied from production | shared by all five slots, empty to start |
 | `CYLIST_ENVIRONMENT` | `staging` | `preview` |
-| `CYLIST_BASE_PATH` | unset | `/dev_N` |
+| `CYLIST_BASE_PATH` | unset | unset |
 
 All five come from one file, [`docker-compose.dev.yml`](docker-compose.dev.yml),
 which takes the slot from `CYLIST_DEV_SLOT` and has no default for it — a
 command that forgot which slot it meant fails instead of acting on another.
 
-**`CYLIST_BASE_PATH=/dev_N`.** Five slots share one HTTPS port and are told
-apart by path. `tailscale serve --set-path /dev_N` strips the prefix before
-proxying, so the app receives `/api/v1/…` as it always has; `CYLIST_BASE_PATH`
-is how it knows the prefix the browser sees, for the links and assets it hands
-out. It is set at runtime and passed as a build argument too, for the SPA's
-build.
+**A hostname each, no base path.** Each slot is served at the root of its own
+hostname, exactly like production and staging, so `CYLIST_BASE_PATH` is empty.
+The slots used to share one tailnet port and be told apart by path
+(`:9443/dev_N`, with `CYLIST_BASE_PATH=/dev_N` so the app knew the prefix the
+browser saw); the app still supports that shape — see
+`backend/app/core/base_path.py` — and a slot built that way keeps its old
+prefix until it is deployed again, which is why a slot deploy also removes any
+`:9443/dev_N` mapping it finds.
 
 **`CYLIST_ENVIRONMENT=preview`, not `dev`.** `CYLIST_ENVIRONMENT` already means
 something in the app: the literal value `"dev"` is what `Settings` defaults to
@@ -544,8 +585,8 @@ on someone's own machine, where the session cookie is *not* `Secure` and
 `make seed` is allowed to run — see `Settings.is_deployed` in
 `backend/app/config.py`. Setting the real value to `"dev"` here would have
 quietly picked up that machine's behavior on a stack that is, in every way
-that matters, a deployment: one container behind `tailscale serve`, reached
-over HTTPS. `"preview"` gets it into `is_deployed` alongside staging and
+that matters, a deployment: one container behind the tunnel, reached over
+HTTPS. `"preview"` gets it into `is_deployed` alongside staging and
 production without touching what `"dev"` means anywhere else.
 
 ### What a slot deploy does beyond the usual
@@ -573,21 +614,19 @@ check as production and staging. Around that,
    `deployed` files. It is a static file, so it is only as current as the last
    slot deploy. A `busybox httpd` container, `cylist-dev-index`, serves that
    directory read-only on `127.0.0.1:8010`; the deploy starts it if it is not
-   running. tailscale will not serve a directory itself for an operator who
-   cannot also run `sudo tailscale`, which is why it proxies to a port instead.
-6. **Points tailscale at the slot**, re-applying both mappings every time:
+   running. `dev.cylist.in` is relayed to that port by the tunnel.
+6. **Removes the slot's old `:9443/dev_N` tailscale mapping** if one is still
+   there, from before the slots had hostnames — a slot built for its hostname
+   has no base path, so the old route would answer with a broken app. Best
+   effort: it needs tailscale's operator, and a slot that cannot clean up is
+   still a working slot. Once no slot has one left, `tailscale serve --https
+   9443 off` takes the port down.
+7. **Checks the slot answers through the tunnel** at
+   `https://devN.cylist.in/api/v1/health`, and fails the deploy if it never
+   does — up on loopback but not served is not deployed.
 
-   ```bash
-   tailscale serve --bg --https 9443 --set-path /dev_N http://127.0.0.1:801N
-   tailscale serve --bg --https 9443 http://127.0.0.1:8010
-   ```
-
-7. **Checks the slot answers through tailscale** at
-   `…:9443/dev_N/api/v1/health`, and fails the deploy if it never does — up on
-   loopback but not served is not deployed.
-
-Steps 4–6 hold a lock (`~/.cylist-dev.lock`), since the index and the serve
-config are shared by all five slots. The workflow's deploy step also exposes
+Steps 4–6 hold a lock (`~/.cylist-dev.lock`), since the index is shared by
+all five slots. The workflow's deploy step also exposes
 `slot`, `url`, `branch` and `sha` as step outputs, for a later step that wants
 to say where a branch went. The *Comment on the card* step reads them.
 
@@ -610,20 +649,10 @@ Both env files `chmod 600`. The shared database starts empty — it is never
 restored from production, so unlike staging's `app.env` it needs only its own
 `CYLIST_VAULT_KEY`, not production's.
 
-What does need doing once is letting the runner's user change tailscale's serve
-config, which otherwise wants root:
-
-```bash
-sudo tailscale set --operator=dnu2
-```
-
-Without it a slot deploy gets as far as a running, healthy slot on loopback and
-then fails at *Serving slot N*, saying exactly that.
-
-`serve`, not `funnel`, exactly as staging: reachable from your devices, and from
-nowhere else. Only the index directory is served as files, by the
-`cylist-dev-index` container; the slot directories hold secrets and are never
-mounted into it.
+Serving is the `devN.cylist.in` and `dev.cylist.in` ingress rules in the
+tunnel config — see *Serving it* — and nothing per deploy. Only the index
+directory is served as files, by the `cylist-dev-index` container; the slot
+directories hold secrets and are never mounted into it.
 
 ### One database for every slot
 
@@ -686,8 +715,8 @@ rm -r ~/cylist-dev
 ## Dashboard
 
 A one-page status view of production, staging and the five dev slots, at
-<https://dnu-home-1.tail222f46.ts.net:7443> — tailnet only, same as staging and
-dev.
+<https://dnu-home-1.tail222f46.ts.net:7443> — tailnet only, the one thing on
+this machine that is not on the tunnel.
 
 [`scripts/dashboard/server.py`](scripts/dashboard/server.py) is stdlib-only
 Python: no dependencies to install, no build step. It answers `/` with a
@@ -704,12 +733,12 @@ static page and `/api/status` with, per environment:
 * **whether it is actually being served** — a real HTTP round trip to the
   address a browser would use, not a proxy for it. For staging and dev that
   is a direct request to their `tailscale serve` address; for production it
-  goes further and forces the request through the public Funnel ingress with
-  `curl --resolve`, the same check `~/.claude/CLAUDE.md` documents as the only
-  one that catches the one outage already seen here — everything on-box
-  correct, the ingress-side registration silently stale. This is slow enough
-  (a real Tokyo round trip) that it runs on its own 45-second timer rather
-  than blocking the page's poll.
+  is a request to `https://cylist.in` through Cloudflare's edge, pinned to one
+  of the zone's anycast addresses with `curl --resolve` so a stale answer in
+  the host's own resolver cannot fake it. That is the only check that proves
+  the tunnel is registered and relaying, rather than that the app answers on
+  loopback. It runs on its own 45-second timer rather than blocking the
+  page's poll.
 * **last backup age** — the newest file in `~/cylist-<env>/backups`.
 
 Machine-wide, it also reports disk usage. The page polls `/api/status` every
