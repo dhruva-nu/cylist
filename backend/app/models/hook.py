@@ -87,6 +87,13 @@ class Hook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Off stops new deliveries being queued. Ones already queued still go:
     they report changes that happened while the hook was on."""
 
+    manual: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Fired by hand and by nothing else. A manual hook names no verbs and sets
+    no filters: a board's changes never reach it, and its only event is the
+    ``hook.fired`` an admin sends from the Hooks page."""
+
     verbs: Mapped[list[str]] = mapped_column(
         postgresql.ARRAY(String(VERB_MAX_LENGTH)),
         nullable=False,
@@ -115,6 +122,18 @@ class Hook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Only cards assigned to the agent — :attr:`app.models.person.Person.is_agent`
     — match. Off matches every owner: a flag rather than a person's id, because
     there is only ever one agent and the rule is about the machine, not a name."""
+
+    mentions_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Only a comment that tags somebody — ``@Aditi K`` — matches. A filter on
+    the comment rather than the card, so a hook with it set fires on nothing
+    but ``task.commented``."""
+
+    mentioned_person_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
+    """Only a comment that tags this person matches. An id rather than a foreign
+    key, for the reason the module docstring gives: someone deleted from the
+    directory is tagged by nothing, and the hook goes quiet."""
 
     url: Mapped[str] = mapped_column(String(URL_MAX_LENGTH), nullable=False)
     """Where events are POSTed. ``http`` or ``https``."""
@@ -167,10 +186,11 @@ class HookDelivery(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         postgresql.UUID(as_uuid=True),
         ForeignKey("activity.id", ondelete="SET NULL"),
     )
-    """The change this reports. Null for a test send, which reports nothing."""
+    """The change this reports. Null for a test send or a manual hook's firing,
+    which report no change."""
 
     event: Mapped[str] = mapped_column(String(VERB_MAX_LENGTH), nullable=False)
-    """The verb, or ``hook.test``."""
+    """The verb, ``hook.test``, or ``hook.fired``."""
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     """Exactly the body sent, kept so a retry sends what the first attempt did

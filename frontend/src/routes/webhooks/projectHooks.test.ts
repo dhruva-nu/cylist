@@ -11,6 +11,7 @@ import {
   eventsPhrase,
   inputOf,
   isDangling,
+  TAGS_ANYONE,
   isHookUrl,
   whyIncomplete,
 } from './projectHooks'
@@ -44,7 +45,11 @@ const HOTFIX_TO_STAGING: Hook = {
   template_id: 'tpl-hotfix',
   template_name: 'Hotfix',
   task_type: null,
+  manual: false,
   agent_only: false,
+  mentions_only: false,
+  mentioned_person_id: null,
+  mentioned_person_name: null,
   secret_hint: 'abcd',
   last_delivery: null,
   created_at: '2026-10-06T00:00:00Z',
@@ -83,6 +88,23 @@ describe('describeRule', () => {
     const hook = { ...HOTFIX_TO_STAGING, agent_only: true }
     expect(describeRule(hook, EVENTS)).toBe(
       "Moved to another column · Hotfix cards · the agent's cards · into In staging",
+    )
+  })
+
+  it('says which tag in a comment fires it', () => {
+    const comments = { ...HOTFIX_TO_STAGING, verbs: ['task.commented'], template_id: null }
+    const anyone = { ...comments, to_column_id: null, mentions_only: true }
+    expect(describeRule(anyone, EVENTS)).toBe('Comment added · tagging someone')
+    const aditi = { ...anyone, mentioned_person_id: 'p-aditi', mentioned_person_name: 'Aditi K' }
+    expect(describeRule(aditi, EVENTS)).toBe('Comment added · tagging Aditi K')
+    const gone = { ...aditi, mentioned_person_name: null }
+    expect(describeRule(gone, EVENTS)).toBe('Comment added · tagging a deleted person')
+    expect(isDangling(gone)).toBe(true)
+  })
+
+  it('says a manual hook fires by hand, whatever else it holds', () => {
+    expect(describeRule({ ...HOTFIX_TO_STAGING, manual: true }, EVENTS)).toBe(
+      'Only when fired by hand',
     )
   })
 
@@ -141,6 +163,47 @@ describe('the form', () => {
     expect(inputOf({ ...draft, agentOnly: true }, false).agent_only).toBe(true)
   })
 
+  it('reads the tag choice as one filter or the other, never both', () => {
+    const draft = draftOf(HOTFIX_TO_STAGING)
+    expect(draft.tagged).toBe('')
+    expect(inputOf(draft, false)).toMatchObject({ mentions_only: false, mentioned_person_id: null })
+    expect(inputOf({ ...draft, tagged: TAGS_ANYONE }, false)).toMatchObject({
+      mentions_only: true,
+      mentioned_person_id: null,
+    })
+    expect(inputOf({ ...draft, tagged: 'p-aditi' }, false)).toMatchObject({
+      mentions_only: false,
+      mentioned_person_id: 'p-aditi',
+    })
+    expect(draftOf({ ...HOTFIX_TO_STAGING, mentions_only: true }).tagged).toBe(TAGS_ANYONE)
+    expect(draftOf({ ...HOTFIX_TO_STAGING, mentioned_person_id: 'p-aditi' }).tagged).toBe('p-aditi')
+  })
+
+  it('sends a manual hook with every event and filter cleared', () => {
+    const draft = { ...draftOf(HOTFIX_TO_STAGING), manual: true, tagged: TAGS_ANYONE }
+    expect(inputOf(draft, false)).toEqual({
+      name: HOTFIX_TO_STAGING.name,
+      url: HOTFIX_TO_STAGING.url,
+      manual: true,
+      verbs: [],
+      to_column_id: null,
+      from_column_id: null,
+      template_id: null,
+      task_type: null,
+      agent_only: false,
+      mentions_only: false,
+      mentioned_person_id: null,
+    })
+    // What was set is still on the draft, for switching back to changes.
+    expect(inputOf({ ...draft, manual: false }, false).verbs).toEqual(HOTFIX_TO_STAGING.verbs)
+    expect(whyIncomplete({ ...draft, verbs: [] }, [], null)).toBeNull()
+  })
+
+  it('does not read a manual hook back as Any change', () => {
+    const manual = { ...HOTFIX_TO_STAGING, manual: true, verbs: [] }
+    expect(draftOf(manual)).toMatchObject({ manual: true, anyChange: false })
+  })
+
   it('sends a secret only when making a hook, and only if one was typed', () => {
     const draft = { ...EMPTY_DRAFT, name: 'A', url: 'https://x.dev', anyChange: true, secret: '  ' }
     expect(inputOf(draft, true)).not.toHaveProperty('secret')
@@ -173,6 +236,12 @@ describe('the form', () => {
     expect(
       whyIncomplete({ ...draft, fromColumnId: 'col', verbs: ['task.created'] }, [], null),
     ).toMatch(/only matches moves/)
+    expect(whyIncomplete({ ...draft, tagged: TAGS_ANYONE }, [], null)).toMatch(
+      /only matches comments/,
+    )
+    expect(
+      whyIncomplete({ ...draft, tagged: TAGS_ANYONE, verbs: ['task.commented'] }, [], null),
+    ).toBeNull()
   })
 
   it('sends Any change as no verbs, and keeps what was ticked to switch back to', () => {

@@ -39,9 +39,10 @@ from app.models.activity import Activity
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
+from app.models.today import TodoState
 from app.schemas.activity import FieldChange, HistoryEntry
-from app.schemas.reports import DayReport, TaskDay
-from app.services import activity, columns, tasks
+from app.schemas.reports import CardTodos, DayReport, DayTodo, TaskDay
+from app.services import activity, columns, tasks, today
 
 
 def today_in(zone: ZoneInfo) -> date:
@@ -66,8 +67,14 @@ async def for_day(
     *,
     day: date,
     zone: ZoneInfo,
+    person_id: UUID | None = None,
 ) -> DayReport:
-    """Everything one project's day amounted to."""
+    """Everything one project's day amounted to.
+
+    ``person_id`` is whoever is asking. Their own plan for the day — the cards
+    they picked up and their to-dos — goes in as its own section; nobody
+    else's does, because a plan is a person's own.
+    """
     starts_at, ends_at = window(day, zone)
     entries = await activity.between(session, project.id, starts_at, ends_at)
 
@@ -97,12 +104,28 @@ async def for_day(
     # with the lines under it would just look like a bug.
     shown = sum(len(card.entries) for card in touched) + len(elsewhere)
 
-    headline = _headline(
-        changes=shown,
-        cards=len(touched),
-        finished=len(finished),
-        elsewhere=len(elsewhere),
-        day=day,
+    planned = await _planned(session, project, person_id, day, zone)
+
+    todo_sentence = _todo_sentence(planned)
+    # A day with a plan and no changes on the board is not a day where nothing
+    # was recorded; the plan is the record, so it is the headline on its own.
+    headline = (
+        todo_sentence
+        if shown == 0 and todo_sentence
+        else " ".join(
+            part
+            for part in (
+                _headline(
+                    changes=shown,
+                    cards=len(touched),
+                    finished=len(finished),
+                    elsewhere=len(elsewhere),
+                    day=day,
+                ),
+                todo_sentence,
+            )
+            if part
+        )
     )
     return DayReport(
         project_key=project.key,
@@ -115,6 +138,7 @@ async def for_day(
         finished=finished,
         tasks=touched,
         elsewhere=elsewhere,
+        todos=planned,
         headline=headline,
         markdown=_markdown(
             project=project,
@@ -123,8 +147,52 @@ async def for_day(
             headline=headline,
             tasks=touched,
             elsewhere=elsewhere,
+            planned=planned,
         ),
     )
+
+
+async def _planned(
+    session: AsyncSession, project: Project, person_id: UUID | None, day: date, zone: ZoneInfo
+) -> list[CardTodos]:
+    """The asker's plan for the day, as the report shows it."""
+    if person_id is None:
+        return []
+    # From today on the plan follows its cards, so today's report reads the
+    # plan as the board has it now; a day gone by keeps what it had.
+    if day >= today_in(zone):
+        await today.sync_day(session, project, person_id, day)
+    return [
+        CardTodos(
+            reference=picked.task.reference,
+            title=picked.task.title,
+            column=picked.task.column.name if picked.task.column else None,
+            todos=[DayTodo.model_validate(todo) for todo in picked.todos],
+        )
+        for picked in await today.picks_for(session, project, person_id, day)
+    ]
+
+
+def _todo_sentence(planned: list[CardTodos]) -> str:
+    """What became of the day's to-dos, as a sentence of its own.
+
+    Empty when there were none, so a day nobody planned reads as it always did.
+    """
+    states = [todo.state for card in planned for todo in card.todos]
+    if not states:
+        return ""
+    done = states.count(TodoState.DONE)
+    said = f"{done} of {len(states)} {_plural(len(states), 'to-do')} done"
+    moved = [todo.moved_to for card in planned for todo in card.todos if todo.moved_to]
+    if moved:
+        # By date, not weekday: Monday the 19th and Monday the 26th are two days.
+        days = set(moved)
+        where = f"{days.pop():%A}" if len(days) == 1 else "later days"
+        said += f", {len(moved)} moved to {where}"
+    left = states.count(TodoState.NOT_DONE)
+    if left:
+        said += f", {left} not done"
+    return f"{said}."
 
 
 def _card_reference(entry: Activity) -> str | None:
@@ -305,6 +373,7 @@ def _markdown(
     headline: str,
     tasks: list[TaskDay],
     elsewhere: list[HistoryEntry],
+    planned: list[CardTodos],
 ) -> str:
     """The report as Markdown, ready to paste into a stand-up note.
 
@@ -312,6 +381,17 @@ def _markdown(
     the browser and the one an agent writes are the same text.
     """
     lines = [f"# {project.name} — {_long_date(day)}", "", headline]
+
+    # The plan first: it is what the day was meant to hold, and the cards
+    # below are what it did hold.
+    if any(card.todos for card in planned):
+        lines += ["", "## To-dos"]
+        for plan in planned:
+            if not plan.todos:
+                continue
+            where = f" ({plan.column})" if plan.column else ""
+            lines += ["", f"### {plan.reference} — {plan.title}{where}", ""]
+            lines += [_todo_line(todo) for todo in plan.todos]
 
     finished = [card for card in tasks if card.finished]
     if finished:
@@ -361,6 +441,24 @@ def _bullet(entry: HistoryEntry, zone: ZoneInfo) -> str:
     if entry.channel == "api":
         return f"- {when} · {entry.summary} — {entry.actor_label} (agent)"
     return f"- {when} · {entry.summary}"
+
+
+def _todo_line(todo: DayTodo) -> str:
+    """One to-do as a Markdown task-list item, saying what became of it."""
+    box = "- [x]" if todo.state is TodoState.DONE else "- [ ]"
+    line = f"{box} {todo.text}"
+    if todo.state is TodoState.MOVED and todo.moved_to:
+        line += f" → moved to {_short_date(todo.moved_to)}"
+    elif todo.state is TodoState.NOT_DONE:
+        line += " — not done"
+    if todo.carried_from:
+        line += f" (carried from {todo.carried_from:%a})"
+    return line
+
+
+def _short_date(day: date) -> str:
+    """``Mon 19 Oct``."""
+    return f"{day:%a} {day.day} {day:%b}"
 
 
 def _long_date(day: date) -> str:

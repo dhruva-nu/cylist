@@ -1,12 +1,23 @@
+import { useMutation } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
-import type { BoardColumn, ColumnDueDate, TaskDetail } from '../../api/client'
+import { api, type BoardColumn, type ColumnDueDate, type TaskDetail } from '../../api/client'
+import { usePermissions } from '../../routes/usePermissions'
 import { AgentPanel } from '../AgentPanel'
 import { localDate } from '../dates'
 import { GoalChip } from '../GoalMarks'
 import { Modal, ModalBody } from '../Modal'
 import { PRIORITIES, STATUS_LABELS } from '../taskLabels'
-import { Avatar, Button, PriorityIcon, SubStatusBar, Tagged, TaskRef, TypeIcon } from '../ui'
+import {
+  Avatar,
+  Button,
+  ErrorNotice,
+  PriorityIcon,
+  SubStatusBar,
+  Tagged,
+  TaskRef,
+  TypeIcon,
+} from '../ui'
 import { Timeline } from './Comments'
 import type { DialogData, TaskDialogProps } from './dialogProps'
 import { History } from './History'
@@ -77,6 +88,16 @@ export function TaskDetailView({
         <h3 className={styles.readTitle}>{task.title}</h3>
 
         <TaskChips task={task} />
+
+        {task.archived_at ? (
+          <StoredNotice
+            projectKey={projectKey}
+            task={task}
+            lastColumn={columns.at(-1)}
+            announce={announce}
+            onDone={onDone}
+          />
+        ) : null}
 
         {/* Under the chips rather than among them: the goal is the one thing
             on this card that is somewhere else as well, so it is a link, and a
@@ -269,6 +290,17 @@ function ColumnOrFinishedReadField({
     return <ReadField label="Finished">{finishedOn ?? 'Not yet'}</ReadField>
   }
 
+  // Off the board, in no column: where it is is cold storage.
+  if (task.archived_at) {
+    return (
+      <ReadField label="Column">
+        Cold storage
+        {task.outcome ? <span className={shared.aside}>· {task.outcome}</span> : null}
+        {finishedOn ? <span className={shared.aside}>· finished {finishedOn}</span> : null}
+      </ReadField>
+    )
+  }
+
   // The column is where a card is; the date beside it is when being there
   // started meaning done. Shown only once there is one, so a card still on its
   // way says where it is and nothing more.
@@ -278,6 +310,53 @@ function ColumnOrFinishedReadField({
       {task.outcome ? <span className={shared.aside}>· {task.outcome}</span> : null}
       {finishedOn ? <span className={shared.aside}>· finished {finishedOn}</span> : null}
     </ReadField>
+  )
+}
+
+/**
+ * Says a card is in cold storage, and offers the way back.
+ *
+ * Near the top rather than among the fields, because it changes how the rest
+ * of the card reads: everything below is true, and none of it is on the board.
+ * The button is drawn only for a reader whose role allows cards — the server
+ * refuses everyone else, and a button that can only fail is not an offer.
+ */
+function StoredNotice({
+  projectKey,
+  task,
+  lastColumn,
+  announce,
+  onDone,
+}: {
+  projectKey: string
+  task: TaskDetail
+  lastColumn: BoardColumn | undefined
+  announce: (message: string) => void
+  onDone: () => Promise<void>
+}) {
+  const may = usePermissions(projectKey)
+  const restore = useMutation({
+    mutationFn: () => api.restoreTask(task.reference),
+    onSuccess: async (restored) => {
+      announce(`${restored.reference} restored to ${lastColumn?.name ?? 'the board'}.`)
+      await onDone()
+    },
+  })
+  const storedOn = task.archived_at ? formatDayWithYear(task.archived_at.slice(0, 10)) : null
+
+  return (
+    <div className={styles.stored} role="note">
+      <ErrorNotice error={restore.error} />
+      <p>
+        In cold storage since {storedOn}. It is off the board, still finished, and in the CSV
+        written that day.
+      </p>
+      {may('tasks') ? (
+        <Button small disabled={restore.isPending} onClick={() => restore.mutate()}>
+          {restore.isPending ? 'Restoring…' : `Restore to ${lastColumn?.name ?? 'the board'}`}
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

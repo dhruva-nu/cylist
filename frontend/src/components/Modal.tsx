@@ -52,6 +52,7 @@ export function Modal({
   footer,
   headerActions,
   wide = false,
+  widest = false,
 }: {
   title: string
   onClose: () => void
@@ -66,6 +67,12 @@ export function Modal({
    * dozen dialogs that ask two questions stay the size of two questions.
    */
   wide?: boolean
+  /**
+   * Wider again, for a dialog that is two panes side by side — Today's open
+   * cards beside the plan made from them. Still stops short of the window's
+   * edges, for the same reason `wide` does.
+   */
+  widest?: boolean
 }) {
   const panel = useRef<HTMLDivElement>(null)
   const opener = useRef<Element | null>(null)
@@ -157,7 +164,9 @@ export function Modal({
     >
       <div
         ref={panel}
-        className={wide ? `${styles.modal} ${styles.wide}` : styles.modal}
+        className={[styles.modal, wide && styles.wide, widest && styles.widest]
+          .filter(Boolean)
+          .join(' ')}
         role="dialog"
         aria-modal="true"
         aria-label={title}

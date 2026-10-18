@@ -90,6 +90,7 @@ function task(title: string, onGoal: string | null): Task {
     outcome: null,
     outcome_index: null,
     finished_at: null,
+    archived_at: null,
     open_subtask_count: 0,
     subtask_count: 0,
     subtask_assignees: [],

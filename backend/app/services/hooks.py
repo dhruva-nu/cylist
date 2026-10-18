@@ -25,6 +25,20 @@ filter set only ever fires for a card's events:
 * ``template_id``, ``task_type`` — the card's template and type.
 * ``agent_only`` — the card's owner, after the change, is the agent. A card
   handed to the agent fires; one taken back from it does not.
+
+Two more are about a comment rather than the card, so a hook with either set
+fires on ``task.commented`` and nothing else:
+
+* ``mentions_only`` — the comment tags somebody, ``@Aditi K``.
+* ``mentioned_person_id`` — the comment tags this person. Tag the agent in a
+  comment and a hook with this set to the agent is how it hears about it.
+
+Who a comment tags is read once, when it is written — see
+:mod:`app.services.mentions` — and kept on its activity entry as ``mentioned``.
+
+**A manual hook** fires on none of it. It names no verbs and sets no filters,
+and the only event it ever sends is ``hook.fired``, when an admin presses its
+button on the Hooks page — :func:`fired_body` is what that sends.
 """
 
 from __future__ import annotations
@@ -51,6 +65,7 @@ from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
+from app.services import projects
 
 
 @dataclass(frozen=True)
@@ -106,12 +121,24 @@ CATEGORIES: tuple[EventCategory, ...] = (
             EventKind(
                 "task.deleted", "Card deleted", "Only the reference is sent; the card is gone."
             ),
+            EventKind(
+                "task.archived",
+                "Moved to cold storage",
+                "Taken off the board with the rest of its last column, into a CSV.",
+            ),
+            EventKind("task.restored", "Restored from cold storage", "Back in the last column."),
         ),
     ),
     EventCategory(
         "comments",
         "Comments",
-        (EventKind("task.commented", "Comment added", "The comment's text is in the payload."),),
+        (
+            EventKind(
+                "task.commented",
+                "Comment added",
+                "The comment's text, and who it tags, are in the payload.",
+            ),
+        ),
     ),
     EventCategory(
         "work",
@@ -184,6 +211,8 @@ class _Card:
     from_column_id: UUID | None
     assigned_to_agent: bool
     """Whether the card's owner, after the change, is the agent."""
+    mentioned: frozenset[UUID] = frozenset()
+    """Who the comment tagged, on a ``task.commented``. Empty on anything else."""
 
 
 async def queue_for(session: AsyncSession, entry: Activity) -> int:
@@ -200,7 +229,11 @@ async def queue_for(session: AsyncSession, entry: Activity) -> int:
 
     hooks = list(
         await session.scalars(
-            select(Hook).where(Hook.project_id == entry.project_id, Hook.enabled.is_(True))
+            select(Hook).where(
+                Hook.project_id == entry.project_id,
+                Hook.enabled.is_(True),
+                Hook.manual.is_(False),
+            )
         )
     )
     candidates = [hook for hook in hooks if not hook.verbs or entry.verb in hook.verbs]
@@ -241,11 +274,13 @@ async def _card_of(session: AsyncSession, entry: Activity) -> _Card:
     )
     from_column = entry.payload.get("from_column_id") if moved_column else None
     assignee = await session.get(Person, task.assignee_id) if task is not None else None
+    mentioned = (entry.payload.get("mentioned") or []) if entry.verb == "task.commented" else []
     return _Card(
         task=task,
         moved_column=moved_column,
         from_column_id=UUID(from_column) if from_column else None,
         assigned_to_agent=assignee is not None and assignee.is_agent,
+        mentioned=frozenset(UUID(person["id"]) for person in mentioned),
     )
 
 
@@ -254,7 +289,15 @@ def matches(hook: Hook, verb: str, card: _Card) -> bool:
     if hook.verbs and verb not in hook.verbs:
         return False
     filtered = any(
-        (hook.to_column_id, hook.from_column_id, hook.template_id, hook.task_type, hook.agent_only)
+        (
+            hook.to_column_id,
+            hook.from_column_id,
+            hook.template_id,
+            hook.task_type,
+            hook.agent_only,
+            hook.mentions_only,
+            hook.mentioned_person_id,
+        )
     )
     if not filtered:
         return True
@@ -267,6 +310,12 @@ def matches(hook: Hook, verb: str, card: _Card) -> bool:
     if hook.task_type is not None and task.type != hook.task_type:
         return False
     if hook.agent_only and not card.assigned_to_agent:
+        return False
+    if (hook.mentions_only or hook.mentioned_person_id is not None) and (
+        verb != "task.commented" or not card.mentioned
+    ):
+        return False
+    if hook.mentioned_person_id is not None and hook.mentioned_person_id not in card.mentioned:
         return False
     if hook.from_column_id is not None and (
         not card.moved_column or card.from_column_id != hook.from_column_id
@@ -359,6 +408,7 @@ class HookFields:
 
     name: str | None = None
     enabled: bool | None = None
+    manual: bool | None = None
     verbs: list[str] | None = None
     url: str | None = None
 
@@ -373,6 +423,8 @@ class HookFilters:
     template_id: UUID | None = None
     task_type: TaskType | None = None
     agent_only: bool = False
+    mentions_only: bool = False
+    mentioned_person_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -382,6 +434,7 @@ class HookLabels:
     to_column_name: str | None
     from_column_name: str | None
     template_name: str | None
+    mentioned_person_name: str | None
     last_delivery: HookDelivery | None
 
 
@@ -396,10 +449,10 @@ async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID,
     """Name every column and template these hooks filter on, and find each one's
     latest delivery.
 
-    Three queries for the whole list rather than four per hook: the Hooks page
-    draws every one of them at once. A filter whose column or template has
-    since been deleted is named ``None``, which is what tells the page that it
-    now matches nothing.
+    Four queries for the whole list rather than five per hook: the Hooks page
+    draws every one of them at once. A filter whose column, template or person
+    has since been deleted is named ``None``, which is what tells the page that
+    it now matches nothing.
     """
     if not hooks:
         return {}
@@ -411,8 +464,12 @@ async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID,
         if column_id is not None
     }
     template_ids = {hook.template_id for hook in hooks if hook.template_id is not None}
+    person_ids = {
+        hook.mentioned_person_id for hook in hooks if hook.mentioned_person_id is not None
+    }
     column_names = await _names_by_id(session, BoardColumn, column_ids)
     template_names = await _names_by_id(session, TaskTemplate, template_ids)
+    person_names = await _names_by_id(session, Person, person_ids)
 
     # DISTINCT ON keeps the first row per hook in this ordering — its newest.
     latest = await session.scalars(
@@ -430,6 +487,9 @@ async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID,
                 column_names.get(hook.from_column_id) if hook.from_column_id else None
             ),
             template_name=template_names.get(hook.template_id) if hook.template_id else None,
+            mentioned_person_name=(
+                person_names.get(hook.mentioned_person_id) if hook.mentioned_person_id else None
+            ),
             last_delivery=last_by_hook.get(hook.id),
         )
         for hook in hooks
@@ -437,7 +497,9 @@ async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID,
 
 
 async def _names_by_id(
-    session: AsyncSession, model: type[BoardColumn] | type[TaskTemplate], ids: set[UUID]
+    session: AsyncSession,
+    model: type[BoardColumn] | type[TaskTemplate] | type[Person],
+    ids: set[UUID],
 ) -> dict[UUID, str]:
     if not ids:
         return {}
@@ -463,6 +525,7 @@ async def create(
     name: str,
     url: str,
     enabled: bool,
+    manual: bool,
     verbs: list[str],
     filters: HookFilters,
     secret: str | None,
@@ -477,10 +540,12 @@ async def create(
         project_id=project.id,
         name=name,
         enabled=enabled,
+        manual=manual,
         verbs=_checked_verbs(verbs),
         url=checked_url(url),
     )
     await _apply_filters(session, project, hook, filters)
+    _refuse_rules_on_manual(hook)
     plaintext = _seal(cipher, hook, secret)
     session.add(hook)
     return hook, plaintext
@@ -502,6 +567,9 @@ async def update(
     if fields.enabled is not None and fields.enabled != hook.enabled:
         hook.enabled = fields.enabled
         changed.append("enabled")
+    if fields.manual is not None and fields.manual != hook.manual:
+        hook.manual = fields.manual
+        changed.append("manual")
     if fields.verbs is not None:
         verbs = _checked_verbs(fields.verbs)
         if verbs != list(hook.verbs):
@@ -513,6 +581,7 @@ async def update(
             hook.url = url
             changed.append("url")
     changed += await _apply_filters(session, project, hook, filters)
+    _refuse_rules_on_manual(hook)
     return changed
 
 
@@ -560,10 +629,37 @@ def sample_body(project: Project, hook: Hook, principal: Principal) -> dict[str,
 
     Shaped like a real event so a receiver can be written against it, and
     named ``hook.test`` so it can tell the difference."""
+    return _bare_body(
+        project, principal, event="hook.test", summary=f"A test from the hook {hook.name!r}."
+    )
+
+
+def fired_body(
+    project: Project, hook: Hook, principal: Principal, message: str | None
+) -> dict[str, Any]:
+    """What firing a manual hook sends: the same envelope, about the project
+    rather than a card, with whatever the person firing it said in ``detail``."""
+    return _bare_body(
+        project,
+        principal,
+        event="hook.fired",
+        summary=f"{principal.label} fired the hook {hook.name!r}.",
+        detail={"hook": {"id": str(hook.id), "name": hook.name}, "message": message},
+    )
+
+
+def _bare_body(
+    project: Project,
+    principal: Principal,
+    *,
+    event: str,
+    summary: str,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "id": None,
-        "event": "hook.test",
-        "summary": f"A test from the hook {hook.name!r}.",
+        "event": event,
+        "summary": summary,
         "occurred_at": now().isoformat(),
         "project": {"id": str(project.id), "key": project.key, "name": project.name},
         "actor": {
@@ -573,8 +669,28 @@ def sample_body(project: Project, hook: Hook, principal: Principal) -> dict[str,
         },
         "task": None,
         "changes": [],
-        "detail": {},
+        "detail": detail or {},
     }
+
+
+def refuse_unless_fireable(project: Project, hook: Hook) -> None:
+    """Only a manual hook, switched on, is fired by hand.
+
+    A hook that fires on changes is not: what it sends is a change, and a
+    firing reports none — "Send test" is how to try one of those. One that is
+    off stays off, as it does for a board's changes.
+    """
+    if not hook.manual:
+        raise ConflictError(
+            f"The hook {hook.name!r} fires on {project.key}'s changes, not by hand. "
+            "Send it a test instead, or make it a manual hook.",
+            details={"hook_id": str(hook.id)},
+        )
+    if not hook.enabled:
+        raise ConflictError(
+            f"The hook {hook.name!r} is off. Switch it on to fire it.",
+            details={"hook_id": str(hook.id)},
+        )
 
 
 def checked_url(url: str) -> str:
@@ -624,7 +740,39 @@ async def _apply_filters(
     if "agent_only" in filters.given and hook.agent_only != filters.agent_only:
         hook.agent_only = filters.agent_only
         changed.append("agent_only")
+    if "mentions_only" in filters.given and hook.mentions_only != filters.mentions_only:
+        hook.mentions_only = filters.mentions_only
+        changed.append("mentions_only")
+    if "mentioned_person_id" in filters.given:
+        if filters.mentioned_person_id is not None:
+            await _own_member(session, project, filters.mentioned_person_id)
+        if hook.mentioned_person_id != filters.mentioned_person_id:
+            hook.mentioned_person_id = filters.mentioned_person_id
+            changed.append("mentioned_person_id")
     return changed
+
+
+def _refuse_rules_on_manual(hook: Hook) -> None:
+    # A manual hook with events or filters would read as though they did
+    # something, and they never would.
+    rules = any(
+        (
+            hook.verbs,
+            hook.to_column_id,
+            hook.from_column_id,
+            hook.template_id,
+            hook.task_type,
+            hook.agent_only,
+            hook.mentions_only,
+            hook.mentioned_person_id,
+        )
+    )
+    if hook.manual and rules:
+        raise UnprocessableRequestError(
+            "A manual hook fires only when somebody fires it, so it takes no events or "
+            "filters. Clear them, or leave it firing on changes.",
+            details={"hook_id": str(hook.id)},
+        )
 
 
 async def _own_column(session: AsyncSession, project: Project, column_id: UUID) -> None:
@@ -642,6 +790,16 @@ async def _own_template(session: AsyncSession, project: Project, template_id: UU
         raise UnprocessableRequestError(
             f"That template is not one of {project.key}'s.",
             details={"template_id": str(template_id)},
+        )
+
+
+async def _own_member(session: AsyncSession, project: Project, person_id: UUID) -> None:
+    # Only a member can be tagged, so a hook waiting on anybody else would
+    # wait forever.
+    if not await projects.is_member(session, project.id, person_id):
+        raise UnprocessableRequestError(
+            f"That person is not on {project.key}, so no comment there can tag them.",
+            details={"person_id": str(person_id)},
         )
 
 

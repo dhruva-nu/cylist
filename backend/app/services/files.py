@@ -141,6 +141,22 @@ async def create_folder(session: AsyncSession, project: Project, data: FolderCre
     return folder
 
 
+async def folder_in_root(session: AsyncSession, project: Project, name: str) -> Folder:
+    """The folder called ``name`` at the top of the project, made if it is not there.
+
+    For a folder Cylist files things in itself — ``Cold storage`` — which should
+    be found where somebody would look for it, and reused rather than made
+    again every time: one folder of exports, not one per export.
+    """
+    root = await root_of(session, project.id)
+    found = await session.scalar(
+        select(Folder).where(Folder.parent_id == root.id, Folder.name == name)
+    )
+    if found is not None:
+        return found
+    return await create_folder(session, project, FolderCreate(name=name, parent_id=root.id))
+
+
 async def get_folder(session: AsyncSession, folder_id: UUID) -> Folder:
     """Fetch one folder."""
     folder = await session.get(Folder, folder_id)
@@ -308,6 +324,54 @@ async def upload(
             sensitivity=(sensitivity or folder.default_sensitivity),
         ),
     )
+
+
+async def store_generated(
+    session: AsyncSession,
+    store: BlobStore,
+    folder: Folder,
+    *,
+    name: str,
+    data: bytes,
+    mime: str,
+    max_bytes: int,
+    added_by: UUID | None,
+) -> FileItem:
+    """File bytes the server wrote itself, as though they had been uploaded.
+
+    For an export Cylist makes on somebody's behalf — cold storage's CSV — which
+    belongs in the folder listing beside everything people uploaded, and is
+    downloaded, classified and deleted the same way. It is an upload by the
+    person who asked for it, so ``source`` says so.
+
+    Raises:
+        ConflictError: if the folder already has an item with this name.
+        PayloadTooLargeError: if the content exceeds ``max_bytes``.
+    """
+    await _ensure_name_is_free(session, folder, name)
+    await ensure_person_exists(session, added_by)
+    blob = await blobs.store_bytes(session, store, data, max_bytes=max_bytes)
+    return await _add_item(
+        session,
+        FileItem(
+            folder_id=folder.id,
+            kind=ItemKind.FILE,
+            name=name,
+            blob=blob,
+            source=ItemSource.UPLOAD,
+            mime=mime,
+            added_by=added_by,
+            sensitivity=folder.default_sensitivity,
+        ),
+    )
+
+
+async def name_is_free(session: AsyncSession, folder: Folder, name: str) -> bool:
+    """Whether nothing in this folder is called ``name`` yet."""
+    taken = await session.scalar(
+        select(FileItem.id).where(FileItem.folder_id == folder.id, FileItem.name == name)
+    )
+    return taken is None
 
 
 async def add_link(session: AsyncSession, folder: Folder, data: LinkCreate) -> FileItem:
@@ -484,10 +548,7 @@ def _duplicate_name(name: str) -> ConflictError:
 
 
 async def _ensure_name_is_free(session: AsyncSession, folder: Folder, name: str) -> None:
-    taken = await session.scalar(
-        select(FileItem.id).where(FileItem.folder_id == folder.id, FileItem.name == name)
-    )
-    if taken is not None:
+    if not await name_is_free(session, folder, name):
         raise _duplicate_name(name)
 
 

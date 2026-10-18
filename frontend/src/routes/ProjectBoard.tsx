@@ -28,6 +28,7 @@ import { hidesHold } from './boardHiding'
 import { BoardGrid, type LanesLayout, type SharedColumnProps } from './board/BoardGrid'
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
 import { CardActionsContext, type CardActions } from './board/cardActions'
+import { ColdStorageDialog } from './board/ColdStorageDialog'
 import { ColumnDialog } from './board/ColumnDialog'
 import { SCREEN_READER_INSTRUCTIONS } from './board/keyboardDrag'
 import { lanesFor, narrowBoard, tasksByColumn, type Lane } from './board/narrowBoard'
@@ -78,6 +79,7 @@ type BoardDialog =
   | { kind: 'newSubtask'; parentRef: string }
   | { kind: 'column'; column: BoardColumn | null }
   | { kind: 'templates' }
+  | { kind: 'coldStorage' }
 
 function LoadedBoard({
   projectKey,
@@ -208,6 +210,7 @@ function LoadedBoard({
     onToggleOutcome: view.toggleOutcome,
     onAddTask: mayWriteCards ? () => setDialog({ kind: 'newTask', goalId: null }) : null,
     onEdit: () => setDialog({ kind: 'column', column }),
+    onColdStorage: column.id === doneColumn?.id ? () => setDialog({ kind: 'coldStorage' }) : null,
     // Settled per column, out of the column's own answer and the board's: see
     // `hidesHold`. Passed in rather than read inside `Column` because the
     // search box and the status filter are the board's, and a column that
@@ -337,6 +340,22 @@ function LoadedBoard({
           maxOutcomes={board.max_outcomes}
           announce={announce}
           onDone={refresh}
+          onClose={closeDialog}
+        />
+      ) : null}
+
+      {doneColumn && dialog?.kind === 'coldStorage' ? (
+        <ColdStorageDialog
+          projectKey={projectKey}
+          column={doneColumn}
+          // Every card in the column, not the ones the filters leave drawn:
+          // storing takes the whole column, whatever the board is showing.
+          cardCount={tasks.filter((task) => task.column_id === doneColumn.id).length}
+          mayStore={mayWriteCards && may('files')}
+          mayRestore={mayWriteCards}
+          announce={announce}
+          onDone={refresh}
+          onOpenTask={(taskId) => setDialog({ kind: 'task', taskId })}
           onClose={closeDialog}
         />
       ) : null}

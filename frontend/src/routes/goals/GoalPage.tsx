@@ -39,7 +39,7 @@ import {
 import { usePermissions } from '../usePermissions'
 import { cardMatches } from './cardMatch'
 import { GoalAside, REFUSAL_ID } from './GoalAside'
-import { Filters, GoalCardRow } from './GoalCards'
+import { COLD_STORAGE, Filters, GoalCardRow, placeOf } from './GoalCards'
 import styles from './GoalPage.module.css'
 import { LinkCardsDialog } from './LinkCardsDialog'
 
@@ -120,12 +120,17 @@ export function GoalPage() {
   // because a word was typed is a chip that lies.
   const searchMatched = goalDetail.tasks.filter((task) => cardMatches(task, searchWord))
   const shownTasks = searchMatched.filter(
-    (task) => onlyColumn === null || task.column_id === onlyColumn,
+    (task) => onlyColumn === null || placeOf(task) === onlyColumn,
   )
-  const columnGroups = columns
-    .map((column) => ({
-      column,
-      tasks: shownTasks.filter((task) => task.column_id === column.id),
+  // Cold storage last, as it is on the board: its cards are off every column
+  // but still the goal's, and still counted in its progress.
+  const columnGroups = [
+    ...columns.map((column) => ({ id: column.id, name: column.name })),
+    { id: COLD_STORAGE, name: 'Cold storage' },
+  ]
+    .map((place) => ({
+      ...place,
+      tasks: shownTasks.filter((task) => placeOf(task) === place.id),
     }))
     .filter((group) => group.tasks.length > 0)
 
@@ -229,10 +234,10 @@ export function GoalPage() {
             </EmptyState>
           ) : null}
 
-          {columnGroups.map(({ column, tasks }) => (
-            <section key={column.id} className={styles.group}>
+          {columnGroups.map(({ id, name, tasks }) => (
+            <section key={id} className={styles.group}>
               <h2>
-                {column.name}
+                {name}
                 <span className={styles.count}>{tasks.length}</span>
               </h2>
               <ul className={styles.cards}>

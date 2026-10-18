@@ -21,6 +21,9 @@
 #   before   creates the shared secrets if there are none yet, copies
 #            production's jev key into them, and makes the shared blob volume
 #            (dev_slot_prepare)
+#   migrate  puts the slot on the shared database, or on a copy of its own if
+#            the branch brings migrations main does not have yet
+#            (dev_slot_database)
 #   after    writes what it deployed into the slot directory, retires the
 #            slot's own Postgres and the old single dev stack, regenerates the
 #            index, drops any old tailscale path mapping for the slot and
@@ -46,11 +49,20 @@ DEV_INDEX_CONTAINER=cylist-dev-index
 DEV_INDEX_IMAGE=busybox:stable
 DEV_LOCK="$DEV_ROOT/.cylist-dev.lock"
 DEV_BLOB_VOLUME=cylist-dev-blobs
+# The shared database only ever takes migrations that are on this branch of
+# origin; see dev_slot_database.
+DEV_MAIN_BRANCH="${CYLIST_DEV_MAIN_BRANCH:-main}"
+DEV_MIGRATIONS=backend/alembic/versions
 DEV_REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-dhruva-nu/cylist}"
 
 dev_slot_dir() { printf '%s/cylist-dev-%s' "$DEV_ROOT" "$1"; }
 dev_slot_url() { printf 'https://dev%s.%s/' "$1" "$DEV_DOMAIN"; }
 dev_index_url() { printf 'https://dev.%s/' "$DEV_DOMAIN"; }
+# A slot's own database, when it has one, and the env file that points the slot
+# at it. docker-compose.dev.yml reads that file after the shared app.env, so its
+# CYLIST_DATABASE_URL wins; with no file the slot is on the shared database.
+dev_slot_db_name() { printf 'cylist_slot_%s' "$1"; }
+dev_slot_db_env() { printf '%s/db.env' "$(dev_slot_dir "$1")"; }
 
 # --- Before the build ---------------------------------------------------------
 
@@ -59,6 +71,12 @@ dev_slot_prepare() {
   _dev_slot_jev_key
   # Idempotent: makes it the first time, and is a no-op every time after.
   docker volume create "$DEV_BLOB_VOLUME" > /dev/null
+  # A volume made this way is root's, and the image has no /data/blobs for
+  # Docker to copy an owner from when it is mounted there — so the app, which
+  # runs as cylist (uid 10001, backend/Dockerfile), could not write a single
+  # file into it, and every upload on every slot was a 500. Handed to cylist on
+  # every deploy, which is a no-op once it already is.
+  docker run --rm -v "$DEV_BLOB_VOLUME":/blobs "$DEV_INDEX_IMAGE" chown 10001 /blobs
 }
 
 # Until some slot has been deployed there are no shared secrets, and dev's are
@@ -122,6 +140,115 @@ _dev_slot_jev_key() {
   echo "   dev slot $SLOT uses production's jev key"
 }
 
+# --- The database ---------------------------------------------------------------
+
+# Five branches share one database, and a migration is not something they can
+# share. A branch's unmerged migration would change the schema under the other
+# four, two branches whose migrations fork from the same parent could not both
+# be applied, and a migration that never reached main would leave the database
+# at a revision main has never heard of — after which no deploy of main could
+# migrate it again until somebody repaired it by hand.
+#
+# So the shared database only ever takes migrations that are already on main.
+# A branch with migrations of its own (any file under alembic/versions that main
+# does not have, or has differently) gets a database of its own instead,
+# cylist_slot_N, made afresh on every deploy from the dump of the shared one
+# deploy.sh has just taken, and then migrated. It starts with everything the
+# other slots show; what it changes, schema or data, stays in the slot and is
+# gone at its next deploy. A slot whose branch has no migrations of its own goes
+# back to the shared database, and its copy is dropped once it is up.
+#
+# Sets DEV_DB_MODE to `shared` or `own`, for the steps after it.
+dev_slot_database() {
+  local dump="$1" unmerged
+  step "Choosing slot $SLOT's database"
+  if ! unmerged="$(_dev_unmerged_migrations)"; then
+    warn "could not find origin/$DEV_MAIN_BRANCH to compare migrations with, so slot $SLOT gets a database of its own rather than risk migrating the shared one"
+    unmerged="(unknown)"
+  fi
+
+  if [[ -z "$unmerged" ]]; then
+    DEV_DB_MODE=shared
+    rm -f "$(dev_slot_db_env "$SLOT")"
+    echo "   no migrations that $DEV_MAIN_BRANCH does not have: the shared database"
+    return 0
+  fi
+
+  DEV_DB_MODE=own
+  local name url
+  name="$(dev_slot_db_name "$SLOT")"
+  echo "   migrations that $DEV_MAIN_BRANCH does not have:"
+  sed 's/^/     /' <<< "$unmerged"
+  echo "   so a database of its own, $name, copied from the shared one"
+  url="$(_dev_database_url "$name")" ||
+    { echo "   no CYLIST_DATABASE_URL in $SECRETS_DIR/app.env" >&2; exit 1; }
+
+  # FORCE, because the slot's running container is still connected to the copy
+  # its last deploy made; it is replaced a moment from now anyway.
+  _dev_psql "DROP DATABASE IF EXISTS \"$name\" WITH (FORCE); CREATE DATABASE \"$name\";"
+  if [[ -s "$dump" ]]; then
+    # shellcheck disable=SC2016  # expanded in the container, not here
+    db_compose exec -T postgres sh -c \
+      'pg_restore --no-owner --exit-on-error -U "$POSTGRES_USER" -d "$1"' sh "$name" < "$dump"
+  fi
+  (
+    umask 077
+    mkdir -p "$(dev_slot_dir "$SLOT")"
+    printf 'CYLIST_DATABASE_URL=%s\n' "$url" > "$(dev_slot_db_env "$SLOT").new"
+    mv "$(dev_slot_db_env "$SLOT").new" "$(dev_slot_db_env "$SLOT")"
+  )
+}
+
+# The files under alembic/versions that this tree has and origin/main does not,
+# one per line — new, changed or renamed here, or not yet committed. Nothing
+# when the branch brings no migrations of its own, which includes a branch
+# that is merely behind main. Fails if there is no origin/main to compare with.
+_dev_unmerged_migrations() {
+  local main="origin/$DEV_MAIN_BRANCH" depth=()
+  # actions/checkout fetches the one commit it deploys, so main has to be
+  # fetched too. Only as shallow as the checkout already is: a full clone run
+  # by hand must not be turned into a shallow one.
+  [[ "$(git rev-parse --is-shallow-repository 2> /dev/null)" == true ]] && depth=(--depth=1)
+  git fetch --quiet --no-tags "${depth[@]}" origin \
+    "+refs/heads/$DEV_MAIN_BRANCH:refs/remotes/$main" 2> /dev/null ||
+    warn "could not fetch $DEV_MAIN_BRANCH; comparing migrations with the $main already here"
+  git rev-parse --verify --quiet "$main^{commit}" > /dev/null || return 1
+  {
+    git diff --name-only --diff-filter=ACMRT "$main" -- "$DEV_MIGRATIONS"
+    git ls-files --others --exclude-standard -- "$DEV_MIGRATIONS"
+  } | sort -u
+}
+
+# The shared app.env's database URL with its database swapped for $1, keeping
+# any ?query after it.
+_dev_database_url() {
+  local url base tail query=""
+  url="$(sed -n 's/^CYLIST_DATABASE_URL=//p' "$SECRETS_DIR/app.env" | head -n1)"
+  [[ -n "$url" ]] || return 1
+  base="${url%/*}"
+  tail="${url##*/}"
+  [[ "$tail" == *\?* ]] && query="?${tail#*\?}"
+  printf '%s/%s%s' "$base" "$1" "$query"
+}
+
+# SQL run as the shared Postgres's superuser, against its maintenance database.
+_dev_psql() {
+  # shellcheck disable=SC2016  # expanded in the container, not here
+  db_compose exec -T postgres sh -c \
+    'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres' \
+    <<< "SET client_min_messages = warning; $1"
+}
+
+# Once the slot is up on the shared database, the copy it had before is nothing
+# anyone can reach.
+_dev_slot_drop_own_db() {
+  [[ "${DEV_DB_MODE:-}" == shared ]] || return 0
+  local name
+  name="$(dev_slot_db_name "$SLOT")"
+  _dev_psql "DROP DATABASE IF EXISTS \"$name\" WITH (FORCE);" 2> /dev/null ||
+    warn "could not drop slot $SLOT's old database $name; it is unused and can be dropped by hand"
+}
+
 # --- After the app is healthy ---------------------------------------------------
 
 dev_slot_publish() {
@@ -136,12 +263,13 @@ dev_slot_publish() {
   local slot_dir
   slot_dir="$(dev_slot_dir "$SLOT")"
   mkdir -p "$slot_dir"
-  printf 'branch=%s\nsha=%s\ntime=%s\n' "$branch" "$sha" "$deployed_at" \
-    > "$slot_dir/deployed.new"
+  printf 'branch=%s\nsha=%s\ntime=%s\ndatabase=%s\n' \
+    "$branch" "$sha" "$deployed_at" "${DEV_DB_MODE:-shared}" > "$slot_dir/deployed.new"
   mv "$slot_dir/deployed.new" "$slot_dir/deployed"
-  echo "   $branch @ ${sha:0:12}, $deployed_at"
+  echo "   $branch @ ${sha:0:12}, $deployed_at, ${DEV_DB_MODE:-shared} database"
 
   _dev_retire_slot_postgres
+  _dev_slot_drop_own_db
 
   # Two slots can deploy at once (by hand, or two runners), and the index is
   # one thing shared by all five: read, changed, written. Serialise just that
@@ -266,21 +394,24 @@ _dev_slot_check_served() {
 # no process of its own to serve it.
 dev_index_write() {
   mkdir -p "$DEV_INDEX_DIR"
-  local tmp="$DEV_INDEX_DIR/.index.html.$$" rows="" n file branch sha deployed_at commit
+  local tmp="$DEV_INDEX_DIR/.index.html.$$" rows="" n file branch sha deployed_at commit database
   for n in "${DEV_SLOTS[@]}"; do
     file="$(dev_slot_dir "$n")/deployed"
     if [[ -f "$file" ]]; then
       branch="$(sed -n 's/^branch=//p' "$file" | head -n1)"
       sha="$(sed -n 's/^sha=//p' "$file" | head -n1)"
       deployed_at="$(sed -n 's/^time=//p' "$file" | head -n1)"
+      # A slot deployed before slots could have their own was on the shared one.
+      database="$(sed -n 's/^database=//p' "$file" | head -n1)"
+      if [[ "$database" == own ]]; then database="its own"; else database=shared; fi
       if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
         commit="<a href=\"$(_html "$DEV_REPO_URL")/commit/$sha\"><code>${sha:0:12}</code></a>"
       else
         commit="<code>$(_html "$sha")</code>"
       fi
-      rows+="<tr><th><a href=\"$(dev_slot_url "$n")\">dev_$n</a></th><td><code>$(_html "$branch")</code></td><td>$commit</td><td><time>$(_html "$deployed_at")</time></td></tr>"$'\n'
+      rows+="<tr><th><a href=\"$(dev_slot_url "$n")\">dev_$n</a></th><td><code>$(_html "$branch")</code></td><td>$commit</td><td><time>$(_html "$deployed_at")</time></td><td>$database</td></tr>"$'\n'
     else
-      rows+="<tr class=\"empty\"><th>dev_$n</th><td colspan=\"3\">empty</td></tr>"$'\n'
+      rows+="<tr class=\"empty\"><th>dev_$n</th><td colspan=\"4\">empty</td></tr>"$'\n'
     fi
   done
 
@@ -319,7 +450,7 @@ dev_index_write() {
 <p>What each slot on dnu-home-1 is running. Deploy one with the <em>Deploy dev</em> workflow, picking the branch and the slot. Updated $(_html "$(date -u +%Y-%m-%dT%H:%M:%SZ)").</p>
 <div class="wrap">
 <table>
-<thead><tr><th>Slot</th><th>Branch</th><th>Commit</th><th>Deployed (UTC)</th></tr></thead>
+<thead><tr><th>Slot</th><th>Branch</th><th>Commit</th><th>Deployed (UTC)</th><th>Database</th></tr></thead>
 <tbody>
 $rows</tbody>
 </table>

@@ -1,10 +1,11 @@
 /*
- * Today's work: the count on the sidebar's button, and the list it opens.
+ * Today: the count on the sidebar's button, the planner it opens, and the
+ * dialog that wraps a day up.
  *
- * The board's own card shape, compressed: what the card is on one line, the
- * marks it carries on the next. Every colour is a token, so the list reads
- * in both themes without a value of its own — see the note at the top of
- * tokens.css.
+ * Quiet on purpose. Colour is used as ink only — late in red, near in amber,
+ * done in green — and never as a tint behind a row; a picked card says so
+ * with a tick, not a band of colour. Every colour is a token, so both themes
+ * come for free — see the note at the top of tokens.css.
  */
 
 /* When there is nothing to list, or nothing to list it from. */
@@ -15,21 +16,12 @@
   line-height: 1.5;
 }
 
-.groups {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* How many cards are behind the strip, worn on it — and on the collapsed
+/* How many to-dos are left today, worn on the strip — and on the collapsed
    rail, where the strip itself is not on screen either.
  *
  * No margin of its own. It sits in two places with opposite ideas of where it
- * belongs: out at the far end of the strip, where the folding sections keep
- * theirs, and dead centre of the rail under the handle. Each container
- * already says which — the strip is `space-between` and the rail centres its
- * items — and a `margin-left: auto` for the first was what pushed it off
- * centre in the second. */
+ * belongs: out at the far end of the strip, and dead centre of the rail under
+ * the handle. Each container already says which. */
 .count,
 .countLate {
   padding: 1px 6px;
@@ -43,16 +35,161 @@
   letter-spacing: 0;
 }
 
-/* Anything overdue turns the count's ink, because that is the part of the
-   number that changes what you do next. The ink only — the grey ground stays,
-   so the count is the same shape whatever it says. */
+/* A late card of yours that is not on the day turns the count's ink. The ink
+   only — the grey ground stays, so the count is the same shape either way. */
 .countLate {
   color: var(--blocked);
 }
 
+/* --- The planner ---------------------------------------------------------- */
+
+.dayNav {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.dayField input {
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+/* Two panes, each scrolling on its own, at a fixed height — so picking a card
+   on the left does not shove the plan on the right down the dialog. */
+.planner {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  height: min(640px, 68vh);
+  border-top: 1px solid var(--line);
+}
+
+.planner.folded {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.cardsPane,
+.cardsRail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
+.cardsRail {
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+}
+
+/* The way back to the cards, said in words rather than only a chevron: a
+   folded pane is easy to forget is there. */
+.railLabel {
+  padding: 8px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  cursor: pointer;
+}
+
+.railLabel:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.planPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.paneHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 14px 16px 8px 20px;
+}
+
+.paneHead h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: normal;
+}
+
+.paneHead > :last-child:not(h3):not(.paneNote) {
+  margin-left: auto;
+}
+
+.paneNote {
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.cardsTools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 8px 20px;
+}
+
+.cardsTools > :last-child {
+  align-self: flex-start;
+}
+
+.find input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+.cardList,
+.planList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cardList {
+  padding: 0 10px 16px 12px;
+}
+
+.planList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 20px 20px;
+}
+
+.group {
+  margin-top: 10px;
+}
+
+/* Sentence case over a hairline, with the count at the far end. */
 .groupName,
 .groupNameLate {
-  margin: 0 0 6px;
+  display: flex;
+  justify-content: space-between;
+  margin: 0 8px 4px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
   color: var(--ink-3);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -67,19 +204,16 @@
 .rows {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* A button now rather than a link, so it needs a button's defaults taken back
-   off it: full width, no chrome of its own, and its text left where text
-   goes. */
-.row {
+.pick {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  gap: 10px;
+  align-items: center;
   width: 100%;
   padding: 7px 8px;
   border: 0;
@@ -88,12 +222,19 @@
   color: var(--ink);
   font: inherit;
   text-align: left;
-  text-decoration: none;
   cursor: pointer;
 }
 
-.row:hover {
+.pick:hover {
   background: var(--paper-2);
+}
+
+.pickText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 
 .head {
@@ -110,99 +251,336 @@
   font-size: var(--text-xs);
 }
 
-/* Two lines and then an ellipsis. A card's title is the only thing on the row
-   that tells you which piece of work it is, so it gets more room than a
-   single line — and a stop, because a sidebar full of one card's title is a
-   sidebar holding one card. */
-.title {
-  display: -webkit-box;
-  min-width: 0;
+.pickTitle {
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   color: var(--ink);
-  font-family: var(--font-ui);
   font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  line-height: 1.35;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.marks {
+.picked .pickTitle {
+  color: var(--ink-2);
+}
+
+.pickMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-/* The priority chevron, in the four inks the board uses for it. */
-.prio {
-  display: inline-flex;
-  align-items: center;
-}
-
-.priority_p0 {
-  color: var(--priority-p0);
-}
-
-.priority_p1 {
-  color: var(--priority-p1);
-}
-
-.priority_p2 {
-  color: var(--priority-p2);
-}
-
-.priority_p3 {
-  color: var(--priority-p3);
-}
-
-/* Which of the four states a card is in, said in full, because a row here
-   carries no tint of its own to say it. Active is never drawn: it is the
-   baseline, and a word on every row would be a word carrying nothing. The
-   word in the state's ink behind a dot of the same — no ground, so a list of
-   held cards does not turn into a stripe of amber boxes. */
-.pill {
-  display: inline-flex;
   gap: 5px;
-  align-items: center;
-  font-family: var(--font-ui);
+  color: var(--ink-3);
   font-size: var(--text-sm);
+}
+
+.late {
+  color: var(--blocked);
   font-weight: var(--weight-semibold);
 }
 
-.pill::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-  background: currentColor;
-}
-
-.pill_hold {
+.soon {
   color: var(--hold);
+  font-weight: var(--weight-semibold);
 }
 
-.pill_blocked {
-  color: var(--blocked);
+/* + to pick it up; a tick, in the done green, once it is on the day. */
+.pickMark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  font-size: var(--text-md);
 }
 
-/* A cancelled card is filtered out before it reaches a row — see `today.ts` —
-   but the pill is written for all four states rather than three, because a
-   list of states with a hole in it is the kind of thing that stays wrong when
-   the filter changes. */
-.pill_cancelled,
-.pill_active {
+.picked .pickMark {
+  border-color: transparent;
+  color: var(--ok);
+}
+
+/* One card on the day. A border rather than a fill or a shadow. */
+.pickBlock {
+  padding: 10px 12px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.pickHead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.cardOpen {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+button.cardOpen {
+  cursor: pointer;
+}
+
+button.cardOpen:hover .blockTitle {
+  text-decoration: underline;
+}
+
+.blockTitle {
+  overflow: hidden;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.todos {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.todo input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--go);
+  cursor: pointer;
+}
+
+.todoText {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
+.done .todoText,
+.moved .todoText,
+.kept .todoText {
   color: var(--ink-3);
 }
 
-/* When an overdue card was wanted. The date itself rather than a day count:
-   the group heading already said these are late, and the date is what you
-   quote in the conversation about it. */
-.late {
-  margin-left: auto;
+.done .todoText {
+  text-decoration: line-through;
+  text-decoration-color: var(--line-2);
+}
+
+.todoMark {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.todoError {
+  flex: 0 0 100%;
+  padding-left: 26px;
   color: var(--blocked);
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+
+/* Out of the way until the row is pointed at or reached by keyboard. */
+.todoDelete {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.todo:hover .todoDelete,
+.todoDelete:focus-visible {
+  opacity: 1;
+}
+
+.todoDelete:hover {
+  background: var(--paper-2);
+  color: var(--blocked);
+}
+
+.compose {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.composeBox {
+  flex: 1;
+}
+
+/* The box reads as a line to write on, not a field to fill: no border of its
+   own until it has focus. */
+.composeBox input {
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-base);
+}
+
+.composeBox input:focus {
+  border-bottom-color: var(--line-2);
+  outline: none;
+}
+
+.progress {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}
+
+.progress b {
+  color: var(--ink);
+  font-weight: var(--weight-semibold);
+}
+
+.meter {
+  width: 120px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--go);
+}
+
+/* --- Wrapping up ------------------------------------------------------------ */
+
+.wrapBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 26px 22px;
+}
+
+.lead {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-base);
+  line-height: 1.55;
+}
+
+.wrapTarget {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.fieldName {
+  color: var(--ink-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.wrapAll {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.wrapAll input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--go);
+}
+
+.wrapAll .paneNote {
+  margin-left: auto;
+  font-weight: var(--weight-regular);
+}
+
+.wrapCard + .wrapCard {
+  margin-top: 4px;
+}
+
+.wrapCardHead {
+  margin: 0 0 2px;
+  color: var(--ink-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.wrapCard .todo:first-child {
+  border-top: 0;
+}
+
+.wrapNote {
+  margin-right: auto;
+  color: var(--ink-3);
+  font-size: var(--text-md);
+}
+
+/* A window too narrow for two panes stacks them: the cards above, the plan
+   below, and the dialog scrolls as a whole. */
+@media (width < 900px) {
+  .planner,
+  .planner.folded {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .cardsPane {
+    max-height: 45vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cardsRail {
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 6px 12px;
+  }
+
+  .railLabel {
+    writing-mode: horizontal-tb;
+    transform: none;
+  }
 }

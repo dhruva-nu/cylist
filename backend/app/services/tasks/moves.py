@@ -70,7 +70,8 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task,
 
     Raises:
         UnprocessableRequestError: if the task is a sub-task, which is not on
-            the board and so has nowhere to be moved to; if the column belongs
+            the board and so has nowhere to be moved to; if it is in cold
+            storage, which it has to be restored from first; if the column belongs
             to another project, if the card's template is not allowed in it or
             not allowed to end on the outcome named, if the outcome is not one
             of that column's, if the column it is leaving still has the card
@@ -78,6 +79,7 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task,
             destination is the last column and a sub-task is still open.
     """
     _refuse_moving_subtask(task)
+    _refuse_moving_stored(task)
     destination = await _destination_column(session, task, data.column_id)
     templates.require_permitted(task, destination)
     source_id = _board_column_id(task)
@@ -224,6 +226,24 @@ def _refuse_moving_subtask(task: Task) -> None:
         )
 
 
+def _refuse_moving_stored(task: Task) -> None:
+    """Stop a card in cold storage being dragged back by a move.
+
+    Restoring is its own act — :func:`app.services.tasks.restore` — because it
+    is a return to the board's end, still finished, rather than a card turning
+    up wherever it was dropped with no column it is coming from.
+
+    Raises:
+        UnprocessableRequestError: if the card is in cold storage.
+    """
+    if task.in_cold_storage:
+        raise UnprocessableRequestError(
+            f"{task.reference} is in cold storage, so it is not on the board to be moved. "
+            "Restore it first; it goes back to the board's last column.",
+            details={"reference": task.reference},
+        )
+
+
 async def _destination_column(session: AsyncSession, task: Task, column_id: UUID) -> BoardColumn:
     """The column a card is being moved into, which must be on its own board.
 
@@ -259,12 +279,23 @@ async def _refuse_unfinished(
     if not arriving_at_end:
         return
 
-    open_cards = [
-        subtask.reference for subtask in await subtasks(session, task) if not subtask.is_settled
-    ]
-    open_boxes = [
-        item.title for item in await checklist(session, task) if item.state is ChecklistState.OPEN
-    ]
+    await refuse_open_work(session, task, last_column, act="moving this card")
+
+
+async def refuse_open_work(
+    session: AsyncSession, task: Task, last_column: BoardColumn, *, act: str
+) -> None:
+    """Refuse to land a card in the last column over work still open under it.
+
+    Shared by a move into that column and a return from cold storage, which
+    keep the same rule for the same reason: a card whose parts are open is not
+    done, and the last column says it is. ``act`` names what was refused, as
+    the sentence's object — "moving this card", "restoring it".
+
+    Raises:
+        UnprocessableRequestError: if anything under the task is still open.
+    """
+    open_cards, open_boxes = await open_work(session, task)
     outstanding = [*open_cards, *open_boxes]
     if not outstanding:
         return
@@ -272,7 +303,7 @@ async def _refuse_unfinished(
     noun = "sub-task" if len(outstanding) == 1 else "sub-tasks"
     raise UnprocessableRequestError(
         f"{task.reference} still has {len(outstanding)} unfinished {noun}: "
-        f"{', '.join(outstanding)}. Finish or cancel each of them before moving this card "
+        f"{', '.join(outstanding)}. Finish or cancel each of them before {act} "
         f"to {last_column.name}.",
         details={
             "column": last_column.name,
@@ -280,6 +311,22 @@ async def _refuse_unfinished(
             "open_checklist_items": open_boxes,
         },
     )
+
+
+async def open_work(session: AsyncSession, task: Task) -> tuple[list[str], list[str]]:
+    """What is still open under a card: its sub-tasks by reference, then its
+    checklist items by title.
+
+    Asked by anything putting a card in the board's last column, which a card
+    with open work under it may not be in.
+    """
+    open_cards = [
+        subtask.reference for subtask in await subtasks(session, task) if not subtask.is_settled
+    ]
+    open_boxes = [
+        item.title for item in await checklist(session, task) if item.state is ChecklistState.OPEN
+    ]
+    return open_cards, open_boxes
 
 
 def _restart_stages(task: Task, column: BoardColumn) -> None:
@@ -356,8 +403,8 @@ def _board_column_id(task: Task) -> UUID:
     """The column a top-level card is in.
 
     States the invariant ``placed_by_parentage`` enforces rather than checking
-    it: everything that asks has already refused a sub-task, which is the only
-    kind of task with no column to name.
+    it: everything that asks has already refused a sub-task and a card in cold
+    storage, which are the only tasks with no column to name.
 
     Raises:
         UnprocessableRequestError: if a sub-task reaches here anyway, which is a

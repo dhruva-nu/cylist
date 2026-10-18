@@ -62,7 +62,12 @@ async def card_count(session: AsyncSession, project: Project) -> int:
     total = await session.scalar(
         select(func.count())
         .select_from(Task)
-        .where(Task.project_id == project.id, Task.parent_id.is_(None))
+        .where(
+            Task.project_id == project.id,
+            Task.parent_id.is_(None),
+            # A stored card is in no column, so it is in none of their counts.
+            Task.archived_at.is_(None),
+        )
     )
     return total or 0
 

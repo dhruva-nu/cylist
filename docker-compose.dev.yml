@@ -7,7 +7,8 @@
 # The same app container as production and staging, and deliberately the same
 # shape: one image serving the API and the built SPA. What it does not have is
 # a Postgres of its own: every slot uses the one in docker-compose.dev-db.yml,
-# so the data is the same whichever slot you open.
+# so the data is the same whichever slot you open — unless its branch has
+# migrations main does not, when it gets a database of its own on that Postgres.
 #
 # Unlike staging, a slot is not tied to any one branch. The deploy workflow is
 # workflow_dispatch — you pick the branch in GitHub's "Run workflow" dropdown
@@ -68,6 +69,15 @@ services:
       # password out from under you.
       - path: ${CYLIST_DEV_DIR:?set CYLIST_DEV_DIR to the shared dev directory holding app.env}/app.env
         format: raw
+      # Only there while the slot's branch has migrations main does not: then
+      # its CYLIST_DATABASE_URL, read after app.env and so winning over it,
+      # points the slot at a copy of the shared database of its own,
+      # cylist_slot_N, rather than at the shared one. Written and removed by
+      # dev_slot_database in scripts/dev-slot.sh; see DEPLOY.md, "One database
+      # for every slot".
+      - path: ${CYLIST_DEV_DIR}/../cylist-dev-${CYLIST_DEV_SLOT}/db.env
+        format: raw
+        required: false
     environment:
       # Not "dev" — see the note at the top of this file and the docstring on
       # Settings.is_deployed.

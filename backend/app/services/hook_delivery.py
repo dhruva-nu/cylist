@@ -96,6 +96,7 @@ SIGNATURE_HEADER = "X-Cylist-Signature"
 SIGNATURE_TOLERANCE = timedelta(minutes=5)
 
 TEST_EVENT = "hook.test"
+FIRED_EVENT = "hook.fired"
 
 
 # --- Signing ---------------------------------------------------------------
@@ -249,8 +250,9 @@ async def send_now(
 ) -> HookDelivery:
     """Send one delivery inside the caller's request, and record the answer.
 
-    For "Send test", whose whole point is the answer: the page that asked is
-    waiting for it, which a courier pass could only give it later.
+    For "Send test" and for firing a manual hook, whose page is waiting for the
+    answer, which a courier pass could only give it later. A firing the
+    receiver refuses is left pending, for the courier to try again.
     """
     secret = hooks.secret_of(cipher_for(vault_key), hook)
     await session.flush()

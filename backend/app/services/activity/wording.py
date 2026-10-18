@@ -123,6 +123,14 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     if entry.verb == "task.comment_deleted":
         said = str(payload.get("comment") or "").strip()
         return f"Deleted the comment {_quoted(said)}." if said else "Deleted a comment."
+    if entry.verb == "task.archived":
+        file = payload.get("file")
+        return f"Moved to cold storage, in {file}." if file else "Moved to cold storage."
+    if entry.verb == "task.restored":
+        column = payload.get("column")
+        return (
+            f"Restored from cold storage to {column}." if column else "Restored from cold storage."
+        )
     if entry.verb == "task.checklist_added":
         return f"Added {_quoted(payload.get('title'))} to the checklist."
     if entry.verb == "task.checklist_updated":
@@ -357,6 +365,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
         f"Gave the hook {_quoted(p.get('name'))} a new signing secret."
     ),
     "hook.deleted": lambda p: f"Deleted the hook {_quoted(p.get('name'))}.",
+    "hook.fired": lambda p: f"Fired the hook {_quoted(p.get('name'))}.",
     # --- Files --------------------------------------------------------------
     "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
     "folder.updated": lambda p: (

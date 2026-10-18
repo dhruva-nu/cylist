@@ -12,6 +12,8 @@ from app.models.hook import NAME_MAX_LENGTH, URL_MAX_LENGTH, DeliveryState
 from app.models.task import TaskType
 from app.schemas.common import Schema
 
+MESSAGE_MAX_LENGTH = 2000
+
 
 class HookEvent(Schema):
     verb: str = Field(description="What a hook names, e.g. `task.moved`.")
@@ -42,6 +44,13 @@ class HookCreate(_HookBody):
         examples=["https://ci.example.com/cylist"],
     )
     enabled: bool = True
+    manual: bool = Field(
+        default=False,
+        description=(
+            "Fired by hand, from `POST .../fire`, and never by a change. A manual hook "
+            "takes no `verbs` and no filters."
+        ),
+    )
     verbs: list[str] = Field(
         default_factory=list,
         description="The events to fire on, from `GET /hooks/events`. Empty fires on all of them.",
@@ -62,6 +71,14 @@ class HookCreate(_HookBody):
     agent_only: bool = Field(
         default=False, description="Only cards assigned to the agent after the change."
     )
+    mentions_only: bool = Field(
+        default=False,
+        description="Only `task.commented`, and only a comment that tags somebody with `@`.",
+    )
+    mentioned_person_id: UUID | None = Field(
+        default=None,
+        description="Only `task.commented`, and only a comment that tags this project member.",
+    )
     secret: str | None = Field(
         default=None,
         description="The signing secret to use. Omit to have one generated.",
@@ -75,6 +92,11 @@ class HookUpdate(_HookBody):
     name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_LENGTH)
     url: str | None = Field(default=None, min_length=1, max_length=URL_MAX_LENGTH)
     enabled: bool | None = None
+    manual: bool | None = Field(
+        default=None,
+        description="Make it manual, or put it back on changes. Clear its events and "
+        "filters in the same request to make it manual.",
+    )
     verbs: list[str] | None = None
     to_column_id: UUID | None = None
     from_column_id: UUID | None = None
@@ -83,6 +105,25 @@ class HookUpdate(_HookBody):
     agent_only: bool | None = Field(
         default=None, description="Only cards assigned to the agent. `null` turns it off."
     )
+    mentions_only: bool | None = Field(
+        default=None, description="Only comments that tag somebody. `null` turns it off."
+    )
+    mentioned_person_id: UUID | None = None
+
+
+class HookFire(Schema):
+    message: str | None = Field(
+        default=None,
+        max_length=MESSAGE_MAX_LENGTH,
+        description="Anything the receiver should be told — sent as `detail.message`.",
+        examples=["Release 1.4 to staging"],
+    )
+
+    @field_validator("message")
+    @classmethod
+    def _message(cls, value: str | None) -> str | None:
+        # Blank is the same as nothing said.
+        return (value or "").strip() or None
 
 
 class HookSecretRotate(Schema):
@@ -102,6 +143,7 @@ class HookRead(Schema):
     id: UUID
     name: str
     enabled: bool
+    manual: bool = Field(description="Fired by hand only; never by a change.")
     url: str
     verbs: list[str]
     to_column_id: UUID | None
@@ -115,6 +157,12 @@ class HookRead(Schema):
     template_name: str | None
     task_type: TaskType | None
     agent_only: bool = Field(description="Only cards assigned to the agent match.")
+    mentions_only: bool = Field(description="Only comments that tag somebody match.")
+    mentioned_person_id: UUID | None
+    mentioned_person_name: str | None = Field(
+        description="The tagged person's name now, or null if they have been deleted — in "
+        "which case the filter matches nothing."
+    )
     secret_hint: str = Field(description="The signing secret's last four characters.")
     last_delivery: DeliverySummary | None
     created_at: datetime

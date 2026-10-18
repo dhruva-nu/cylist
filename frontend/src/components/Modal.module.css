@@ -33,6 +33,13 @@
   width: min(860px, 100%);
 }
 
+/* Two panes side by side — Today's open cards beside the plan — where 860px
+   would leave each pane narrower than one of the dialogs above. On a window too
+   narrow for it the panes stack instead; see Today.module.css. */
+.modal.widest {
+  width: min(1120px, 100%);
+}
+
 .header {
   display: flex;
   gap: 12px;

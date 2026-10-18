@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -730,3 +730,84 @@ class TestTheDirectoryAndTheAccount:
         )
 
         assert count == 1
+
+
+SECOND_ADITI = {**ADITI, "name": "Aditi K (again)"}
+
+GIVING_AN_ADDRESS = ["invite", "open account", "email change"]
+
+
+async def _give_address(signed_in: AsyncClient, how: str) -> tuple[str, Response]:
+    """Add somebody new and try to make ``ADITI_EMAIL`` theirs to sign in with,
+    the way ``how`` names. Returns their id and the response that decides it."""
+    if how == "email change":
+        # Invited under another address first, so the row is one the index
+        # holds before its address changes.
+        person, _ = await open_account(signed_in, SECOND_ADITI, "aditi.k@cylist.dev")
+        return person["id"], await signed_in.patch(
+            f"/people/{person['id']}", json={"email": ADITI_EMAIL}
+        )
+    person = (await signed_in.post("/people", json={**SECOND_ADITI, "email": ADITI_EMAIL})).json()
+    if how == "invite":
+        return person["id"], await signed_in.post(f"/people/{person['id']}/invite")
+    return person["id"], await signed_in.put(
+        f"/people/{person['id']}/account",
+        json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+    )
+
+
+@pytest.mark.parametrize("how", GIVING_AN_ADDRESS)
+class TestAnAddressSomebodyElseWasGiven:
+    """What happens to an address when the person who already has it is not
+    what they seem — the usual case being one person added twice (CYLIST-93).
+
+    The index cannot ask what time it is, so whether an invitation has lapsed
+    is decided by the service, and it is decided the same way however the
+    second person comes by the address.
+    """
+
+    async def test_a_lapsed_invitation_gives_it_up(
+        self, how: str, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        first, _ = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        stored = await session.get(Person, first["id"])
+        assert stored is not None
+        stored.invite_expires_at = now() - timedelta(seconds=1)
+        await session.commit()
+
+        _, response = await _give_address(signed_in, how)
+
+        assert response.status_code in (200, 201), response.text
+        await session.refresh(stored)
+        assert stored.invite_token_hash is None
+        assert stored.invite_expires_at is None
+
+    async def test_an_unexpired_invitation_keeps_it_and_says_so(
+        self, how: str, signed_in: AsyncClient
+    ) -> None:
+        """Said as an invitation rather than as a sign-in address, so the
+        duplicate entry is what whoever reads it goes looking for."""
+        await open_account(signed_in, ADITI, ADITI_EMAIL)
+
+        second_id, response = await _give_address(signed_in, how)
+
+        assert response.status_code == 409
+        message = response.json()["error"]["message"]
+        assert "invited" in message
+        assert "sign-in address" not in message
+        assert ADITI["name"] in message
+        assert (await signed_in.get(f"/people/{second_id}")).json()["has_account"] is False
+
+    async def test_an_account_keeps_it_even_archived(
+        self, how: str, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        """Archiving keeps the password so they can be brought back — and so
+        the address still has to be theirs when they are."""
+        first, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+        assert (await signed_in.delete(f"/people/{first['id']}")).status_code == 200
+
+        _, response = await _give_address(signed_in, how)
+
+        assert response.status_code == 409
+        assert "sign-in address" in response.json()["error"]["message"]

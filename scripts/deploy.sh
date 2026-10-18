@@ -26,6 +26,10 @@
 #   $SECRETS_DIR/postgres.env  POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 #   $SECRETS_DIR/backups/      where this script leaves its dumps
 #
+# A dev slot whose branch has migrations main does not have runs on a copy of
+# the shared database of its own rather than migrating the shared one — see
+# dev_slot_database in scripts/dev-slot.sh.
+#
 # The order below is deliberate. The image is built before anything running is
 # touched, so a build that does not compile changes nothing. The database is
 # dumped before migrations run, because `alembic upgrade` is the one step here
@@ -140,20 +144,30 @@ fi
 ls -1t "$BACKUPS"/cylist-*.dump 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" |
   xargs -r rm --
 
+if [[ -n "$SLOT" ]]; then
+  # The shared database, or a copy of it for this slot alone if the branch
+  # brings migrations main does not have. Sets DEV_DB_MODE.
+  dev_slot_database "$DUMP"
+fi
+
 step "Applying migrations"
 # A one-off container rather than the app's own start-up, so a migration that
 # fails fails the deploy here — visibly — instead of leaving a container
 # restarting in a loop against a schema it does not match.
 #
-# A dev slot shares its database with four others, so the database can already
-# be at a revision this branch has never heard of — another slot's branch added
-# a migration and got there first. That slot owns the schema now; this one is
-# started on it as it is, with a warning, rather than refused, since an older
-# branch on a newer schema mostly works and dev is for looking.
+# A dev slot's database can already be at a revision this branch has never
+# heard of: main has moved on since the branch was cut, and the shared database
+# (or the copy of it this slot was just given) moved with it. The slot is
+# started on that schema as it is, with a warning, rather than refused, since an
+# older branch on a newer schema mostly works and dev is for looking.
 if ! migrate_log="$(compose run --rm -T app alembic upgrade head 2>&1)"; then
   echo "$migrate_log" >&2
   if [[ -n "$SLOT" ]] && grep -q "Can't locate revision" <<< "$migrate_log"; then
-    warn "the shared dev database is at a migration this branch does not have (another slot's branch put it there), so slot $SLOT starts on that schema unmigrated"
+    if [[ "$DEV_DB_MODE" == own ]]; then
+      warn "the dev database is at a migration of main's that this branch does not have, so slot $SLOT starts unmigrated, without its own migrations. Rebase the branch onto main and deploy again."
+    else
+      warn "the shared dev database is at a migration of main's that this branch does not have, so slot $SLOT starts on that schema unmigrated"
+    fi
   else
     exit 1
   fi

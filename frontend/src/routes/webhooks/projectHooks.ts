@@ -26,25 +26,41 @@ export interface HookDraft {
    * `verbs`, empty for this.
    */
   anyChange: boolean
+  /**
+   * Fired by hand rather than by changes. Kept apart from the rest so
+   * switching to it and back loses nothing; the server hears no events and no
+   * filters while it is on.
+   */
+  manual: boolean
   verbs: string[]
   toColumnId: string
   fromColumnId: string
   templateId: string
   taskType: '' | TaskType
   agentOnly: boolean
+  /**
+   * Which comments fire it: '' any (no filter), {@link TAGS_ANYONE} one that
+   * tags somebody, or a person's id for one that tags them.
+   */
+  tagged: string
   secret: string
 }
+
+/** The `tagged` choice for "a comment that tags anybody at all". */
+export const TAGS_ANYONE = 'anyone'
 
 export const EMPTY_DRAFT: HookDraft = {
   name: '',
   url: '',
   anyChange: false,
+  manual: false,
   verbs: [],
   toColumnId: '',
   fromColumnId: '',
   templateId: '',
   taskType: '',
   agentOnly: false,
+  tagged: '',
   secret: '',
 }
 
@@ -52,31 +68,41 @@ export function draftOf(hook: Hook): HookDraft {
   return {
     name: hook.name,
     url: hook.url,
-    anyChange: hook.verbs.length === 0,
+    // A manual hook's empty verbs are not "Any change": switched back to
+    // changes, it should ask which.
+    anyChange: !hook.manual && hook.verbs.length === 0,
+    manual: hook.manual,
     verbs: hook.verbs,
     toColumnId: hook.to_column_id ?? '',
     fromColumnId: hook.from_column_id ?? '',
     templateId: hook.template_id ?? '',
     taskType: hook.task_type ?? '',
     agentOnly: hook.agent_only,
+    tagged: hook.mentioned_person_id ?? (hook.mentions_only ? TAGS_ANYONE : ''),
     secret: '',
   }
 }
 
 /**
  * The form as the server reads it. Every filter is sent, null when empty, so
- * an edit that clears one clears it rather than leaving it alone.
+ * an edit that clears one clears it rather than leaving it alone. A manual
+ * hook sends every one of them cleared, since the server refuses a manual hook
+ * with any set.
  */
 export function inputOf(draft: HookDraft, creating: boolean): HookInput {
+  const rules = draft.manual ? { ...EMPTY_DRAFT, anyChange: true } : draft
   const input: HookInput = {
     name: draft.name.trim(),
     url: draft.url.trim(),
-    verbs: draft.anyChange ? [] : draft.verbs,
-    to_column_id: draft.toColumnId || null,
-    from_column_id: draft.fromColumnId || null,
-    template_id: draft.templateId || null,
-    task_type: draft.taskType || null,
-    agent_only: draft.agentOnly,
+    manual: draft.manual,
+    verbs: rules.anyChange ? [] : rules.verbs,
+    to_column_id: rules.toColumnId || null,
+    from_column_id: rules.fromColumnId || null,
+    template_id: rules.templateId || null,
+    task_type: rules.taskType || null,
+    agent_only: rules.agentOnly,
+    mentions_only: rules.tagged === TAGS_ANYONE,
+    mentioned_person_id: rules.tagged === '' || rules.tagged === TAGS_ANYONE ? null : rules.tagged,
   }
   if (creating && draft.secret.trim() !== '') input.secret = draft.secret.trim()
   return input
@@ -104,11 +130,15 @@ export function whyIncomplete(
     return `This project already has a hook called ${name}.`
   }
   if (!isHookUrl(draft.url)) return 'The URL must start with http:// or https://.'
+  if (draft.manual) return null
   if (!draft.anyChange && draft.verbs.length === 0) {
     return 'Tick at least one event, or choose Any change.'
   }
   if (draft.fromColumnId !== '' && !draft.anyChange && !draft.verbs.includes('task.moved')) {
     return '"Moved from" only matches moves — tick Moved to another column.'
+  }
+  if (draft.tagged !== '' && !draft.anyChange && !draft.verbs.includes('task.commented')) {
+    return '"Tagged in a comment" only matches comments — tick Comment added.'
   }
   return null
 }
@@ -179,10 +209,16 @@ const TYPE_WORDS: Record<TaskType, string> = { feature: 'Features', bug: 'Bugs',
 
 /** The rule as a line of parts: which change · which cards · where. */
 export function describeRule(hook: Hook, events: HookEvent[]): string {
+  if (hook.manual) return 'Only when fired by hand'
   const parts = [eventsPhrase(hook.verbs, events)]
   if (hook.template_id) parts.push(`${hook.template_name ?? 'a deleted template'} cards`)
   if (hook.task_type) parts.push(TYPE_WORDS[hook.task_type])
   if (hook.agent_only) parts.push("the agent's cards")
+  if (hook.mentioned_person_id) {
+    parts.push(`tagging ${hook.mentioned_person_name ?? 'a deleted person'}`)
+  } else if (hook.mentions_only) {
+    parts.push('tagging someone')
+  }
   if (hook.from_column_id) parts.push(`from ${hook.from_column_name ?? 'a deleted column'}`)
   if (hook.to_column_id) {
     const movesOnly = hook.verbs.length === 1 && hook.verbs[0] === 'task.moved'
@@ -196,7 +232,8 @@ export function isDangling(hook: Hook): boolean {
   return (
     (hook.to_column_id !== null && hook.to_column_name === null) ||
     (hook.from_column_id !== null && hook.from_column_name === null) ||
-    (hook.template_id !== null && hook.template_name === null)
+    (hook.template_id !== null && hook.template_name === null) ||
+    (hook.mentioned_person_id !== null && hook.mentioned_person_name === null)
   )
 }
 

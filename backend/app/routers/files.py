@@ -76,7 +76,9 @@ def _folder_read(folder: Folder) -> FolderRead:
     )
 
 
-def _file_item_read(item: FileItem) -> ItemRead:
+def file_item_read(item: FileItem) -> ItemRead:
+    """One item as a listing shows it. Public, because a CSV cold storage
+    writes is reported in the same shape as anything uploaded."""
     person = item.added_by_person
     return ItemRead(
         id=item.id,
@@ -96,7 +98,7 @@ def _file_item_read(item: FileItem) -> ItemRead:
 def _filed_item(filed: files.Filed) -> FiledItem:
     """An item plus where it is filed, built from the plain row's own shape so
     the two listings cannot drift apart."""
-    return FiledItem(**_file_item_read(filed.item).model_dump(), folder_path=filed.folder_path)
+    return FiledItem(**file_item_read(filed.item).model_dump(), folder_path=filed.folder_path)
 
 
 def _nested_folders(folders: list[Folder]) -> list[FolderNode]:
@@ -254,7 +256,7 @@ async def get_children(
         path=[FolderCrumb(id=crumb.id, name=crumb.name) for crumb in path],
         folders=[_folder_read(subfolder) for subfolder in subfolders],
         items=[
-            _file_item_read(item)
+            file_item_read(item)
             for item in items
             if permissions.readable(item.sensitivity, allowed)
         ],
@@ -381,7 +383,7 @@ async def upload_file(
         project_id=folder.project_id,
         payload={"name": item.name, "size": item.size, "sensitivity": item.sensitivity},
     )
-    return _file_item_read(item)
+    return file_item_read(item)
 
 
 @router.post(
@@ -413,7 +415,7 @@ async def add_link(
         project_id=folder.project_id,
         payload={"name": item.name, "source": item.source.value},
     )
-    return _file_item_read(item)
+    return file_item_read(item)
 
 
 @router.get(
@@ -446,7 +448,7 @@ async def get_item(
     item: FileItem = Depends(visible_item),
     _: Principal = Depends(require(Scope.READ)),
 ) -> ItemRead:
-    return _file_item_read(item)
+    return file_item_read(item)
 
 
 @router.patch(
@@ -472,7 +474,7 @@ async def update_item(
         project_id=await files.project_id_of_item(session, updated),
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
     )
-    return _file_item_read(updated)
+    return file_item_read(updated)
 
 
 @router.delete("/items/{item_id}", response_model=Acknowledged, summary="Delete a file or link")

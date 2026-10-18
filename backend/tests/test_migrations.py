@@ -2282,3 +2282,119 @@ class TestUndoingThePullRequestStates:
         await rewind(MANY_PRS)
 
         assert await pr_refs_by_number(connection) == {1: ["#212", "#219"], 2: []}
+
+
+# --- Cold storage ------------------------------------------------------------
+
+WITH_COLD_STORAGE = "0041"
+
+
+async def seed_board_for_cold_storage(connection: AsyncConnection) -> None:
+    """One board of two columns: card 1 in To do, cards 2 and 3 in Done."""
+    await connection.execute(
+        text(
+            "INSERT INTO project (id, key, name, description, colour, task_counter)"
+            " VALUES (gen_random_uuid(), 'ATL', 'Atlas Billing Migration', '', '#1D7D46', 3)"
+        )
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO person (id, name, kind, title, responsibilities, colour)"
+            " VALUES (gen_random_uuid(), 'Aditi K', 'team', 'Backend engineer', '', '#1D7D46')"
+        )
+    )
+    for position, name in enumerate(["To do", "Done"]):
+        await connection.execute(
+            text(
+                "INSERT INTO board_column (id, project_id, name, description, position)"
+                " SELECT gen_random_uuid(), project.id, :name, '', :position FROM project"
+            ),
+            {"name": name, "position": position},
+        )
+    for number, column, position in [(1, "To do", 0), (2, "Done", 0), (3, "Done", 1)]:
+        await connection.execute(
+            text(
+                "INSERT INTO task (id, project_id, number, column_id, position, title,"
+                " description, type, assignee_id, status)"
+                " SELECT gen_random_uuid(), project.id, :number, board_column.id, :position,"
+                " :title, 'Work.', 'bug', person.id, 'active'"
+                " FROM project, board_column, person"
+                " WHERE person.name = 'Aditi K' AND board_column.name = :column"
+            ),
+            {"number": number, "column": column, "position": position, "title": f"Card {number}"},
+        )
+
+
+async def placed_by_number(connection: AsyncConnection) -> dict[int, tuple[str | None, int | None]]:
+    rows = await connection.execute(
+        text(
+            "SELECT task.number, board_column.name, task.position FROM task"
+            " LEFT JOIN board_column ON board_column.id = task.column_id ORDER BY task.number"
+        )
+    )
+    return {number: (column, position) for number, column, position in rows}
+
+
+class TestColdStorage:
+    """Revision 0041: a card can leave the board without leaving the database."""
+
+    async def test_every_card_stays_on_the_board(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0040")
+        await seed_board_for_cold_storage(connection)
+
+        await migrate(WITH_COLD_STORAGE)
+
+        stored = await connection.execute(
+            text("SELECT count(*) FROM task WHERE archived_at IS NOT NULL")
+        )
+        assert stored.scalar() == 0
+        assert await placed_by_number(connection) == {
+            1: ("To do", 0),
+            2: ("Done", 0),
+            3: ("Done", 1),
+        }
+
+    async def test_a_live_card_still_needs_a_column(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0040")
+        await seed_board_for_cold_storage(connection)
+        await migrate(WITH_COLD_STORAGE)
+
+        with pytest.raises(IntegrityError, match="placed_by_parentage"):
+            await connection.execute(
+                text("UPDATE task SET column_id = NULL, position = NULL WHERE number = 1")
+            )
+
+    async def test_the_undo_puts_stored_cards_at_the_bottom_of_the_last_column(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """Which is where restoring them by hand, one after another, would have."""
+        await migrate("0040")
+        await seed_board_for_cold_storage(connection)
+        await migrate(WITH_COLD_STORAGE)
+        await connection.execute(
+            text(
+                "UPDATE task SET archived_at = now() - (number || ' minutes')::interval,"
+                " column_id = NULL, position = NULL WHERE number IN (1, 2)"
+            )
+        )
+        # Closing the gap card 2 left, as the service does when it stores one.
+        await connection.execute(text("UPDATE task SET position = 0 WHERE number = 3"))
+
+        await rewind("0040")
+
+        assert await placed_by_number(connection) == {
+            1: ("Done", 2),
+            2: ("Done", 1),
+            3: ("Done", 0),
+        }

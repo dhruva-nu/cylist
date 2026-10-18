@@ -562,7 +562,7 @@ the repository variable `CYLIST_URL`.
 | served at | `stage.cylist.in` | `devN.cylist.in` |
 | secrets | `~/cylist-staging` | `~/cylist-dev-shared`, the same for every slot |
 | deploy trigger | manual, `staging` only | manual, any branch, pick a slot |
-| data | copied from production | shared by all five slots, empty to start |
+| data | copied from production | shared by all five slots, empty to start; a copy of its own for a branch with unmerged migrations |
 | `CYLIST_ENVIRONMENT` | `staging` | `preview` |
 | `CYLIST_BASE_PATH` | unset | unset |
 
@@ -609,7 +609,8 @@ check as production and staging. Around that,
 3. **Records what it deployed** in `~/cylist-dev-N/deployed`, one `key=value`
    per line: `branch`, `sha`, `time` (UTC).
 4. **Retires the slot's own Postgres and the old single dev stack** if their
-   containers are still there (see below).
+   containers are still there, and drops the slot's own database if its branch
+   no longer needs one (see below).
 5. **Regenerates the index** at `~/cylist-dev-index/index.html` from the five
    `deployed` files. It is a static file, so it is only as current as the last
    slot deploy. A `busybox httpd` container, `cylist-dev-index`, serves that
@@ -642,7 +643,10 @@ slot's first deploy its own:
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   backups/       the dumps slot deploys leave behind
 ~/cylist-dev-N/
-  deployed       branch, sha, time of slot N's last deploy
+  deployed       branch, sha, time and database (shared or own) of slot N's
+                 last deploy
+  db.env         only while slot N has a database of its own: its
+                 CYLIST_DATABASE_URL
 ```
 
 Both env files `chmod 600`. The shared database starts empty — it is never
@@ -665,14 +669,37 @@ in its own volume. `make dev-db-ps` and `make dev-db-logs` look at the
 database.
 
 Every slot deploy dumps the shared database to `~/cylist-dev-shared/backups`
-and then runs `alembic upgrade head` against it. So **a branch with a new
-migration changes the schema under every slot.** If the database is already at
-a revision the deploying branch does not have — another slot's branch added a
-migration and got there first — the deploy warns and starts the slot on that
-schema unmigrated, rather than failing: an older branch on a newer schema
-mostly works, and dev is for looking. Two branches whose migrations fork from
-the same parent cannot both be migrated; whichever deploys second runs
-unmigrated until one of them is rebased.
+before it migrates anything. A migration is the one thing five branches cannot
+share, so **the shared database only ever takes migrations that are already on
+`main`**:
+
+* **A branch with no migrations of its own** — every file under
+  `backend/alembic/versions` is also on `origin/main`, byte for byte — runs on
+  the shared database, and `alembic upgrade head` is run against it. That only
+  ever applies migrations `main` has, so it can never take the shared database
+  somewhere `main` cannot follow.
+* **A branch with migrations `main` does not have** (new, changed or
+  uncommitted) gets a database of its own on the same Postgres,
+  `cylist_slot_N`. Each deploy drops it, restores the dump just taken of the
+  shared one into it, and migrates that. The slot starts with everything the
+  others show; its schema changes and whatever is done on it stay in the slot
+  and are gone at its next deploy. Its `CYLIST_DATABASE_URL` is in
+  `~/cylist-dev-N/db.env`, which `docker-compose.dev.yml` reads after the
+  shared `app.env`.
+* When a slot goes back to a branch with no migrations of its own, `db.env` is
+  removed and, once the slot is up on the shared database, `cylist_slot_N` is
+  dropped.
+
+The index at <https://dev.cylist.in/> says which database each slot is on.
+`scripts/dev-slot.sh` fetches `main` to compare against (set
+`CYLIST_DEV_MAIN_BRANCH` to compare against another branch); if it cannot find
+it at all, the slot gets a database of its own rather than risk the shared one.
+
+A branch cut before `main`'s latest migration meets a database at a revision
+it has never heard of. The deploy warns and starts the slot on that schema
+unmigrated, rather than failing: an older branch on a newer schema mostly
+works, and dev is for looking. If that branch has migrations of its own they
+are not applied either, and the warning says to rebase it onto `main`.
 
 What one process per slot means against one database, and is accepted for dev:
 
