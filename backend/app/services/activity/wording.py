@@ -365,6 +365,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
         f"Gave the hook {_quoted(p.get('name'))} a new signing secret."
     ),
     "hook.deleted": lambda p: f"Deleted the hook {_quoted(p.get('name'))}.",
+    "hook.fired": lambda p: f"Fired the hook {_quoted(p.get('name'))}.",
     # --- Files --------------------------------------------------------------
     "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
     "folder.updated": lambda p: (

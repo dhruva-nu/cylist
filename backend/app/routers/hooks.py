@@ -30,6 +30,7 @@ from app.schemas.hooks import (
     HookCreated,
     HookDeliveryRead,
     HookEvent,
+    HookFire,
     HookRead,
     HookSecret,
     HookSecretRotate,
@@ -71,6 +72,7 @@ def _hook_read(hook: Hook, labels: hooks.HookLabels) -> HookRead:
         id=hook.id,
         name=hook.name,
         enabled=hook.enabled,
+        manual=hook.manual,
         url=hook.url,
         verbs=list(hook.verbs),
         to_column_id=hook.to_column_id,
@@ -180,6 +182,7 @@ async def create_hook(
         name=body.name,
         url=body.url,
         enabled=body.enabled,
+        manual=body.manual,
         verbs=body.verbs,
         filters=_filters_of(body),
         secret=body.secret,
@@ -228,7 +231,13 @@ async def update_hook(
         session,
         project,
         hook,
-        HookFields(name=body.name, enabled=body.enabled, verbs=body.verbs, url=body.url),
+        HookFields(
+            name=body.name,
+            enabled=body.enabled,
+            manual=body.manual,
+            verbs=body.verbs,
+            url=body.url,
+        ),
         _filters_of(body),
     )
     if changed:
@@ -321,6 +330,52 @@ async def test_hook(
         hook_id=hook.id,
         event=hook_delivery.TEST_EVENT,
         payload=hooks.sample_body(project, hook, principal),
+    )
+    session.add(delivery)
+    async with _client(request) as client:
+        await hook_delivery.send_now(
+            session, client, request.app.state.settings.vault_key, hook, delivery
+        )
+    await session.flush()
+    await session.refresh(delivery)
+    return HookDeliveryRead.model_validate(delivery)
+
+
+@router.post(
+    "/projects/{project_ref}/hooks/{hook_id}/fire",
+    response_model=HookDeliveryRead,
+    summary="Fire a manual hook",
+    responses={409: {"description": "The hook is not a manual one, or it is switched off."}},
+)
+async def fire_hook(
+    request: Request,
+    body: HookFire | None = None,
+    project: Project = Depends(resolved_project),
+    hook: Hook = Depends(resolved_hook),
+    principal: Principal = Depends(may_change_hooks),
+    session: AsyncSession = SessionDependency,
+) -> HookDeliveryRead:
+    """POST a `hook.fired` event to a manual hook's URL now, and answer with what came back.
+
+    Sent at once, so the page that pressed the button sees the receiver's
+    answer. Unlike a test it is the real thing: if the receiver does not take
+    it, it is tried again on the same schedule as any change.
+    """
+    hooks.refuse_unless_fireable(project, hook)
+    message = body.message if body is not None else None
+    await activity.record(
+        session,
+        principal,
+        "hook.fired",
+        entity_type="hook",
+        entity_id=hook.id,
+        project_id=project.id,
+        payload={"name": hook.name, "message": message},
+    )
+    delivery = HookDelivery(
+        hook_id=hook.id,
+        event=hook_delivery.FIRED_EVENT,
+        payload=hooks.fired_body(project, hook, principal, message),
     )
     session.add(delivery)
     async with _client(request) as client:

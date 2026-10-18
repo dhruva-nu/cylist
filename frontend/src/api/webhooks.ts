@@ -32,11 +32,16 @@ export type DeliveryState = 'pending' | 'delivered' | 'failed'
  * two tag filters narrow to comments instead: one that tags somebody, or one
  * that tags a given person. A filter naming a column, template or person since
  * deleted comes back with a null name and matches nothing.
+ *
+ * A `manual` hook has none of that: no verbs, no filters. No change on the
+ * board fires it; an admin does, from the Hooks page, and it sends `hook.fired`.
  */
 export interface Hook {
   id: string
   name: string
   enabled: boolean
+  /** Fired by hand only, never by a change. */
+  manual: boolean
   url: string
   verbs: string[]
   to_column_id: string | null
@@ -78,6 +83,7 @@ export interface HookInput {
   name: string
   url: string
   enabled?: boolean
+  manual: boolean
   verbs: string[]
   to_column_id: string | null
   from_column_id: string | null
@@ -137,6 +143,12 @@ export const webhooksApi = {
     }),
   testHook: (projectKey: string, id: string) =>
     request<HookDelivery>(`/projects/${projectKey}/hooks/${id}/test`, { method: 'POST' }),
+  /** Fire a manual hook now. `message` reaches the receiver as `detail.message`. */
+  fireHook: (projectKey: string, id: string, message: string) =>
+    request<HookDelivery>(`/projects/${projectKey}/hooks/${id}/fire`, {
+      method: 'POST',
+      body: jsonBody({ message: message.trim() || null }),
+    }),
   listHookDeliveries: (projectKey: string, id: string) =>
     request<HookDelivery[]>(`/projects/${projectKey}/hooks/${id}/deliveries`),
   redeliverHook: (projectKey: string, id: string, deliveryId: string) =>

@@ -27,6 +27,7 @@ export function HookDetail({
 }) {
   const queryClient = useQueryClient()
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [message, setMessage] = useState('')
 
   const deliveries = useQuery({
     queryKey: ['hook-deliveries', hook.id],
@@ -55,6 +56,14 @@ export function HookDetail({
       await onChanged(`Test sent to ${hook.name}: ${deliveryOutcome(sent)}.`)
     },
   })
+  const fire = useMutation({
+    mutationFn: () => api.fireHook(projectKey, hook.id, message),
+    onSuccess: async (sent) => {
+      setMessage('')
+      await refreshLog()
+      await onChanged(`${hook.name} fired: ${deliveryOutcome(sent)}.`)
+    },
+  })
   const rotate = useMutation({
     mutationFn: () => api.rotateHookSecret(projectKey, hook.id),
     // The new secret is shown once, by the dialog it is handed to; it is not
@@ -78,7 +87,8 @@ export function HookDetail({
     },
   })
 
-  const failure = toggle.error ?? test.error ?? rotate.error ?? remove.error ?? redeliver.error
+  const failure =
+    toggle.error ?? test.error ?? fire.error ?? rotate.error ?? remove.error ?? redeliver.error
 
   return (
     <section className={`${cardStyles.card} ${styles.pane}`} aria-label={hook.name}>
@@ -118,6 +128,33 @@ export function HookDetail({
         </dd>
       </dl>
 
+      {hook.manual ? (
+        <form
+          className={styles.fire}
+          onSubmit={(event) => {
+            event.preventDefault()
+            fire.mutate()
+          }}
+        >
+          <input
+            value={message}
+            maxLength={2000}
+            placeholder="A message for the receiver (optional)"
+            aria-label="Message"
+            disabled={!hook.enabled}
+            onChange={(event) => setMessage(event.target.value)}
+          />
+          <Button
+            type="submit"
+            variant="go"
+            disabled={!hook.enabled || fire.isPending}
+            title={hook.enabled ? undefined : 'Switch it on to fire it.'}
+          >
+            {fire.isPending ? 'Firing…' : 'Fire now'}
+          </Button>
+        </form>
+      ) : null}
+
       <div className={styles.actions}>
         <Button onClick={onEdit}>Edit</Button>
         <Button disabled={test.isPending} onClick={() => test.mutate()}>
@@ -146,7 +183,9 @@ export function HookDetail({
         <ErrorNotice error={deliveries.error} />
       ) : deliveries.data.length === 0 ? (
         <p className={styles.quiet}>
-          Nothing sent yet. Send a test, or make a change this hook matches.
+          {hook.manual
+            ? 'Nothing sent yet. Fire it, or send a test.'
+            : 'Nothing sent yet. Send a test, or make a change this hook matches.'}
         </p>
       ) : (
         <ul className={styles.log}>

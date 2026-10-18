@@ -87,6 +87,13 @@ class Hook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Off stops new deliveries being queued. Ones already queued still go:
     they report changes that happened while the hook was on."""
 
+    manual: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Fired by hand and by nothing else. A manual hook names no verbs and sets
+    no filters: a board's changes never reach it, and its only event is the
+    ``hook.fired`` an admin sends from the Hooks page."""
+
     verbs: Mapped[list[str]] = mapped_column(
         postgresql.ARRAY(String(VERB_MAX_LENGTH)),
         nullable=False,
@@ -179,10 +186,11 @@ class HookDelivery(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         postgresql.UUID(as_uuid=True),
         ForeignKey("activity.id", ondelete="SET NULL"),
     )
-    """The change this reports. Null for a test send, which reports nothing."""
+    """The change this reports. Null for a test send or a manual hook's firing,
+    which report no change."""
 
     event: Mapped[str] = mapped_column(String(VERB_MAX_LENGTH), nullable=False)
-    """The verb, or ``hook.test``."""
+    """The verb, ``hook.test``, or ``hook.fired``."""
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     """Exactly the body sent, kept so a retry sends what the first attempt did

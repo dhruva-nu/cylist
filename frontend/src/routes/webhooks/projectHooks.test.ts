@@ -45,6 +45,7 @@ const HOTFIX_TO_STAGING: Hook = {
   template_id: 'tpl-hotfix',
   template_name: 'Hotfix',
   task_type: null,
+  manual: false,
   agent_only: false,
   mentions_only: false,
   mentioned_person_id: null,
@@ -99,6 +100,12 @@ describe('describeRule', () => {
     const gone = { ...aditi, mentioned_person_name: null }
     expect(describeRule(gone, EVENTS)).toBe('Comment added · tagging a deleted person')
     expect(isDangling(gone)).toBe(true)
+  })
+
+  it('says a manual hook fires by hand, whatever else it holds', () => {
+    expect(describeRule({ ...HOTFIX_TO_STAGING, manual: true }, EVENTS)).toBe(
+      'Only when fired by hand',
+    )
   })
 
   it('names a filter whose column has been deleted', () => {
@@ -170,6 +177,31 @@ describe('the form', () => {
     })
     expect(draftOf({ ...HOTFIX_TO_STAGING, mentions_only: true }).tagged).toBe(TAGS_ANYONE)
     expect(draftOf({ ...HOTFIX_TO_STAGING, mentioned_person_id: 'p-aditi' }).tagged).toBe('p-aditi')
+  })
+
+  it('sends a manual hook with every event and filter cleared', () => {
+    const draft = { ...draftOf(HOTFIX_TO_STAGING), manual: true, tagged: TAGS_ANYONE }
+    expect(inputOf(draft, false)).toEqual({
+      name: HOTFIX_TO_STAGING.name,
+      url: HOTFIX_TO_STAGING.url,
+      manual: true,
+      verbs: [],
+      to_column_id: null,
+      from_column_id: null,
+      template_id: null,
+      task_type: null,
+      agent_only: false,
+      mentions_only: false,
+      mentioned_person_id: null,
+    })
+    // What was set is still on the draft, for switching back to changes.
+    expect(inputOf({ ...draft, manual: false }, false).verbs).toEqual(HOTFIX_TO_STAGING.verbs)
+    expect(whyIncomplete({ ...draft, verbs: [] }, [], null)).toBeNull()
+  })
+
+  it('does not read a manual hook back as Any change', () => {
+    const manual = { ...HOTFIX_TO_STAGING, manual: true, verbs: [] }
+    expect(draftOf(manual)).toMatchObject({ manual: true, anyChange: false })
   })
 
   it('sends a secret only when making a hook, and only if one was typed', () => {

@@ -35,6 +35,10 @@ fires on ``task.commented`` and nothing else:
 
 Who a comment tags is read once, when it is written — see
 :mod:`app.services.mentions` — and kept on its activity entry as ``mentioned``.
+
+**A manual hook** fires on none of it. It names no verbs and sets no filters,
+and the only event it ever sends is ``hook.fired``, when an admin presses its
+button on the Hooks page — :func:`fired_body` is what that sends.
 """
 
 from __future__ import annotations
@@ -225,7 +229,11 @@ async def queue_for(session: AsyncSession, entry: Activity) -> int:
 
     hooks = list(
         await session.scalars(
-            select(Hook).where(Hook.project_id == entry.project_id, Hook.enabled.is_(True))
+            select(Hook).where(
+                Hook.project_id == entry.project_id,
+                Hook.enabled.is_(True),
+                Hook.manual.is_(False),
+            )
         )
     )
     candidates = [hook for hook in hooks if not hook.verbs or entry.verb in hook.verbs]
@@ -400,6 +408,7 @@ class HookFields:
 
     name: str | None = None
     enabled: bool | None = None
+    manual: bool | None = None
     verbs: list[str] | None = None
     url: str | None = None
 
@@ -516,6 +525,7 @@ async def create(
     name: str,
     url: str,
     enabled: bool,
+    manual: bool,
     verbs: list[str],
     filters: HookFilters,
     secret: str | None,
@@ -530,10 +540,12 @@ async def create(
         project_id=project.id,
         name=name,
         enabled=enabled,
+        manual=manual,
         verbs=_checked_verbs(verbs),
         url=checked_url(url),
     )
     await _apply_filters(session, project, hook, filters)
+    _refuse_rules_on_manual(hook)
     plaintext = _seal(cipher, hook, secret)
     session.add(hook)
     return hook, plaintext
@@ -555,6 +567,9 @@ async def update(
     if fields.enabled is not None and fields.enabled != hook.enabled:
         hook.enabled = fields.enabled
         changed.append("enabled")
+    if fields.manual is not None and fields.manual != hook.manual:
+        hook.manual = fields.manual
+        changed.append("manual")
     if fields.verbs is not None:
         verbs = _checked_verbs(fields.verbs)
         if verbs != list(hook.verbs):
@@ -566,6 +581,7 @@ async def update(
             hook.url = url
             changed.append("url")
     changed += await _apply_filters(session, project, hook, filters)
+    _refuse_rules_on_manual(hook)
     return changed
 
 
@@ -613,10 +629,37 @@ def sample_body(project: Project, hook: Hook, principal: Principal) -> dict[str,
 
     Shaped like a real event so a receiver can be written against it, and
     named ``hook.test`` so it can tell the difference."""
+    return _bare_body(
+        project, principal, event="hook.test", summary=f"A test from the hook {hook.name!r}."
+    )
+
+
+def fired_body(
+    project: Project, hook: Hook, principal: Principal, message: str | None
+) -> dict[str, Any]:
+    """What firing a manual hook sends: the same envelope, about the project
+    rather than a card, with whatever the person firing it said in ``detail``."""
+    return _bare_body(
+        project,
+        principal,
+        event="hook.fired",
+        summary=f"{principal.label} fired the hook {hook.name!r}.",
+        detail={"hook": {"id": str(hook.id), "name": hook.name}, "message": message},
+    )
+
+
+def _bare_body(
+    project: Project,
+    principal: Principal,
+    *,
+    event: str,
+    summary: str,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "id": None,
-        "event": "hook.test",
-        "summary": f"A test from the hook {hook.name!r}.",
+        "event": event,
+        "summary": summary,
         "occurred_at": now().isoformat(),
         "project": {"id": str(project.id), "key": project.key, "name": project.name},
         "actor": {
@@ -626,8 +669,28 @@ def sample_body(project: Project, hook: Hook, principal: Principal) -> dict[str,
         },
         "task": None,
         "changes": [],
-        "detail": {},
+        "detail": detail or {},
     }
+
+
+def refuse_unless_fireable(project: Project, hook: Hook) -> None:
+    """Only a manual hook, switched on, is fired by hand.
+
+    A hook that fires on changes is not: what it sends is a change, and a
+    firing reports none — "Send test" is how to try one of those. One that is
+    off stays off, as it does for a board's changes.
+    """
+    if not hook.manual:
+        raise ConflictError(
+            f"The hook {hook.name!r} fires on {project.key}'s changes, not by hand. "
+            "Send it a test instead, or make it a manual hook.",
+            details={"hook_id": str(hook.id)},
+        )
+    if not hook.enabled:
+        raise ConflictError(
+            f"The hook {hook.name!r} is off. Switch it on to fire it.",
+            details={"hook_id": str(hook.id)},
+        )
 
 
 def checked_url(url: str) -> str:
@@ -687,6 +750,29 @@ async def _apply_filters(
             hook.mentioned_person_id = filters.mentioned_person_id
             changed.append("mentioned_person_id")
     return changed
+
+
+def _refuse_rules_on_manual(hook: Hook) -> None:
+    # A manual hook with events or filters would read as though they did
+    # something, and they never would.
+    rules = any(
+        (
+            hook.verbs,
+            hook.to_column_id,
+            hook.from_column_id,
+            hook.template_id,
+            hook.task_type,
+            hook.agent_only,
+            hook.mentions_only,
+            hook.mentioned_person_id,
+        )
+    )
+    if hook.manual and rules:
+        raise UnprocessableRequestError(
+            "A manual hook fires only when somebody fires it, so it takes no events or "
+            "filters. Clear them, or leave it firing on changes.",
+            details={"hook_id": str(hook.id)},
+        )
 
 
 async def _own_column(session: AsyncSession, project: Project, column_id: UUID) -> None:
