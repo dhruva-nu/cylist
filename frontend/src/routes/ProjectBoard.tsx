@@ -18,21 +18,24 @@
  */
 
 import { closestCenter, DndContext, DragOverlay } from '@dnd-kit/core'
-import { useParams, useSearch } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMemo, useRef, useState } from 'react'
 import type { Board, BoardColumn, Goal, Person, Task, Template } from '../api/client'
+import { useIdentity } from '../api/queries'
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
 import { EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../components/ui'
 import { anyAgentCounted } from './agentState'
 import { hidesHold } from './boardHiding'
 import { BoardGrid, type LanesLayout, type SharedColumnProps } from './board/BoardGrid'
+import { peopleFromSearch, searchFromPeople } from './board/boardPeople'
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
 import { CardActionsContext, type CardActions } from './board/cardActions'
 import { ColdStorageDialog } from './board/ColdStorageDialog'
 import { ColumnDialog } from './board/ColumnDialog'
 import { SCREEN_READER_INSTRUCTIONS } from './board/keyboardDrag'
 import { lanesFor, narrowBoard, tasksByColumn, type Lane } from './board/narrowBoard'
+import { NobodysCards } from './board/PeopleFilter'
 import { ReopenDialog } from './board/ReopenDialog'
 import { LiftedTaskCard } from './board/TaskCard'
 import { useBoardData } from './board/useBoardData'
@@ -44,10 +47,16 @@ import { usePermissions } from './usePermissions'
 
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
-  const { q: initialQuery = '' } = useSearch({ from: '/p/$projectKey/board' })
+  const { q: initialQuery = '', who } = useSearch({ from: '/p/$projectKey/board' })
   const { board, tasks, members, templates, goals } = useBoardData(projectKey)
+  // Already in hand: the sign-in gate does not draw a page until it is.
+  const identity = useIdentity()
 
-  if (board.isPending || tasks.isPending) return <EmptyState>Loading the board…</EmptyState>
+  // The members too, this time: without them the board cannot tell whether
+  // to open on you, and guessing either way redraws it a moment later.
+  if (board.isPending || tasks.isPending || members.isPending) {
+    return <EmptyState>Loading the board…</EmptyState>
+  }
   if (board.error || tasks.error) return <ErrorNotice error={board.error ?? tasks.error} />
 
   return (
@@ -57,6 +66,8 @@ export function ProjectBoard() {
       key={projectKey}
       projectKey={projectKey}
       initialQuery={initialQuery}
+      who={who}
+      meId={identity.data?.person?.id ?? null}
       board={board.data}
       tasks={tasks.data}
       members={members.data?.members ?? EMPTY}
@@ -85,6 +96,8 @@ type BoardDialog =
 function LoadedBoard({
   projectKey,
   initialQuery,
+  who,
+  meId,
   board,
   tasks,
   members,
@@ -99,6 +112,10 @@ function LoadedBoard({
    * render would take the cursor with it.
    */
   initialQuery: string
+  /** `?who=`, whose cards the board shows — see `peopleFromSearch`. */
+  who: string | undefined
+  /** The person signed in, where the session is one. */
+  meId: string | null
   board: Board
   tasks: Task[]
   members: Person[]
@@ -123,30 +140,44 @@ function LoadedBoard({
    * dropdowns, for whoever would rather point than type, and the agent chips
    * (CYLIST-90) are every card, the ones that need you, or the busy ones.
    */
-  const [filters, setFilters] = useState<ChosenFilters>(() => ({
+  const [chosen, setChosen] = useState<Omit<ChosenFilters, 'people'>>(() => ({
     search: initialQuery,
     goal: 'all',
     status: 'all',
     agent: 'all',
   }))
+  /**
+   * Whose cards (CYLIST-99), which unlike the rest lives in the URL rather
+   * than in this component: it is the one filter a board is opened onto, so a
+   * link has to be able to carry it. Replaced rather than pushed, so Back
+   * leaves the board instead of walking through every face pressed on it.
+   */
+  const navigate = useNavigate({ from: '/p/$projectKey/board' })
+  const filters: ChosenFilters = { ...chosen, people: peopleFromSearch(who, meId, members) }
+  function setFilters(changes: Partial<ChosenFilters>) {
+    const { people, ...rest } = changes
+    if (people !== undefined) {
+      void navigate({
+        search: (current) => ({ ...current, who: searchFromPeople(people) }),
+        replace: true,
+      })
+    }
+    setChosen((current) => ({ ...current, ...rest }))
+  }
   // A chip pressed when the last agent on the board stops has nothing left to
   // narrow to, and the chips themselves go (CYLIST-97) — so the board lets go
   // of it rather than sitting empty under a filter nobody can see to release.
   // Settled during render, React's own pattern for state that follows props.
-  if (filters.agent !== 'all' && !anyAgentCounted(tasks)) {
-    setFilters((current) => ({ ...current, agent: 'all' }))
+  if (chosen.agent !== 'all' && !anyAgentCounted(tasks)) {
+    setChosen((current) => ({ ...current, agent: 'all' }))
   }
 
   const columns = board.columns
   const firstColumn = columns[0]
   const doneColumn = columns.at(-1)
 
-  const { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally } = narrowBoard(
-    tasks,
-    { ...filters, showCancelled: view.showCancelled },
-    columns,
-    members,
-  )
+  const { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally, peopleTally } =
+    narrowBoard(tasks, { ...filters, showCancelled: view.showCancelled }, columns, members)
   const byColumn = tasksByColumn(columns, visibleTasks)
 
   const drag = useBoardDrag({
@@ -270,13 +301,16 @@ function LoadedBoard({
         board={board}
         members={members}
         goals={goals}
+        meId={meId}
+        tasks={tasks}
         filters={filters}
-        onFiltersChange={(changes) => setFilters((current) => ({ ...current, ...changes }))}
+        onFiltersChange={setFilters}
         showCancelled={view.showCancelled}
         onShowCancelled={view.setShowCancelled}
         cancelledCount={cancelledCount}
         hidingCancelled={hidingCancelled}
         agentTally={agentTally}
+        peopleTally={peopleTally}
         lanesOn={view.lanesOn}
         onLanesOn={view.setLanesOn}
         foldAll={inLanes ? { everyLaneFolded, onToggle: toggleEveryLane } : null}
@@ -289,6 +323,14 @@ function LoadedBoard({
               }
             : null
         }
+      />
+
+      <NobodysCards
+        people={filters.people}
+        tasks={tasks}
+        members={members}
+        meId={meId}
+        onEveryone={() => setFilters({ people: [] })}
       />
 
       <BoardAnnounce.Provider value={announce}>

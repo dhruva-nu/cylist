@@ -8,6 +8,7 @@ import type { BoardColumn, Goal, Person, Task, Template } from '../../api/client
 import { agentCounts, passesAgentFilter, type AgentFilter } from '../agentState'
 import { hidesCancelled, isCancelled, type StatusChoice } from '../boardHiding'
 import { filterTasks, parseQuery, tokenize } from '../boardSearch'
+import { cardsOwned, ownedByAny } from './boardPeople'
 import { laneKeyOfTask, NO_GOAL_LANE } from './dropTargets'
 
 /** The goal filter's choices: every card, the cards on no goal, or one goal's id. */
@@ -19,6 +20,8 @@ export interface BoardFilters {
   goal: GoalChoice
   status: StatusChoice
   agent: AgentFilter
+  /** Whose cards to show, by person id (CYLIST-99). Empty is everyone's. */
+  people: string[]
   showCancelled: boolean
 }
 
@@ -38,7 +41,7 @@ export interface BoardFilters {
  */
 export function narrowBoard(
   tasks: Task[],
-  { search, goal, status, agent, showCancelled }: BoardFilters,
+  { search, goal, status, agent, people, showCancelled }: BoardFilters,
   columns: BoardColumn[],
   members: Person[],
 ) {
@@ -66,8 +69,18 @@ export function narrowBoard(
    * board, as it is currently being read, is holding back.
    */
   const hidingCancelled = hidesCancelled(showCancelled, status, parsed)
-  const cancelledCount = narrowed.filter(isCancelled).length
-  const unhidden = hidingCancelled ? narrowed.filter((task) => !isCancelled(task)) : narrowed
+  const unhide = (cards: Task[]) =>
+    hidingCancelled ? cards.filter((task) => !isCancelled(task)) : cards
+  /**
+   * The people filter (CYLIST-99), ANDed on like the quick filters. Each
+   * person's count is taken before it is applied, the way the agent chips'
+   * are: the number beside a name is how many cards picking that person alone
+   * would leave, whoever else is picked.
+   */
+  const peopleTally = cardsOwned(unhide(narrowed))
+  const theirs = narrowed.filter((task) => ownedByAny(task, people))
+  const cancelledCount = theirs.filter(isCancelled).length
+  const unhidden = unhide(theirs)
   /**
    * The agent chips, last of all. Their counts are taken from the board as
    * everything else has narrowed it but before the chip itself has, so the
@@ -77,7 +90,7 @@ export function narrowBoard(
   const agentTally = agentCounts(unhidden)
   const visibleTasks =
     agent === 'all' ? unhidden : unhidden.filter((task) => passesAgentFilter(task, agent))
-  return { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally }
+  return { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally, peopleTally }
 }
 
 /** The cards to draw, sorted into their columns in the order they arrived. */
