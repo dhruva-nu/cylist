@@ -47,11 +47,13 @@ const projectBoardRoute = createRoute({
   path: '/p/$projectKey/board',
   component: ProjectBoard,
   // `?q=` so a board can be linked to already filtered — which is how a goal's
-  // page hands you its own cards. Anything else in the query string is
-  // dropped rather than carried: a search box is the whole of what this route
-  // takes from a URL.
-  validateSearch: (search: Record<string, unknown>): { q?: string } =>
-    typeof search.q === 'string' && search.q ? { q: search.q } : {},
+  // page hands you its own cards — and `?who=` for whose cards it shows
+  // (CYLIST-99), so a shared link shows the same people. Anything else in the
+  // query string is dropped rather than carried.
+  validateSearch: (search: Record<string, unknown>): { q?: string; who?: string } => ({
+    ...(typeof search.q === 'string' && search.q ? { q: search.q } : {}),
+    ...(typeof search.who === 'string' && search.who ? { who: search.who } : {}),
+  }),
 })
 
 const projectGoalsRoute = createRoute({
