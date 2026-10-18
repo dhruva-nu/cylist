@@ -1,4 +1,4 @@
-/* One bar: the page's title and its two counts, the search box taking every
+/* One bar: the agent counts while there are any, the search box taking every
    pixel up to the filter, then the board's own controls. A hairline under it
    is the whole of the header — no box, no shadow. */
 .toolbar {
@@ -14,24 +14,11 @@
   border-bottom: 1px solid var(--line);
 }
 
-.titleGroup {
-  display: flex;
-  flex: none;
-  gap: 10px;
-  align-items: center;
-}
-
-.pageTitle {
-  font-size: var(--text-3xl);
-  font-weight: var(--weight-semibold);
-  letter-spacing: -0.015em;
-  white-space: nowrap;
-}
-
 /* The agent counts (CYLIST-90) — see `AgentChips`. Text with a dot, no fill
    until pressed; the number takes the state's colour once there is one. */
 .agentChips {
   display: flex;
+  flex: none;
   gap: 2px;
 }
 
