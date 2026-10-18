@@ -28,8 +28,10 @@ export type DeliveryState = 'pending' | 'delivered' | 'failed'
  *
  * `verbs` empty means every change. Each filter narrows to cards: the column a
  * card is in after the change (on a move, only a move *into* it), the column a
- * move left, its template, its type, and whether its owner is the agent. A filter naming a column or template
- * since deleted comes back with a null name and matches nothing.
+ * move left, its template, its type, and whether its owner is the agent. The
+ * two tag filters narrow to comments instead: one that tags somebody, or one
+ * that tags a given person. A filter naming a column, template or person since
+ * deleted comes back with a null name and matches nothing.
  */
 export interface Hook {
   id: string
@@ -46,6 +48,11 @@ export interface Hook {
   task_type: TaskType | null
   /** Only cards assigned to the agent, after the change. */
   agent_only: boolean
+  /** Only comments that tag somebody with `@`. */
+  mentions_only: boolean
+  /** Only comments that tag this person. */
+  mentioned_person_id: string | null
+  mentioned_person_name: string | null
   /** The signing secret's last four characters. The secret itself is shown once. */
   secret_hint: string
   last_delivery: {
@@ -77,6 +84,8 @@ export interface HookInput {
   template_id: string | null
   task_type: TaskType | null
   agent_only: boolean
+  mentions_only: boolean
+  mentioned_person_id: string | null
   /** Only on creation. Leave out to have one generated. */
   secret?: string
 }

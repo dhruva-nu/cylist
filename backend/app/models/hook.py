@@ -116,6 +116,18 @@ class Hook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     — match. Off matches every owner: a flag rather than a person's id, because
     there is only ever one agent and the rule is about the machine, not a name."""
 
+    mentions_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Only a comment that tags somebody — ``@Aditi K`` — matches. A filter on
+    the comment rather than the card, so a hook with it set fires on nothing
+    but ``task.commented``."""
+
+    mentioned_person_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
+    """Only a comment that tags this person matches. An id rather than a foreign
+    key, for the reason the module docstring gives: someone deleted from the
+    directory is tagged by nothing, and the hook goes quiet."""
+
     url: Mapped[str] = mapped_column(String(URL_MAX_LENGTH), nullable=False)
     """Where events are POSTed. ``http`` or ``https``."""
 
