@@ -20,7 +20,7 @@ from app.routers.tasks.recording import record_on_card
 from app.routers.tasks.views import comment_read
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import CommentCreate, CommentRead
-from app.services import activity, tasks
+from app.services import activity, mentions, tasks
 
 router = APIRouter(tags=["tasks"])
 
@@ -56,6 +56,7 @@ async def add_comment(
     that is not speaking for anyone in particular omits it.
     """
     entry = await tasks.comment(session, task, body)
+    tagged = await mentions.tagged_on_project(session, task.project_id, entry.body)
     await record_on_card(
         session,
         principal,
@@ -68,6 +69,10 @@ async def add_comment(
             # Kept in the entry rather than looked up through `comment_id`, so
             # the record still says what was said after the comment is edited.
             "comment": activity.excerpt(entry.body),
+            # Who it tagged, read from the whole text rather than the excerpt
+            # and kept for the same reason: a hook asking "did this comment
+            # tag somebody?" gets the answer as it was when it was said.
+            "mentioned": [{"id": str(person.id), "name": person.name} for person in tagged],
         },
     )
     return comment_read(entry)

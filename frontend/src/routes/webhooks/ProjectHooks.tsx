@@ -20,7 +20,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ApiError, api, type Hook } from '../../api/client'
-import { queryKeys, useBoard, useInvalidate, useTemplates } from '../../api/queries'
+import { queryKeys, useBoard, useInvalidate, useMembers, useTemplates } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
 import { Button, EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../../components/ui'
 import { HookDetail } from './HookDetail'
@@ -50,6 +50,7 @@ export function ProjectHooks() {
   const events = useQuery({ queryKey: queryKeys.hookEvents, queryFn: api.listHookEvents })
   const board = useBoard(projectKey)
   const templates = useTemplates(projectKey)
+  const members = useMembers(projectKey)
 
   async function refresh() {
     await invalidate(['hooks', projectKey])
@@ -126,6 +127,7 @@ export function ProjectHooks() {
           events={catalogue}
           columns={board.data?.columns ?? []}
           templates={templates.data ?? []}
+          members={members.data?.members ?? []}
           onClose={() => setEditing(null)}
           onSaved={async (saved, secret) => {
             await refresh()

@@ -62,6 +62,14 @@ class HookCreate(_HookBody):
     agent_only: bool = Field(
         default=False, description="Only cards assigned to the agent after the change."
     )
+    mentions_only: bool = Field(
+        default=False,
+        description="Only `task.commented`, and only a comment that tags somebody with `@`.",
+    )
+    mentioned_person_id: UUID | None = Field(
+        default=None,
+        description="Only `task.commented`, and only a comment that tags this project member.",
+    )
     secret: str | None = Field(
         default=None,
         description="The signing secret to use. Omit to have one generated.",
@@ -83,6 +91,10 @@ class HookUpdate(_HookBody):
     agent_only: bool | None = Field(
         default=None, description="Only cards assigned to the agent. `null` turns it off."
     )
+    mentions_only: bool | None = Field(
+        default=None, description="Only comments that tag somebody. `null` turns it off."
+    )
+    mentioned_person_id: UUID | None = None
 
 
 class HookSecretRotate(Schema):
@@ -115,6 +127,12 @@ class HookRead(Schema):
     template_name: str | None
     task_type: TaskType | None
     agent_only: bool = Field(description="Only cards assigned to the agent match.")
+    mentions_only: bool = Field(description="Only comments that tag somebody match.")
+    mentioned_person_id: UUID | None
+    mentioned_person_name: str | None = Field(
+        description="The tagged person's name now, or null if they have been deleted — in "
+        "which case the filter matches nothing."
+    )
     secret_hint: str = Field(description="The signing secret's last four characters.")
     last_delivery: DeliverySummary | None
     created_at: datetime

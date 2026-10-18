@@ -7,6 +7,7 @@ import {
   type BoardColumn,
   type Hook,
   type HookEvent,
+  type Person,
   type TaskType,
   type Template,
 } from '../../api/client'
@@ -19,6 +20,7 @@ import {
   groupEvents,
   inputOf,
   pickedIn,
+  TAGS_ANYONE,
   whyIncomplete,
   withVerbs,
   type HookDraft,
@@ -37,6 +39,7 @@ export function HookDialog({
   events,
   columns,
   templates,
+  members,
   onClose,
   onSaved,
 }: {
@@ -46,6 +49,8 @@ export function HookDialog({
   events: HookEvent[]
   columns: BoardColumn[]
   templates: Template[]
+  /** Who a comment can tag, and so who the tag filter offers. */
+  members: Person[]
   onClose: () => void
   onSaved: (saved: Hook, secret: string | null) => Promise<void>
 }) {
@@ -184,6 +189,20 @@ export function HookDialog({
             </span>
           </span>
         </label>
+        <Field
+          label="Tagged in a comment"
+          hint="Set this and only a comment fires it — one that @-tags this."
+        >
+          <select value={draft.tagged} onChange={(event) => set({ tagged: event.target.value })}>
+            <option value="">Any comment, tagged or not</option>
+            <option value={TAGS_ANYONE}>Anyone</option>
+            {members.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+        </Field>
 
         {hook === null ? (
           <Field

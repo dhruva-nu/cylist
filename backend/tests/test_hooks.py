@@ -115,6 +115,11 @@ async def _move(client: AsyncClient, reference: str, column_id: str, position: i
     assert response.status_code == 200, response.text
 
 
+async def _comment(client: AsyncClient, reference: str, body: str) -> None:
+    response = await client.post(f"/tasks/{reference}/comments", json={"body": body})
+    assert response.status_code == 201, response.text
+
+
 async def _hook(client: AsyncClient, **fields: object) -> dict[str, Any]:
     response = await client.post(
         "/projects/ATL/hooks", json={"name": "Hook", "url": RECEIVER, **fields}
@@ -467,6 +472,76 @@ class TestMatching:
 
         left = await signed_in.patch(f"/projects/ATL/hooks/{hook['id']}", json={"enabled": False})
         assert left.json()["agent_only"] is False
+
+    async def test_a_mentions_only_hook_fires_only_for_a_comment_that_tags_somebody(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _project(signed_in)
+        hook = await _hook(signed_in, mentions_only=True)
+        assert hook["mentions_only"] is True
+        card = await _task(signed_in, person)
+
+        await _comment(signed_in, card, "Nobody tagged; mail deploy@example.com.")
+        await _comment(signed_in, card, "@Aditi Kumar is somebody else.")
+        await _move(signed_in, card, (await _columns(signed_in))["Done"])
+        assert await _queued(signed_in, hook["id"]) == []
+
+        await _comment(signed_in, card, "@aditi k could you look?")
+        [delivery] = await _queued(signed_in, hook["id"])
+        assert delivery.event == "task.commented"
+        assert delivery.payload["detail"]["mentioned"] == [{"id": person, "name": "Aditi K"}]
+
+    async def test_a_hook_on_one_person_fires_only_when_they_are_tagged(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _project(signed_in)
+        agent = await _agent(signed_in)
+        agent_name = next(
+            member["name"]
+            for member in (await signed_in.get("/projects/ATL/members")).json()["members"]
+            if member["id"] == agent
+        )
+        hook = await _hook(signed_in, mentioned_person_id=agent)
+        assert hook["mentioned_person_name"] == agent_name
+        card = await _task(signed_in, person)
+
+        await _comment(signed_in, card, "@Aditi K over to you.")
+        assert await _queued(signed_in, hook["id"]) == []
+
+        await _comment(signed_in, card, f"@Aditi K and @{agent_name}, please pair on it.")
+        [delivery] = await _queued(signed_in, hook["id"])
+        assert {tagged["id"] for tagged in delivery.payload["detail"]["mentioned"]} == {
+            person,
+            agent,
+        }
+
+    async def test_a_hook_cannot_wait_on_somebody_off_the_project(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await _project(signed_in)
+        stranger = (await signed_in.post("/people", json={**TEAM, "name": "Ravi S"})).json()["id"]
+        response = await signed_in.post(
+            "/projects/ATL/hooks",
+            json={"name": "Hook", "url": RECEIVER, "mentioned_person_id": stranger},
+        )
+        assert response.status_code == 422, response.text
+
+    async def test_mention_filters_are_off_unless_asked_and_null_clears_them(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _project(signed_in)
+        plain = await _hook(signed_in)
+        assert plain["mentions_only"] is False
+        assert plain["mentioned_person_id"] is None
+        hook = await _hook(signed_in, name="Tagged", mentions_only=True, mentioned_person_id=person)
+
+        cleared = await signed_in.patch(
+            f"/projects/ATL/hooks/{hook['id']}",
+            json={"mentions_only": None, "mentioned_person_id": None},
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["mentions_only"] is False
+        assert cleared.json()["mentioned_person_id"] is None
 
     async def test_a_disabled_hook_queues_nothing(self, signed_in: AsyncClient) -> None:
         person = await _project(signed_in)
