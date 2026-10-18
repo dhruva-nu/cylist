@@ -7,6 +7,7 @@ from datetime import date, datetime
 from pydantic import Field
 
 from app.models.task import TaskStatus
+from app.models.today import TodoState
 from app.schemas.activity import HistoryEntry
 from app.schemas.common import Schema
 
@@ -37,6 +38,27 @@ class TaskDay(Schema):
         "move they amounted to — from the column the day started in to the one it "
         "ended in — carrying `moves` in the payload to say how many there were."
     )
+
+
+class DayTodo(Schema):
+    """One to-do from the asker's plan for the day, and how the day left it."""
+
+    text: str = Field(description="As written, `@person` and `>file` tags included.")
+    state: TodoState = Field(
+        description="`done`, `moved` (to `moved_to`), `not_done`, or `open` for a day "
+        "that has not been wrapped up yet."
+    )
+    moved_to: date | None
+    carried_from: date | None = Field(description="The day it was moved on from, if it was.")
+
+
+class CardTodos(Schema):
+    """One card on the asker's plan, with what they meant to do about it."""
+
+    reference: str
+    title: str
+    column: str | None = Field(description="Where the card sits now; null in cold storage.")
+    todos: list[DayTodo]
 
 
 class DayReport(Schema):
@@ -75,6 +97,12 @@ class DayReport(Schema):
     elsewhere: list[HistoryEntry] = Field(
         description="Changes that were not to a card — files, columns, the vault, "
         "the project itself — oldest first."
+    )
+    todos: list[CardTodos] = Field(
+        default_factory=list,
+        description="The asker's own plan for the day — the cards they picked up and "
+        "their to-dos under each — in the order picked. Empty for anyone who did not "
+        "plan the day, and always for the bootstrap session, which is nobody.",
     )
     headline: str = Field(description="The day in one sentence.")
     markdown: str = Field(
