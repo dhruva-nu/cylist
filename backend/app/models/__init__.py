@@ -20,6 +20,7 @@ from app.models.agent_session import (
 from app.models.api_token import ApiToken, TokenKind
 from app.models.base import Base
 from app.models.board import BoardColumn
+from app.models.device import DevicePlatform, PushDevice
 from app.models.doc import Doc, DocSection, DocTopic
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
@@ -69,6 +70,7 @@ __all__ = [
     "CommentKind",
     "DayPick",
     "DeliveryState",
+    "DevicePlatform",
     "Doc",
     "DocSection",
     "DocTopic",
@@ -86,6 +88,7 @@ __all__ = [
     "ProjectMember",
     "ProjectPermission",
     "ProjectRole",
+    "PushDevice",
     "RoleClearance",
     "RoleColumnRule",
     "Skill",
