@@ -31,6 +31,9 @@ private fun icon(name: String, viewBox: Float, stroke: Float, vararg paths: Stri
 object CylistIcons {
     val ChevronDown = icon("chevron-down", 24f, 2.2f, "m6 9 6 6 6-6")
     val ChevronLeft = icon("chevron-left", 24f, 2.2f, "m15 18-6-6 6-6")
+    val ChevronRight = icon("chevron-right", 24f, 2.1f, "m9 18 6-6-6-6")
+    val Close = icon("close", 24f, 2f, "M6 6l12 12M18 6 6 18")
+    val File = icon("file", 24f, 1.9f, "M6 3h8l4 4v14H6z", "M14 3v4h4")
     val Plus = icon("plus", 24f, 2f, "M12 5v14M5 12h14")
     val Filter = icon("filter", 24f, 2f, "M4 7h16M7 12h10M10 17h4")
     val Tick = icon("tick", 16f, 2f, "m3 8.5 3 3 7-7.5")

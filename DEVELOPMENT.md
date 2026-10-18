@@ -581,6 +581,19 @@ rules — late dates, the agent line, whose cards — are ported from the web ap
 in `app/src/main/kotlin/cylist/app/board/BoardRules.kt`, each beside the name of
 the TypeScript it mirrors; change the two together.
 
+**Today is the web planner's day.** The Today tab plans on the project the
+Board tab is on, through the same `/today` routes as the web planner (see
+`frontend/src/components/Today.tsx`), and sends the phone's own zone as
+`timezone`, as the web sends the browser's, so a day planned on one is the
+same day on the other. It holds the board socket while it is on screen, so a
+card ticked on the board ticks its to-do here; a to-do ticked on the web rings
+no doorbell (the plan is not the board), so the phone reads it when Today is
+next opened. Its rules are ported beside the TypeScript they mirror: which
+cards are offered and the dates in `today/TodayRules.kt` (`components/today.ts`,
+`components/dates.ts`), and `@` person / `>` file tags in `today/Tags.kt`
+(`components/mentions.ts`). Change the two together; `TagsTest` and
+`TodayRulesTest` are the web tests, case for case.
+
 The theme is not Material's. It is the web app's tokens
 (`frontend/src/theme/tokens.css`) written out in
 `app/src/main/kotlin/cylist/app/theme/Tokens.kt`, and `ThemeTokensTest`
