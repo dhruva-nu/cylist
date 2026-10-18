@@ -281,9 +281,15 @@
    identical stretches of the column. A 1px line reads as noise the moment
    there is a third section to tell apart from the other two; a box that
    looks like a place of its own reads at a glance regardless of how many
-   there are. */
+   there are.
+
+   Never shrunk. The clip that rounds its corners also takes away a flex
+   item's floor of its own content height, so a tall section was squeezed to
+   what the column had left and cut its cards off — leaving `.sections`, the
+   thing that scrolls, with nothing overflowing to scroll to. */
 .section {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line-2);
