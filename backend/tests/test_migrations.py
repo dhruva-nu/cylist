@@ -2286,7 +2286,7 @@ class TestUndoingThePullRequestStates:
 
 # --- Cold storage ------------------------------------------------------------
 
-WITH_COLD_STORAGE = "0040"
+WITH_COLD_STORAGE = "0041"
 
 
 async def seed_board_for_cold_storage(connection: AsyncConnection) -> None:
@@ -2336,14 +2336,14 @@ async def placed_by_number(connection: AsyncConnection) -> dict[int, tuple[str |
 
 
 class TestColdStorage:
-    """Revision 0040: a card can leave the board without leaving the database."""
+    """Revision 0041: a card can leave the board without leaving the database."""
 
     async def test_every_card_stays_on_the_board(
         self,
         connection: AsyncConnection,
         migrate: Callable[[str], Awaitable[None]],
     ) -> None:
-        await migrate("0039")
+        await migrate("0040")
         await seed_board_for_cold_storage(connection)
 
         await migrate(WITH_COLD_STORAGE)
@@ -2363,7 +2363,7 @@ class TestColdStorage:
         connection: AsyncConnection,
         migrate: Callable[[str], Awaitable[None]],
     ) -> None:
-        await migrate("0039")
+        await migrate("0040")
         await seed_board_for_cold_storage(connection)
         await migrate(WITH_COLD_STORAGE)
 
@@ -2379,7 +2379,7 @@ class TestColdStorage:
         rewind: Callable[[str], Awaitable[None]],
     ) -> None:
         """Which is where restoring them by hand, one after another, would have."""
-        await migrate("0039")
+        await migrate("0040")
         await seed_board_for_cold_storage(connection)
         await migrate(WITH_COLD_STORAGE)
         await connection.execute(
@@ -2391,7 +2391,7 @@ class TestColdStorage:
         # Closing the gap card 2 left, as the service does when it stores one.
         await connection.execute(text("UPDATE task SET position = 0 WHERE number = 3"))
 
-        await rewind("0039")
+        await rewind("0040")
 
         assert await placed_by_number(connection) == {
             1: ("Done", 2),
