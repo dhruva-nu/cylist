@@ -71,6 +71,12 @@ dev_slot_prepare() {
   _dev_slot_jev_key
   # Idempotent: makes it the first time, and is a no-op every time after.
   docker volume create "$DEV_BLOB_VOLUME" > /dev/null
+  # A volume made this way is root's, and the image has no /data/blobs for
+  # Docker to copy an owner from when it is mounted there — so the app, which
+  # runs as cylist (uid 10001, backend/Dockerfile), could not write a single
+  # file into it, and every upload on every slot was a 500. Handed to cylist on
+  # every deploy, which is a no-op once it already is.
+  docker run --rm -v "$DEV_BLOB_VOLUME":/blobs "$DEV_INDEX_IMAGE" chown 10001 /blobs
 }
 
 # Until some slot has been deployed there are no shared secrets, and dev's are
