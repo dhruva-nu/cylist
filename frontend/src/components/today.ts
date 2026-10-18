@@ -109,3 +109,79 @@ function byPriority(a: Task, b: Task): number {
 export function todaysWorkCount(work: TodayWork): number {
   return work.overdue.length + work.due.length
 }
+
+/** One heading's worth of the cards a day can be planned from. */
+export interface CardGroup {
+  name: string
+  /** Whether this is the group of cards that are due or late. */
+  late: boolean
+  tasks: Task[]
+}
+
+/**
+ * Every open card on a board, as the planner offers them to pick from.
+ *
+ * Open means not in the board's last column, not cancelled and not in cold
+ * storage (a stored card is in no column). On hold stays: it is still work,
+ * and somebody may well mean to chase whatever it is waiting on today.
+ *
+ * Cards wanted by today come first, in the order {@link todaysWork} puts them
+ * — that list is what the old Today showed, and it is still the first thing
+ * worth seeing — then everything else by column, nearest to done first,
+ * because a card in review is closer to being somebody's today than one in
+ * the backlog. Within a column, board order.
+ *
+ * `mine` narrows to your own cards; `query` to cards whose reference or
+ * title holds it.
+ */
+export function openCardGroups(
+  tasks: readonly Task[],
+  columns: readonly BoardColumn[],
+  { me, mine, query, today }: { me: Person | null; mine: boolean; query: string; today: string },
+): CardGroup[] {
+  const doneColumnId = columns.at(-1)?.id ?? null
+  const wanted = query.trim().toLowerCase()
+
+  const open = tasks.filter((task) => {
+    if (task.column_id === null || task.column_id === doneColumnId) return false
+    if (task.status === 'cancelled') return false
+    if (mine && me && task.assignee.id !== me.id) return false
+    if (wanted && !`${task.reference} ${task.title}`.toLowerCase().includes(wanted)) return false
+    return true
+  })
+
+  const dueOrLate = open
+    .filter((task) => task.next_due_date !== null && task.next_due_date <= today)
+    .sort(
+      (a, b) => (a.next_due_date ?? '').localeCompare(b.next_due_date ?? '') || byPriority(a, b),
+    )
+  const pulledUp = new Set(dueOrLate.map((task) => task.id))
+
+  const groups: CardGroup[] = []
+  if (dueOrLate.length) groups.push({ name: 'Due or late', late: true, tasks: dueOrLate })
+  for (const column of [...columns].reverse()) {
+    if (column.id === doneColumnId) continue
+    const here = open
+      .filter((task) => task.column_id === column.id && !pulledUp.has(task.id))
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    if (here.length) groups.push({ name: column.name, late: false, tasks: here })
+  }
+  return groups
+}
+
+/**
+ * Whether a card wanted by today has been left off the plan.
+ *
+ * What turns the sidebar's count red. The count itself is the to-dos left;
+ * this is the old Today's warning kept alive — something of yours is late
+ * and you have not planned to touch it.
+ */
+export function lateAndUnplanned(
+  tasks: readonly Task[],
+  columns: readonly BoardColumn[],
+  me: Person | null,
+  today: string,
+  planned: ReadonlySet<string>,
+): boolean {
+  return todaysWork(tasks, columns, me, today).overdue.some((task) => !planned.has(task.id))
+}

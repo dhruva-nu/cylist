@@ -102,3 +102,56 @@ export function dueBucket(iso: string | null): DueBucket {
   if (days <= 7) return { kind: 'soon' }
   return { kind: 'later' }
 }
+
+/**
+ * The day `by` days from this one, as `YYYY-MM-DD`.
+ *
+ * Stepped through UTC on purpose: `new Date('2026-09-02')` is midnight UTC, so
+ * doing the arithmetic there cannot land on the previous day for a reader west
+ * of it. The result is a plain date either way — no time of day survives.
+ */
+export function shiftDay(day: string, by: number): string {
+  const [year = 0, month = 1, date = 1] = day.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, date + by)).toISOString().slice(0, 10)
+}
+
+/**
+ * The next weekday after this one: Friday's is Monday.
+ *
+ * What wrapping a day up offers first, because work left on a Friday is
+ * Monday's, not Saturday's. Saturday and Sunday are the weekend everywhere
+ * this is used; a team that works them can still pick the day.
+ */
+export function nextWorkingDay(day: string): string {
+  let next = shiftDay(day, 1)
+  while ([0, 6].includes(localDate(next).getDay())) next = shiftDay(next, 1)
+  return next
+}
+
+/** `Fri`, for a mark that only needs to say which day nearby. */
+export function weekdayShort(iso: string): string {
+  return localDate(iso).toLocaleDateString('en-GB', { weekday: 'short' })
+}
+
+/** `Friday 16 October`, for a heading that names one day. */
+export function dayLong(iso: string): string {
+  return localDate(iso).toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  })
+}
+
+/** `Mon 19 Oct`. */
+export function dayShort(iso: string): string {
+  return localDate(iso).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+}
+
+/** The zone this browser is in, as an IANA name the server can cut a day by. */
+export function localZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}

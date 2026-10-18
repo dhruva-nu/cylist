@@ -46,6 +46,7 @@ from app.models.task import (
     TaskWaitingOn,
 )
 from app.models.template import TaskTemplate, TemplateStage
+from app.models.today import DayPick, Todo, TodoState
 from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 
 __all__ = [
@@ -66,6 +67,7 @@ __all__ = [
     "Channel",
     "ChecklistState",
     "CommentKind",
+    "DayPick",
     "DeliveryState",
     "Doc",
     "DocSection",
@@ -97,6 +99,8 @@ __all__ = [
     "TaskType",
     "TaskWaitingOn",
     "TemplateStage",
+    "Todo",
+    "TodoState",
     "TokenKind",
     "VaultNode",
     "VaultNodeKind",

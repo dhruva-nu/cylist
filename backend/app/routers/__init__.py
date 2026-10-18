@@ -27,6 +27,7 @@ from app.routers import (
     setup,
     tasks,
     templates,
+    today,
     tokens,
     vault,
 )
@@ -41,6 +42,7 @@ api_router.include_router(projects.router)
 # against the same `{project_ref}` the rest of that prefix uses.
 api_router.include_router(vault.project_router)
 api_router.include_router(reports.router)
+api_router.include_router(today.router)
 # After `projects` too: every role path hangs off the same `{project_ref}`.
 api_router.include_router(roles.router)
 # After `roles`, whose `resolved_role` and admin gate the permission grid uses.

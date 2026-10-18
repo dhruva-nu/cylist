@@ -35,7 +35,7 @@ router = APIRouter(prefix="/projects", tags=["reports"])
 )
 async def day_report(
     project: Project = Depends(resolved_project),
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     day: date | None = Query(
         default=None,
@@ -67,6 +67,10 @@ async def day_report(
     comes back as `starts_at` and `ends_at` so there is no doubt about what was
     covered.
 
+    `todos` is the caller's own plan for the day — the cards they picked up on
+    Today and their to-dos under each, with what became of each one. Nobody
+    else's plan is included.
+
     `markdown` is the whole report as a paste-ready note. It is written here
     rather than by each client so a stand-up note copied out of the browser and
     one written by an agent say the same thing.
@@ -82,4 +86,10 @@ async def day_report(
     history. `/activity` remains the place that answers "who touched what".
     """
     zone = timezones.zone_for(timezone)
-    return await reports.for_day(session, project, day=day or reports.today_in(zone), zone=zone)
+    return await reports.for_day(
+        session,
+        project,
+        day=day or reports.today_in(zone),
+        zone=zone,
+        person_id=principal.person_id,
+    )

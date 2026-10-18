@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { BoardColumn, Person, Task, TaskPriority, TaskStatus } from '../api/client'
-import { todaysWork, todaysWorkCount } from './today'
+import { lateAndUnplanned, openCardGroups, todaysWork, todaysWorkCount } from './today'
 
 const TODAY = '2026-09-08'
 
@@ -291,5 +291,55 @@ describe('what order today’s work is in', () => {
     todaysWork(cards, BOARD, ME, TODAY)
 
     expect(refs(cards)).toEqual(order)
+  })
+})
+
+describe('the cards a day can be planned from', () => {
+  const options = { me: ME, mine: false, query: '', today: TODAY }
+
+  it('puts due and late cards first, then columns nearest done first', () => {
+    const late = card('ATL-1', { due: '2026-09-01', column: TO_DO.id })
+    const doing = card('ATL-2', { due: null, column: DOING.id })
+    const todo = card('ATL-3', { due: null, column: TO_DO.id })
+
+    const groups = openCardGroups([todo, doing, late], BOARD, options)
+
+    expect(groups.map((group) => [group.name, group.tasks.map((task) => task.reference)])).toEqual([
+      ['Due or late', ['ATL-1']],
+      ['In progress', ['ATL-2']],
+      ['To do', ['ATL-3']],
+    ])
+  })
+
+  it('leaves out finished, cancelled and stored cards', () => {
+    const finished = card('ATL-1', { due: null, column: DONE.id })
+    const cancelled = card('ATL-2', { due: null, status: 'cancelled' })
+    const stored = { ...card('ATL-3', { due: null }), column_id: null }
+    const onHold = card('ATL-4', { due: null, status: 'hold' })
+
+    const groups = openCardGroups([finished, cancelled, stored, onHold], BOARD, options)
+
+    expect(groups.flatMap((group) => group.tasks.map((task) => task.reference))).toEqual(['ATL-4'])
+  })
+
+  it('narrows to your cards, and to what the search holds', () => {
+    const mine = card('ATL-1', { due: null, assignee: ME })
+    const theirs = card('ATL-2', { due: null, assignee: ADITI })
+
+    expect(
+      openCardGroups([mine, theirs], BOARD, { ...options, mine: true }).flatMap((g) => g.tasks),
+    ).toEqual([mine])
+    expect(
+      openCardGroups([mine, theirs], BOARD, { ...options, query: 'atl-2' }).flatMap((g) => g.tasks),
+    ).toEqual([theirs])
+  })
+})
+
+describe('whether something late was left off the plan', () => {
+  it('is true only while an overdue card of yours is unplanned', () => {
+    const late = card('ATL-1', { due: '2026-09-01', assignee: ME })
+
+    expect(lateAndUnplanned([late], BOARD, ME, TODAY, new Set())).toBe(true)
+    expect(lateAndUnplanned([late], BOARD, ME, TODAY, new Set([late.id]))).toBe(false)
   })
 })

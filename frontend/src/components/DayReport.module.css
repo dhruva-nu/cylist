@@ -221,3 +221,58 @@
   color: var(--ink-3);
   font-size: var(--text-sm);
 }
+
+/* --- Your to-dos, from Today ------------------------------------------------ */
+
+.todos {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+/* What became of it, as a glyph in an ink: done in the ok green, moved on in
+   the body's own ink, left behind in grey. Ink only — no ground. */
+.todoMark {
+  flex: 0 0 14px;
+  color: var(--ink-3);
+  font-weight: var(--weight-bold);
+  text-align: center;
+}
+
+.mark_done {
+  color: var(--ok);
+}
+
+.mark_moved {
+  color: var(--ink-2);
+}
+
+.todoText {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.todoDone {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-2);
+}
+
+.todoFate {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
