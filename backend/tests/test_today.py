@@ -399,3 +399,59 @@ async def test_a_day_of_only_planning_leads_with_the_plan(signed_in: AsyncClient
 
     assert report["entry_count"] == 0
     assert report["headline"] == "1 of 3 to-dos done."
+
+
+# --- What a freshly picked card brings with it --------------------------------
+
+
+async def test_a_picked_card_brings_what_is_outstanding_on_it(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    card = await make_card(signed_in, project)
+    staged = await signed_in.patch(
+        f"/tasks/{card}", json={"sub_statuses": ["Spec", "Build", "Review"]}
+    )
+    assert staged.status_code == 200, staged.text
+    await signed_in.post(f"/tasks/{card}/sub-status", json={"index": 1})
+    subs = []
+    for title in ("Layout", "Totals row", "Old template"):
+        made = await signed_in.post(
+            f"/tasks/{card}/subtasks",
+            json={"title": title, "description": "Part of it.", "type": "feature"},
+        )
+        assert made.status_code == 201, made.text
+        subs.append(made.json()["reference"])
+    await signed_in.post(f"/tasks/{subs[0]}/finish", json={"finished": True})
+    await signed_in.post(
+        f"/tasks/{subs[2]}/status", json={"status": "cancelled", "reason": "Not needed."}
+    )
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
+
+    picked = await pick(signed_in, project, card)
+
+    assert [todo["text"] for todo in picked["todos"]] == [
+        "Stage: Build",
+        "Stage: Review",
+        f"{subs[1]} Totals row",
+        "Tell support",
+    ]
+    assert {todo["state"] for todo in picked["todos"]} == {"open"}
+
+
+async def test_picking_again_imports_nothing_more(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    card = await make_card(signed_in, project)
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
+    first = await pick(signed_in, project, card)
+    await signed_in.delete(f"/today/todos/{first['todos'][0]['id']}")
+
+    again = await pick(signed_in, project, card)
+
+    assert again["todos"] == []
+
+
+async def test_a_card_with_nothing_outstanding_starts_empty(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+
+    picked = await pick(signed_in, project, await make_card(signed_in, project))
+
+    assert picked["todos"] == []

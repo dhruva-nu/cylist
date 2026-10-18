@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.errors import ForbiddenError, NotFoundError, UnprocessableRequestError
 from app.models.project import Project
-from app.models.task import Task
+from app.models.task import ChecklistState, Task, TaskStatus
 from app.models.today import DayPick, Todo, TodoState
 from app.schemas.today import PickedCard, PickRead, TodoRead, TodoUpdate
+from app.services import tasks
 
 
 def person_of(principal: Principal) -> UUID:
@@ -60,6 +61,13 @@ async def pick(
 ) -> DayPick:
     """Put a card on a person's day — or hand back the pick that already does.
 
+    A card freshly picked brings what is still outstanding on it as to-dos:
+    the stages it has yet to get through, from the one in hand onward, then
+    its open sub-tasks and tick boxes. Those are the pieces of the card a day
+    spent on it is spent on, so they are written down rather than retyped.
+    Nothing is imported into a pick that already existed, nor into one a
+    wrap-up makes — that day's to-dos are the ones carried over.
+
     Raises:
         UnprocessableRequestError: for a task on another project, a sub-task, or
             a card in cold storage. A day is planned around cards on the board.
@@ -75,15 +83,50 @@ async def pick(
         raise UnprocessableRequestError(
             f"{task.reference} is in cold storage. Take it back onto the board first."
         )
-    return await _pick_on(session, person_id, task.id, day)
+    existing = await _existing_pick(session, person_id, task.id, day)
+    if existing is not None:
+        return existing
+
+    picked = await _pick_on(session, person_id, task.id, day)
+    for text in await outstanding(session, task):
+        await add_todo(session, picked, text)
+    return picked
 
 
-async def _pick_on(session: AsyncSession, person_id: UUID, task_id: UUID, day: date) -> DayPick:
-    existing = await session.scalar(
+async def outstanding(session: AsyncSession, task: Task) -> list[str]:
+    """What is still to be done on a card, one line each, in the card's own order.
+
+    Stages first, from the one in hand to the last — the one in hand is not
+    finished, it is what is being worked on. Then sub-tasks neither finished nor
+    cancelled, by sub-number, named by reference so the line says which; then
+    open tick boxes.
+    """
+    lines: list[str] = []
+    if task.sub_status_index is not None:
+        lines += [f"Stage: {stage}" for stage in task.sub_statuses[task.sub_status_index :]]
+    lines += [
+        f"{sub.reference} {sub.title}"
+        for sub in await tasks.subtasks(session, task)
+        if sub.finished_at is None and sub.status is not TaskStatus.CANCELLED
+    ]
+    lines += [item.title for item in task.checklist if item.state is ChecklistState.OPEN]
+    return lines
+
+
+async def _existing_pick(
+    session: AsyncSession, person_id: UUID, task_id: UUID, day: date
+) -> DayPick | None:
+    found: DayPick | None = await session.scalar(
         select(DayPick).where(
             DayPick.person_id == person_id, DayPick.task_id == task_id, DayPick.day == day
         )
     )
+    return found
+
+
+async def _pick_on(session: AsyncSession, person_id: UUID, task_id: UUID, day: date) -> DayPick:
+    """The person's pick of this card on this day, made if there is none yet."""
+    existing = await _existing_pick(session, person_id, task_id, day)
     if existing is not None:
         return existing
 
