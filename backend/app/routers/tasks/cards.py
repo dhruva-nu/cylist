@@ -12,6 +12,7 @@ from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import Task
 from app.routers.projects import resolved_project
+from app.routers.tasks import acts
 from app.routers.tasks.dependencies import (
     WRITE_THIS_CARD,
     may_add_card,
@@ -280,18 +281,7 @@ async def set_sub_status(
     This is what the board card's own sub-status slider calls: one click puts
     a card on the stage under the cursor without opening it.
     """
-    updated, changes = await tasks.set_sub_status(session, task, body.index)
-    await record_on_card(
-        session,
-        principal,
-        "task.sub_status_moved",
-        updated,
-        {
-            "sub_status_index": updated.sub_status_index,
-            "sub_status": updated.sub_statuses[body.index],
-            "changes": changes,
-        },
-    )
+    updated = await acts.move_stage(session, principal, task, body.index)
     return await task_detail(session, updated)
 
 
@@ -322,22 +312,7 @@ async def finish_task(
     On a top-level card this is a 422: a card's done is the board's answer, and
     it is given by moving the card to the last column.
     """
-    updated, changes = await tasks.set_finished(session, task, finished=body.finished)
-    # Nothing changed means the tick box was already where the caller wants it,
-    # and a history line for that would be a record of a click rather than of
-    # the work.
-    if changes:
-        await record_on_card(
-            session,
-            principal,
-            "task.finished",
-            updated,
-            {
-                "parent": updated.parent.reference if updated.parent else None,
-                "finished": body.finished,
-                "changes": changes,
-            },
-        )
+    updated = await acts.finish(session, principal, task, finished=body.finished)
     return await task_detail(session, updated)
 
 

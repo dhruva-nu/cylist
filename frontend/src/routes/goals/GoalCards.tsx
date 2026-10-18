@@ -80,7 +80,8 @@ export function Filters({
   total: number
   showing: number
 }) {
-  const countIn = (columnId: string) => tasks.filter((task) => task.column_id === columnId).length
+  const countIn = (place: string) => tasks.filter((task) => placeOf(task) === place).length
+  const stored = countIn(COLD_STORAGE)
 
   return (
     <div className={styles.filters}>
@@ -125,7 +126,28 @@ export function Filters({
             </button>
           )
         })}
+        {/* Only when there is something in it: a chip for an empty cold
+            storage would be on every goal page, saying nothing. */}
+        {stored > 0 ? (
+          <button
+            type="button"
+            aria-pressed={onlyColumn === COLD_STORAGE}
+            className={onlyColumn === COLD_STORAGE ? styles.chipOn : undefined}
+            onClick={() => onColumn(onlyColumn === COLD_STORAGE ? null : COLD_STORAGE)}
+          >
+            Cold storage
+            <span className={styles.chipCount}>{stored}</span>
+          </button>
+        ) : null}
       </div>
     </div>
   )
+}
+
+/** What the column filter calls cold storage, which is in no column. */
+export const COLD_STORAGE = 'cold-storage'
+
+/** Where a card on a goal is: its column's id, or cold storage. */
+export function placeOf(task: Task): string {
+  return task.column_id ?? COLD_STORAGE
 }

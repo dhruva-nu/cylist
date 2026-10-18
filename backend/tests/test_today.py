@@ -582,3 +582,132 @@ async def test_a_written_todo_never_touches_the_card(signed_in: AsyncClient) -> 
 
     assert mine["source_kind"] is None
     assert (await signed_in.get(f"/tasks/{card}")).json()["sub_status_index"] == 0
+
+
+# --- Review fixes ------------------------------------------------------------------
+
+
+async def test_reopening_a_todo_left_not_done_leaves_the_card_alone(
+    signed_in: AsyncClient,
+) -> None:
+    project, card, sub = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, FRIDAY)
+    await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": MONDAY, "move": []},
+    )
+    # Finished on the board after Friday was closed.
+    await signed_in.post(f"/tasks/{sub}/finish", json={"finished": True})
+    left = todo_named(await plan(signed_in, project, FRIDAY), f"{sub} Layout")
+    assert left["state"] == "not_done"
+
+    reopened = await signed_in.patch(f"/today/todos/{left['id']}", json={"state": "open"})
+
+    assert reopened.status_code == 200, reopened.text
+    assert (await signed_in.get(f"/tasks/{sub}")).json()["finished_at"] is not None
+
+
+async def test_a_stage_ticked_today_survives_the_card_changing_column(
+    signed_in: AsyncClient,
+) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+    spec = todo_named(await plan(signed_in, project, TODAY_HERE), "Stage: Spec")
+    await signed_in.patch(f"/today/todos/{spec['id']}", json={"state": "done"})
+
+    review = await signed_in.post(
+        f"/projects/{project}/columns", json={"name": "Review", "description": "In review."}
+    )
+    assert review.status_code == 201, review.text
+    # And one after it, so Review is not the board's last (done) column.
+    await signed_in.post(
+        f"/projects/{project}/columns", json={"name": "Shipped", "description": "Out."}
+    )
+    moved = await signed_in.post(
+        f"/tasks/{card}/move", json={"column_id": review.json()["id"], "position": 0}
+    )
+    assert moved.status_code == 200, moved.text
+    await signed_in.patch(f"/tasks/{card}", json={"sub_statuses": ["QA", "Sign-off"]})
+
+    day = await plan(signed_in, project, TODAY_HERE)
+    ticked = next(t for p in day["picks"] for t in p["todos"] if t["id"] == spec["id"])
+    assert (ticked["text"], ticked["state"]) == ("Stage: Spec", "done")
+    assert todo_named(day, "Stage: QA")["state"] == "open"
+
+
+async def test_wrapping_up_a_day_gone_by_closes_the_plan_it_had(
+    signed_in: AsyncClient,
+) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    before = await pick(signed_in, project, card, FRIDAY)
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Added after Friday"})
+
+    wrapped = await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": MONDAY, "move": []},
+    )
+
+    assert wrapped.status_code == 200, wrapped.text
+    assert wrapped.json()["not_done"] == len(before["todos"])
+    texts = [t["text"] for t in (await plan(signed_in, project, FRIDAY))["picks"][0]["todos"]]
+    assert "Added after Friday" not in texts
+
+
+async def test_a_moved_todo_is_refused_before_the_card_is_touched(
+    signed_in: AsyncClient,
+) -> None:
+    project, card, sub = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, FRIDAY)
+    todo = todo_named(await plan(signed_in, project, FRIDAY), f"{sub} Layout")
+    await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": MONDAY, "move": [todo["id"]]},
+    )
+
+    refused = await signed_in.patch(f"/today/todos/{todo['id']}", json={"state": "done"})
+
+    assert refused.status_code == 422
+    assert "moved to Monday" in refused.json()["error"]["message"]
+    assert (await signed_in.get(f"/tasks/{sub}")).json()["finished_at"] is None
+    history = (await signed_in.get(f"/tasks/{sub}/history")).json()["entries"]
+    assert "task.finished" not in [entry["verb"] for entry in history]
+
+
+async def test_a_reworded_import_keeps_its_words(signed_in: AsyncClient) -> None:
+    project, card, sub = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+    todo = todo_named(await plan(signed_in, project, TODAY_HERE), f"{sub} Layout")
+
+    await signed_in.patch(
+        f"/today/todos/{todo['id']}", json={"text": "Layout, with @Aditi K's grid"}
+    )
+    day = await plan(signed_in, project, TODAY_HERE)
+
+    assert todo_named(day, "Layout, with @Aditi K's grid")["source_kind"] == "subtask"
+    # Still linked: finishing it on the card still ticks it.
+    await signed_in.post(f"/tasks/{sub}/finish", json={"finished": True})
+    day = await plan(signed_in, project, TODAY_HERE)
+    assert todo_named(day, "Layout, with @Aditi K's grid")["state"] == "done"
+
+
+async def test_the_report_tells_two_mondays_apart(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    first = await pick(signed_in, project, await make_card(signed_in, project, "One"))
+    second = await pick(signed_in, project, await make_card(signed_in, project, "Two"))
+    soon = await add_todo(signed_in, first["id"], "Call the bank")
+    later = await add_todo(signed_in, second["id"], "Chase the bank")
+    await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": MONDAY, "move": [soon["id"]]},
+    )
+    await signed_in.patch(f"/today/todos/{later['id']}", json={"state": "open"})
+    await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": "2026-10-26", "move": [later["id"]]},
+    )
+
+    report = (
+        await signed_in.get(f"/projects/{project}/reports/day", params={"date": FRIDAY})
+    ).json()
+
+    assert "2 moved to later days" in report["headline"]

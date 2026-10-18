@@ -859,7 +859,7 @@ function WrapUpDialog({
   const staying = openIds.length - moving.length
 
   const wrap = useMutation({
-    mutationFn: () => api.wrapUpDay(projectKey, day, toDay, moving),
+    mutationFn: () => api.wrapUpDay(projectKey, day, toDay, moving, localZone()),
     onSettled: refresh,
   })
 

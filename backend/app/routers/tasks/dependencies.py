@@ -54,23 +54,42 @@ async def resolved_comment(
     return await tasks.get_comment(session, comment_id)
 
 
-async def _project_of_card_under(
-    session: AsyncSession, entry: TaskChecklistItem | TaskComment
-) -> UUID:
-    """Which project a tick box or a comment is on, by way of the card it is on.
-
-    These are the two things in this router addressed by an id that names
-    neither a project nor a card, so the hop the guard needs is written out
-    rather than read off the row.
-    """
-    task = await tasks.get(session, entry.task_id)
-    return task.project_id
-
-
 WRITE_CARDS = guards.on_project(Permission.TASKS)
 """Adding a card, on the one path that names the project rather than a card."""
 
-WRITE_THIS_CARD = guards.for_entity(Permission.TASKS, resolved_task)
+
+async def may_write_card(session: AsyncSession, principal: Principal, task: Task) -> Principal:
+    """Whether this caller may change this card — the rule behind :data:`WRITE_THIS_CARD`.
+
+    A plain function as well as a guard, because a card is not always reached
+    through its own path: ticking a to-do on a day's plan finishes a sub-task
+    or ticks a box on the card it came from, and has to be asked exactly what
+    doing it on the board would be asked.
+    """
+    return await permissions.enforce_on(session, task.project_id, principal, Permission.TASKS)
+
+
+async def may_stage_card(session: AsyncSession, principal: Principal, task: Task) -> Principal:
+    """Whether this caller may set the card's sub-stage — :func:`may_stage_this_card`'s rule.
+
+    A sub-task has no column, so nothing restricts its stages: the rules are
+    about places on a board, and it is not on one.
+    """
+    await may_write_card(session, principal, task)
+    if task.column_id is not None:
+        await permissions.enforce_column_staging(session, task.project, principal, task.column_id)
+    return principal
+
+
+async def _write_this_card(
+    task: Task = Depends(resolved_task),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    return await may_write_card(session, principal, task)
+
+
+WRITE_THIS_CARD = _write_this_card
 """Everything done to a card that already exists: editing it, moving it,
 finishing it, changing its status, splitting it, ticking its boxes."""
 
@@ -80,11 +99,18 @@ A client who should never move a card is often exactly the person whose
 comment you want. The reason a status change carries is not this — that is
 part of making the change, and goes with it."""
 
-WRITE_THIS_CHECKLIST = guards.for_entity(
-    Permission.TASKS, resolved_checklist_item, locate=_project_of_card_under
-)
-"""A tick box is addressed by its own id and knows only its card, so the hop
-to the project is spelled out."""
+
+async def _write_this_checklist(
+    item: TaskChecklistItem = Depends(resolved_checklist_item),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> Principal:
+    return await may_write_card(session, principal, await tasks.get(session, item.task_id))
+
+
+WRITE_THIS_CHECKLIST = _write_this_checklist
+"""A tick box is addressed by its own id and knows only its card, so it is
+asked what changing that card would be."""
 
 
 async def may_delete_this_comment(
@@ -191,14 +217,8 @@ async def may_move_this_card(
 
 async def may_stage_this_card(
     task: Task = Depends(resolved_task),
-    principal: Principal = Depends(WRITE_THIS_CARD),
+    principal: Principal = Depends(require(Scope.WRITE)),
     session: AsyncSession = SessionDependency,
 ) -> Principal:
-    """Admit a caller whose role may set sub-stages in the card's own column.
-
-    A sub-task has no column, so nothing restricts its stages: the rules are
-    about places on a board, and it is not on one.
-    """
-    if task.column_id is not None:
-        await permissions.enforce_column_staging(session, task.project, principal, task.column_id)
-    return principal
+    """Admit a caller whose role may set sub-stages in the card's own column."""
+    return await may_stage_card(session, principal, task)

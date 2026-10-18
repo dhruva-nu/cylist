@@ -375,3 +375,50 @@ class TestWhoMay:
 
         assert listed.status_code == 200
         assert len(listed.json()) == 1
+
+
+class TestWhatAStoredCardStillSays:
+    """Review fixes: a stored card is off the board but not forgotten."""
+
+    async def test_the_hub_counts_only_cards_in_columns(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        await _finish(signed_in, await _create(signed_in, person))
+        await _create(signed_in, person)
+        await _store(signed_in)
+
+        summary = (await signed_in.get("/projects/ATL/summary")).json()
+        in_columns = sum(column["task_count"] for column in await _columns(signed_in))
+
+        assert summary["task_count"] == in_columns == 1
+
+    async def test_a_goal_page_lists_its_stored_cards(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        goal = (
+            await signed_in.post("/projects/ATL/goals", json={"name": "Search", "owner_id": person})
+        ).json()
+        stored = await _create(signed_in, person, goal_id=goal["id"], title="Stored")
+        on_board = await _create(signed_in, person, goal_id=goal["id"], title="On board")
+        await _finish(signed_in, stored)
+        await _store(signed_in)
+
+        page = (await signed_in.get(f"/goals/{goal['reference']}")).json()
+
+        assert [task["reference"] for task in page["tasks"]] == [
+            on_board["reference"],
+            stored["reference"],
+        ]
+        assert page["progress"]["total"] == len(page["tasks"])
+
+    async def test_a_stored_card_still_says_how_it_ended(self, signed_in: AsyncClient) -> None:
+        person = await _setup(signed_in)
+        last = (await _columns(signed_in))[-1]
+        await signed_in.patch(f"/columns/{last['id']}", json={"outcomes": ["Done", "In prod"]})
+        card = await _create(signed_in, person)
+        await _finish(signed_in, card, outcome="In prod")
+        await _store(signed_in)
+
+        listed = (await signed_in.get("/projects/ATL/cold-storage")).json()
+        opened = (await signed_in.get(f"/tasks/{card['reference']}")).json()
+
+        assert [task["outcome"] for task in listed] == ["In prod"]
+        assert opened["outcome"] == "In prod"

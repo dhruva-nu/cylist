@@ -224,13 +224,21 @@ async def tasks_for(session: AsyncSession, goal: Goal) -> list[Task]:
     Left to right by column and top to bottom within one, so a goal's page
     reads as the slice of the board that belongs to it. Cards only: a sub-task
     cannot name a goal, and arrives with the card it belongs to.
+
+    Cards in cold storage come last, most recently stored first. They are off
+    the board but still the goal's, and :func:`progress` counts them as done —
+    so the page has to list them, or its cards and its totals disagree.
     """
     return list(
         await session.scalars(
             select(Task)
-            .join(BoardColumn, BoardColumn.id == Task.column_id)
-            .where(Task.goal_id == goal.id)
-            .order_by(BoardColumn.position, Task.position)
+            .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
+            .where(Task.goal_id == goal.id, Task.parent_id.is_(None))
+            .order_by(
+                BoardColumn.position.asc().nulls_last(),
+                Task.position,
+                Task.archived_at.desc(),
+            )
         )
     )
 

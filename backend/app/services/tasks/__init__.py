@@ -51,7 +51,13 @@ from app.services.tasks.checklists import (
     get_checklist_item,
     update_checklist_item,
 )
-from app.services.tasks.cold_storage import Stored, list_stored, restore, store_finished
+from app.services.tasks.cold_storage import (
+    Stored,
+    list_stored,
+    restore,
+    store_finished,
+    stored_outcome,
+)
 from app.services.tasks.counts import (
     NOT_SPLIT,
     Split,
@@ -109,6 +115,7 @@ __all__ = [
     "set_sub_status",
     "status_counts",
     "store_finished",
+    "stored_outcome",
     "subtask_counts",
     "subtask_owners",
     "subtasks",

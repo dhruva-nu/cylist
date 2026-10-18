@@ -123,12 +123,13 @@ async def card_items(session: AsyncSession, task: Task) -> list[CardItem]:
     """Everything on a card a to-do can stand for, in the card's own order.
 
     Stages first: those before the one in hand are done, the one in hand and
-    those after it are not — all of them done once the card is finished. Then
-    sub-tasks by sub-number, named by reference so the line says which; then
-    tick boxes.
+    those after it are not — all of them done once the card is finished. A
+    stage is named with the column it belongs to, because moving the card
+    replaces its stages with the next column's. Then sub-tasks by sub-number,
+    named by reference so the line says which; then tick boxes.
     """
     items: list[CardItem] = []
-    if task.sub_status_index is not None:
+    if task.sub_status_index is not None and task.column_id is not None:
         last = len(task.sub_statuses) - 1
         for index, stage in enumerate(task.sub_statuses):
             state: TodoState | None
@@ -138,7 +139,7 @@ async def card_items(session: AsyncSession, task: Task) -> list[CardItem]:
                 state = None
             else:
                 state = TodoState.OPEN
-            items.append(CardItem(f"stage:{index}", f"Stage: {stage}", state))
+            items.append(CardItem(stage_source(task.column_id, index), f"Stage: {stage}", state))
     for sub in await tasks.subtasks(session, task):
         if sub.status is TaskStatus.CANCELLED:
             state = TodoState.NOT_DONE
@@ -158,8 +159,9 @@ async def sync(session: AsyncSession, picked: DayPick) -> None:
     Anything on the card not yet on the plan and still to do is added, unless
     it was deleted from this pick before. Each linked to-do takes the state the
     card gives it, and the wording too, so a renamed sub-task reads as it is
-    now. A to-do the day has already closed — moved on, or left not done — is
-    left as the wrap-up left it.
+    now — unless somebody reworded the to-do, whose words are then their own.
+    A to-do the day has already closed — moved on, or left not done — is left
+    as the wrap-up left it.
 
     A to-do written by hand with exactly an item's words is taken to be that
     item and linked to it, rather than listed twice.
@@ -184,7 +186,8 @@ async def sync(session: AsyncSession, picked: DayPick) -> None:
             continue
         if item.state is not None and item.state is not todo.state:
             _set_state(todo, item.state)
-        todo.text = text
+        if not todo.reworded:
+            todo.text = text
     await session.flush()
 
 
@@ -267,6 +270,7 @@ async def add_todo(
     *,
     carried_from: date | None = None,
     source: str | None = None,
+    reworded: bool = False,
 ) -> Todo:
     """Add a to-do at the bottom of a pick's list."""
     last = await session.scalar(select(func.max(Todo.position)).where(Todo.pick_id == picked.id))
@@ -277,26 +281,44 @@ async def add_todo(
         state=TodoState.OPEN,
         carried_from=carried_from,
         source=source,
+        reworded=reworded,
     )
     session.add(todo)
     await session.flush()
     return todo
 
 
-async def update_todo(session: AsyncSession, todo: Todo, data: TodoUpdate) -> Todo:
-    """Retitle, tick, untick or give up on a to-do.
+def refuse_moved(todo: Todo) -> None:
+    """Refuse any change to a to-do already handed on to another day.
+
+    The copy on that day is the live one; this is the record that it moved.
+    Called before anything is done about the change, the card's half included.
 
     Raises:
-        UnprocessableRequestError: for a to-do already handed on to another day.
-            The copy on that day is the live one; this is the record that it
-            moved.
+        UnprocessableRequestError: if the to-do has moved.
     """
     if todo.state is TodoState.MOVED:
         moved_to = todo.moved_to
         when = f"{moved_to:%A} {moved_to.day} {moved_to:%B}" if moved_to else "another day"
         raise UnprocessableRequestError(f"That to-do moved to {when}. Change it there instead.")
+
+
+async def update_todo(session: AsyncSession, todo: Todo, data: TodoUpdate) -> Todo:
+    """Retitle, tick, untick or give up on a to-do.
+
+    Rewording an imported one marks it as reworded, so keeping the plan in
+    step with its card leaves the new words alone.
+
+    Raises:
+        UnprocessableRequestError: for a to-do already handed on to another
+            day — see :func:`refuse_moved`.
+    """
+    refuse_moved(todo)
     if data.text is not None:
-        todo.text = _clean(data.text)
+        text = _clean(data.text)
+        if todo.source is not None and text != todo.text:
+            todo.reworded = True
+        todo.text = text
     if data.state is not None:
         _set_state(todo, TodoState(data.state))
     await session.flush()
@@ -323,6 +345,20 @@ def parse_source(source: str) -> tuple[str, str]:
     """``subtask:<id>`` as ``("subtask", "<id>")``."""
     kind, _, ident = source.partition(":")
     return kind, ident
+
+
+def stage_source(column_id: UUID, index: int) -> str:
+    """The ``source`` of a to-do standing for one stage of a card in one column."""
+    return f"stage:{column_id}:{index}"
+
+
+def parse_stage(ident: str) -> tuple[UUID, int] | None:
+    """A stage source's ident as ``(column id, index)`` — None for one that is not."""
+    column, _, index = ident.partition(":")
+    try:
+        return UUID(column), int(index)
+    except ValueError:
+        return None
 
 
 async def checklist_item(session: AsyncSession, ident: str) -> TaskChecklistItem | None:
@@ -383,7 +419,14 @@ async def wrap_up(
                 select(Todo.id).where(Todo.pick_id == onward.id, Todo.source == todo.source)
             )
             if not already:
-                await add_todo(session, onward, todo.text, carried_from=day, source=todo.source)
+                await add_todo(
+                    session,
+                    onward,
+                    todo.text,
+                    carried_from=day,
+                    source=todo.source,
+                    reworded=todo.reworded,
+                )
             todo.state = TodoState.MOVED
             todo.moved_to = to_day
             moved += 1

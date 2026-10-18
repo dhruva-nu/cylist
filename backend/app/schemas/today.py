@@ -93,6 +93,12 @@ class WrapUp(BaseModel):
         description="The open to-dos to hand on. Every other open to-do on the day "
         "stays behind as `not_done`.",
     )
+    timezone: str | None = Field(
+        default=None,
+        description="IANA zone that says what today is, e.g. `Asia/Kolkata`. Defaults to UTC. "
+        "A day from today on is brought in step with its cards before it is closed; "
+        "a day gone by is closed on the plan it had.",
+    )
 
 
 class WrapUpResult(Schema):
