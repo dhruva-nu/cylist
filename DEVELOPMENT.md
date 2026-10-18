@@ -607,6 +607,64 @@ make openapi         # rewrite android/api/openapi.json from backend/
 make openapi-check   # what CI's backend job runs: fail if it is out of date
 ```
 
+### Agent notifications: FCM and Live Updates
+
+When an agent session on a card starts, changes state, or starts asking
+something, the server pushes it to the phones of the person running the agent
+and of the card's owner (CYLIST-107). The phone shows it as an Android 16
+Live Update that changes in place: working (a chip counting up), needs you (a
+question or permission: rings, with the question), waiting for your reply, then
+finished. Tapping it opens that card's agent session.
+
+**Server side** (`backend/app/services/push/`). A mapper listener on
+`AgentSession` (`triggers.py`) compares each row before and after a flush and
+queues a snapshot on the transaction's outbox when the change is worth a push
+(`messages.worth_pushing`: new, a change of state, or a waiting session's reason
+or question changing; never a working session's note). After commit the
+`Pusher` (`delivery.py`) finds the devices (`services/devices.py`: those
+registered with a token that is still live) and sends each an FCM HTTP v1 *data*
+message (`messages.message_for`), through `fcm.FcmSender`, which mints its own
+OAuth token from the service account. A device FCM calls `UNREGISTERED` is
+deleted. Phones register with `POST /devices` (`write` scope) and leave with
+`DELETE /devices/{id}`; the table is `push_device` (migration 0045).
+
+Set `CYLIST_FCM_SERVICE_ACCOUNT_FILE` to a service-account key's path to send
+for real. Unset, which is normal for development and CI, nothing is sent and
+each push is a debug log line. The tests fake Google and FCM with
+`httpx.MockTransport` (`tests/test_push.py`).
+
+**App side** (`android/app/src/main/kotlin/cylist/app/push/`). Firebase is
+configured without the google-services plugin. `app/build.gradle.kts` reads
+`google-services.json` from the Gradle property `cylist.googleServices`, the
+environment variable `CYLIST_GOOGLE_SERVICES_JSON`, or `app/google-services.json`
+(git-ignored), and turns the client whose package name equals the variant's
+application id into `BuildConfig.FIREBASE_*`. With no file, or no client for
+that id, the fields are empty and push is off in that build, which is why CI
+builds without one. Debug builds are `in.cylist.app.debug`, so the Firebase
+project needs a client registered for that id as well as `in.cylist.app`.
+
+```bash
+cp ~/.secrets/cylist-firebase/google-services.json android/app/   # never commit it
+# or: CYLIST_GOOGLE_SERVICES_JSON=~/.secrets/cylist-firebase/google-services.json ./gradlew assembleDebug
+```
+
+The app registers its FCM token after every sign-in and launch (`PushRegistrar`)
+and unregisters before signing out, through the `beforeSignOut` hook on
+`Sessions`. `PushService` receives the data messages, and `AgentNotifier` posts
+them with `NotificationCompat` and `setRequestPromotedOngoing`. More › Notifications
+shows whether notifications and Live Updates are allowed, and where OxygenOS
+keeps its per-app Live Alerts switch for the camera pill.
+
+**Without Firebase**, a debug build can be sent a push by hand. It goes through
+the same `PushService.deliver` a real one does, and adb's shell is the only
+sender allowed:
+
+```bash
+adb shell am broadcast -n in.cylist.app.debug/cylist.app.push.DebugPushReceiver \
+  --es task ATL-12 --es task_title "Import the March schedule" \
+  --es state waiting --es reason question --es note "Sheet 1 or Mar-2026?"
+```
+
 ## Status
 
 All six phases of the [plan](PLAN.md) are built: authentication and the audit

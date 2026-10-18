@@ -5,6 +5,7 @@ import cylist.api.AccountService
 import cylist.api.Revocation
 import cylist.api.ServerAddress
 import cylist.api.generated.models.Scope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,13 @@ class Sessions(
     private val deviceName: String,
     private val http: OkHttpClient = OkHttpClient(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Run before the token is revoked, while the server still accepts it: the
+     * phone forgets its push registration here (CYLIST-107). Its failure is
+     * swallowed, because signing out must not depend on it; a revoked token
+     * stops the pushes anyway.
+     */
+    private val beforeSignOut: suspend (Session) -> Unit = {},
 ) {
     private val _state = MutableStateFlow<SessionState>(
         store.read()?.let { SessionState.SignedIn(sessionFor(it)) } ?: SessionState.SignedOut(),
@@ -83,6 +91,13 @@ class Sessions(
         val session = current() ?: return
         val account = session.account
         val notice = withContext(io) {
+            try {
+                beforeSignOut(session)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Signing out goes on regardless; see beforeSignOut.
+            }
             try {
                 when (accounts.revoke(parse(account.server), account.token, UUID.fromString(account.tokenId))) {
                     Revocation.Revoked, Revocation.AlreadyGone -> null
