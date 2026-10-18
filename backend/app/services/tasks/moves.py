@@ -279,6 +279,22 @@ async def _refuse_unfinished(
     if not arriving_at_end:
         return
 
+    await refuse_open_work(session, task, last_column, act="moving this card")
+
+
+async def refuse_open_work(
+    session: AsyncSession, task: Task, last_column: BoardColumn, *, act: str
+) -> None:
+    """Refuse to land a card in the last column over work still open under it.
+
+    Shared by a move into that column and a return from cold storage, which
+    keep the same rule for the same reason: a card whose parts are open is not
+    done, and the last column says it is. ``act`` names what was refused, as
+    the sentence's object — "moving this card", "restoring it".
+
+    Raises:
+        UnprocessableRequestError: if anything under the task is still open.
+    """
     open_cards, open_boxes = await open_work(session, task)
     outstanding = [*open_cards, *open_boxes]
     if not outstanding:
@@ -287,7 +303,7 @@ async def _refuse_unfinished(
     noun = "sub-task" if len(outstanding) == 1 else "sub-tasks"
     raise UnprocessableRequestError(
         f"{task.reference} still has {len(outstanding)} unfinished {noun}: "
-        f"{', '.join(outstanding)}. Finish or cancel each of them before moving this card "
+        f"{', '.join(outstanding)}. Finish or cancel each of them before {act} "
         f"to {last_column.name}.",
         details={
             "column": last_column.name,

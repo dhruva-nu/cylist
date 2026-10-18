@@ -185,8 +185,9 @@ def _todo_sentence(planned: list[CardTodos]) -> str:
     said = f"{done} of {len(states)} {_plural(len(states), 'to-do')} done"
     moved = [todo.moved_to for card in planned for todo in card.todos if todo.moved_to]
     if moved:
-        days = {f"{when:%A}" for when in moved}
-        where = days.pop() if len(days) == 1 else "later days"
+        # By date, not weekday: Monday the 19th and Monday the 26th are two days.
+        days = set(moved)
+        where = f"{days.pop():%A}" if len(days) == 1 else "later days"
         said += f", {len(moved)} moved to {where}"
     left = states.count(TodoState.NOT_DONE)
     if left:

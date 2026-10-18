@@ -81,9 +81,9 @@ export const todayApi = {
   deleteTodo: (todoId: string) =>
     request<{ ok: boolean }>(`/today/todos/${todoId}`, { method: 'DELETE' }),
   /** Close a day: `move` goes on to `toDay`, every other open to-do stays as not done. */
-  wrapUpDay: (projectKey: string, day: string, toDay: string, move: string[]) =>
+  wrapUpDay: (projectKey: string, day: string, toDay: string, move: string[], timezone: string) =>
     request<WrapUpResult>(`/projects/${projectKey}/today/wrap-up`, {
       method: 'POST',
-      body: jsonBody({ day, to_day: toDay, move }),
+      body: jsonBody({ day, to_day: toDay, move, timezone }),
     }),
 }

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.db import SessionDependency
 from app.models.task import Task, TaskChecklistItem
+from app.routers.tasks import acts
 from app.routers.tasks.dependencies import (
     WRITE_THIS_CARD,
     WRITE_THIS_CHECKLIST,
@@ -62,15 +63,7 @@ async def update_checklist_item(
     `state` is `open`, `done` or `cancelled`; the last two both count as
     settled, so either one stops the item holding its card back.
     """
-    updated = await tasks.update_checklist_item(session, item, body)
-    task = await tasks.get(session, updated.task_id)
-    await record_on_card(
-        session,
-        principal,
-        "task.checklist_updated",
-        task,
-        {"title": updated.title, "state": updated.state.value},
-    )
+    updated = await acts.update_checklist_item(session, principal, item, body)
     return checklist_item_read(updated)
 
 

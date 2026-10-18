@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
-from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core import timezones
@@ -24,7 +23,8 @@ from app.models.project import Project
 from app.models.task import ChecklistState
 from app.models.today import Todo, TodoState
 from app.routers.projects import resolved_project
-from app.routers.tasks.recording import record_on_card
+from app.routers.tasks import acts
+from app.routers.tasks.dependencies import may_stage_card, may_write_card
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import ChecklistItemUpdate
 from app.schemas.today import (
@@ -37,7 +37,7 @@ from app.schemas.today import (
     WrapUp,
     WrapUpResult,
 )
-from app.services import permissions, reports, tasks, today
+from app.services import reports, tasks, today
 
 router = APIRouter(tags=["today"])
 
@@ -150,18 +150,32 @@ async def update_todo(
     card on to the stage after it (or back to it, when unticked). Each is
     checked against the caller's role and written to the card's history
     exactly as doing it on the board would be. Giving up on one (`not_done`)
-    is the plan's business alone and leaves the card as it is.
+    is the plan's business alone and leaves the card as it is, and so is
+    reopening one that was given up on: only unticking a done one unticks the
+    card.
     """
     todo = await today.own_todo(session, today.person_of(principal), todo_id)
-    if body.state in ("done", "open") and todo.source is not None:
-        await _tick_on_card(session, principal, todo, done=body.state == "done")
+    # Before the card is touched: a moved to-do is refused whatever it asks.
+    today.refuse_moved(todo)
+    if todo.source is not None and body.state is not None:
+        # Only a real tick or untick reaches the card. Reopening one the day
+        # left not done is the plan changing its mind, not the card's work
+        # being undone — which may have been finished since.
+        if body.state == "done" and todo.state is not TodoState.DONE:
+            await _tick_on_card(session, principal, todo, done=True)
+        elif body.state == "open" and todo.state is TodoState.DONE:
+            await _tick_on_card(session, principal, todo, done=False)
     return today.todo_read(await today.update_todo(session, todo, body))
 
 
 async def _tick_on_card(
     session: AsyncSession, principal: Principal, todo: Todo, *, done: bool
 ) -> None:
-    """Do to the card what ticking (or unticking) this to-do means."""
+    """Do to the card what ticking (or unticking) this to-do means.
+
+    Through the same acts and permission rules the board's own routes use, so
+    a to-do ticked here is asked and recorded exactly as the board would.
+    """
     if todo.source is None:
         return
     kind, ident = today.parse_source(todo.source)
@@ -173,71 +187,41 @@ async def _tick_on_card(
             sub = await tasks.get(session, UUID(ident))
         except (ValueError, NotFoundError):
             return  # deleted since: the to-do is all that is left of it
-        await permissions.enforce_on(session, sub.project_id, principal, Permission.TASKS)
-        updated, changes = await tasks.set_finished(session, sub, finished=done)
-        if changes:
-            await record_on_card(
-                session,
-                principal,
-                "task.finished",
-                updated,
-                {
-                    "parent": updated.parent.reference if updated.parent else None,
-                    "finished": done,
-                    "changes": changes,
-                },
-            )
+        await may_write_card(session, principal, sub)
+        await acts.finish(session, principal, sub, finished=done)
 
     elif kind == "checklist":
         item = await today.checklist_item(session, ident)
         if item is None:
             return
-        await permissions.enforce_on(session, card.project_id, principal, Permission.TASKS)
+        await may_write_card(session, principal, await tasks.get(session, item.task_id))
         state = ChecklistState.DONE if done else ChecklistState.OPEN
         if item.state is not state:
-            updated_item = await tasks.update_checklist_item(
-                session, item, ChecklistItemUpdate(state=state)
-            )
-            await record_on_card(
-                session,
-                principal,
-                "task.checklist_updated",
-                card,
-                {"title": updated_item.title, "state": updated_item.state.value},
+            await acts.update_checklist_item(
+                session, principal, item, ChecklistItemUpdate(state=state)
             )
 
-    elif kind == "stage" and ident.isdigit() and card.sub_status_index is not None:
-        index = int(ident)
-        stages = card.sub_statuses
-        if index >= len(stages):
+    elif kind == "stage":
+        stage = today.parse_stage(ident)
+        # A stage of a column the card has since left is not one of its
+        # stages any more; the to-do is the plan's alone now.
+        if stage is None or stage[0] != card.column_id or card.sub_status_index is None:
+            return
+        index = stage[1]
+        if index >= len(card.sub_statuses):
             return
         # Done with a stage is being on the next one; the last has no next, so
         # finishing it is the plan's to record and the card stays where it is.
         # Unticking one puts the card back on it, if it had got past it.
         target: int | None
         if done:
-            target = index + 1 if index + 1 < len(stages) else None
+            target = index + 1 if index + 1 < len(card.sub_statuses) else None
         else:
             target = index if card.sub_status_index > index else None
         if target is None or target == card.sub_status_index:
             return
-        await permissions.enforce_on(session, card.project_id, principal, Permission.TASKS)
-        if card.column_id is not None:
-            await permissions.enforce_column_staging(
-                session, card.project, principal, card.column_id
-            )
-        updated, changes = await tasks.set_sub_status(session, card, target)
-        await record_on_card(
-            session,
-            principal,
-            "task.sub_status_moved",
-            updated,
-            {
-                "sub_status_index": updated.sub_status_index,
-                "sub_status": updated.sub_statuses[target],
-                "changes": changes,
-            },
-        )
+        await may_stage_card(session, principal, card)
+        await acts.move_stage(session, principal, card, target)
 
 
 @router.delete(
@@ -274,8 +258,10 @@ async def wrap_up(
     """
     person_id = today.person_of(principal)
     # The card may have moved on since the plan was last read; close the day
-    # on what is true now.
-    await today.sync_day(session, project, person_id, body.day)
+    # on what is true now — but only a day from today on, which is all that
+    # follows its cards. A day gone by is closed on the plan it had.
+    if body.day >= reports.today_in(timezones.zone_for(body.timezone)):
+        await today.sync_day(session, project, person_id, body.day)
     moved, left = await today.wrap_up(
         session,
         project,

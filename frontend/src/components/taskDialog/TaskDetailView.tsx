@@ -295,6 +295,7 @@ function ColumnOrFinishedReadField({
     return (
       <ReadField label="Column">
         Cold storage
+        {task.outcome ? <span className={shared.aside}>· {task.outcome}</span> : null}
         {finishedOn ? <span className={shared.aside}>· finished {finishedOn}</span> : null}
       </ReadField>
     )

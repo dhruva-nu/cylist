@@ -40,7 +40,7 @@ from app.models.project import Project
 from app.models.task import Task
 from app.services import columns, files, templates
 from app.services.tasks.history import FieldChange, field_change
-from app.services.tasks.moves import open_work
+from app.services.tasks.moves import refuse_open_work
 from app.services.tasks.stacking import cards_in_column, restack
 from app.storage import BlobStore
 
@@ -134,13 +134,11 @@ async def store_finished(
 
     for card in cards:
         card.archived_at = stored_at
-        card.column_id = None
+        # Through the relationship rather than the id, so the card in hand
+        # stops pointing at the column it left without a reload per card.
+        card.column = None
         card.position = None
     await session.flush()
-    for card in cards:
-        # The relationship still holds the column the card left, and the
-        # response reads the card's outcome off it.
-        await session.refresh(card, ["column"])
     return Stored(cards=cards, file=item, column=finished)
 
 
@@ -168,7 +166,7 @@ async def restore(session: AsyncSession, task: Task) -> tuple[Task, list[FieldCh
 
     finished = await columns.last(session, task.project_id)
     templates.require_permitted(task, finished)
-    await _refuse_open_work(session, task, finished)
+    await refuse_open_work(session, task, finished, act="restoring it")
 
     await restack(session, task, finished, 0)
     task.archived_at = None
@@ -191,33 +189,25 @@ async def list_stored(session: AsyncSession, project: Project) -> list[Task]:
     )
 
 
+def stored_outcome(task: Task, last_column: BoardColumn) -> str | None:
+    """How a stored card ended, as the label it would come back on.
+
+    A card in cold storage is in no column, so :attr:`Task.outcome` has
+    nothing to read its index against. The column it left is the board's last,
+    and that is the one restoring it lands it in — so its label is read there,
+    by the same rule :func:`restore` follows.
+    """
+    if task.outcome_index is None:
+        return None
+    index = _outcome_back(task.outcome_index, last_column)
+    return None if index is None else last_column.outcomes[index]
+
+
 def _outcome_back(index: int | None, column: BoardColumn) -> int | None:
     """Which of ``column``'s outcomes a returning card lands on."""
     if not column.outcomes:
         return None
     return min(index or 0, len(column.outcomes) - 1)
-
-
-async def _refuse_open_work(session: AsyncSession, task: Task, finished: BoardColumn) -> None:
-    """Refuse to put a card in the last column over work still open under it.
-
-    The same rule a move into that column keeps, for the same reason: a card
-    whose parts are open is not done, and the last column says it is.
-    """
-    open_cards, open_boxes = await open_work(session, task)
-    outstanding = [*open_cards, *open_boxes]
-    if not outstanding:
-        return
-    noun = "sub-task" if len(outstanding) == 1 else "sub-tasks"
-    raise UnprocessableRequestError(
-        f"{task.reference} has {len(outstanding)} unfinished {noun}: {', '.join(outstanding)}. "
-        f"Finish or cancel each of them before restoring it to {finished.name}.",
-        details={
-            "column": finished.name,
-            "open_subtasks": open_cards,
-            "open_checklist_items": open_boxes,
-        },
-    )
 
 
 async def _free_name(session: AsyncSession, folder: Folder, project: Project, at: datetime) -> str:

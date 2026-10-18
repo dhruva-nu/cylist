@@ -98,7 +98,11 @@ def _task_read(
         waiting_on=[PersonRead.model_validate(person) for person in task.waiting_on],
         comment_count=comment_count,
         checklist=[checklist_item_read(item) for item in task.checklist],
-        outcome=task.outcome,
+        outcome=(
+            tasks.stored_outcome(task, board[-1])
+            if task.in_cold_storage and board
+            else task.outcome
+        ),
         outcome_index=task.outcome_index,
         finished_at=task.finished_at,
         archived_at=task.archived_at,

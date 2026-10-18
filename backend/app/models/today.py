@@ -33,6 +33,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -158,9 +159,17 @@ class Todo(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     read on a Friday."""
     source: Mapped[str | None] = mapped_column(String(SOURCE_MAX_LENGTH), nullable=True)
     """What on the card this to-do stands for, when it was imported from it:
-    ``stage:<index>``, ``subtask:<id>`` or ``checklist:<id>``. Null for one a
+    ``stage:<column id>:<index>``, ``subtask:<id>`` or ``checklist:<id>``. A
+    stage names its column because a card's stages are replaced when it moves,
+    and the first stage of one column is not the first stage of the next. Null for one a
     person wrote. Ticking a to-do with a source ticks the thing itself, and the
     thing being ticked on the card ticks the to-do — see
     :func:`app.services.today.sync`."""
+
+    reworded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Whether somebody rewrote this imported to-do. Its words are then its
+    own, and keeping it in step with its card no longer puts the card's back."""
 
     pick: Mapped[DayPick] = relationship(back_populates="todos")
