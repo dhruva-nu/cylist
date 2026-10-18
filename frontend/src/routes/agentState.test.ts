@@ -14,6 +14,7 @@ import {
   agentBusy,
   agentCounts,
   agentIndicator,
+  anyAgentCounted,
   hasLiveAgent,
   isAnswerable,
   needsYou,
@@ -394,6 +395,13 @@ describe('the agent filters', () => {
       working: 2,
     })
     expect(agentCounts([])).toEqual({ needsYou: 0, working: 0 })
+  })
+
+  it('says whether there is any agent for the chips to count', () => {
+    expect(anyAgentCounted([idle, finished, working])).toBe(true)
+    expect(anyAgentCounted([idle, turnOver])).toBe(true)
+    expect(anyAgentCounted([idle, finished])).toBe(false)
+    expect(anyAgentCounted([])).toBe(false)
   })
 })
 

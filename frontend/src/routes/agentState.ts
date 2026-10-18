@@ -291,6 +291,16 @@ export function passesAgentFilter(
   }
 }
 
+/**
+ * Whether any card has an agent on it the chips would count. With none, there
+ * is nothing for a pressed chip to narrow the board to, and the chips go.
+ */
+export function anyAgentCounted(
+  tasks: readonly { agent_session: AgentPresence | null }[],
+): boolean {
+  return tasks.some((task) => needsYou(task) || agentBusy(task))
+}
+
 /** The two numbers on the chips. */
 export function agentCounts(tasks: readonly { agent_session: AgentPresence | null }[]): {
   needsYou: number

@@ -16,7 +16,7 @@
   font-size: var(--text-base);
 }
 
-/* Takes every pixel the title and the buttons leave, right up to the filter.
+/* Takes every pixel the counts and the buttons leave, right up to the filter.
    The basis is the width below which the two drop onto separate lines rather
    than squeezing the box down to nothing. */
 .search {

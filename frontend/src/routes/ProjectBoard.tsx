@@ -24,6 +24,7 @@ import type { Board, BoardColumn, Goal, Person, Task, Template } from '../api/cl
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
 import { EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../components/ui'
+import { anyAgentCounted } from './agentState'
 import { hidesHold } from './boardHiding'
 import { BoardGrid, type LanesLayout, type SharedColumnProps } from './board/BoardGrid'
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
@@ -128,6 +129,13 @@ function LoadedBoard({
     status: 'all',
     agent: 'all',
   }))
+  // A chip pressed when the last agent on the board stops has nothing left to
+  // narrow to, and the chips themselves go (CYLIST-97) — so the board lets go
+  // of it rather than sitting empty under a filter nobody can see to release.
+  // Settled during render, React's own pattern for state that follows props.
+  if (filters.agent !== 'all' && !anyAgentCounted(tasks)) {
+    setFilters((current) => ({ ...current, agent: 'all' }))
+  }
 
   const columns = board.columns
   const firstColumn = columns[0]
