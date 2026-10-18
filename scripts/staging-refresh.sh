@@ -70,11 +70,21 @@ staging stop app 2>/dev/null || true
 staging up -d --wait postgres
 
 step "Restoring into staging"
-# --clean --if-exists so a second run is as good as the first, and --no-owner
-# because staging's database role is not production's.
+# The whole schema is dropped rather than pg_restore --clean, which only drops
+# what the dump names. Staging usually runs migrations production has not had
+# yet, and a table only staging has (day_pick, once) holds foreign keys that stop
+# --clean dropping the tables they point at — leaving those tables staging's and
+# everything else production's. Staging comes back at production's revision;
+# Deploy staging migrates it forward.
+#
+# One transaction, stopping at the first error: a restore that fails leaves
+# staging as it was, not half-replaced. --no-owner because staging's database
+# role is not production's.
 staging exec -T postgres sh -c \
-  'pg_restore --clean --if-exists --no-owner --no-privileges \
-     -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$DUMP"
+  '{ echo "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+     pg_restore --no-owner --no-privileges -f -
+   } | psql --quiet --output=/dev/null -v ON_ERROR_STOP=1 --single-transaction \
+       -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$DUMP"
 
 step "Copying the uploaded files"
 # Production's volume is mounted read-only; only staging's is written. Ownership
