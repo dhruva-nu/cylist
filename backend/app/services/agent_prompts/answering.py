@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.auth.scopes import Scope
 from app.core.clock import now as clock_now
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError
 from app.models.activity import Channel
@@ -37,21 +38,25 @@ async def answer(
 ) -> AgentPromptRead:
     """A person's answer: close the prompt, free the agent, say so on the card.
 
-    A permission is answered by a person signed in, never with an API token.
+    A permission is answered by a person signed in, or with a token minted
+    with the ``permit`` scope for a person's own device (the phone app's).
     Agents hold API tokens, and the agent asking holds one on the same disk as
     the hook: one that could grant itself "Allow for this session" would be
-    walking past the very prompt Claude Code put in front of a person.
+    walking past the very prompt Claude Code put in front of a person. An
+    agent's token is never minted with ``permit``.
 
     Raises:
         NotFoundError: if there is no such prompt on the card.
-        ForbiddenError: if a permission is answered with an API token.
+        ForbiddenError: if a permission is answered with an API token that
+            lacks the ``permit`` scope.
         ConflictError: if the prompt has already closed, or the answer is not
             one it accepts.
     """
     prompt = await store.prompt_on(session, task, prompt_id)
-    if prompt.kind is AgentPromptKind.PERMISSION and principal.channel is not Channel.WEB:
+    if prompt.kind is AgentPromptKind.PERMISSION and not _may_permit(principal):
         raise ForbiddenError(
-            "A permission is answered by a person on the board, not with an API token."
+            "A permission is answered by a person on the board or on their phone, "
+            "not with an agent's API token."
         )
     now = clock_now()
     await store.expire_if_due(session, prompt, now)
@@ -87,6 +92,12 @@ async def answer(
     )
     store.announce(session, task, prompt, row.client_session_id if row else "")
     return read(prompt)
+
+
+def _may_permit(principal: Principal) -> bool:
+    """Whether this credential may grant or refuse a tool call: a browser
+    session, or a token carrying ``permit``."""
+    return principal.channel is Channel.WEB or principal.has(Scope.PERMIT)
 
 
 def _record_answer(prompt: AgentPrompt, data: AgentPromptAnswer) -> None:

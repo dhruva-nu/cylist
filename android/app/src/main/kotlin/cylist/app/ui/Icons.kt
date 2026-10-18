@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
  * rather than Material's. Each is stroked in black and tinted where it is used.
  */
 
-private fun icon(name: String, viewBox: Float, stroke: Float, vararg paths: String, filled: Boolean = false): ImageVector =
+internal fun icon(name: String, viewBox: Float, stroke: Float, vararg paths: String, filled: Boolean = false): ImageVector =
     ImageVector.Builder(name, 24.dp, 24.dp, viewBox, viewBox).apply {
         paths.forEach { d ->
             addPath(

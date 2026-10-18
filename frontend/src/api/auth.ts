@@ -3,7 +3,8 @@
 import { jsonBody, request } from './http'
 import type { Person } from './people'
 
-export type Scope = 'read' | 'write' | 'vault:read' | 'vault:reveal' | 'admin'
+/** `permit` answers an agent's permission prompt; the phone app's token has it, an agent's never does. */
+export type Scope = 'read' | 'write' | 'vault:read' | 'vault:reveal' | 'admin' | 'permit'
 
 /**
  * The server's password floor, repeated so a form can say so before the trip.

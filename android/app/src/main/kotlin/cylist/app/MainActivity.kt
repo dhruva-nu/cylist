@@ -43,6 +43,7 @@ import cylist.app.session.Session
 import cylist.app.session.SessionState
 import cylist.app.signin.SignInScreen
 import cylist.app.signin.SignInViewModel
+import cylist.app.task.TaskDetailRoute
 import cylist.app.theme.CylistTheme
 import cylist.app.theme.Figtree
 import cylist.app.ui.CylistIcons
@@ -94,10 +95,16 @@ fun AppShell(session: Session, signingOut: Boolean, signOut: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.Board) }
     // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
     val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
+    // The card open over the board (CYLIST-104), as "KEY|KEY-41"; it takes the whole screen.
+    var openTask by rememberSaveable { mutableStateOf<String?>(null) }
+    openTask?.let { opened ->
+        TaskDetailRoute(session, opened) { openTask = null }
+        return
+    }
     Column(Modifier.fillMaxSize().background(CylistTheme.colors.bg)) {
         Box(Modifier.weight(1f)) {
             when (tab) {
-                Tab.Board -> BoardScreen(board)
+                Tab.Board -> BoardScreen(board, openTask = { key, ref -> openTask = "$key|$ref" })
                 Tab.More -> MoreScreen(session.account, signingOut, signOut)
                 else -> NotYet(tab)
             }

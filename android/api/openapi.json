@@ -13602,7 +13602,8 @@
           "write",
           "vault:read",
           "vault:reveal",
-          "admin"
+          "admin",
+          "permit"
         ],
         "title": "Scope"
       },
