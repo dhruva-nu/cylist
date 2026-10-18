@@ -1,6 +1,7 @@
 /**
- * The bar above the board: the two agent counts while there is anything to
- * count, then the search and the board's own controls.
+ * The bar above the board: whose cards it is showing, the two agent counts
+ * while there is anything to count, then the search and the board's own
+ * controls.
  *
  * No visible page title (CYLIST-97): the breadcrumb and the top nav already
  * say this is the board, and a heading saying it a third time spent the bar's
@@ -10,11 +11,12 @@
  * search box was read as one more thing to press.
  */
 
-import type { Board, Goal, Person } from '../../api/client'
+import type { Board, Goal, Person, Task } from '../../api/client'
 import type { AgentFilter } from '../agentState'
 import { BoardMenu } from './BoardMenu'
 import { ColumnsIcon, LanesIcon } from './icons'
 import type { BoardFilters } from './narrowBoard'
+import { PeopleFilter } from './PeopleFilter'
 import { QuickFilters } from './QuickFilters'
 import { SearchBar } from './SearchBar'
 import styles from './BoardToolbar.module.css'
@@ -25,6 +27,8 @@ export type ChosenFilters = Omit<BoardFilters, 'showCancelled'>
 export function BoardToolbar({
   board,
   members,
+  meId,
+  tasks,
   goals,
   filters,
   onFiltersChange,
@@ -33,6 +37,7 @@ export function BoardToolbar({
   cancelledCount,
   hidingCancelled,
   agentTally,
+  peopleTally,
   lanesOn,
   onLanesOn,
   foldAll,
@@ -40,6 +45,9 @@ export function BoardToolbar({
 }: {
   board: Board
   members: Person[]
+  meId: string | null
+  /** Every card on the board, unfiltered. */
+  tasks: Task[]
   goals: Goal[]
   filters: ChosenFilters
   onFiltersChange: (changes: Partial<ChosenFilters>) => void
@@ -48,6 +56,7 @@ export function BoardToolbar({
   cancelledCount: number
   hidingCancelled: boolean
   agentTally: { needsYou: number; working: number }
+  peopleTally: Map<string, number>
   lanesOn: boolean
   onLanesOn: (on: boolean) => void
   /**
@@ -67,6 +76,16 @@ export function BoardToolbar({
       {/* Still the page's heading for whoever navigates by headings; it is
           only the eye that has the breadcrumb to read instead. */}
       <h1 className="visually-hidden">Kanban board</h1>
+      {/* Where the title used to be (CYLIST-99): whose board this is being
+          read as comes before what is on it. */}
+      <PeopleFilter
+        members={members}
+        meId={meId}
+        tasks={tasks}
+        people={filters.people}
+        onPeople={(people) => onFiltersChange({ people })}
+        tally={peopleTally}
+      />
       {/* Only while an agent is on a card this board is showing, or while a
           chip is pressed — a pressed chip is a filter in force, and hiding
           it would leave the board narrowed with no way to let go. Otherwise

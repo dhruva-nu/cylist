@@ -14,6 +14,136 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* Whose cards (CYLIST-99) — see `PeopleFilter`. Faces overlap a little, the
+   way a group of people is drawn, and part to show who is picked: a ring
+   around the picked ones, the rest faded back. */
+.people {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Folded, the default: whoever is picked, small and stacked, and a grey
+   chevron — no box, no label. Everyone is a grey people icon instead. */
+.peopleSummary {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  align-items: center;
+  height: 36px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.peopleSummary:hover,
+.foldButton:hover {
+  color: var(--ink);
+}
+
+.summaryFaces {
+  display: flex;
+  align-items: center;
+}
+
+.summaryFaces > span {
+  width: 22px;
+  height: 22px;
+  box-shadow: 0 0 0 2px var(--bg);
+  font-size: var(--text-2xs);
+}
+
+.summaryFaces > span + span {
+  margin-left: -4px;
+}
+
+/* The ‹ at the start of the open row, which folds it back. */
+.foldButton {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.faces {
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+}
+
+.face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: none;
+  box-shadow: 0 0 0 2px var(--bg);
+  cursor: pointer;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+
+.face > span {
+  width: 32px;
+  height: 32px;
+  font-size: var(--text-sm);
+}
+
+.face:hover,
+.face:focus-visible {
+  z-index: 1;
+  transform: translateY(-2px);
+}
+
+.facePicked {
+  z-index: 1;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--ink);
+}
+
+.faceDim {
+  opacity: 0.45;
+}
+
+.faceDim:hover {
+  opacity: 0.85;
+}
+
+.moreFaces {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-round);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-weight: var(--weight-bold);
+}
+
+/* Over the columns, when nobody picked owns a card on the board. */
+.nobodys {
+  margin: 0 6px 12px;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+}
+
 /* The agent counts (CYLIST-90) — see `AgentChips`. Text with a dot, no fill
    until pressed; the number takes the state's colour once there is one. */
 .agentChips {
@@ -198,6 +328,53 @@
 
 .filterPopover {
   width: 320px;
+}
+
+/* The faces sit at the start of the bar, so their list opens rightwards. */
+.peoplePopover {
+  right: auto;
+  left: 0;
+  width: 300px;
+}
+
+.popFind {
+  width: 100%;
+  height: 34px;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+
+.optionHint,
+.optionCount {
+  color: var(--ink-3);
+  font-weight: var(--weight-medium);
+}
+
+.optionCount {
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kept whether or not it holds a tick, so the counts stay in one column. */
+.optionTick {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+}
+
+.popEmpty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
 }
 
 .menuPopover {

@@ -12,6 +12,19 @@
   stroke-linejoin: round;
 }
 
+/* The people row's chevron: always drawn, unlike `.go` — it is the one
+   thing that says the row opens. */
+.fold {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* A tick, wherever it is drawn: kept its own width inside a flex row. */
 .tick {
   flex: none;

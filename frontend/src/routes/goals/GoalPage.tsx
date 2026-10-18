@@ -36,6 +36,7 @@ import {
   LiveRegion,
   useAnnouncer,
 } from '../../components/ui'
+import { EVERYONE } from '../board/boardPeople'
 import { usePermissions } from '../usePermissions'
 import { cardMatches } from './cardMatch'
 import { GoalAside, REFUSAL_ID } from './GoalAside'
@@ -152,11 +153,13 @@ export function GoalPage() {
         actions={
           <>
             {/* Straight to the board with the goal already in the search box,
-                which is the one thing this page cannot do: move cards. */}
+                which is the one thing this page cannot do: move cards. Every
+                owner's cards, not the board's usual opening on yours: this
+                page is about the goal, and so is the link. */}
             <Link
               to="/p/$projectKey/board"
               params={{ projectKey }}
-              search={{ q: `goal:"${goalDetail.name}"` }}
+              search={{ q: `goal:"${goalDetail.name}"`, who: EVERYONE }}
               className={styles.boardLink}
             >
               On the board

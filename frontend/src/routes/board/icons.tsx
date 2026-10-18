@@ -35,6 +35,27 @@ export function ChevronIcon() {
   )
 }
 
+/** The people row's chevron: › opens the folded row, ‹ (`back`) folds it again. */
+export function FoldIcon({ back = false }: { back?: boolean }) {
+  return (
+    <svg className={styles.fold} viewBox="0 0 16 16" aria-hidden="true">
+      <path d={back ? 'M10 4 6 8l4 4' : 'm6 4 4 4-4 4'} />
+    </svg>
+  )
+}
+
+/** Two people, for a board showing everybody's cards. */
+export function PeopleIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="6" cy="5.5" r="2.3" />
+      <path d="M1.8 13c.5-2.3 2.2-3.5 4.2-3.5s3.7 1.2 4.2 3.5" strokeLinecap="round" />
+      <circle cx="11.3" cy="6" r="1.8" />
+      <path d="M11.6 9.6c1.4.2 2.4 1.2 2.7 2.9" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** A row that opens elsewhere, in a new tab. */
 export function OutIcon() {
   return (
