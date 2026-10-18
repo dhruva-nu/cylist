@@ -2,14 +2,18 @@
 
 ``day_pick`` (CYLIST-96) says a card is on one person's plan for one day;
 ``todo`` is one thing they mean to do about it, with ``@`` and ``>`` tags in its
-text. Wrapping a day up marks what is left ``moved`` or ``not_done``, and a
+text. A to-do imported from its card — a stage, a sub-task, a tick box —
+carries ``source`` naming which, so ticking one in either place ticks the
+other; ``day_pick.dismissed`` remembers the ones deleted from the plan, so
+keeping the plan in step with the card does not bring them back. Wrapping a
+day up marks what is left ``moved`` or ``not_done``, and a
 moved to-do is copied onto the day it went to with ``carried_from`` set.
 
 Two new tables and nothing changed on any old one, so there is nothing to
 backfill and the downgrade only drops them.
 
-Revision ID: 0042
-Revises: 0041
+Revision ID: 0043
+Revises: 0042
 Created: 2026-10-18
 """
 
@@ -22,8 +26,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0042"
-down_revision: str | None = "0041"
+revision: str = "0043"
+down_revision: str | None = "0042"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -55,6 +59,12 @@ def upgrade() -> None:
         sa.Column("task_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("day", sa.Date(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
+        sa.Column(
+            "dismissed",
+            postgresql.ARRAY(sa.String(length=80)),
+            server_default=sa.text("'{}'"),
+            nullable=False,
+        ),
         *_timestamps(),
         sa.ForeignKeyConstraint(
             ["person_id"],
@@ -93,6 +103,7 @@ def upgrade() -> None:
         sa.Column("done_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("moved_to", sa.Date(), nullable=True),
         sa.Column("carried_from", sa.Date(), nullable=True),
+        sa.Column("source", sa.String(length=80), nullable=True),
         *_timestamps(),
         sa.CheckConstraint("char_length(text) > 0", name=op.f("ck_todo_text_not_empty")),
         sa.CheckConstraint(
@@ -108,9 +119,17 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_todo")),
     )
     op.create_index(op.f("ix_todo_pick_id"), "todo", ["pick_id"])
+    op.create_index(
+        "ix_todo_pick_id_source",
+        "todo",
+        ["pick_id", "source"],
+        unique=True,
+        postgresql_where=sa.text("source IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_todo_pick_id_source", table_name="todo")
     op.drop_index(op.f("ix_todo_pick_id"), table_name="todo")
     op.drop_table("todo")
     op.drop_index(op.f("ix_day_pick_task_id"), table_name="day_pick")

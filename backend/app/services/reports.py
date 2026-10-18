@@ -104,7 +104,7 @@ async def for_day(
     # with the lines under it would just look like a bug.
     shown = sum(len(card.entries) for card in touched) + len(elsewhere)
 
-    planned = await _planned(session, project, person_id, day)
+    planned = await _planned(session, project, person_id, day, zone)
 
     todo_sentence = _todo_sentence(planned)
     # A day with a plan and no changes on the board is not a day where nothing
@@ -153,11 +153,15 @@ async def for_day(
 
 
 async def _planned(
-    session: AsyncSession, project: Project, person_id: UUID | None, day: date
+    session: AsyncSession, project: Project, person_id: UUID | None, day: date, zone: ZoneInfo
 ) -> list[CardTodos]:
     """The asker's plan for the day, as the report shows it."""
     if person_id is None:
         return []
+    # From today on the plan follows its cards, so today's report reads the
+    # plan as the board has it now; a day gone by keeps what it had.
+    if day >= today_in(zone):
+        await today.sync_day(session, project, person_id, day)
     return [
         CardTodos(
             reference=picked.task.reference,

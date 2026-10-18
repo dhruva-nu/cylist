@@ -7,11 +7,15 @@ ends up being read by anyone but its author.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from httpx import AsyncClient
 
 from tests.conftest import INVITEE_PASSWORD, open_account
 
 FRIDAY = "2026-10-16"
+TODAY_HERE = datetime.now(UTC).date().isoformat()
+"""Today in UTC, which is the zone a plan is read in when none is named."""
 SATURDAY = "2026-10-17"
 MONDAY = "2026-10-19"
 
@@ -437,16 +441,14 @@ async def test_a_picked_card_brings_what_is_outstanding_on_it(signed_in: AsyncCl
     assert {todo["state"] for todo in picked["todos"]} == {"open"}
 
 
-async def test_picking_again_imports_nothing_more(signed_in: AsyncClient) -> None:
+async def test_a_deleted_import_stays_deleted(signed_in: AsyncClient) -> None:
     project = await make_project(signed_in)
     card = await make_card(signed_in, project)
     await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
-    first = await pick(signed_in, project, card)
+    first = await pick(signed_in, project, card, TODAY_HERE)
     await signed_in.delete(f"/today/todos/{first['todos'][0]['id']}")
 
-    again = await pick(signed_in, project, card)
-
-    assert again["todos"] == []
+    assert (await plan(signed_in, project, TODAY_HERE))["picks"][0]["todos"] == []
 
 
 async def test_a_card_with_nothing_outstanding_starts_empty(signed_in: AsyncClient) -> None:
@@ -457,36 +459,126 @@ async def test_a_card_with_nothing_outstanding_starts_empty(signed_in: AsyncClie
     assert picked["todos"] == []
 
 
-async def test_a_pick_names_what_its_card_holds_that_it_does_not(signed_in: AsyncClient) -> None:
-    project = await make_project(signed_in)
-    card = await make_card(signed_in, project)
-    picked = await pick(signed_in, project, card)
-    assert picked["missing"] == []
+# --- A plan from today on follows its cards -------------------------------------
 
-    # Split after it was picked: the plan does not grow by itself, it says so.
-    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
-    made = await signed_in.post(
+
+async def card_with_parts(client: AsyncClient) -> tuple[str, str, str]:
+    """A card with three stages, the first in hand, and one sub-task."""
+    project = await make_project(client)
+    card = await make_card(client, project)
+    await client.patch(f"/tasks/{card}", json={"sub_statuses": ["Spec", "Build", "Review"]})
+    made = await client.post(
         f"/tasks/{card}/subtasks",
         json={"title": "Layout", "description": "Part of it.", "type": "feature"},
     )
-    sub = made.json()["reference"]
-
-    day = await plan(signed_in, project)
-    assert day["picks"][0]["missing"] == [f"{sub} Layout", "Tell support"]
-    assert day["picks"][0]["todos"] == []
-
-    brought = await signed_in.post(f"/today/picks/{picked['id']}/bring-in")
-
-    assert brought.status_code == 200, brought.text
-    assert [t["text"] for t in brought.json()["todos"]] == [f"{sub} Layout", "Tell support"]
-    assert brought.json()["missing"] == []
+    return project, card, made.json()["reference"]
 
 
-async def test_a_listed_line_is_not_missing_once_done(signed_in: AsyncClient) -> None:
-    project = await make_project(signed_in)
-    card = await make_card(signed_in, project)
+def todo_named(day: dict, text: str) -> dict:
+    return next(t for p in day["picks"] for t in p["todos"] if t["text"] == text)
+
+
+async def test_what_is_added_to_the_card_later_comes_onto_today(signed_in: AsyncClient) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+
+    made = await signed_in.post(
+        f"/tasks/{card}/subtasks",
+        json={"title": "Totals row", "description": "Part of it.", "type": "feature"},
+    )
     await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
-    picked = await pick(signed_in, project, card)
-    await signed_in.patch(f"/today/todos/{picked['todos'][0]['id']}", json={"state": "done"})
 
-    assert (await plan(signed_in, project))["picks"][0]["missing"] == []
+    texts = [t["text"] for t in (await plan(signed_in, project, TODAY_HERE))["picks"][0]["todos"]]
+    assert texts[-2:] == [f"{made.json()['reference']} Totals row", "Tell support"]
+
+
+async def test_a_day_gone_by_keeps_the_plan_it_had(signed_in: AsyncClient) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    before = await pick(signed_in, project, card, FRIDAY)
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
+
+    friday = (await plan(signed_in, project, FRIDAY))["picks"][0]["todos"]
+
+    assert len(friday) == len(before["todos"])
+
+
+async def test_ticking_a_sub_task_on_the_plan_finishes_it_on_the_card(
+    signed_in: AsyncClient,
+) -> None:
+    project, card, sub = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+    todo = todo_named(await plan(signed_in, project, TODAY_HERE), f"{sub} Layout")
+    assert todo["source_kind"] == "subtask"
+
+    await signed_in.patch(f"/today/todos/{todo['id']}", json={"state": "done"})
+    assert (await signed_in.get(f"/tasks/{sub}")).json()["finished_at"] is not None
+
+    await signed_in.patch(f"/today/todos/{todo['id']}", json={"state": "open"})
+    assert (await signed_in.get(f"/tasks/{sub}")).json()["finished_at"] is None
+
+
+async def test_finishing_a_sub_task_on_the_card_ticks_it_on_the_plan(
+    signed_in: AsyncClient,
+) -> None:
+    project, card, sub = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+
+    await signed_in.post(f"/tasks/{sub}/finish", json={"finished": True})
+
+    day = await plan(signed_in, project, TODAY_HERE)
+    assert todo_named(day, f"{sub} Layout")["state"] == "done"
+
+
+async def test_ticking_a_stage_moves_the_card_on(signed_in: AsyncClient) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+    spec = todo_named(await plan(signed_in, project, TODAY_HERE), "Stage: Spec")
+    assert spec["source_kind"] == "stage"
+
+    await signed_in.patch(f"/today/todos/{spec['id']}", json={"state": "done"})
+
+    assert (await signed_in.get(f"/tasks/{card}")).json()["sub_status_index"] == 1
+    history = (await signed_in.get(f"/tasks/{card}/history")).json()["entries"]
+    assert "task.sub_status_moved" in [entry["verb"] for entry in history]
+
+
+async def test_moving_the_stage_on_the_card_ticks_the_plan(signed_in: AsyncClient) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    await pick(signed_in, project, card, TODAY_HERE)
+
+    await signed_in.post(f"/tasks/{card}/sub-status", json={"index": 2})
+
+    day = await plan(signed_in, project, TODAY_HERE)
+    assert [todo_named(day, f"Stage: {s}")["state"] for s in ("Spec", "Build", "Review")] == [
+        "done",
+        "done",
+        "open",
+    ]
+
+    # And back: unticking Build on the plan puts the card back on Build.
+    build = todo_named(day, "Stage: Build")
+    await signed_in.patch(f"/today/todos/{build['id']}", json={"state": "open"})
+    assert (await signed_in.get(f"/tasks/{card}")).json()["sub_status_index"] == 1
+
+
+async def test_ticking_a_tick_box_ticks_it_on_the_card(signed_in: AsyncClient) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
+    await pick(signed_in, project, card, TODAY_HERE)
+    todo = todo_named(await plan(signed_in, project, TODAY_HERE), "Tell support")
+
+    await signed_in.patch(f"/today/todos/{todo['id']}", json={"state": "done"})
+
+    checklist = (await signed_in.get(f"/tasks/{card}")).json()["checklist"]
+    assert [item["state"] for item in checklist] == ["done"]
+
+
+async def test_a_written_todo_never_touches_the_card(signed_in: AsyncClient) -> None:
+    project, card, _ = await card_with_parts(signed_in)
+    picked = await pick(signed_in, project, card, TODAY_HERE)
+    mine = await add_todo(signed_in, picked["id"], "Email the client")
+
+    await signed_in.patch(f"/today/todos/{mine['id']}", json={"state": "done"})
+
+    assert mine["source_kind"] is None
+    assert (await signed_in.get(f"/tasks/{card}")).json()["sub_status_index"] == 0

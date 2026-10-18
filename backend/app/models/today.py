@@ -32,7 +32,18 @@ from datetime import date, datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Enum, ForeignKey, Index, Integer, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,6 +52,8 @@ from app.models.task import Task
 
 TEXT_MAX_LENGTH = 500
 """How long one to-do may be. A line of work, not a description."""
+
+SOURCE_MAX_LENGTH = 80
 
 
 class TodoState(StrEnum):
@@ -81,6 +94,14 @@ class DayPick(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     """Order on the day: the order the cards were picked in, until rearranged."""
+    dismissed: Mapped[list[str]] = mapped_column(
+        postgresql.ARRAY(String(SOURCE_MAX_LENGTH)),
+        nullable=False,
+        default=list,
+        server_default=sql_text("'{}'"),
+    )
+    """The ``source`` of every imported to-do deleted from this pick, so that
+    keeping the pick in step with its card does not bring it back."""
 
     task: Mapped[Task] = relationship(lazy="joined")
     todos: Mapped[list[Todo]] = relationship(
@@ -97,6 +118,13 @@ class Todo(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __tablename__ = "todo"
     __table_args__ = (
+        Index(
+            "ix_todo_pick_id_source",
+            "pick_id",
+            "source",
+            unique=True,
+            postgresql_where=sql_text("source IS NOT NULL"),
+        ),
         CheckConstraint("char_length(text) > 0", name="text_not_empty"),
         # Moved and the day it moved to are one fact, stated twice.
         CheckConstraint("(state = 'moved') = (moved_to IS NOT NULL)", name="moved_says_where"),
@@ -128,5 +156,11 @@ class Todo(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """The day this was handed on from, when it was — the day before it moved,
     not the day it was first written, because "from Thu" is what is useful to
     read on a Friday."""
+    source: Mapped[str | None] = mapped_column(String(SOURCE_MAX_LENGTH), nullable=True)
+    """What on the card this to-do stands for, when it was imported from it:
+    ``stage:<index>``, ``subtask:<id>`` or ``checklist:<id>``. Null for one a
+    person wrote. Ticking a to-do with a source ticks the thing itself, and the
+    thing being ticked on the card ticks the to-do — see
+    :func:`app.services.today.sync`."""
 
     pick: Mapped[DayPick] = relationship(back_populates="todos")

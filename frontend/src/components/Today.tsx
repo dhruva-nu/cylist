@@ -28,6 +28,7 @@ import { useMatchRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import {
   api,
+  errorMessage,
   type DayPick,
   type FiledItem,
   type Person,
@@ -81,6 +82,10 @@ function usePlan(projectKey: string | null, day: string) {
     // Off by one person's session — the bootstrap login has no plan, and
     // asking again will not give it one.
     retry: false,
+    // A plan from today on follows its cards, which change behind it — on
+    // the board, on an open card, by an agent — so opening it always reads it
+    // again rather than showing the copy from half a minute ago.
+    refetchOnMount: 'always',
   })
 }
 
@@ -97,7 +102,7 @@ function useBoardCards(projectKey: string | null) {
     queryFn: () => api.listColumns(projectKey ?? ''),
     enabled,
   })
-  return { tasks: tasks.data, columns: board.data?.columns }
+  return { tasks: tasks.data, columns: board.data?.columns, readAt: tasks.dataUpdatedAt }
 }
 
 /**
@@ -112,6 +117,11 @@ function useRefreshPlans(projectKey: string) {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ['today', projectKey] }),
       queryClient.invalidateQueries({ queryKey: ['day-report', projectKey] }),
+      // A to-do from the card ticks the card too, so the board and any open
+      // card are read again.
+      queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: ['task'] }),
+      queryClient.invalidateQueries({ queryKey: ['task-history'] }),
     ])
 }
 
@@ -229,6 +239,14 @@ function TodayDialog({
   onClose: () => void
 }) {
   const plan = usePlan(projectKey, day)
+  const queryClient = useQueryClient()
+  const { readAt } = useBoardCards(projectKey)
+  // Whenever the board's cards are read again — something changed on one,
+  // here or anywhere else — so is the plan, which the server keeps in step
+  // with them.
+  useEffect(() => {
+    if (readAt) void queryClient.invalidateQueries({ queryKey: ['today', projectKey] })
+  }, [readAt, projectKey, queryClient])
   const [cardsFolded, setCardsFolded] = useState(() => readStored(CARDS_FOLDED_KEY) === 'true')
   /** The pick just made from the left pane, so the plan can bring it into view. */
   const [justPicked, setJustPicked] = useState<string | null>(null)
@@ -616,11 +634,6 @@ function PickBlock({
     if (fresh) block.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [fresh, pick.todos.length])
 
-  const bringIn = useMutation({
-    mutationFn: () => api.bringInOutstanding(pick.id),
-    onSettled: refresh,
-  })
-
   const add = useMutation({
     mutationFn: (text: string) => api.addTodo(pick.id, text),
     onSuccess: () => setDraft(''),
@@ -676,18 +689,6 @@ function PickBlock({
           ✕
         </Button>
       </div>
-      {pick.missing.length ? (
-        <p className={styles.missing}>
-          <span title={pick.missing.join('\n')}>
-            {pick.missing.length} still open on the card {pick.missing.length === 1 ? 'is' : 'are'}{' '}
-            not listed here: {pick.missing.slice(0, 2).join(', ')}
-            {pick.missing.length > 2 ? ', …' : ''}
-          </span>
-          <Button small onClick={() => bringIn.mutate()} disabled={bringIn.isPending}>
-            Add {pick.missing.length === 1 ? 'it' : 'them'}
-          </Button>
-        </p>
-      ) : null}
       <ul className={styles.todos}>
         {pick.todos.map((todo) => (
           <TodoRow
@@ -717,7 +718,7 @@ function PickBlock({
           </Button>
         ) : null}
       </div>
-      <ErrorNotice error={add.error ?? unpick.error ?? bringIn.error} />
+      <ErrorNotice error={add.error ?? unpick.error} />
     </section>
   )
 }
@@ -767,6 +768,7 @@ function TodoRow({
         checked={done}
         disabled={moved}
         aria-label={done ? 'Mark not done' : 'Mark done'}
+        title={todo.source_kind ? ON_THE_CARD[todo.source_kind] : undefined}
         onChange={(event) => tick.mutate(event.currentTarget.checked)}
       />
       <span className={styles.todoText}>
@@ -781,6 +783,9 @@ function TodoRow({
         <span className={styles.todoMark}>→ {dayShort(todo.moved_to)}</span>
       ) : null}
       {todo.state === 'not_done' ? <span className={styles.todoMark}>not done</span> : null}
+      {/* A tick on the card can be refused — a role kept out of staging a
+          column, say — and the box springs back; this says why. */}
+      {tick.error ? <span className={styles.todoError}>{errorMessage(tick.error)}</span> : null}
       {moved ? null : (
         <button
           type="button"
@@ -795,6 +800,13 @@ function TodoRow({
     </li>
   )
 }
+
+/** What ticking a to-do from the card does to the card, for its tooltip. */
+const ON_THE_CARD = {
+  stage: 'Ticking this moves the card on to its next stage',
+  subtask: 'Ticking this finishes the sub-task on the card',
+  checklist: 'Ticking this ticks the box on the card',
+} as const
 
 function withTodoState(plan: TodayPlan, todoId: string, state: 'open' | 'done'): TodayPlan {
   return {

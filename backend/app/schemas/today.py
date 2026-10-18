@@ -28,6 +28,11 @@ class TodoRead(Schema):
     carried_from: date | None = Field(
         description="The day it was handed on from, when it arrived by wrap-up."
     )
+    source_kind: Literal["stage", "subtask", "checklist"] | None = Field(
+        description="What on the card it stands for, when it came from the card: a stage, "
+        "a sub-task or a tick box. Ticking it ticks that too, and the other way about. "
+        "Null for a to-do somebody wrote."
+    )
     created_at: datetime
 
 
@@ -49,10 +54,6 @@ class PickRead(Schema):
     day: date
     task: PickedCard
     todos: list[TodoRead]
-    missing: list[str] = Field(
-        description="Stages, sub-tasks and tick boxes still open on the card that no "
-        "to-do here lists — what `POST /today/picks/{id}/bring-in` would add."
-    )
 
 
 class TodayPlan(Schema):

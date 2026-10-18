@@ -4,10 +4,20 @@ See :mod:`app.models.today` for what a plan is and why moving a to-do on is a
 copy. Everything here is scoped to one person — every lookup takes the
 caller's ``person_id`` and a row belonging to anybody else is not found, the
 same answer a row that never existed gets.
+
+**A pick follows its card.** What a card holds — its stages, its sub-tasks,
+its tick boxes — comes onto the plan as to-dos linked back by ``source``, and
+:func:`sync` keeps the two in step: something added to the card later appears
+on the plan, and something ticked on the board is ticked here. Ticking a linked
+to-do on the plan ticks the thing itself; that half is the router's, because
+it is a change to the card and is recorded on the card's history like any
+other. Only days from today on follow their cards. A day gone by keeps the
+plan it had, which is what its report is a record of.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from uuid import UUID
 
@@ -17,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.errors import ForbiddenError, NotFoundError, UnprocessableRequestError
 from app.models.project import Project
-from app.models.task import ChecklistState, Task, TaskStatus
+from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
 from app.models.today import DayPick, Todo, TodoState
 from app.schemas.today import PickedCard, PickRead, TodoRead, TodoUpdate
 from app.services import tasks
@@ -61,12 +71,9 @@ async def pick(
 ) -> DayPick:
     """Put a card on a person's day — or hand back the pick that already does.
 
-    A card freshly picked brings what is still outstanding on it as to-dos:
-    the stages it has yet to get through, from the one in hand onward, then
-    its open sub-tasks and tick boxes. Those are the pieces of the card a day
-    spent on it is spent on, so they are written down rather than retyped.
-    Nothing is imported into a pick that already existed, nor into one a
-    wrap-up makes — that day's to-dos are the ones carried over.
+    A card freshly picked brings what is still outstanding on it as to-dos —
+    see :func:`sync`. Those are the pieces of the card a day spent on it is
+    spent on, so they are written down rather than retyped.
 
     Raises:
         UnprocessableRequestError: for a task on another project, a sub-task, or
@@ -88,29 +95,103 @@ async def pick(
         return existing
 
     picked = await _pick_on(session, person_id, task.id, day)
-    for text in await outstanding(session, task):
-        await add_todo(session, picked, text)
+    await sync(session, picked)
     return picked
 
 
-async def outstanding(session: AsyncSession, task: Task) -> list[str]:
-    """What is still to be done on a card, one line each, in the card's own order.
+@dataclass(frozen=True, slots=True)
+class CardItem:
+    """One thing on a card a to-do can stand for, and where the card says it is."""
 
-    Stages first, from the one in hand to the last — the one in hand is not
-    finished, it is what is being worked on. Then sub-tasks neither finished nor
-    cancelled, by sub-number, named by reference so the line says which; then
-    open tick boxes.
+    source: str
+    text: str
+    state: TodoState | None
+    """``open``, ``done`` or ``not_done`` (cancelled on the card) — or None where
+    the card cannot say, which is only the last stage while it is in hand: a
+    card has no stage after its last to move on to, so finishing it is the
+    plan's to record."""
+
+
+_CHECKLIST_STATES = {
+    ChecklistState.OPEN: TodoState.OPEN,
+    ChecklistState.DONE: TodoState.DONE,
+    ChecklistState.CANCELLED: TodoState.NOT_DONE,
+}
+
+
+async def card_items(session: AsyncSession, task: Task) -> list[CardItem]:
+    """Everything on a card a to-do can stand for, in the card's own order.
+
+    Stages first: those before the one in hand are done, the one in hand and
+    those after it are not — all of them done once the card is finished. Then
+    sub-tasks by sub-number, named by reference so the line says which; then
+    tick boxes.
     """
-    lines: list[str] = []
+    items: list[CardItem] = []
     if task.sub_status_index is not None:
-        lines += [f"Stage: {stage}" for stage in task.sub_statuses[task.sub_status_index :]]
-    lines += [
-        f"{sub.reference} {sub.title}"
-        for sub in await tasks.subtasks(session, task)
-        if sub.finished_at is None and sub.status is not TaskStatus.CANCELLED
+        last = len(task.sub_statuses) - 1
+        for index, stage in enumerate(task.sub_statuses):
+            state: TodoState | None
+            if task.finished_at is not None or index < task.sub_status_index:
+                state = TodoState.DONE
+            elif index == task.sub_status_index == last:
+                state = None
+            else:
+                state = TodoState.OPEN
+            items.append(CardItem(f"stage:{index}", f"Stage: {stage}", state))
+    for sub in await tasks.subtasks(session, task):
+        if sub.status is TaskStatus.CANCELLED:
+            state = TodoState.NOT_DONE
+        else:
+            state = TodoState.DONE if sub.finished_at is not None else TodoState.OPEN
+        items.append(CardItem(f"subtask:{sub.id}", f"{sub.reference} {sub.title}", state))
+    items += [
+        CardItem(f"checklist:{item.id}", item.title, _CHECKLIST_STATES[item.state])
+        for item in task.checklist
     ]
-    lines += [item.title for item in task.checklist if item.state is ChecklistState.OPEN]
-    return lines
+    return items
+
+
+async def sync(session: AsyncSession, picked: DayPick) -> None:
+    """Bring a pick in step with its card.
+
+    Anything on the card not yet on the plan and still to do is added, unless
+    it was deleted from this pick before. Each linked to-do takes the state the
+    card gives it, and the wording too, so a renamed sub-task reads as it is
+    now. A to-do the day has already closed — moved on, or left not done — is
+    left as the wrap-up left it.
+
+    A to-do written by hand with exactly an item's words is taken to be that
+    item and linked to it, rather than listed twice.
+    """
+    linked = {todo.source: todo for todo in picked.todos if todo.source}
+    by_hand = {
+        todo.text: todo
+        for todo in picked.todos
+        if todo.source is None and todo.state in (TodoState.OPEN, TodoState.DONE)
+    }
+    for item in await card_items(session, picked.task):
+        text = _clean(item.text)
+        todo = linked.get(item.source)
+        if todo is None and text in by_hand:
+            todo = by_hand.pop(text)
+            todo.source = item.source
+        if todo is None:
+            if item.source not in picked.dismissed and item.state in (TodoState.OPEN, None):
+                await add_todo(session, picked, text, source=item.source)
+            continue
+        if todo.state in (TodoState.MOVED, TodoState.NOT_DONE):
+            continue
+        if item.state is not None and item.state is not todo.state:
+            _set_state(todo, item.state)
+        todo.text = text
+    await session.flush()
+
+
+async def sync_day(session: AsyncSession, project: Project, person_id: UUID, day: date) -> None:
+    """:func:`sync` every card on one person's day."""
+    for picked in await picks_for(session, project, person_id, day):
+        await sync(session, picked)
 
 
 async def _existing_pick(
@@ -180,7 +261,12 @@ async def unpick(session: AsyncSession, picked: DayPick) -> None:
 
 
 async def add_todo(
-    session: AsyncSession, picked: DayPick, text: str, *, carried_from: date | None = None
+    session: AsyncSession,
+    picked: DayPick,
+    text: str,
+    *,
+    carried_from: date | None = None,
+    source: str | None = None,
 ) -> Todo:
     """Add a to-do at the bottom of a pick's list."""
     last = await session.scalar(select(func.max(Todo.position)).where(Todo.pick_id == picked.id))
@@ -190,6 +276,7 @@ async def add_todo(
         text=_clean(text),
         state=TodoState.OPEN,
         carried_from=carried_from,
+        source=source,
     )
     session.add(todo)
     await session.flush()
@@ -211,15 +298,39 @@ async def update_todo(session: AsyncSession, todo: Todo, data: TodoUpdate) -> To
     if data.text is not None:
         todo.text = _clean(data.text)
     if data.state is not None:
-        todo.state = TodoState(data.state)
-        todo.done_at = datetime.now(UTC) if todo.state is TodoState.DONE else None
+        _set_state(todo, TodoState(data.state))
     await session.flush()
     return todo
 
 
+def _set_state(todo: Todo, state: TodoState) -> None:
+    todo.state = state
+    todo.done_at = datetime.now(UTC) if state is TodoState.DONE else None
+
+
 async def delete_todo(session: AsyncSession, todo: Todo) -> None:
+    """Delete a to-do. One imported from the card is remembered as dismissed,
+    so keeping the pick in step with the card does not put it back."""
+    if todo.source is not None:
+        picked = await session.get(DayPick, todo.pick_id)
+        if picked is not None and todo.source not in picked.dismissed:
+            picked.dismissed = [*picked.dismissed, todo.source]
     await session.delete(todo)
     await session.flush()
+
+
+def parse_source(source: str) -> tuple[str, str]:
+    """``subtask:<id>`` as ``("subtask", "<id>")``."""
+    kind, _, ident = source.partition(":")
+    return kind, ident
+
+
+async def checklist_item(session: AsyncSession, ident: str) -> TaskChecklistItem | None:
+    """The tick box a ``checklist:`` source names, if it is still there."""
+    try:
+        return await session.get(TaskChecklistItem, UUID(ident))
+    except ValueError:
+        return None
 
 
 async def wrap_up(
@@ -266,7 +377,13 @@ async def wrap_up(
     for todo_id, (picked, todo) in open_todos.items():
         if todo_id in chosen:
             onward = await _pick_on(session, person_id, picked.task_id, to_day)
-            await add_todo(session, onward, todo.text, carried_from=day)
+            # A card already on that day, kept in step with its card, may hold
+            # this very item already; then there is nothing to carry.
+            already = todo.source is not None and await session.scalar(
+                select(Todo.id).where(Todo.pick_id == onward.id, Todo.source == todo.source)
+            )
+            if not already:
+                await add_todo(session, onward, todo.text, carried_from=day, source=todo.source)
             todo.state = TodoState.MOVED
             todo.moved_to = to_day
             moved += 1
@@ -286,34 +403,20 @@ def _clean(text: str) -> str:
 
 
 def todo_read(todo: Todo) -> TodoRead:
-    return TodoRead.model_validate(todo)
+    kind = parse_source(todo.source)[0] if todo.source else None
+    return TodoRead(
+        id=todo.id,
+        text=todo.text,
+        state=todo.state,
+        done_at=todo.done_at,
+        moved_to=todo.moved_to,
+        carried_from=todo.carried_from,
+        source_kind=kind if kind in ("stage", "subtask", "checklist") else None,
+        created_at=todo.created_at,
+    )
 
 
-async def missing(session: AsyncSession, picked: DayPick) -> list[str]:
-    """What is outstanding on a pick's card that its to-dos do not list yet.
-
-    A card picked before it was split further, or before picking imported
-    anything at all, still says what it is missing — so the plan can offer to
-    bring it in rather than leave the day short of work it plainly holds. A
-    line counts as listed whatever state its to-do is in: a stage ticked off
-    an hour ago is not missing.
-    """
-    listed = {todo.text for todo in picked.todos}
-    return [line for line in await outstanding(session, picked.task) if _clean(line) not in listed]
-
-
-async def bring_in(session: AsyncSession, picked: DayPick) -> None:
-    """Add whatever :func:`missing` names to the bottom of the pick's list."""
-    for line in await missing(session, picked):
-        await add_todo(session, picked, line)
-
-
-async def pick_view(session: AsyncSession, picked: DayPick) -> PickRead:
-    """A pick as the API sends it, with what its card holds that it does not."""
-    return pick_read(picked, await missing(session, picked))
-
-
-def pick_read(picked: DayPick, missing_lines: list[str]) -> PickRead:
+def pick_read(picked: DayPick) -> PickRead:
     task = picked.task
     return PickRead(
         id=picked.id,
@@ -325,5 +428,4 @@ def pick_read(picked: DayPick, missing_lines: list[str]) -> PickRead:
             column=task.column.name if task.column else None,
         ),
         todos=[todo_read(todo) for todo in picked.todos],
-        missing=missing_lines,
     )
