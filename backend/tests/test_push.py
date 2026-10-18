@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -365,7 +366,14 @@ class TestServiceAccount:
     def test_an_unreadable_file_means_no_pushes_rather_than_no_server(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        sender = sender_for(tmp_path / "missing.json")
+        # On the module's own logger: whether app.* propagates to the root,
+        # where caplog listens, depends on which test configured logging last.
+        logger = logging.getLogger(fcm.__name__)
+        logger.addHandler(caplog.handler)
+        try:
+            sender = sender_for(tmp_path / "missing.json")
+        finally:
+            logger.removeHandler(caplog.handler)
         assert isinstance(sender, NullSender)
         assert "could not be loaded" in caplog.text
 
