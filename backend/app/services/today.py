@@ -289,7 +289,31 @@ def todo_read(todo: Todo) -> TodoRead:
     return TodoRead.model_validate(todo)
 
 
-def pick_read(picked: DayPick) -> PickRead:
+async def missing(session: AsyncSession, picked: DayPick) -> list[str]:
+    """What is outstanding on a pick's card that its to-dos do not list yet.
+
+    A card picked before it was split further, or before picking imported
+    anything at all, still says what it is missing — so the plan can offer to
+    bring it in rather than leave the day short of work it plainly holds. A
+    line counts as listed whatever state its to-do is in: a stage ticked off
+    an hour ago is not missing.
+    """
+    listed = {todo.text for todo in picked.todos}
+    return [line for line in await outstanding(session, picked.task) if _clean(line) not in listed]
+
+
+async def bring_in(session: AsyncSession, picked: DayPick) -> None:
+    """Add whatever :func:`missing` names to the bottom of the pick's list."""
+    for line in await missing(session, picked):
+        await add_todo(session, picked, line)
+
+
+async def pick_view(session: AsyncSession, picked: DayPick) -> PickRead:
+    """A pick as the API sends it, with what its card holds that it does not."""
+    return pick_read(picked, await missing(session, picked))
+
+
+def pick_read(picked: DayPick, missing_lines: list[str]) -> PickRead:
     task = picked.task
     return PickRead(
         id=picked.id,
@@ -301,4 +325,5 @@ def pick_read(picked: DayPick) -> PickRead:
             column=task.column.name if task.column else None,
         ),
         todos=[todo_read(todo) for todo in picked.todos],
+        missing=missing_lines,
     )

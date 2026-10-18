@@ -25,7 +25,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMatchRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   api,
   type DayPick,
@@ -230,6 +230,8 @@ function TodayDialog({
 }) {
   const plan = usePlan(projectKey, day)
   const [cardsFolded, setCardsFolded] = useState(() => readStored(CARDS_FOLDED_KEY) === 'true')
+  /** The pick just made from the left pane, so the plan can bring it into view. */
+  const [justPicked, setJustPicked] = useState<string | null>(null)
 
   function foldCards(folded: boolean) {
     setCardsFolded(folded)
@@ -295,9 +297,16 @@ function TodayDialog({
             day={day}
             plan={loaded}
             onFold={() => foldCards(true)}
+            onPicked={setJustPicked}
           />
         )}
-        <PlanPane projectKey={projectKey} day={day} plan={loaded} onOpenCard={onOpenCard} />
+        <PlanPane
+          projectKey={projectKey}
+          day={day}
+          plan={loaded}
+          justPicked={justPicked}
+          onOpenCard={onOpenCard}
+        />
       </div>
     </Modal>
   )
@@ -345,11 +354,14 @@ function CardsPane({
   day,
   plan,
   onFold,
+  onPicked,
 }: {
   projectKey: string
   day: string
   plan: TodayPlan | undefined
   onFold: () => void
+  /** Told the new pick's id, so the plan can scroll to what it brought in. */
+  onPicked: (pickId: string) => void
 }) {
   const { tasks, columns } = useBoardCards(projectKey)
   const identity = useIdentity()
@@ -363,6 +375,7 @@ function CardsPane({
 
   const pick = useMutation({
     mutationFn: (task: Task) => api.pickCard(projectKey, task.reference, day),
+    onSuccess: (picked) => onPicked(picked.id),
     onSettled: refresh,
   })
   const unpick = useMutation({
@@ -530,11 +543,13 @@ function PlanPane({
   projectKey,
   day,
   plan,
+  justPicked,
   onOpenCard,
 }: {
   projectKey: string
   day: string
   plan: TodayPlan | undefined
+  justPicked: string | null
   onOpenCard: (reference: string) => void
 }) {
   const people = (usePeople().data ?? []).filter((person) => person.archived_at === null)
@@ -564,6 +579,7 @@ function PlanPane({
               key={pick.id}
               projectKey={projectKey}
               pick={pick}
+              fresh={pick.id === justPicked}
               people={people}
               files={files}
               onOpenCard={onOpenCard}
@@ -579,18 +595,31 @@ function PlanPane({
 function PickBlock({
   projectKey,
   pick,
+  fresh,
   people,
   files,
   onOpenCard,
 }: {
   projectKey: string
   pick: DayPick
+  /** Just picked: scrolled into view, since a new card lands at the bottom. */
+  fresh: boolean
   people: Person[]
   files: readonly FiledItem[]
   onOpenCard: (reference: string) => void
 }) {
   const refresh = useRefreshPlans(projectKey)
   const [draft, setDraft] = useState('')
+  const block = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (fresh) block.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [fresh, pick.todos.length])
+
+  const bringIn = useMutation({
+    mutationFn: () => api.bringInOutstanding(pick.id),
+    onSettled: refresh,
+  })
 
   const add = useMutation({
     mutationFn: (text: string) => api.addTodo(pick.id, text),
@@ -618,7 +647,7 @@ function PickBlock({
   }
 
   return (
-    <section className={styles.pickBlock} aria-label={pick.task.reference}>
+    <section ref={block} className={styles.pickBlock} aria-label={pick.task.reference}>
       <div className={styles.pickHead}>
         {pick.task.column !== null ? (
           <button
@@ -647,6 +676,18 @@ function PickBlock({
           ✕
         </Button>
       </div>
+      {pick.missing.length ? (
+        <p className={styles.missing}>
+          <span title={pick.missing.join('\n')}>
+            {pick.missing.length} still open on the card {pick.missing.length === 1 ? 'is' : 'are'}{' '}
+            not listed here: {pick.missing.slice(0, 2).join(', ')}
+            {pick.missing.length > 2 ? ', …' : ''}
+          </span>
+          <Button small onClick={() => bringIn.mutate()} disabled={bringIn.isPending}>
+            Add {pick.missing.length === 1 ? 'it' : 'them'}
+          </Button>
+        </p>
+      ) : null}
       <ul className={styles.todos}>
         {pick.todos.map((todo) => (
           <TodoRow
@@ -676,7 +717,7 @@ function PickBlock({
           </Button>
         ) : null}
       </div>
-      <ErrorNotice error={add.error ?? unpick.error} />
+      <ErrorNotice error={add.error ?? unpick.error ?? bringIn.error} />
     </section>
   )
 }

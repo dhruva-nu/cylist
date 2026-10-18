@@ -65,7 +65,7 @@ async def get_plan(
         project_key=project.key,
         day=on,
         timezone=str(zone),
-        picks=[today.pick_read(picked) for picked in picks],
+        picks=[await today.pick_view(session, picked) for picked in picks],
         open_count=sum(todo.state is TodoState.OPEN for todo in todos),
         done_count=sum(todo.state is TodoState.DONE for todo in todos),
     )
@@ -87,7 +87,29 @@ async def add_pick(
     task = await tasks.resolve(session, body.task)
     picked = await today.pick(session, project, today.person_of(principal), task, body.day)
     await session.refresh(picked, ["todos"])
-    return today.pick_read(picked)
+    return await today.pick_view(session, picked)
+
+
+@router.post(
+    "/today/picks/{pick_id}/bring-in",
+    response_model=PickRead,
+    summary="Add the card's open stages and sub-tasks to a pick",
+)
+async def bring_in(
+    pick_id: UUID,
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> PickRead:
+    """Add, as to-dos, whatever is still open on the card that this pick does not list.
+
+    What a fresh pick imports by itself, for a pick made before the card was
+    split further — or before it imported anything at all. Lines already
+    listed, in any state, are left alone.
+    """
+    picked = await today.own_pick(session, today.person_of(principal), pick_id)
+    await today.bring_in(session, picked)
+    await session.refresh(picked, ["todos"])
+    return await today.pick_view(session, picked)
 
 
 @router.delete(

@@ -300,6 +300,30 @@
   color: var(--ok);
 }
 
+/* What the card holds that the plan does not, offered quietly under its head:
+   grey words and a plain button, not a banner. */
+.missing {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.missing > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.missing > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* One card on the day. A border rather than a fill or a shadow. */
 .pickBlock {
   padding: 10px 12px 6px;

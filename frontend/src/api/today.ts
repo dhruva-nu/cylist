@@ -35,6 +35,8 @@ export interface DayPick {
   day: string
   task: PickedCard
   todos: Todo[]
+  /** Stages, sub-tasks and tick boxes still open on the card that no to-do lists. */
+  missing: string[]
 }
 
 export interface TodayPlan {
@@ -68,6 +70,9 @@ export const todayApi = {
   /** Take a card off its day, and its to-dos for that day with it. */
   unpickCard: (pickId: string) =>
     request<{ ok: boolean }>(`/today/picks/${pickId}`, { method: 'DELETE' }),
+  /** Add, as to-dos, whatever `missing` names. */
+  bringInOutstanding: (pickId: string) =>
+    request<DayPick>(`/today/picks/${pickId}/bring-in`, { method: 'POST' }),
   addTodo: (pickId: string, text: string) =>
     request<Todo>(`/today/picks/${pickId}/todos`, { method: 'POST', body: jsonBody({ text }) }),
   updateTodo: (todoId: string, change: { text?: string; state?: 'open' | 'done' | 'not_done' }) =>

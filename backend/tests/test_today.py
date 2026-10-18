@@ -455,3 +455,38 @@ async def test_a_card_with_nothing_outstanding_starts_empty(signed_in: AsyncClie
     picked = await pick(signed_in, project, await make_card(signed_in, project))
 
     assert picked["todos"] == []
+
+
+async def test_a_pick_names_what_its_card_holds_that_it_does_not(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    card = await make_card(signed_in, project)
+    picked = await pick(signed_in, project, card)
+    assert picked["missing"] == []
+
+    # Split after it was picked: the plan does not grow by itself, it says so.
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
+    made = await signed_in.post(
+        f"/tasks/{card}/subtasks",
+        json={"title": "Layout", "description": "Part of it.", "type": "feature"},
+    )
+    sub = made.json()["reference"]
+
+    day = await plan(signed_in, project)
+    assert day["picks"][0]["missing"] == [f"{sub} Layout", "Tell support"]
+    assert day["picks"][0]["todos"] == []
+
+    brought = await signed_in.post(f"/today/picks/{picked['id']}/bring-in")
+
+    assert brought.status_code == 200, brought.text
+    assert [t["text"] for t in brought.json()["todos"]] == [f"{sub} Layout", "Tell support"]
+    assert brought.json()["missing"] == []
+
+
+async def test_a_listed_line_is_not_missing_once_done(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    card = await make_card(signed_in, project)
+    await signed_in.post(f"/tasks/{card}/checklist", json={"title": "Tell support"})
+    picked = await pick(signed_in, project, card)
+    await signed_in.patch(f"/today/todos/{picked['todos'][0]['id']}", json={"state": "done"})
+
+    assert (await plan(signed_in, project))["picks"][0]["missing"] == []

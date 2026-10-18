@@ -49,6 +49,10 @@ class PickRead(Schema):
     day: date
     task: PickedCard
     todos: list[TodoRead]
+    missing: list[str] = Field(
+        description="Stages, sub-tasks and tick boxes still open on the card that no "
+        "to-do here lists — what `POST /today/picks/{id}/bring-in` would add."
+    )
 
 
 class TodayPlan(Schema):
