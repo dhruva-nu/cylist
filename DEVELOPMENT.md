@@ -74,6 +74,7 @@ frontend/   React + Vite. Types are generated from the API's OpenAPI document,
             so the UI cannot drift from the server.
 backend/    FastAPI. Routers handle HTTP; business rules live in app/services
             so a future in-process MCP server can call them directly.
+android/    The phone app: Kotlin and Jetpack Compose, built with Gradle.
 ```
 
 **The API is the product.** The web app is one client of `/api/v1`; the CLI and
@@ -508,6 +509,47 @@ uninstall` takes it all back out and leaves any other hooks you have alone.
 
 `cylist board ATL` says the same thing in the terminal. `cli/README.md` has the
 rest, including what each lifecycle event reports.
+
+## The Android app
+
+`android/` is a Gradle project of its own, in Kotlin and Jetpack Compose, with
+two modules: `app`, the phone app, and `api`, the client for `/api/v1`. The
+`api` module is plain Kotlin on the JVM, with no Android in it. It exists
+because Android 16's Live Updates, an agent's progress shown in the status bar,
+are something only a native app can post. Every version is set in
+`android/gradle/libs.versions.toml`.
+
+**You need:** JDK 21 and the Android SDK command-line tools. Gradle itself
+comes from the committed wrapper, and the build downloads the SDK platform it
+compiles against. Both install into your home directory:
+
+```bash
+# JDK 21: any build will do, e.g. Temurin from adoptium.net, unpacked to ~/.local/opt/jdk21
+# SDK: "Command line tools only" from developer.android.com/studio, unzipped so
+# that ~/Android/Sdk/cmdline-tools/latest/bin/sdkmanager exists
+export JAVA_HOME=~/.local/opt/jdk21
+export ANDROID_HOME=~/Android/Sdk
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+yes | sdkmanager --licenses
+sdkmanager platform-tools        # adb, to install onto a phone
+```
+
+```bash
+make android           # lint, unit tests and the debug APK, as CI runs them
+make android-install   # build the debug APK and install it on the phone adb sees
+```
+
+The APK lands in `android/app/build/outputs/apk/debug/app-debug.apk`. To try a
+pull request on a phone without building anything, download the
+`cylist-debug-apk` artifact from its CI run instead. CI signs every APK with a
+fresh debug key, so uninstall one before installing another.
+
+The theme is not Material's. It is the web app's tokens
+(`frontend/src/theme/tokens.css`) written out in
+`app/src/main/kotlin/cylist/app/theme/Tokens.kt`, and `ThemeTokensTest`
+compares the two. Change a colour, type size or corner in `tokens.css` and that
+test fails until `Tokens.kt` matches, so CI runs the Android job when
+`tokens.css` changes too.
 
 ## Status
 

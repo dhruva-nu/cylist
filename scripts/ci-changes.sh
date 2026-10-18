@@ -4,7 +4,8 @@
 # and writes one output per suite to $GITHUB_OUTPUT (stdout when unset, so it
 # can be tried by hand):
 #
-#   backend, installers, frontend   'true' or 'false'
+#   backend, installers, frontend,  'true' or 'false'
+#   android
 #   agents                          JSON matrix `include` list for the CLI and
 #                                   MCP server legs; '[]' when neither changed
 #
@@ -61,6 +62,9 @@ cli=$(flag cli/)
 mcp=$(flag mcp/)
 installers=$(flag scripts/install.sh scripts/install.ps1)
 frontend=$(flag frontend/)
+# The app's theme is checked against the web app's tokens (ThemeTokensTest), so
+# a change to those is an Android change too.
+android=$(flag android/ frontend/src/theme/tokens.css)
 
 legs=()
 if [[ "$cli" == true ]]; then
@@ -76,6 +80,7 @@ agents="[$(IFS=,; echo "${legs[*]}")]"
   echo "backend=$backend"
   echo "installers=$installers"
   echo "frontend=$frontend"
+  echo "android=$android"
   echo "agents=$agents"
 } >>"$out"
 
@@ -83,5 +88,5 @@ if [[ "$all" == true ]]; then
   echo "Running every suite: $reason." >&2
 else
   printf 'Changed files:\n%s\n' "$files" >&2
-  echo "backend=$backend cli=$cli mcp=$mcp installers=$installers frontend=$frontend" >&2
+  echo "backend=$backend cli=$cli mcp=$mcp installers=$installers frontend=$frontend android=$android" >&2
 fi
