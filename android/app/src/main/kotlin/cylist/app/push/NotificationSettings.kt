@@ -2,6 +2,7 @@ package cylist.app.push
 
 import android.Manifest
 import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -65,7 +66,14 @@ fun AskForNotifications() {
 }
 
 /** What the phone currently allows, read again whenever the screen comes back. */
-private data class NotifyStatus(val notifications: Boolean, val liveUpdates: Boolean?, val push: Boolean)
+private data class NotifyStatus(val notifications: Boolean, val liveUpdates: LiveUpdates, val push: Boolean)
+
+/**
+ * Android 16 Live Updates on this phone. They arrived in 36.1: a 36.0 build has
+ * the permission and the API but no settings page and never promotes, so it is
+ * told apart from one where the person turned them off.
+ */
+private enum class LiveUpdates { NotThisAndroid, Off, On }
 
 private fun notificationsAllowed(context: Context): Boolean =
     context.getSystemService(NotificationManager::class.java).areNotificationsEnabled() &&
@@ -76,16 +84,32 @@ private fun notificationsAllowed(context: Context): Boolean =
 
 private fun statusOf(context: Context): NotifyStatus = NotifyStatus(
     notifications = notificationsAllowed(context),
-    liveUpdates = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
-        context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()
-    } else {
-        null
+    liveUpdates = when {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA ||
+            Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1 -> LiveUpdates.NotThisAndroid
+        context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications() -> LiveUpdates.On
+        else -> LiveUpdates.Off
     },
     push = (context.applicationContext as CylistApp).pushAvailable,
 )
 
-private fun appSettings(context: Context, action: String): Intent =
-    Intent(action).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+/**
+ * Open the first of [actions] this phone has a screen for, for this app.
+ * Not every Android 16 has every one: the Live Updates page is missing on 36.0,
+ * and a phone maker can drop any of them, so the app's notification page is
+ * always the last resort.
+ */
+private fun openSettings(context: Context, vararg actions: String) {
+    for (action in listOf(*actions, Settings.ACTION_APP_NOTIFICATION_SETTINGS)) {
+        val intent = Intent(action).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent)
+            return
+        } catch (_: ActivityNotFoundException) {
+            // Try the next one.
+        }
+    }
+}
 
 /**
  * The More tab's "Notifications on this phone": whether agent alerts can reach
@@ -123,23 +147,34 @@ fun NotificationsSection() {
                 if (neverAsked) {
                     ask.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
-                    context.startActivity(appSettings(context, Settings.ACTION_APP_NOTIFICATION_SETTINGS))
+                    openSettings(context)
                 }
             },
         )
 
-        status.liveUpdates?.let { live ->
-            StatusRow(
-                on = live,
-                title = if (live) "Live Updates are on" else "Live Updates are off for Cylist",
-                detail = "A running agent shows as a chip in the status bar, with how long it has been working.",
-                action = if (live) null else "Open Live Updates settings",
-                onAction = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
-                        context.startActivity(appSettings(context, Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS))
-                    }
-                },
+        when (status.liveUpdates) {
+            LiveUpdates.NotThisAndroid -> StatusRow(
+                on = false,
+                title = "No Live Updates on this Android",
+                detail = "They arrive with Android 16's 36.1 update. Until then a running agent is an ordinary ongoing notification.",
+                action = null,
+                onAction = {},
             )
+            LiveUpdates.Off, LiveUpdates.On -> {
+                val live = status.liveUpdates == LiveUpdates.On
+                StatusRow(
+                    on = live,
+                    title = if (live) "Live Updates are on" else "Live Updates are off for Cylist",
+                    detail = "A running agent shows as a chip in the status bar, with how long it has been working.",
+                    action = if (live) null else "Open Live Updates settings",
+                    onAction = {
+                        // Always true here (Off and On are 36.1+ only); said again for lint.
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                            openSettings(context, Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS)
+                        }
+                    },
+                )
+            }
         }
 
         // OxygenOS keeps the camera pill behind a switch of its own, per app,
@@ -172,14 +207,14 @@ fun NotificationsSection() {
                 fontFamily = Figtree,
             )
             SettingsButton("Open Cylist's notification settings") {
-                context.startActivity(appSettings(context, Settings.ACTION_APP_NOTIFICATION_SETTINGS))
+                openSettings(context)
             }
         }
 
         if (!status.push) {
             Text(
-                "This build was made without a Firebase config, so the server cannot push to it. " +
-                    "Alerts appear only while the app is open to receive them.",
+                "This build was made without a Firebase config, so the server cannot push to this phone " +
+                    "and agent alerts will not arrive.",
                 color = colors.ink3,
                 fontSize = TextSizes.sm,
                 fontFamily = Figtree,
