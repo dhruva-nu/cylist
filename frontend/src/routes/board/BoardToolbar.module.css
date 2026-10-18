@@ -24,6 +24,58 @@
   align-items: center;
 }
 
+/* Folded, the default: whoever is picked, small and stacked, and a grey
+   chevron — no box, no label. Everyone is a grey people icon instead. */
+.peopleSummary {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  align-items: center;
+  height: 36px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.peopleSummary:hover,
+.foldButton:hover {
+  color: var(--ink);
+}
+
+.summaryFaces {
+  display: flex;
+  align-items: center;
+}
+
+.summaryFaces > span {
+  width: 22px;
+  height: 22px;
+  box-shadow: 0 0 0 2px var(--bg);
+  font-size: var(--text-2xs);
+}
+
+.summaryFaces > span + span {
+  margin-left: -4px;
+}
+
+/* The ‹ at the start of the open row, which folds it back. */
+.foldButton {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
 .faces {
   display: flex;
   align-items: center;

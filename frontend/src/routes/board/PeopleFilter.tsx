@@ -6,18 +6,26 @@
  * The board opens on you — see `peopleFromSearch` — because the question most
  * people bring to a board is "what is on me", and a board of everyone's cards
  * makes them find themselves in it every time.
+ *
+ * The row starts folded: just whoever is picked, small and stacked, and a grey
+ * chevron. Who the board is narrowed to is worth seeing at all times; the
+ * faces of everybody it could be narrowed to are not. The board stays
+ * narrowed whether the row is open or not.
  */
 
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { Person, Task } from '../../api/client'
 import { Avatar } from '../../components/primitives/Avatar'
 import { cardsOwned, facesInOrder } from './boardPeople'
-import { TickIcon } from './icons'
+import { FoldIcon, PeopleIcon, TickIcon } from './icons'
 import { usePopover } from './usePopover'
 import styles from './BoardToolbar.module.css'
 
 /** How many faces sit on the toolbar before the rest go behind "+N". */
 const FACES_SHOWN = 5
+
+/** How many of the picked the folded row draws; its label names them all. */
+const FACES_STACKED = 3
 
 export function PeopleFilter({
   members,
@@ -42,7 +50,53 @@ export function PeopleFilter({
     () => facesInOrder(members, cardsOwned(tasks), meId),
     [members, tasks, meId],
   )
+  const [expanded, setExpanded] = useState(false)
+  // Opening swaps the summary button for the row and folding swaps it back,
+  // so the button pressed is gone; focus goes to the one that took its place.
+  const summary = useRef<HTMLButtonElement>(null)
+  const fold = useRef<HTMLButtonElement>(null)
+  const moveFocus = useRef(false)
+  useEffect(() => {
+    if (!moveFocus.current) return
+    moveFocus.current = false
+    ;(expanded ? fold : summary).current?.focus()
+  }, [expanded])
   if (!faces.length) return null
+
+  const setOpen = (open: boolean) => {
+    moveFocus.current = true
+    setExpanded(open)
+  }
+
+  if (!expanded) {
+    const picked = faces.filter((person) => people.includes(person.id))
+    const label = `${showing(picked, people, meId)} Open to change whose.`
+    return (
+      <button
+        ref={summary}
+        type="button"
+        className={styles.peopleSummary}
+        aria-expanded={false}
+        aria-label={label}
+        title={label}
+        onClick={() => setOpen(true)}
+      >
+        {/* Somebody picked who has since left the project has no face to
+            stack, but the board is still narrowed to them: the people icon
+            would claim it was everyone's. */}
+        {people.length ? (
+          <span className={styles.summaryFaces}>
+            {picked.slice(0, FACES_STACKED).map((person) => (
+              <Avatar key={person.id} name={person.name} colour={person.colour} />
+            ))}
+          </span>
+        ) : (
+          <PeopleIcon />
+        )}
+        <FoldIcon />
+      </button>
+    )
+  }
 
   const shown = faces.slice(0, FACES_SHOWN)
   const behind = faces.slice(FACES_SHOWN)
@@ -51,6 +105,17 @@ export function PeopleFilter({
 
   return (
     <div className={styles.people} role="group" aria-label="Whose cards">
+      <button
+        ref={fold}
+        type="button"
+        className={styles.foldButton}
+        aria-expanded={true}
+        aria-label="Fold the people back up"
+        title="Fold the people back up"
+        onClick={() => setOpen(false)}
+      >
+        <FoldIcon back />
+      </button>
       <div className={styles.faces}>
         {shown.map((person) => {
           const picked = people.includes(person.id)
@@ -272,5 +337,22 @@ export function NobodysCards({
 
 /** "Aditi", "Aditi or Ravi", "Aditi, Ravi or you". */
 function joinOr(names: string[]): string {
-  return names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`
+  return joinWith(names, 'or')
+}
+
+/** What the folded row is narrowing the board to, in words, for its label. */
+function showing(picked: Person[], people: string[], meId: string | null): string {
+  if (!people.length) return "Showing everyone's cards."
+  if (!picked.length) return 'Showing the cards of somebody no longer on this project.'
+  if (picked.length === 1 && picked[0]?.id === meId) return 'Showing your cards.'
+  return `Showing ${joinWith(
+    picked.map((person) => (person.id === meId ? 'you' : person.name)),
+    'and',
+  )}'s cards.`
+}
+
+function joinWith(names: string[], last: string): string {
+  return names.length < 2
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} ${last} ${names.at(-1)}`
 }
