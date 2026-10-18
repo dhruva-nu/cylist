@@ -1,8 +1,8 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // The stored session is written as JSON before it is sealed (session/SessionStore.kt).
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -34,15 +34,13 @@ android {
             // So a debug build and a future release build can be installed side by side.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            // Until sign-in exists (CYLIST-102), a debug build is signed in by
-            // `cylist.server` and `cylist.token` in android/local.properties,
-            // which git ignores. Both empty means the app says it is signed out.
-            buildConfigField("String", "DEV_SERVER", quoted(localProperty("cylist.server")))
-            buildConfigField("String", "DEV_TOKEN", quoted(localProperty("cylist.token")))
+            // The hosts the server picker lets a debug build reach over plain
+            // HTTP. Keep it equal to src/debug/res/xml/network_security_config.xml,
+            // which is what Android itself enforces.
+            buildConfigField("String", "CLEARTEXT_HOSTS", "\"10.0.2.2,localhost\"")
         }
         release {
-            buildConfigField("String", "DEV_SERVER", quoted(""))
-            buildConfigField("String", "DEV_TOKEN", quoted(""))
+            buildConfigField("String", "CLEARTEXT_HOSTS", "\"\"")
         }
     }
 
@@ -92,12 +90,6 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
 }
-
-fun localProperty(name: String): String {
-    val file = rootProject.file("local.properties")
-    if (!file.exists()) return ""
-    return Properties().apply { file.inputStream().use(::load) }.getProperty(name).orEmpty()
-}
-
-fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""

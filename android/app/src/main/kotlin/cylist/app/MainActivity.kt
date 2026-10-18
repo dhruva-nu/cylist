@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,22 +34,47 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cylist.app.board.BoardScreen
 import cylist.app.board.BoardViewModel
+import cylist.app.more.MoreScreen
 import cylist.app.session.Session
+import cylist.app.session.SessionState
+import cylist.app.signin.SignInScreen
+import cylist.app.signin.SignInViewModel
 import cylist.app.theme.CylistTheme
 import cylist.app.theme.Figtree
 import cylist.app.ui.CylistIcons
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val session = Session.current()
+        val app = application as CylistApp
         setContent {
-            CylistTheme {
-                if (session == null) SignedOut() else AppShell(session)
+            CylistTheme { Root(app) }
+        }
+    }
+}
+
+/** Sign-in while signed out, the app while signed in; [Sessions] decides which. */
+@Composable
+private fun Root(app: CylistApp) {
+    val state by app.sessions.state.collectAsStateWithLifecycle()
+    when (val current = state) {
+        is SessionState.SignedOut -> {
+            val signIn: SignInViewModel = viewModel { SignInViewModel(app.sessions, app.accounts, app.cleartextHosts) }
+            SignInScreen(signIn, current.notice, app.sessions.tokenName)
+        }
+        is SessionState.SignedIn -> {
+            var signingOut by remember(current.session) { mutableStateOf(false) }
+            AppShell(current.session, signingOut) {
+                signingOut = true
+                // On the app's scope, so turning the phone mid-way does not
+                // leave the token half signed out.
+                app.scope.launch { app.sessions.signOut() }
             }
         }
     }
@@ -64,13 +90,15 @@ enum class Tab(val label: String, val icon: ImageVector, val card: String?) {
 }
 
 @Composable
-fun AppShell(session: Session) {
+fun AppShell(session: Session, signingOut: Boolean, signOut: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.Board) }
-    val board: BoardViewModel = viewModel { BoardViewModel(session) }
+    // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
+    val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
     Column(Modifier.fillMaxSize().background(CylistTheme.colors.bg)) {
         Box(Modifier.weight(1f)) {
             when (tab) {
                 Tab.Board -> BoardScreen(board)
+                Tab.More -> MoreScreen(session.account, signingOut, signOut)
                 else -> NotYet(tab)
             }
         }
@@ -111,21 +139,6 @@ private fun NotYet(tab: Tab) {
         Text(
             tab.card?.let { "${tab.label} comes with $it." } ?: "${tab.label} is not built yet.",
             color = colors.ink3,
-            fontSize = 14.sp,
-            fontFamily = Figtree,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
-/** No session yet. Sign-in is CYLIST-102; until then a debug build is given one at build time. */
-@Composable
-private fun SignedOut() {
-    val colors = CylistTheme.colors
-    Box(Modifier.fillMaxSize().background(colors.bg).padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(
-            "Not signed in. Put cylist.server and cylist.token in android/local.properties and rebuild.",
-            color = colors.ink2,
             fontSize = 14.sp,
             fontFamily = Figtree,
             textAlign = TextAlign.Center,

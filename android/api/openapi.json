@@ -335,7 +335,7 @@
           "tokens"
         ],
         "summary": "Revoke an API token",
-        "description": "Revoke a token immediately. Requests using it stop working at once.",
+        "description": "Revoke a token immediately. Requests using it stop working at once.\n\nNeeds ``admin``, except to revoke the very token making the request: any\ncredential may sign itself out (the phone app does, with its own id from\n``GET /me``).",
         "operationId": "revoke_token_api_v1_tokens__token_id__delete",
         "parameters": [
           {

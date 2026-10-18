@@ -544,18 +544,32 @@ pull request on a phone without building anything, download the
 `cylist-debug-apk` artifact from its CI run instead. CI signs every APK with a
 fresh debug key, so uninstall one before installing another.
 
-**Signing in, for now.** Sign-in is CYLIST-102. Until it lands, a debug build
-is signed in at build time by two lines in `android/local.properties`, which
-git ignores; without them the app says it is not signed in, and a release build
-never has them:
+**Signing in.** The app opens on a server picker: Production
+(`https://cylist.in`), Staging (`https://stage.cylist.in`), Dev 1–5
+(`https://devN.cylist.in`), or another address typed in. The choice is checked
+with `GET /setup` before the email and password are asked for, so a wrong or
+unreachable address says so within about five seconds (`Accounts.defaultHttp`
+sets the timeouts). Signing in is the web app's own login used once:
+`POST /auth/login` buys a session cookie, which mints a personal token named
+for the phone (`"<device name> (Android)"`, scopes `read` and `write`) with
+`POST /tokens`, and is logged out straight away. The phone keeps the token,
+never the password, sealed with an AES-GCM key held in the Android Keystore
+(`app/.../session/SessionStore.kt`), so it survives a restart and a reboot.
+Sign out (More tab) revokes the token with `DELETE /tokens/{id}` using the
+token itself; any 401 from the server signs the app out with a notice.
 
-```properties
-cylist.server=http://10.0.2.2:8000   # the emulator's name for this machine
-cylist.token=cyl_…                   # read and write is enough for the board
-```
+The code is in `api/src/main/kotlin/cylist/api/Accounts.kt` (the HTTP side,
+plain JVM) and `app/src/main/kotlin/cylist/app/session/Sessions.kt` (what the
+app holds). Screens take a `Session` from `Sessions` and talk through
+`session.client`; none of them builds a client or reads storage.
 
-Debug builds may use plain HTTP to `10.0.2.2` and `localhost` only
-(`app/src/debug/res/xml/network_security_config.xml`); everything else is HTTPS.
+To sign in to a backend on this machine from the emulator, choose "Another
+server" and type `http://10.0.2.2:<port>`. Debug builds may use plain HTTP to
+`10.0.2.2` and `localhost` only (`app/src/debug/res/xml/network_security_config.xml`,
+mirrored by `CLEARTEXT_HOSTS` in `app/build.gradle.kts`); everything else, and
+every release build, is HTTPS. A fresh backend has no accounts; sign in to it
+once in a browser with the bootstrap password and give somebody an account
+(`PUT /people/{id}/account`) first.
 
 **The board is live.** While the Board screen is in the foreground it holds the
 project's board socket (`cylist.api.BoardSocket`, the same doorbell the web app
