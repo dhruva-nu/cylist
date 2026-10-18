@@ -551,6 +551,25 @@ compares the two. Change a colour, type size or corner in `tokens.css` and that
 test fails until `Tokens.kt` matches, so CI runs the Android job when
 `tokens.css` changes too.
 
+The API client is not written by hand either. `android/api/openapi.json` is a
+committed copy of the backend's OpenAPI document, and the `api` module
+generates a Kotlin client from it on every build (OpenAPI Generator, OkHttp and
+kotlinx.serialization) into `api/build/generated/`. `CylistClient` hands each
+generated API class the server and a `cyl_…` token, sent as
+`Authorization: Bearer`:
+
+```kotlin
+val tasks = CylistClient("https://cylist.in", token).api(::TasksApi)
+```
+
+Change what a route takes or returns and the snapshot is stale. Refresh it,
+without a server or a database, and commit it with the backend change:
+
+```bash
+make openapi         # rewrite android/api/openapi.json from backend/
+make openapi-check   # what CI's backend job runs: fail if it is out of date
+```
+
 ## Status
 
 All six phases of the [plan](PLAN.md) are built: authentication and the audit

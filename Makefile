@@ -18,7 +18,7 @@ UV       := uv --project $(BACKEND)
         staging-refresh staging-logs staging-ps staging-down \
         dev-slot-given dev-deploy dev-logs dev-ps dev-down dev-db-logs dev-db-ps dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key \
-        agent android android-install clean
+        agent android android-install openapi openapi-check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -195,7 +195,7 @@ typecheck: ## Type-check both sides
 	cd $(BACKEND) && uv run mypy app scripts
 	npm --prefix $(FRONTEND) run typecheck
 
-check: lint typecheck test migrate-check ## Everything CI runs
+check: lint typecheck test migrate-check openapi-check ## Everything CI runs
 
 seed: ## Fill an empty database with the three worked-through projects
 	cd $(BACKEND) && uv run python -m scripts.seed
@@ -219,6 +219,15 @@ android: ## Lint, test and build the Android debug APK
 
 android-install: ## Build the Android debug APK and install it on the phone adb sees
 	cd android && ./gradlew installDebug
+
+# The Android client is generated from android/api/openapi.json, a committed
+# copy of the API's OpenAPI document. Refresh it after changing anything a
+# route takes or returns; CI fails the backend job until you do.
+openapi: ## Refresh android/api/openapi.json from the backend
+	cd $(BACKEND) && uv run python -m scripts.openapi
+
+openapi-check: ## Fail if android/api/openapi.json is behind the backend
+	cd $(BACKEND) && uv run python -m scripts.openapi --check
 
 clean: ## Remove caches and build output
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

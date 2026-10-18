@@ -113,6 +113,12 @@ jobs:
       - name: Verify migrations
         run: uv run python -m scripts.check_migrations
 
+      # The Android client is generated from a committed copy of the OpenAPI
+      # document. A change to what a route takes or returns has to refresh it,
+      # so the Android job builds against the contract the server now has.
+      - name: Check the OpenAPI snapshot
+        run: uv run python -m scripts.openapi --check
+
   # The CLI and the MCP server talk to the API over HTTP and are tested against
   # an httpx.MockTransport, so neither needs a database or a running backend.
   agents:

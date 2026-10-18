@@ -56,8 +56,10 @@ fi
 flag() { if changed "$@"; then echo true; else echo false; fi; }
 
 # The backend depends on the MCP server and the vendored jev packages by path
-# (backend/pyproject.toml), so a change to either is a backend change too.
-backend=$(flag backend/ mcp/ vendor/)
+# (backend/pyproject.toml), so a change to either is a backend change too. The
+# backend job also checks android/api/openapi.json against the API, so an edit
+# to that file reruns it.
+backend=$(flag backend/ mcp/ vendor/ android/api/openapi.json)
 cli=$(flag cli/)
 mcp=$(flag mcp/)
 installers=$(flag scripts/install.sh scripts/install.ps1)
