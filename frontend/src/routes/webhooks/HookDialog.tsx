@@ -1,4 +1,7 @@
-/** Adding a hook or editing one: its name and URL, what it fires on, and its filters. */
+/**
+ * Adding a hook or editing one: its name and URL, what it fires on, and its
+ * filters — or, for a manual hook, none of that: it fires when it is fired.
+ */
 
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -75,7 +78,6 @@ export function HookDialog({
   })
 
   const blocked = whyIncomplete(draft, hooks, hook)
-  const moveOnly = !draft.anyChange && draft.verbs.length === 1 && draft.verbs[0] === 'task.moved'
 
   return (
     <Modal
@@ -107,7 +109,11 @@ export function HookDialog({
               onChange={(event) => set({ name: event.target.value })}
             />
           </Field>
-          <Field label="URL" required hint="Where each event is POSTed.">
+          <Field
+            label="URL"
+            required
+            hint={draft.manual ? 'POSTed to each time it is fired.' : 'Where each event is POSTed.'}
+          >
             <input
               value={draft.url}
               type="url"
@@ -119,90 +125,15 @@ export function HookDialog({
 
         <EventPicker events={events} draft={draft} onChange={set} />
 
-        <p className={styles.quiet}>Only for cards that match every filter you set:</p>
-        <FieldPair>
-          <Field label={moveOnly ? 'Moved into' : 'In column'}>
-            <select
-              value={draft.toColumnId}
-              onChange={(event) => set({ toColumnId: event.target.value })}
-            >
-              <option value="">Any column</option>
-              {columns.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Moved from">
-            <select
-              value={draft.fromColumnId}
-              onChange={(event) => set({ fromColumnId: event.target.value })}
-            >
-              <option value="">Any column</option>
-              {columns.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </FieldPair>
-        <FieldPair>
-          <Field label="Template">
-            <select
-              value={draft.templateId}
-              onChange={(event) => set({ templateId: event.target.value })}
-            >
-              <option value="">Any template</option>
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Type">
-            <select
-              value={draft.taskType}
-              onChange={(event) => set({ taskType: event.target.value as HookDraft['taskType'] })}
-            >
-              <option value="">Any type</option>
-              {TYPES.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </FieldPair>
-        <label className={styles.eventRow}>
-          <input
-            type="checkbox"
-            checked={draft.agentOnly}
-            onChange={(event) => set({ agentOnly: event.target.checked })}
+        {draft.manual ? null : (
+          <Filters
+            draft={draft}
+            set={set}
+            columns={columns}
+            templates={templates}
+            members={members}
           />
-          <span className={styles.eventText}>
-            <span className={styles.eventName}>Only cards assigned to the agent</span>
-            <span className={styles.eventHint}>
-              Fires when the card's owner is the agent after the change.
-            </span>
-          </span>
-        </label>
-        <Field
-          label="Tagged in a comment"
-          hint="Set this and only a comment fires it — one that @-tags this."
-        >
-          <select value={draft.tagged} onChange={(event) => set({ tagged: event.target.value })}>
-            <option value="">Any comment, tagged or not</option>
-            <option value={TAGS_ANYONE}>Anyone</option>
-            {members.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        )}
 
         {hook === null ? (
           <Field
@@ -221,6 +152,111 @@ export function HookDialog({
   )
 }
 
+/** Which cards a hook on changes is narrowed to. A manual hook has none. */
+function Filters({
+  draft,
+  set,
+  columns,
+  templates,
+  members,
+}: {
+  draft: HookDraft
+  set: (patch: Partial<HookDraft>) => void
+  columns: BoardColumn[]
+  templates: Template[]
+  members: Person[]
+}) {
+  const moveOnly = !draft.anyChange && draft.verbs.length === 1 && draft.verbs[0] === 'task.moved'
+  return (
+    <>
+      <p className={styles.quiet}>Only for cards that match every filter you set:</p>
+      <FieldPair>
+        <Field label={moveOnly ? 'Moved into' : 'In column'}>
+          <select
+            value={draft.toColumnId}
+            onChange={(event) => set({ toColumnId: event.target.value })}
+          >
+            <option value="">Any column</option>
+            {columns.map((column) => (
+              <option key={column.id} value={column.id}>
+                {column.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Moved from">
+          <select
+            value={draft.fromColumnId}
+            onChange={(event) => set({ fromColumnId: event.target.value })}
+          >
+            <option value="">Any column</option>
+            {columns.map((column) => (
+              <option key={column.id} value={column.id}>
+                {column.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </FieldPair>
+      <FieldPair>
+        <Field label="Template">
+          <select
+            value={draft.templateId}
+            onChange={(event) => set({ templateId: event.target.value })}
+          >
+            <option value="">Any template</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Type">
+          <select
+            value={draft.taskType}
+            onChange={(event) => set({ taskType: event.target.value as HookDraft['taskType'] })}
+          >
+            <option value="">Any type</option>
+            {TYPES.map((type) => (
+              <option key={type.value} value={type.value}>
+                {type.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </FieldPair>
+      <label className={styles.eventRow}>
+        <input
+          type="checkbox"
+          checked={draft.agentOnly}
+          onChange={(event) => set({ agentOnly: event.target.checked })}
+        />
+        <span className={styles.eventText}>
+          <span className={styles.eventName}>Only cards assigned to the agent</span>
+          <span className={styles.eventHint}>
+            Fires when the card's owner is the agent after the change.
+          </span>
+        </span>
+      </label>
+      <Field
+        label="Tagged in a comment"
+        hint="Set this and only a comment fires it — one that @-tags this."
+      >
+        <select value={draft.tagged} onChange={(event) => set({ tagged: event.target.value })}>
+          <option value="">Any comment, tagged or not</option>
+          <option value={TAGS_ANYONE}>Anyone</option>
+          {members.map((person) => (
+            <option key={person.id} value={person.id}>
+              {person.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </>
+  )
+}
+
 /**
  * Which changes a hook fires on: everything, or the events ticked here.
  *
@@ -230,6 +266,18 @@ export function HookDialog({
  * count beside a group is how many of its events are ticked, so a choice made
  * in a group not on screen is still in sight.
  */
+/** The picker's three ways to fire, and what choosing each sets on the draft. */
+const MODES = [
+  { id: 'any', label: 'Any change', patch: { anyChange: true, manual: false } },
+  { id: 'events', label: 'Only these events', patch: { anyChange: false, manual: false } },
+  { id: 'manual', label: 'Only when fired', patch: { manual: true } },
+] as const
+
+function modeOf(draft: HookDraft): (typeof MODES)[number]['id'] {
+  if (draft.manual) return 'manual'
+  return draft.anyChange ? 'any' : 'events'
+}
+
 /** Every event a group of the picker offers, by verb. */
 function verbsOf(group: { events: HookEvent[] }): string[] {
   return group.events.map((event) => event.verb)
@@ -259,25 +307,28 @@ function EventPicker({
     <fieldset className={styles.when}>
       <legend className={styles.whenLegend}>When</legend>
       <div className={styles.mode} role="group" aria-label="Which changes">
-        <button
-          type="button"
-          className={draft.anyChange ? `${styles.seg} ${styles.segOn}` : styles.seg}
-          aria-pressed={draft.anyChange}
-          onClick={() => onChange({ anyChange: true })}
-        >
-          Any change
-        </button>
-        <button
-          type="button"
-          className={draft.anyChange ? styles.seg : `${styles.seg} ${styles.segOn}`}
-          aria-pressed={!draft.anyChange}
-          onClick={() => onChange({ anyChange: false })}
-        >
-          Only these events
-        </button>
+        {MODES.map((mode) => {
+          const on = modeOf(draft) === mode.id
+          return (
+            <button
+              key={mode.id}
+              type="button"
+              className={on ? `${styles.seg} ${styles.segOn}` : styles.seg}
+              aria-pressed={on}
+              onClick={() => onChange(mode.patch)}
+            >
+              {mode.label}
+            </button>
+          )
+        })}
       </div>
 
-      {draft.anyChange ? (
+      {draft.manual ? (
+        <p className={styles.quiet}>
+          No change on the board fires it. It fires when you press Fire now on this page, and sends
+          a <code>hook.fired</code> event with anything you say.
+        </p>
+      ) : draft.anyChange ? (
         <p className={styles.quiet}>
           Every card, column, template and goal change is sent. Narrow it with the filters below.
         </p>

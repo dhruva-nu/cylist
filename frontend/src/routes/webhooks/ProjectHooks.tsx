@@ -68,7 +68,8 @@ export function ProjectHooks() {
       }
     >
       Send this board&rsquo;s changes to a URL — a deploy, a chat, a script of your own. Each one is
-      POSTed as signed JSON, and tried again for hours if nobody answers.
+      POSTed as signed JSON, and tried again for hours if nobody answers. A manual hook sends
+      nothing on its own: it fires when you press its button.
     </PageHead>
   )
 
