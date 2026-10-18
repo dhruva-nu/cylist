@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -32,6 +34,15 @@ android {
             // So a debug build and a future release build can be installed side by side.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // Until sign-in exists (CYLIST-102), a debug build is signed in by
+            // `cylist.server` and `cylist.token` in android/local.properties,
+            // which git ignores. Both empty means the app says it is signed out.
+            buildConfigField("String", "DEV_SERVER", quoted(localProperty("cylist.server")))
+            buildConfigField("String", "DEV_TOKEN", quoted(localProperty("cylist.token")))
+        }
+        release {
+            buildConfigField("String", "DEV_SERVER", quoted(""))
+            buildConfigField("String", "DEV_TOKEN", quoted(""))
         }
     }
 
@@ -42,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -69,6 +81,9 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.kotlinx.coroutines.android)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
@@ -78,3 +93,11 @@ dependencies {
 
     testImplementation(libs.junit)
 }
+
+fun localProperty(name: String): String {
+    val file = rootProject.file("local.properties")
+    if (!file.exists()) return ""
+    return Properties().apply { file.inputStream().use(::load) }.getProperty(name).orEmpty()
+}
+
+fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""

@@ -544,6 +544,29 @@ pull request on a phone without building anything, download the
 `cylist-debug-apk` artifact from its CI run instead. CI signs every APK with a
 fresh debug key, so uninstall one before installing another.
 
+**Signing in, for now.** Sign-in is CYLIST-102. Until it lands, a debug build
+is signed in at build time by two lines in `android/local.properties`, which
+git ignores; without them the app says it is not signed in, and a release build
+never has them:
+
+```properties
+cylist.server=http://10.0.2.2:8000   # the emulator's name for this machine
+cylist.token=cyl_…                   # read and write is enough for the board
+```
+
+Debug builds may use plain HTTP to `10.0.2.2` and `localhost` only
+(`app/src/debug/res/xml/network_security_config.xml`); everything else is HTTPS.
+
+**The board is live.** While the Board screen is in the foreground it holds the
+project's board socket (`cylist.api.BoardSocket`, the same doorbell the web app
+rings — see `frontend/src/api/realtime.ts`) and refetches on each
+`board.changed`, so a card moved on the web moves on the phone within a second
+or two. The socket closes when the app goes to the background and reopens when
+it comes back, and its `ready` refetches whatever changed meanwhile. The card
+rules — late dates, the agent line, whose cards — are ported from the web app
+in `app/src/main/kotlin/cylist/app/board/BoardRules.kt`, each beside the name of
+the TypeScript it mirrors; change the two together.
+
 The theme is not Material's. It is the web app's tokens
 (`frontend/src/theme/tokens.css`) written out in
 `app/src/main/kotlin/cylist/app/theme/Tokens.kt`, and `ThemeTokensTest`
