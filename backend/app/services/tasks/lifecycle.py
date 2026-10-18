@@ -174,7 +174,7 @@ def _refuse_unfit_parent(parent: Task, goal_id: UUID | None) -> None:
 
     Raises:
         UnprocessableRequestError: if the new sub-task names a goal of its own,
-            or if ``parent`` is itself a sub-task.
+            if ``parent`` is itself a sub-task, or if it is in cold storage.
     """
     if goal_id is not None:
         raise UnprocessableRequestError(
@@ -187,6 +187,15 @@ def _refuse_unfit_parent(parent: Task, goal_id: UUID | None) -> None:
         raise UnprocessableRequestError(
             f"{parent.reference} is already a sub-task, so it cannot have sub-tasks of its own. "
             "A board that nests further is a tree, not a board.",
+            details={"parent": parent.reference},
+        )
+
+    # Stored work is finished work. Splitting more out of it would be an open
+    # sub-task under a card nobody is looking at, which is how work is lost.
+    if parent.in_cold_storage:
+        raise UnprocessableRequestError(
+            f"{parent.reference} is in cold storage. Restore it to the board before splitting "
+            "more work out of it.",
             details={"parent": parent.reference},
         )
 

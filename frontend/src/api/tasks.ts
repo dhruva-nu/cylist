@@ -1,6 +1,7 @@
 /** Cards, their sub-tasks and tick boxes, and what has been said and done on them. */
 
 import type { AgentPresence, AgentSessionRead } from './agents'
+import type { FileItem } from './files'
 import { jsonBody, request } from './http'
 import type { Person } from './people'
 
@@ -126,9 +127,12 @@ export interface Task {
   parent_reference: string | null
   /** `2` in `ATL-41-2`. Null at the top level. */
   sub_number: number | null
-  /** Which column the card is in. Null on a sub-task, which is not on the board. */
+  /**
+   * Which column the card is in. Null on a sub-task, which is not on the board,
+   * and on a card in cold storage, which has left it.
+   */
   column_id: string | null
-  /** Where it sits in that column, from the top. Null on a sub-task. */
+  /** Where it sits in that column, from the top. Null on a sub-task and in cold storage. */
   position: number | null
   title: string
   description: string
@@ -191,6 +195,12 @@ export interface Task {
    * column, and moving it back out clears this.
    */
   finished_at: string | null
+  /**
+   * When this card was put in cold storage, or null while it is on the board.
+   * A stored card is still finished; restoring it puts it back in the board's
+   * last column.
+   */
+  archived_at: string | null
   /**
    * Sub-tasks — cards and tick boxes together — that are neither finished nor
    * cancelled. While this is above zero the card cannot reach the last column.
@@ -292,6 +302,16 @@ export interface StatusChange {
   waiting_on?: string[]
 }
 
+/** What putting a board's finished cards in cold storage did. */
+export interface ColdStorageRun {
+  /** The column they were taken from: the board's last. */
+  column: string
+  /** The cards stored, top to bottom as they stood. */
+  references: string[]
+  /** The CSV they were written to, in the project's `Cold storage` folder. */
+  file: FileItem
+}
+
 export const tasksApi = {
   listTasks: (projectKey: string) => request<Task[]>(`/projects/${projectKey}/tasks`),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
@@ -356,4 +376,15 @@ export const tasksApi = {
    */
   deleteComment: (commentId: string) =>
     request<void>(`/comments/${commentId}`, { method: 'DELETE' }),
+  /** The board's cards in cold storage, most recently stored first. */
+  listColdStorage: (projectKey: string) => request<Task[]>(`/projects/${projectKey}/cold-storage`),
+  /**
+   * Take every card in the board's last column off the board, into a CSV in the
+   * project's files. The cards are kept, not deleted, and each can be restored.
+   */
+  storeFinished: (projectKey: string) =>
+    request<ColdStorageRun>(`/projects/${projectKey}/cold-storage`, { method: 'POST' }),
+  /** Put a stored card back at the top of the board's last column, still finished. */
+  restoreTask: (taskRef: string) =>
+    request<TaskDetail>(`/tasks/${taskRef}/restore`, { method: 'POST' }),
 }

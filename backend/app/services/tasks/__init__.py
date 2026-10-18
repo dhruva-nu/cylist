@@ -37,6 +37,7 @@ whichever module it lives in:
 * :mod:`.editing` changes fields in place, and :mod:`.dates` owns the per-column
   due dates and how they read against the board;
 * :mod:`.moves` puts a card in a column and finishes or reopens it;
+* :mod:`.cold_storage` takes the finished ones off the board, and puts them back;
 * :mod:`.status` stalls and unstalls it;
 * :mod:`.timeline` and :mod:`.checklists` are what hangs off a card;
 * :mod:`.history` is the one shape every change is reported in, and
@@ -50,6 +51,7 @@ from app.services.tasks.checklists import (
     get_checklist_item,
     update_checklist_item,
 )
+from app.services.tasks.cold_storage import Stored, list_stored, restore, store_finished
 from app.services.tasks.counts import (
     NOT_SPLIT,
     Split,
@@ -79,6 +81,7 @@ __all__ = [
     "ColumnDue",
     "FieldChange",
     "Split",
+    "Stored",
     "add_checklist_item",
     "all_for_project",
     "board_dates",
@@ -97,12 +100,15 @@ __all__ = [
     "get_checklist_item",
     "get_comment",
     "list_for_project",
+    "list_stored",
     "move",
     "resolve",
+    "restore",
     "set_column_due_dates",
     "set_finished",
     "set_sub_status",
     "status_counts",
+    "store_finished",
     "subtask_counts",
     "subtask_owners",
     "subtasks",

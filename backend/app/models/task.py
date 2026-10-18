@@ -235,6 +235,14 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # The column says which project it is on, so the project is not here.
         Index("ix_task_column_id_position", "column_id", "position"),
         Index("ix_task_parent_id_sub_number", "parent_id", "sub_number", unique=True),
+        # A project's cold storage, newest first. Partial, because nearly every
+        # card is on the board and an index of NULLs answers nothing.
+        Index(
+            "ix_task_project_id_archived_at",
+            "project_id",
+            "archived_at",
+            postgresql_where=sql_text("archived_at IS NOT NULL"),
+        ),
         # What a goal's progress and a template's "in use by" are counted
         # from, and what deleting either has to find. Partial, because most
         # cards carry neither and an index of NULLs answers nothing.
@@ -252,14 +260,21 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "AND (parent_id IS NULL) = (sub_number IS NULL)",
             name="numbered_by_parentage",
         ),
-        # The same shape, for the same kind of reason: a top-level card is on
-        # the board and always in a column, a sub-task is not on the board and
-        # never in one. Neither "a card in no column" nor "a sub-task in Review"
-        # can be written at all.
+        # The same shape, for the same kind of reason: a card on the board is
+        # always in a column, and a sub-task — not on the board — never is.
+        # Neither "a live card in no column" nor "a sub-task in Review" can be
+        # written at all. A card in cold storage has left the board too, so it
+        # is in no column either, which is the one way a top-level card is.
         CheckConstraint(
-            "(parent_id IS NULL) = (column_id IS NOT NULL) "
-            "AND (parent_id IS NULL) = (position IS NOT NULL)",
+            "(parent_id IS NULL AND archived_at IS NULL) = (column_id IS NOT NULL) "
+            "AND (parent_id IS NULL AND archived_at IS NULL) = (position IS NOT NULL)",
             name="placed_by_parentage",
+        ),
+        # Cold storage is where finished *cards* go. A sub-task goes with its
+        # card rather than on its own, because it was never on the board.
+        CheckConstraint(
+            "archived_at IS NULL OR parent_id IS NULL",
+            name="archived_only_on_cards",
         ),
         # A card can be split into at most 4 stages — enough to read as a
         # position along a bar, not so many that a segment on a board card is
@@ -332,7 +347,8 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("board_column.id"),
     )
     """Which column the card is in. Null on a sub-task, which is not on the
-    board at all — see ``placed_by_parentage``.
+    board at all, and on a card in cold storage, which has left it — see
+    ``placed_by_parentage``.
 
     No ``ondelete``: NO ACTION is checked at the end of the statement, so
     deleting a project still cascades cleanly, while deleting a column that
@@ -421,6 +437,24 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[TaskStatus] = mapped_column(
         _enum(TaskStatus, "task_status"), nullable=False, default=TaskStatus.ACTIVE
     )
+
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """When this card was put in cold storage, or null while it is on the board.
+
+    Cold storage is where a board's finished cards go once nobody needs to see
+    them any more: off the board, out of every column, and written into a CSV
+    in the project's files — see :mod:`app.services.tasks.cold_storage`. The
+    row stays, so ``ATL-41`` still opens, its history is still there, and it
+    can be put back.
+
+    Not a column of its own, and not a status. A column is a place on the
+    board and this card is not on it; a status says whether the work is
+    moving, and stored work is neither moving nor stalled. What it *is* is
+    done — ``finished_at`` and ``outcome_index`` are kept just as they were —
+    so a goal still counts it, and putting it back lands it in the board's
+    last column with nothing about how it ended forgotten.
+
+    Cards alone — see ``archived_only_on_cards``."""
 
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     """When this task was finished, or null while it is still open.
@@ -539,8 +573,8 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     assignee: Mapped[Person] = relationship(lazy="selectin")
     column: Mapped[BoardColumn | None] = relationship(lazy="selectin")
     """The column the card is in, loaded with it so ``outcome_index`` can be
-    read back as the label it points at. Null on a sub-task, which is in
-    none."""
+    read back as the label it points at. Null on a sub-task, and on a card in
+    cold storage, which are in none."""
     template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
     goal: Mapped[Goal | None] = relationship(lazy="selectin")
 
@@ -610,6 +644,11 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             return None
         outcomes = self.column.outcomes
         return outcomes[self.outcome_index] if self.outcome_index < len(outcomes) else None
+
+    @property
+    def in_cold_storage(self) -> bool:
+        """Whether this card has been taken off the board into cold storage."""
+        return self.archived_at is not None
 
     @property
     def is_settled(self) -> bool:
