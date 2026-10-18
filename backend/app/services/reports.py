@@ -106,13 +106,27 @@ async def for_day(
 
     planned = await _planned(session, project, person_id, day)
 
-    headline = _headline(
-        changes=shown,
-        cards=len(touched),
-        finished=len(finished),
-        elsewhere=len(elsewhere),
-        day=day,
-    ) + _todo_sentence(planned)
+    todo_sentence = _todo_sentence(planned)
+    # A day with a plan and no changes on the board is not a day where nothing
+    # was recorded; the plan is the record, so it is the headline on its own.
+    headline = (
+        todo_sentence
+        if shown == 0 and todo_sentence
+        else " ".join(
+            part
+            for part in (
+                _headline(
+                    changes=shown,
+                    cards=len(touched),
+                    finished=len(finished),
+                    elsewhere=len(elsewhere),
+                    day=day,
+                ),
+                todo_sentence,
+            )
+            if part
+        )
+    )
     return DayReport(
         project_key=project.key,
         project_name=project.name,
@@ -156,7 +170,7 @@ async def _planned(
 
 
 def _todo_sentence(planned: list[CardTodos]) -> str:
-    """What became of the day's to-dos, as a sentence after the headline's first.
+    """What became of the day's to-dos, as a sentence of its own.
 
     Empty when there were none, so a day nobody planned reads as it always did.
     """
@@ -164,7 +178,7 @@ def _todo_sentence(planned: list[CardTodos]) -> str:
     if not states:
         return ""
     done = states.count(TodoState.DONE)
-    said = f" {done} of {len(states)} {_plural(len(states), 'to-do')} done"
+    said = f"{done} of {len(states)} {_plural(len(states), 'to-do')} done"
     moved = [todo.moved_to for card in planned for todo in card.todos if todo.moved_to]
     if moved:
         days = {f"{when:%A}" for when in moved}

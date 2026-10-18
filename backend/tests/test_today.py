@@ -387,3 +387,15 @@ async def test_a_day_nobody_planned_reports_as_before(signed_in: AsyncClient) ->
     assert report["todos"] == []
     assert "to-do" not in report["headline"]
     assert "## To-dos" not in report["markdown"]
+
+
+async def test_a_day_of_only_planning_leads_with_the_plan(signed_in: AsyncClient) -> None:
+    project, _, _ = await friday_with_three_todos(signed_in)
+    # The project and card were made today, not on Friday, so Friday's trail
+    # is empty and its plan is all there is to say.
+    report = (
+        await signed_in.get(f"/projects/{project}/reports/day", params={"date": FRIDAY})
+    ).json()
+
+    assert report["entry_count"] == 0
+    assert report["headline"] == "1 of 3 to-dos done."

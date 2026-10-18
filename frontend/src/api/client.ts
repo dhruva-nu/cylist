@@ -24,6 +24,7 @@ import { reportsApi } from './reports'
 import { rolesApi } from './roles'
 import { skillsApi } from './skills'
 import { tasksApi } from './tasks'
+import { todayApi } from './today'
 import { vaultApi } from './vault'
 import { webhooksApi } from './webhooks'
 
@@ -40,6 +41,7 @@ export * from './reports'
 export * from './roles'
 export * from './skills'
 export * from './tasks'
+export * from './today'
 export * from './vault'
 export * from './webhooks'
 
@@ -56,6 +58,7 @@ export const api = {
   ...webhooksApi,
   ...goalsApi,
   ...tasksApi,
+  ...todayApi,
   ...agentsApi,
   ...vaultApi,
 }

@@ -2,6 +2,7 @@
 
 import { request } from './http'
 import type { TaskHistoryEntry, TaskStatus } from './tasks'
+import type { TodoState } from './today'
 
 /** One card's share of a day: everything that happened to it, oldest first. */
 export interface TaskDay {
@@ -31,6 +32,23 @@ export interface TaskDay {
   entries: TaskHistoryEntry[]
 }
 
+/** One to-do from your plan for the day, and how the day left it. */
+export interface DayTodo {
+  text: string
+  state: TodoState
+  moved_to: string | null
+  carried_from: string | null
+}
+
+/** One card on your plan for the day, with what you meant to do about it. */
+export interface CardTodos {
+  reference: string
+  title: string
+  /** Where the card sits now; null in cold storage. */
+  column: string | null
+  todos: DayTodo[]
+}
+
 /**
  * What one project's day amounted to.
  *
@@ -58,6 +76,8 @@ export interface DayReport {
   tasks: TaskDay[]
   /** Changes that were not to a card — files, columns, the vault, the project. */
   elsewhere: TaskHistoryEntry[]
+  /** Your own plan for the day, from Today, in the order the cards were picked. */
+  todos: CardTodos[]
   headline: string
   markdown: string
 }

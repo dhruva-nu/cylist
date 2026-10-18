@@ -39,30 +39,22 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useMatchRoute } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, type DayReport, type TaskDay, type TaskHistoryEntry } from '../api/client'
-import { localToday } from './dates'
+import {
+  api,
+  type CardTodos,
+  type DayReport,
+  type DayTodo,
+  type TaskDay,
+  type TaskHistoryEntry,
+} from '../api/client'
+import { usePeople } from '../api/queries'
+import { dayShort, localToday, localZone, shiftDay, weekdayShort } from './dates'
 import { Modal, ModalBody } from './Modal'
 import { OpenCard } from './OpenCard'
 import { SidebarAction } from './SidebarSection'
-import { Button, EmptyState, ErrorNotice } from './ui'
+import { useProjectFiles } from './projectFiles'
+import { Button, EmptyState, ErrorNotice, Tagged } from './ui'
 import styles from './DayReport.module.css'
-
-/** The zone this browser is in, as an IANA name the server can cut a day by. */
-function localZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-}
-
-/**
- * The day `by` days from this one.
- *
- * Stepped through UTC on purpose: `new Date('2026-09-02')` is midnight UTC, so
- * doing the arithmetic there cannot land on the previous day for a reader west
- * of it. The result is a plain date either way — no time of day survives.
- */
-function shiftDay(day: string, by: number): string {
-  const [year = 0, month = 1, date = 1] = day.split('-').map(Number)
-  return new Date(Date.UTC(year, month - 1, date + by)).toISOString().slice(0, 10)
-}
 
 /**
  * The button in the sidebar, and everything it opens.
@@ -165,7 +157,9 @@ function ReportDialog({
           </span>
           <Button
             variant="go"
-            disabled={!loadedReport || loadedReport.entry_count === 0}
+            disabled={
+              !loadedReport || (loadedReport.entry_count === 0 && loadedReport.todos.length === 0)
+            }
             onClick={() => loadedReport && void copy(loadedReport.markdown)}
           >
             {copied ? 'Copied' : 'Copy as Markdown'}
@@ -241,6 +235,10 @@ function ReportContents({
     <div className={styles.report}>
       <p className={styles.headline}>{report.headline}</p>
 
+      {report.todos.some((card) => card.todos.length) ? (
+        <ReportTodos report={report} onOpen={onOpen} />
+      ) : null}
+
       {report.finished.length ? (
         <section>
           <h3 className={styles.section}>Finished</h3>
@@ -290,6 +288,92 @@ function ReportContents({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Your plan for the day, from Today: each card you picked up and what became
+ * of every to-do under it.
+ *
+ * Before the cards on purpose — it is what the day was meant to hold, and the
+ * section after it is what the day did hold. Only yours: the server sends
+ * nobody else's.
+ */
+function ReportTodos({
+  report,
+  onOpen,
+}: {
+  report: DayReport
+  onOpen: (reference: string) => void
+}) {
+  const people = usePeople().data ?? []
+  const files = useProjectFiles(report.project_key)
+
+  return (
+    <section>
+      <h3 className={styles.section}>To-dos</h3>
+      {report.todos
+        .filter((card) => card.todos.length)
+        .map((card: CardTodos) => (
+          <div key={card.reference} className={styles.card}>
+            {card.column !== null ? (
+              <button
+                type="button"
+                className={`${styles.cardHead} ${styles.cardOpen}`}
+                title={`Open ${card.reference}`}
+                onClick={() => onOpen(card.reference)}
+              >
+                <span className={styles.reference}>{card.reference}</span>
+                <span className={styles.title}>{card.title}</span>
+                <span className={styles.where}>{card.column}</span>
+              </button>
+            ) : (
+              <div className={styles.cardHead}>
+                <span className={styles.reference}>{card.reference}</span>
+                <span className={styles.title}>{card.title}</span>
+                <span className={styles.where}>Cold storage</span>
+              </div>
+            )}
+            <ul className={styles.todos}>
+              {card.todos.map((todo, index) => (
+                <li key={index} className={styles.todo}>
+                  <TodoMark todo={todo} />
+                  <span className={todo.state === 'done' ? styles.todoDone : styles.todoText}>
+                    <Tagged text={todo.text} members={people} files={files} />
+                  </span>
+                  <span className={styles.todoFate}>{todoFate(todo)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+    </section>
+  )
+}
+
+/** A tick, an arrow, or an empty ring: done, moved on, or not. */
+function TodoMark({ todo }: { todo: DayTodo }) {
+  const label = {
+    done: 'Done',
+    moved: 'Moved',
+    not_done: 'Not done',
+    open: 'Still open',
+  }[todo.state]
+  const glyph = { done: '✓', moved: '→', not_done: '○', open: '○' }[todo.state]
+  return (
+    <span className={`${styles.todoMark} ${styles[`mark_${todo.state}`] ?? ''}`} title={label}>
+      <span aria-hidden="true">{glyph}</span>
+      <span className="visually-hidden">{label}: </span>
+    </span>
+  )
+}
+
+/** What became of it, beside the words — and where it came from, if moved in. */
+function todoFate(todo: DayTodo): string {
+  const parts: string[] = []
+  if (todo.state === 'moved' && todo.moved_to) parts.push(`moved to ${dayShort(todo.moved_to)}`)
+  if (todo.state === 'not_done') parts.push('not done')
+  if (todo.carried_from) parts.push(`from ${weekdayShort(todo.carried_from)}`)
+  return parts.join(' · ')
 }
 
 /** One card's part of the day: its head, and what happened to it. */
