@@ -60,7 +60,7 @@ class Sessions(
      */
     suspend fun signIn(server: ServerAddress, email: String, password: String): Session {
         val account = withContext(io) {
-            val minted = accounts.signIn(server, email, password, tokenName, PHONE_SCOPES)
+            val minted = accounts.signIn(server, email, password, tokenName, PHONE_SCOPES, optional = setOf(Scope.permit))
             Account(
                 server = minted.server.url,
                 token = minted.token,
@@ -116,7 +116,11 @@ class Sessions(
          * that needs more widens this, and signing in again picks it up.
          * `permit` lets the person answer an agent's permission prompt from
          * the Task detail screen (CYLIST-104): the server refuses that to any
-         * token without it, which is every token an agent holds.
+         * token without it, which is every token an agent holds. A server
+         * older than `permit` refuses the scope, so it is asked for as
+         * optional: the phone then signs in without it, and answering a
+         * permission waits until the server is upgraded and the phone signs
+         * in again.
          */
         val PHONE_SCOPES: List<Scope> = listOf(Scope.read, Scope.write, Scope.permit)
     }

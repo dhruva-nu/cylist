@@ -50,6 +50,7 @@ class SessionsTest {
         val session = sessions.signIn(address("https://cylist.in"), "aditi@example.com", "hunter2")
 
         assertEquals(listOf(Triple("aditi@example.com", "Pixel 9 (Android)", listOf(Scope.read, Scope.write, Scope.permit))), accounts.signIns)
+        assertEquals(listOf(setOf(Scope.permit)), accounts.optionalScopes)
         assertSame(session, sessions.current())
         val stored = store.account!!
         assertEquals("cyl_phone", stored.token)

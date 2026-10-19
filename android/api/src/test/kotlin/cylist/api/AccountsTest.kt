@@ -121,6 +121,42 @@ class AccountsTest {
     }
 
     @Test
+    fun aServerOlderThanAnOptionalScopeMintsWithoutIt() {
+        server.enqueue(json(identity, 200, "Set-Cookie" to "cylist_session=cyl_session; Path=/"))
+        server.enqueue(json("""{"detail": [{"loc": ["body", "scopes", 2], "msg": "Input should be 'read'"}]}""", 422))
+        server.enqueue(json(issued, 201))
+        server.enqueue(json("""{"ok": true}"""))
+
+        val minted = accounts.signIn(
+            address, "aditi@example.com", "pw", "phone",
+            listOf(Scope.read, Scope.write, Scope.permit), optional = setOf(Scope.permit),
+        )
+
+        assertEquals("cyl_minted", minted.token)
+        server.takeRequest()
+        assertTrue("\"permit\"" in server.takeRequest().body!!.utf8())
+        val retry = server.takeRequest().body!!.utf8()
+        assertTrue(retry, "\"scopes\":[\"read\",\"write\"]" in retry)
+        assertEquals("/api/v1/auth/logout", server.takeRequest().url.encodedPath)
+    }
+
+    @Test
+    fun aRefusedTokenIsNotCalledANonCylistServer() {
+        server.enqueue(json(identity, 200, "Set-Cookie" to "cylist_session=cyl_session; Path=/"))
+        server.enqueue(json("""{"detail": []}""", 422))
+        server.enqueue(json("""{"ok": true}"""))
+
+        val error = runCatching {
+            accounts.signIn(address, "aditi@example.com", "pw", "phone", listOf(Scope.read, Scope.write))
+        }.exceptionOrNull()
+
+        assertTrue(error.toString(), error is AccountError.TokenRefused)
+        server.takeRequest()
+        server.takeRequest()
+        assertEquals("/api/v1/auth/logout", server.takeRequest().url.encodedPath)
+    }
+
+    @Test
     fun aWebPageIsNotACylistServer() {
         server.enqueue(MockResponse.Builder().code(200).addHeader("Content-Type", "text/html").body("<html></html>").build())
 
