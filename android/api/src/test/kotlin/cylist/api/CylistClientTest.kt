@@ -2,6 +2,8 @@ package cylist.api
 
 import cylist.api.generated.apis.AuthApi
 import cylist.api.generated.models.Channel
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
@@ -45,6 +47,35 @@ class CylistClientTest {
         assertEquals(Channel.api, me.channel)
         assertEquals(listOf("read", "write"), me.scopes)
         assertNull(me.person)
+    }
+
+    @Test
+    fun patchesATaskWithOnlyTheFieldsGiven() {
+        server.enqueue(MockResponse.Builder().addHeader("Content-Type", "application/json").body("{}").build())
+
+        CylistClient(server.url("/").toString(), "cyl_abc")
+            .patchTask("HWL-7", buildJsonObject { put("assignee_id", "0199a3c4-5b6e-7f80-9a1b-2c3d4e5f6a7b") })
+
+        val request = server.takeRequest()
+        assertEquals("PATCH", request.method)
+        assertEquals("/api/v1/tasks/HWL-7", request.url.encodedPath)
+        assertEquals("Bearer cyl_abc", request.headers["Authorization"])
+        // Nothing but the assignee: a null due date or goal would take it off the card.
+        assertEquals("{\"assignee_id\":\"0199a3c4-5b6e-7f80-9a1b-2c3d4e5f6a7b\"}", request.body?.utf8())
+    }
+
+    @Test
+    fun aRefusedPatchCarriesTheServersWords() {
+        server.enqueue(
+            MockResponse.Builder().code(422).addHeader("Content-Type", "application/json")
+                .body("{\"error\": {\"code\": \"unprocessable\", \"message\": \"Aditi K is not on HWL.\"}}").build(),
+        )
+
+        val error = runCatching {
+            CylistClient(server.url("/").toString(), "cyl_abc").patchTask("HWL-7", buildJsonObject { put("assignee_id", "x") })
+        }.exceptionOrNull()
+
+        assertEquals(ApiFailure(422, "unprocessable", "Aditi K is not on HWL."), error?.let(ApiFailure::of))
     }
 
     @Test(expected = IllegalArgumentException::class)

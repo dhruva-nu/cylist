@@ -1,8 +1,17 @@
 package cylist.api
 
+import cylist.api.generated.infrastructure.ClientError
+import cylist.api.generated.infrastructure.ClientException
+import cylist.api.generated.infrastructure.ServerError
+import cylist.api.generated.infrastructure.ServerException
+import kotlinx.serialization.json.JsonObject
 import okhttp3.Call
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
 /**
@@ -44,6 +53,34 @@ class CylistClient(
     fun boardSocket(projectKey: String, listener: BoardSocket.Listener): BoardSocket =
         BoardSocket(http, BoardSocketProtocol.url(basePath, projectKey), listener)
 
+    /**
+     * `PATCH /tasks/{ref}` with only [fields]: a partial edit of one card.
+     *
+     * The generated `updateTaskApiV1TasksTaskRefPatch` cannot make one. The
+     * generated client encodes every default, so `TaskUpdate(assigneeId = …)`
+     * also sends `"due_date": null`, `"goal_id": null`, `"template_id": null`
+     * and `"jira_ref": null`, and the server reads a null in those four as
+     * taking it off the card (`services/tasks/editing.py`, `_CLEARABLE`).
+     *
+     * A refusal throws the generated client's [ClientException] or
+     * [ServerException], so [ApiFailure.of] reads it as it does any other call's.
+     */
+    fun patchTask(ref: String, fields: JsonObject) {
+        val url = "$basePath/api/v1/tasks".toHttpUrl().newBuilder().addPathSegment(ref).build()
+        val request = Request.Builder().url(url).patch(fields.toString().toRequestBody(JSON)).build()
+        http.newCall(request).execute().use { response ->
+            if (response.isSuccessful) return
+            val status = response.code
+            val body = response.body.string()
+            val headers = response.headers.toMultimap()
+            throw if (status < HTTP_SERVER_ERROR) {
+                ClientException("Client error : $status", status, ClientError<Unit>(response.message, body, status, headers))
+            } else {
+                ServerException("Server error : $status", status, ServerError<Unit>(response.message, body, status, headers))
+            }
+        }
+    }
+
     private class BearerToken(private val token: String) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response = chain.proceed(
             chain.request().newBuilder().header("Authorization", "Bearer $token").build(),
@@ -52,5 +89,7 @@ class CylistClient(
 
     private companion object {
         const val TOKEN_PREFIX = "cyl_"
+        const val HTTP_SERVER_ERROR = 500
+        val JSON = "application/json".toMediaType()
     }
 }

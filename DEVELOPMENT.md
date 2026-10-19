@@ -617,6 +617,14 @@ rules — late dates, the agent line, whose cards — are ported from the web ap
 in `app/src/main/kotlin/cylist/app/board/BoardRules.kt`, each beside the name of
 the TypeScript it mirrors; change the two together.
 
+A sideways swipe on the card list moves between columns (the commit, flick,
+rubber-band and direction-lock numbers are in `BoardRules.kt` beside
+`swipeStep`). The assignee on a card is its own touch target and opens a sheet
+of the project's members; picking one sends `PATCH /tasks/{ref}` with
+`assignee_id` alone, through `CylistClient.patchTask`, because the generated
+`TaskUpdate` writes every field and a null `due_date`, `goal_id`,
+`template_id` or `jira_ref` would clear it.
+
 **A card opens over the board.** Tapping one opens the Task detail screen
 (`app/src/main/kotlin/cylist/app/task/`): its fields, sub-tasks and checklist
 (a tap ticks one), linked Jira and pull-request rows, the agent sessions on it

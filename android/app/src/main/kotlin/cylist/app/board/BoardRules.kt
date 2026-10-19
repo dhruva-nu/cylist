@@ -13,6 +13,9 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.sign
 
 /*
  * What a board card says, decided apart from how it is drawn, so the rules can
@@ -156,3 +159,82 @@ fun passesAgentFilter(task: TaskRead, filter: AgentFilter): Boolean = when (filt
 fun initialsOf(name: String): String =
     name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }
         .ifEmpty { "?" }
+
+/*
+ * Swiping the card list sideways, between columns. The numbers are the
+ * design's (the Board artboard on the mobile canvas); everything is in dp, and
+ * velocity in dp per millisecond, so the rule reads the same on any screen.
+ */
+
+/** Movement before a gesture is given an axis. */
+const val SWIPE_LOCK_DP = 8f
+
+/** A gesture is sideways only when it is this much more sideways than up or down. */
+const val SWIPE_AXIS_RATIO = 1.2f
+
+/** A drag this far moves to the next column whatever its speed. */
+const val SWIPE_COMMIT_DP = 72f
+
+/** A flick: shorter than [SWIPE_COMMIT_DP], but at least this far and faster than [SWIPE_FLICK_DP_PER_MS]. */
+const val SWIPE_FLICK_DP = 28f
+const val SWIPE_FLICK_DP_PER_MS = 0.5f
+
+/** At the first or last column the list moves this fraction of the drag, and springs back. */
+const val SWIPE_RUBBER_BAND = 0.25f
+
+enum class SwipeAxis { Sideways, UpDown }
+
+/**
+ * Who owns a gesture that has moved ([dx], [dy]) dp: null until it has moved
+ * [SWIPE_LOCK_DP], then sideways only if clearly so. Anything else is the
+ * list's, so the cards still scroll.
+ */
+fun swipeAxisOf(dx: Float, dy: Float): SwipeAxis? = when {
+    hypot(dx, dy) < SWIPE_LOCK_DP -> null
+    abs(dx) > SWIPE_AXIS_RATIO * abs(dy) -> SwipeAxis.Sideways
+    else -> SwipeAxis.UpDown
+}
+
+/**
+ * Where a sideways drag of [dx] dp, let go at [velocity] dp/ms, takes the
+ * list: -1 to the previous column, +1 to the next, 0 back where it was. A
+ * drag to the right (positive) brings the previous column in.
+ */
+fun swipeStep(dx: Float, velocity: Float, hasPrevious: Boolean, hasNext: Boolean): Int {
+    val step = when {
+        dx > 0 && hasPrevious -> -1
+        dx < 0 && hasNext -> 1
+        else -> return 0
+    }
+    val far = abs(dx) >= SWIPE_COMMIT_DP
+    val flick = abs(dx) > SWIPE_FLICK_DP && velocity * sign(dx) > SWIPE_FLICK_DP_PER_MS
+    return if (far || flick) step else 0
+}
+
+/** How far the list is drawn for a drag of [dx]: the whole drag, or a rubber band where there is no column to go to. */
+fun swipeFollow(dx: Float, hasPrevious: Boolean, hasNext: Boolean): Float =
+    if ((dx > 0 && hasPrevious) || (dx < 0 && hasNext)) dx else dx * SWIPE_RUBBER_BAND
+
+/** The name a card gives its assignee: "You" for the viewer, otherwise the first name ("Aditi K" → "Aditi"). */
+fun assigneeLabel(id: UUID, name: String, viewerId: UUID?): String =
+    if (viewerId != null && id == viewerId) "You" else name.trim().split(Regex("\\s+")).first().ifEmpty { name }
+
+/**
+ * How many open cards each person is the assignee of: cards on the board and
+ * not yet finished, which is what the assign sheet orders by.
+ */
+fun openCardsOf(tasks: List<TaskRead>, lastColumnId: UUID?): Map<UUID, Int> =
+    tasks.filter { onBoard(it) && it.finishedAt == null && it.columnId != lastColumnId }
+        .groupingBy { it.assignee.id }.eachCount()
+
+/** "1 open card", "3 open cards". */
+fun openCardsText(count: Int): String = if (count == 1) "1 open card" else "$count open cards"
+
+/**
+ * The snackbar after a card is given to someone. When the people filter now
+ * hides the card it says so, or the card would look lost.
+ */
+fun reassignedText(ref: String, name: String, toViewer: Boolean, hidden: Boolean): String {
+    val whose = if (toViewer) "$ref is now yours." else "$ref is now $name's."
+    return if (hidden) "$whose Your filter hides it." else whose
+}

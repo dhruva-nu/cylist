@@ -2,6 +2,7 @@ package cylist.app.board
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cylist.api.ApiFailure
 import cylist.api.BoardEvent
 import cylist.api.BoardSocket
 import cylist.api.generated.apis.AuthApi
@@ -26,6 +27,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.util.UUID
 
 /** Everything the Board screen draws, as of the last fetch. */
@@ -45,7 +48,15 @@ data class BoardState(
     /** Whether the board socket is open, so a change elsewhere shows here by itself. */
     val live: Boolean = false,
     val signedOut: Boolean = false,
+    /** The snackbar under the board, if one is showing. */
+    val notice: BoardNotice? = null,
 )
+
+/** A snackbar: what just happened, and the reassignment Undo would take back, if any. */
+data class BoardNotice(val serial: Long, val text: String, val undo: Reassignment? = null)
+
+/** A card given from one person to another, kept so Undo can give it back. */
+data class Reassignment(val taskId: UUID, val ref: String, val from: PersonRead, val to: PersonRead)
 
 /**
  * The Board screen's data: one project's columns, cards and people, refetched
@@ -66,6 +77,10 @@ class BoardViewModel(private val session: Session) : ViewModel() {
     private var started = false
     private var pending: Job? = null
     private var whoChosen = false
+    private var notices = 0L
+
+    /** A card's new assignee while its PATCH is in flight, so a refetch that crosses it does not flicker back. */
+    private val assigning = mutableMapOf<UUID, PersonRead>()
 
     init {
         viewModelScope.launch { firstLoad() }
@@ -163,6 +178,55 @@ class BoardViewModel(private val session: Session) : ViewModel() {
         }
     }
 
+    /**
+     * Give [task] to [to]: the card changes at once, the server is told, and a
+     * snackbar offers Undo. A failure puts the card back and says so.
+     */
+    fun reassign(task: TaskRead, to: MemberRead) {
+        if (to.id == task.assignee.id) return
+        val move = Reassignment(task.id, task.reference, task.assignee, to.asPerson())
+        send(move)
+        val moved = _state.value.tasks.firstOrNull { it.id == task.id } ?: return
+        val text = reassignedText(move.ref, to.name, to.id == _state.value.me?.id, hidden = !ownedByAny(moved, _state.value.who))
+        notify(text, move)
+    }
+
+    /** Take back the reassignment [notice] reported. */
+    fun undo(notice: BoardNotice) {
+        val move = notice.undo ?: return
+        dismissNotice(notice.serial)
+        send(Reassignment(move.taskId, move.ref, from = move.to, to = move.from))
+    }
+
+    fun dismissNotice(serial: Long) = _state.update { if (it.notice?.serial == serial) it.copy(notice = null) else it }
+
+    private fun notify(text: String, undo: Reassignment? = null) = _state.update { it.copy(notice = BoardNotice(++notices, text, undo)) }
+
+    private fun send(move: Reassignment) {
+        assigning[move.taskId] = move.to
+        showAssignee(move.taskId, move.to)
+        viewModelScope.launch {
+            val failure = try {
+                io { client.patchTask(move.ref, buildJsonObject { put("assignee_id", move.to.id.toString()) }) }
+                null
+            } catch (e: Exception) {
+                e
+            }
+            // A later reassignment of the same card owns it now; leave that one be.
+            val latest = assigning[move.taskId] == move.to
+            if (latest) assigning.remove(move.taskId)
+            if (failure != null && latest) {
+                showAssignee(move.taskId, move.from)
+                notify("Couldn't give ${move.ref} to ${move.to.name}. ${describe(failure)}")
+            }
+            refresh()
+        }
+    }
+
+    private fun showAssignee(taskId: UUID, person: PersonRead) = _state.update { current ->
+        current.copy(tasks = current.tasks.map { if (it.id == taskId) it.copy(assignee = person) else it })
+    }
+
     /** Refetch now, collapsing a burst of doorbells into one fetch. */
     fun refresh(debounceMs: Long = 0) {
         val key = _state.value.project?.key ?: return
@@ -188,7 +252,7 @@ class BoardViewModel(private val session: Session) : ViewModel() {
                 val me = current.me?.id
                 current.copy(
                     columns = columns,
-                    tasks = tasks,
+                    tasks = tasks.map { task -> assigning[task.id]?.let { task.copy(assignee = it) } ?: task },
                     members = members.filter { it.archivedAt == null },
                     columnId = current.columnId?.takeIf { id -> columns.any { it.id == id } } ?: defaultColumn(columns, tasks, me),
                     who = if (whoChosen) current.who else setOfNotNull(me?.takeIf { id -> members.any { it.id == id } }),
@@ -231,6 +295,12 @@ class BoardViewModel(private val session: Session) : ViewModel() {
     }
 
     private companion object {
+        fun MemberRead.asPerson() = PersonRead(
+            id = id, name = name, kind = kind, title = title, responsibilities = responsibilities, email = email,
+            colour = colour, archivedAt = archivedAt, createdAt = createdAt, isAgent = isAgent,
+            hasAccount = hasAccount, inviteIsPending = inviteIsPending,
+        )
+
         /** Collapse a burst of doorbells into one refetch, as the web app does. */
         const val DEBOUNCE_MS = 250L
 
@@ -239,7 +309,7 @@ class BoardViewModel(private val session: Session) : ViewModel() {
         fun describe(e: Exception): String = when (e) {
             is java.net.UnknownHostException, is java.net.ConnectException, is java.net.SocketTimeoutException ->
                 "Can't reach the server."
-            else -> e.message ?: "Something went wrong."
+            else -> ApiFailure.of(e)?.message ?: e.message ?: "Something went wrong."
         }
     }
 }
