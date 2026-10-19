@@ -12,6 +12,10 @@ junit = "4.13.2"
 openapi-generator = "7.14.0"
 okhttp = "5.5.0"
 kotlinx-serialization = "1.11.0"
+# Firebase Cloud Messaging only, for agent pushes (CYLIST-107). No
+# google-services plugin: app/build.gradle.kts reads the config itself, so a
+# build without it still succeeds.
+firebase-bom = "34.19.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
@@ -30,6 +34,8 @@ junit = { module = "junit:junit", version.ref = "junit" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
