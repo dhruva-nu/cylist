@@ -7,6 +7,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,14 +17,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +59,9 @@ import cylist.app.signin.SignInViewModel
 import cylist.app.task.TaskDetailRoute
 import cylist.app.theme.CylistTheme
 import cylist.app.theme.Figtree
+import cylist.app.theme.PlexMono
+import cylist.app.today.TodayScreen
+import cylist.app.today.TodayViewModel
 import cylist.app.ui.CylistIcons
 import kotlinx.coroutines.launch
 
@@ -99,15 +109,16 @@ private fun Root(app: CylistApp) {
     }
 }
 
-/** The five places the tab bar goes to. Only Board is built so far; the rest are their own cards. */
+/** The five places the tab bar goes to. Those not built yet name the card that brings them. */
 enum class Tab(val label: String, val icon: ImageVector, val card: String?) {
     Board("Board", CylistIcons.Board, null),
-    Today("Today", CylistIcons.Today, "CYLIST-105"),
+    Today("Today", CylistIcons.Today, null),
     Docs("Docs", CylistIcons.Docs, null),
     People("People", CylistIcons.People, null),
     More("More", CylistIcons.More, null),
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppShell(
     session: Session,
@@ -119,6 +130,11 @@ fun AppShell(
     var tab by rememberSaveable { mutableStateOf(Tab.Board) }
     // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
     val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
+    // Today plans on the project the Board is on, and its count rides on the tab.
+    val today: TodayViewModel = viewModel(key = "today-${session.account.tokenId}") { TodayViewModel(session) }
+    val boardState by board.state.collectAsStateWithLifecycle()
+    val todayState by today.state.collectAsStateWithLifecycle()
+    LaunchedEffect(boardState.project?.key) { boardState.project?.key?.let(today::setProject) }
     val docs: DocsViewModel = viewModel(key = "docs-${session.account.tokenId}") { DocsViewModel(session) }
     AskForNotifications()
     if (card != null) {
@@ -132,25 +148,28 @@ fun AppShell(
         TaskDetailRoute(session, opened) { openTask = null }
         return
     }
-    Column(Modifier.fillMaxSize().background(CylistTheme.colors.bg)) {
+    // Above the keyboard, so a box being typed in (a to-do on Today) is never under it.
+    Column(Modifier.fillMaxSize().background(CylistTheme.colors.bg).imePadding()) {
         Box(Modifier.weight(1f)) {
             when (tab) {
                 Tab.Board -> BoardScreen(board, openTask = { key, ref -> openTask = "$key|$ref" })
-                Tab.Docs -> {
-                    // Docs follows the project the board is on.
-                    val onBoard by board.state.collectAsStateWithLifecycle()
-                    DocsScreen(docs, onBoard.project?.key, session.server)
-                }
+                Tab.Today -> TodayScreen(today)
+                // Docs follows the project the board is on.
+                Tab.Docs -> DocsScreen(docs, boardState.project?.key, session.server)
                 Tab.More -> MoreScreen(session.account, signingOut, signOut)
                 else -> NotYet(tab)
             }
         }
-        TabBar(tab) { tab = it }
+        // Out of the way while typing, so the box and what it offers have the room.
+        if (!WindowInsets.isImeVisible) TabBar(tab, badges = mapOf(Tab.Today to TabBadge(todayState.todayOpen, warn = todayState.lateUnplanned != null))) { tab = it }
     }
 }
 
+/** A count on a tab: the to-dos left today on Today, red while a late card of yours is off the plan. */
+data class TabBadge(val count: Int, val warn: Boolean = false)
+
 @Composable
-fun TabBar(current: Tab, select: (Tab) -> Unit) {
+fun TabBar(current: Tab, badges: Map<Tab, TabBadge> = emptyMap(), select: (Tab) -> Unit) {
     val colors = CylistTheme.colors
     Column(Modifier.fillMaxWidth().background(colors.paper)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
@@ -167,7 +186,20 @@ fun TabBar(current: Tab, select: (Tab) -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     val tone = if (on) colors.ink else colors.ink3
-                    Icon(tab.icon, null, tint = tone, modifier = Modifier.size(20.dp))
+                    // The icon's own size, so a badge hanging off its corner moves nothing.
+                    Box(Modifier.size(20.dp)) {
+                        Icon(tab.icon, null, tint = tone, modifier = Modifier.size(20.dp))
+                        badges[tab]?.takeIf { it.count > 0 || it.warn }?.let { badge ->
+                            Text(
+                                "${badge.count}",
+                                color = if (badge.warn) colors.blocked else colors.ink2,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = PlexMono,
+                                modifier = Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).offset(x = 22.dp, y = (-4).dp),
+                            )
+                        }
+                    }
                     Text(tab.label, color = tone, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFamily = Figtree)
                 }
             }
