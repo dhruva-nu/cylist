@@ -1,5 +1,6 @@
 package cylist.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -41,10 +42,14 @@ import cylist.app.board.BoardViewModel
 import cylist.app.docs.DocsScreen
 import cylist.app.docs.DocsViewModel
 import cylist.app.more.MoreScreen
+import cylist.app.push.AgentSessionScreen
+import cylist.app.push.AskForNotifications
+import cylist.app.push.CardLink
 import cylist.app.session.Session
 import cylist.app.session.SessionState
 import cylist.app.signin.SignInScreen
 import cylist.app.signin.SignInViewModel
+import cylist.app.task.TaskDetailRoute
 import cylist.app.theme.CylistTheme
 import cylist.app.theme.Figtree
 import cylist.app.ui.CylistIcons
@@ -55,9 +60,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as CylistApp
+        if (savedInstanceState == null) opened(intent)
         setContent {
             CylistTheme { Root(app) }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        opened(intent)
+    }
+
+    /** An agent notification's tap carries the card to open (CYLIST-107). */
+    private fun opened(intent: Intent?) {
+        CardLink.parse(intent?.dataString)?.let { (application as CylistApp).openCard.value = it }
     }
 }
 
@@ -72,7 +88,8 @@ private fun Root(app: CylistApp) {
         }
         is SessionState.SignedIn -> {
             var signingOut by remember(current.session) { mutableStateOf(false) }
-            AppShell(current.session, signingOut) {
+            val card by app.openCard.collectAsStateWithLifecycle()
+            AppShell(current.session, signingOut, card, closeCard = { app.openCard.value = null }) {
                 signingOut = true
                 // On the app's scope, so turning the phone mid-way does not
                 // leave the token half signed out.
@@ -92,15 +109,33 @@ enum class Tab(val label: String, val icon: ImageVector, val card: String?) {
 }
 
 @Composable
-fun AppShell(session: Session, signingOut: Boolean, signOut: () -> Unit) {
+fun AppShell(
+    session: Session,
+    signingOut: Boolean,
+    card: CardLink? = null,
+    closeCard: () -> Unit = {},
+    signOut: () -> Unit,
+) {
     var tab by rememberSaveable { mutableStateOf(Tab.Board) }
     // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
     val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
     val docs: DocsViewModel = viewModel(key = "docs-${session.account.tokenId}") { DocsViewModel(session) }
+    AskForNotifications()
+    if (card != null) {
+        // An agent notification was tapped: its card's session, over the tabs.
+        AgentSessionScreen(session, card, closeCard)
+        return
+    }
+    // The card open over the board (CYLIST-104), as "KEY|KEY-41"; it takes the whole screen.
+    var openTask by rememberSaveable { mutableStateOf<String?>(null) }
+    openTask?.let { opened ->
+        TaskDetailRoute(session, opened) { openTask = null }
+        return
+    }
     Column(Modifier.fillMaxSize().background(CylistTheme.colors.bg)) {
         Box(Modifier.weight(1f)) {
             when (tab) {
-                Tab.Board -> BoardScreen(board)
+                Tab.Board -> BoardScreen(board, openTask = { key, ref -> openTask = "$key|$ref" })
                 Tab.Docs -> {
                     // Docs follows the project the board is on.
                     val onBoard by board.state.collectAsStateWithLifecycle()

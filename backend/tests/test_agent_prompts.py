@@ -729,6 +729,34 @@ class TestPermissionsOverTheSocket:
         assert response.status_code == 403
         assert (await _card(signed_in, ref))["agent_session"]["prompt"]["status"] == "open"
 
+    async def test_a_token_with_permit_answers_a_permission(
+        self, signed_in: AsyncClient, agent: dict[str, str], session: AsyncSession
+    ) -> None:
+        """The phone app's token carries `permit`: a person's own device, not
+        the agent's, may answer what the terminal is asking (CYLIST-104)."""
+        ref = await a_card(signed_in)
+        await _report(signed_in, agent, ref, "waiting", reason="permission")
+        prompt_id = await self._open_permission(session, ref)
+        issued = await signed_in.post(
+            "/tokens", json={"name": "Pixel 9 (Android)", "scopes": ["read", "write", "permit"]}
+        )
+        assert issued.status_code == 201, issued.text
+        phone = {"Authorization": f"Bearer {issued.json()['token']}"}
+
+        response = await signed_in.post(
+            f"/tasks/{ref}/agent-prompts/{prompt_id}/answer",
+            json={"key": "deny"},
+            headers=phone,
+        )
+
+        assert response.status_code == 200, response.text
+        assert (response.json()["status"], response.json()["answer_key"]) == ("answered", "deny")
+
+    async def test_the_agent_is_never_handed_permit(self, signed_in: AsyncClient) -> None:
+        """What `cylist setup` mints an agent's token with leaves `permit` out."""
+        described = (await signed_in.get("/setup")).json()
+        assert "permit" not in described["agent_scopes"]
+
     async def _open_permission(self, session: AsyncSession, ref: str) -> str:
         task = await tasks.resolve(session, ref)
         prompt_id = uuid4()

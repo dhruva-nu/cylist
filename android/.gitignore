@@ -5,3 +5,5 @@ local.properties
 *.iml
 .idea/
 captures/
+# Firebase's client config (CYLIST-107). Never committed; see app/build.gradle.kts.
+google-services.json
