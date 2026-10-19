@@ -5,7 +5,8 @@
  *
  * The board opens on you — see `peopleFromSearch` — because the question most
  * people bring to a board is "what is on me", and a board of everyone's cards
- * makes them find themselves in it every time.
+ * makes them find themselves in it every time. After that it opens on
+ * whoever you last picked on it (CYLIST-110).
  *
  * The row starts folded: just whoever is picked, small and stacked, and a grey
  * chevron. Who the board is narrowed to is worth seeing at all times; the
