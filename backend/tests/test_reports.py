@@ -19,6 +19,8 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.conftest import put_members
+
 TODAY = "2026-09-02"
 
 ADITI = {
@@ -38,7 +40,7 @@ async def make_project(client: AsyncClient, key: str = "ATL") -> str:
     """A project with one member, who can then own the cards."""
     await client.post("/projects", json={"key": key, "name": "Atlas migration"})
     person = (await client.post("/people", json={**ADITI, "name": f"Aditi {key}"})).json()["id"]
-    await client.put(f"/projects/{key}/members", json={"person_ids": [person]})
+    await put_members(client, key, [person])
     return key
 
 

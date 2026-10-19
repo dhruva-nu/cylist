@@ -37,11 +37,11 @@ class Principal:
     assigns work and writes history under its owner's name rather than the
     server's.
 
-    This is the whole of "who is asking". Cylist's projects are a shared
-    workspace — everyone signed in sees the same boards — so there is no
-    authorisation question hanging off this, only an attribution one: who
-    ``is_me`` means, who joins a project they create, and whose name goes on
-    the audit row.
+    This is "who is asking", and it decides what they can see: the projects
+    this person is a member of, and no others — see
+    :func:`app.services.projects.require_reachable`. It is also who ``is_me``
+    means, who joins a project they create, and whose name goes on the audit
+    row.
     """
 
     label: str

@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
@@ -180,9 +180,13 @@ async def recent(
     *,
     limit: int,
     project_id: UUID | None = None,
+    within: list[UUID] | None = None,
     entity_type: str | None = None,
 ) -> list[Activity]:
     """The newest entries on the whole trail, optionally narrowed.
+
+    ``within`` keeps the entries on those projects and the ones on no project
+    at all, which is how a reader is shown only the boards they are on.
 
     Unlike the two readers above this keeps the entries that changed nothing:
     it is the feed that answers "who touched what", and a request somebody
@@ -191,6 +195,10 @@ async def recent(
     statement = select(Activity).order_by(Activity.occurred_at.desc()).limit(limit)
     if project_id is not None:
         statement = statement.where(Activity.project_id == project_id)
+    if within is not None:
+        statement = statement.where(
+            or_(Activity.project_id.is_(None), Activity.project_id.in_(within))
+        )
     if entity_type is not None:
         statement = statement.where(Activity.entity_type == entity_type)
     return list(await session.scalars(statement))

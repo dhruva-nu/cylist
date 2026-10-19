@@ -266,9 +266,8 @@ async def set_baseline_permissions(
 
     That is most of a board most of the time — a role is something an admin
     says about you, and until they have, this line is the whole of what you
-    are allowed. It covers people who are not on the project at all for the
-    same reason: membership has never been a fence in Cylist, and nobody
-    having said what you are is nobody having said what you are.
+    are allowed. Somebody not on the project at all cannot see it, so this
+    line is never theirs.
 
     A project starts with every box on this line ticked, which is what every
     project was before roles carried permissions at all.

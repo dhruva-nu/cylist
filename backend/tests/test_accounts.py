@@ -31,6 +31,7 @@ from tests.conftest import (
     OWNER_PASSWORD,
     client_for,
     open_account,
+    put_members,
 )
 
 ADITI = {
@@ -696,7 +697,7 @@ class TestAttribution:
         assert entry.actor_label == OWNER_NAME
 
     async def test_two_people_are_told_apart_in_one_feed(
-        self, signed_in: AsyncClient, settings: Settings, database: Database
+        self, signed_in: AsyncClient, owner: Person, settings: Settings, database: Database
     ) -> None:
         _, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
         await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
@@ -704,6 +705,8 @@ class TestAttribution:
         async with client_for(settings, database) as theirs:
             await _accept(theirs, token)
             await theirs.post("/projects", json={"key": "HRM", "name": "Hermes"})
+            # Or the feed would leave Hermes out: it shows the projects you are on.
+            await put_members(theirs, "HRM", [str(owner.id)])
 
         feed = (await signed_in.get("/activity")).json()
         started = {

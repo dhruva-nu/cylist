@@ -11,18 +11,18 @@ from uuid import UUID
 from fastapi import Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.errors import ForbiddenError
+from app.core.errors import ForbiddenError, NotFoundError
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
 from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.tasks import TaskCreate, TaskMove, TaskUpdate
-from app.services import columns, permissions, roles, tasks, templates
+from app.services import columns, permissions, projects, roles, tasks, templates
 
 TaskRef = Path(
     description="The task's id, or its reference such as `ATL-41` (case-insensitive).",
@@ -32,26 +32,46 @@ TaskRef = Path(
 
 async def resolved_task(
     task_ref: str = TaskRef,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> Task:
-    """Turn the path segment into a task, 404-ing if nothing matches."""
-    return await tasks.resolve(session, task_ref)
+    """Turn the path segment into a task, 404-ing if nothing matches — or if
+    it is on a project the caller is not a member of."""
+    task = await tasks.resolve(session, task_ref)
+    await projects.require_reachable(
+        session, task.project_id, principal, NotFoundError(f"No task matching {task_ref!r}.")
+    )
+    return task
 
 
 async def resolved_checklist_item(
     item_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> TaskChecklistItem:
-    """Turn the path segment into a tick box, 404-ing if nothing matches."""
-    return await tasks.get_checklist_item(session, item_id)
+    """Turn the path segment into a tick box, 404-ing if nothing matches or
+    the card it is on is out of the caller's reach."""
+    item = await tasks.get_checklist_item(session, item_id)
+    task = await tasks.get(session, item.task_id)
+    await projects.require_reachable(
+        session, task.project_id, principal, NotFoundError("No checklist item with that id.")
+    )
+    return item
 
 
 async def resolved_comment(
     comment_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> TaskComment:
-    """Turn the path segment into a timeline entry, 404-ing if nothing matches."""
-    return await tasks.get_comment(session, comment_id)
+    """Turn the path segment into a timeline entry, 404-ing if nothing matches
+    or the card it is on is out of the caller's reach."""
+    entry = await tasks.get_comment(session, comment_id)
+    task = await tasks.get(session, entry.task_id)
+    await projects.require_reachable(
+        session, task.project_id, principal, NotFoundError("No comment with that id.")
+    )
+    return entry
 
 
 WRITE_CARDS = guards.on_project(Permission.TASKS)

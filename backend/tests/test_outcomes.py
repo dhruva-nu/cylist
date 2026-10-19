@@ -14,6 +14,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
+from tests.conftest import put_members
+
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
     "name": "Aditi K",
@@ -27,7 +29,7 @@ OUTCOMES = ["Done", "Cancelled", "In prod"]
 async def _setup(client: AsyncClient) -> str:
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=ADITI)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     return str(person)
 
 

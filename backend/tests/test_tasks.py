@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BoardColumn, Person, Project, Task
-from tests.conftest import OWNER_NAME
+from tests.conftest import OWNER_NAME, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -35,7 +35,7 @@ async def _setup(client: AsyncClient, project: dict[str, str] = ATLAS) -> str:
     """Create a project with one member, and return that member's id."""
     await client.post("/projects", json=project)
     person = (await client.post("/people", json=ADITI)).json()["id"]
-    await client.put(f"/projects/{project['key']}/members", json={"person_ids": [person]})
+    await put_members(client, project["key"], [person])
     return str(person)
 
 
@@ -317,7 +317,7 @@ class TestWhoTheCardLandsOn:
         """The default is a default, not a rule about who may own work."""
         await signed_in.post("/projects", json=ATLAS)
         aditi = (await signed_in.post("/people", json=ADITI)).json()["id"]
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [aditi]})
+        await put_members(signed_in, "ATL", [aditi])
 
         task = await _create(signed_in, aditi)
 
@@ -343,21 +343,6 @@ class TestWhoTheCardLandsOn:
 
         assert response.status_code == 201, response.text
         assert response.json()["assignee"]["name"] == OWNER_NAME
-
-    async def test_a_creator_who_is_not_on_the_project_has_to_name_somebody(
-        self, signed_in: AsyncClient
-    ) -> None:
-        """The default steps aside rather than putting a card on an outsider.
-
-        ``_setup`` leaves the board with one member who is not the caller, so
-        there is somebody to name — the message says to name them.
-        """
-        await _setup(signed_in)
-
-        response = await signed_in.post("/projects/ATL/tasks", json=_no_assignee())
-
-        assert response.status_code == 422
-        assert "not on ATL" in response.json()["error"]["message"]
 
     async def test_a_bootstrap_session_has_to_name_somebody(
         self, bootstrapped: AsyncClient
@@ -393,7 +378,7 @@ class TestNumbering:
         person = await _setup(signed_in)
         await _create(signed_in, person)
         await signed_in.post("/projects", json=HERMES)
-        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        await put_members(signed_in, "HRM", [person])
 
         elsewhere = (await signed_in.post("/projects/HRM/tasks", json=_task(person))).json()
 
@@ -585,7 +570,7 @@ class TestUpdating:
     async def test_the_assignee_can_be_handed_over(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
         rohan = (await signed_in.post("/people", json=ROHAN)).json()["id"]
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [person, rohan]})
+        await put_members(signed_in, "ATL", [person, rohan])
         task = await _create(signed_in, person)
 
         updated = (
@@ -998,7 +983,7 @@ class TestListing:
         person = await _setup(signed_in)
         await _create(signed_in, person)
         await signed_in.post("/projects", json=HERMES)
-        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        await put_members(signed_in, "HRM", [person])
         await signed_in.post("/projects/HRM/tasks", json=_task(person, title="Elsewhere"))
 
         assert len((await signed_in.get("/projects/ATL/tasks")).json()) == 1

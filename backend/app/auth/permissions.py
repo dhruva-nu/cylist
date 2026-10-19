@@ -12,9 +12,11 @@ recognise at a particular endpoint. An admin who could invent "can approve
 budgets" would have invented a word nothing checks.
 
 **Actions, not reading.** Everything here is something a caller *does*.
-Reading a project you can reach is not fenced by a role, which keeps Cylist's
-projects the shared workspace decision 4 called them: a board whose cards half
-the team cannot see is a different product, and nobody has asked for it. The
+Reading a project you are on is not fenced by a role, which keeps a project a
+shared workspace for the people on it: a board whose cards half the team cannot
+see is a different product, and nobody has asked for it. Whether you can see a
+project at all is membership's question, not a role's — see
+:func:`app.services.projects.require_reachable`. The
 one read-shaped entry, :attr:`Permission.VAULT_REVEAL`, is here because
 revealing a secret was already a distinct, logged, separately scoped act
 before roles existed.

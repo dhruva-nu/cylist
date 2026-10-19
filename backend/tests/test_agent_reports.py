@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import agent_reports
+from tests.conftest import put_members
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
 SESSION_B = "22222222-2222-4222-8222-222222222222"
@@ -51,7 +52,7 @@ async def a_card(client: AsyncClient) -> str:
             },
         )
     ).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     created = await client.post(
         "/projects/ATL/tasks",
         json={

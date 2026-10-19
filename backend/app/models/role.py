@@ -6,8 +6,8 @@ for the reason membership is: the same person is the one who signs work off on
 one board and the one doing the work on another, and a directory-wide role
 could only say one of those.
 
-What a role is *allowed* to do is deliberately not here. Cylist's projects are
-a shared workspace and this change does not make them otherwise; a role says
+What a role is *allowed* to do is deliberately not here. A project is a shared
+workspace for the people on it and this change does not make it otherwise; a role says
 who somebody is on a board, the way ``kind`` says which side of the work they
 are on. The single exception is the role named below — :attr:`ProjectRole.is_admin`
 — which is the one whose holder may create the others, because roles that

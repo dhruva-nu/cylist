@@ -144,8 +144,8 @@ a vocabulary the server fixes:
 
 A role's *name* is the admin's invention; what it may do cannot be, because
 every entry is a fence a particular endpoint recognises. Reading is not on the
-list: a project is a shared workspace, and everyone who can reach a board can
-read it. `vault_reveal` is the one read-shaped entry, and it was already a
+list: a project is a shared workspace for the people on it, and everyone who is
+on a board can read it. `vault_reveal` is the one read-shaped entry, and it was already a
 distinct, logged, separately scoped act before roles existed.
 
 Three things hold everything, always. The `Admin` role, by being it. The
@@ -153,8 +153,8 @@ bootstrap session, which belongs to nobody. And whoever the project's grid
 grants it to.
 
 The line called **Everyone else** is what somebody on the project with no role
-may do — and what somebody who is not on it may do, since membership has never
-been a fence here. A project is created with every box on that line ticked, so
+may do. Somebody who is not on it never gets as far as the grid — see
+*Membership* below. A project is created with every box on that line ticked, so
 a new board behaves exactly as boards did before permissions existed, and its
 admin narrows it from there. A new role starts with whatever that line allows,
 so naming somebody a Reviewer is never a demotion nobody asked for.
@@ -189,6 +189,26 @@ subtree with it.
 
 Reading is otherwise still unfenced — a project is a shared workspace, and its
 board, cards and goals are visible to everyone on it.
+
+### Membership
+
+Being on a project is what lets you see it at all (CYLIST-111). `GET
+/projects` lists only the projects the caller is a member of, and every path
+that reaches one — its key, a card's reference, the id of a doc, folder, file,
+vault tree or node, a goal, a column, a comment, the board socket — answers a
+non-member with the same **404** a project that does not exist gets, so the
+refusal cannot be used to learn which keys are taken. The activity feed keeps
+only entries on the caller's projects and those on no project at all.
+
+The check is `app.services.projects.require_reachable`, called from
+`resolved_project` and from every row resolver (`resolved_task`,
+`resolved_doc`, …). A new route addressed by a row on a project has to resolve
+it through one of those, or call the check itself.
+
+An API token acts as whoever minted it, so an agent sees exactly what its
+person sees, whatever its scopes. The bootstrap session is nobody, so it is on
+no project and sees all of them — it is what adds the first person to one.
+Taking yourself off a project is leaving it: it disappears from your list.
 
 `GET /projects/{ref}/permissions` returns the whole grid — the vocabulary, the
 levels, each role's line with its columns and clearance, and `mine`, what the

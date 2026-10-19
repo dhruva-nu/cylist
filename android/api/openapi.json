@@ -495,7 +495,7 @@
           "projects"
         ],
         "summary": "List projects",
-        "description": "Return every project, newest first — the home screen's grid.",
+        "description": "Return the projects the caller is a member of, newest first — the home\nscreen's grid.",
         "operationId": "list_projects_api_v1_projects_get",
         "parameters": [
           {
@@ -1908,7 +1908,7 @@
           "roles"
         ],
         "summary": "Say what somebody with no role may do",
-        "description": "Replace what everybody here without a role may do.\n\nThat is most of a board most of the time — a role is something an admin\nsays about you, and until they have, this line is the whole of what you\nare allowed. It covers people who are not on the project at all for the\nsame reason: membership has never been a fence in Cylist, and nobody\nhaving said what you are is nobody having said what you are.\n\nA project starts with every box on this line ticked, which is what every\nproject was before roles carried permissions at all.",
+        "description": "Replace what everybody here without a role may do.\n\nThat is most of a board most of the time — a role is something an admin\nsays about you, and until they have, this line is the whole of what you\nare allowed. Somebody not on the project at all cannot see it, so this\nline is never theirs.\n\nA project starts with every box on this line ticked, which is what every\nproject was before roles carried permissions at all.",
         "operationId": "set_baseline_permissions_api_v1_projects__project_ref__permissions_everyone_else_put",
         "parameters": [
           {
@@ -7640,7 +7640,7 @@
           "activity"
         ],
         "summary": "Recent activity",
-        "description": "Return audit entries, newest first.\n\n``project`` takes a key as well as an id, matching every other\nproject-scoped path — otherwise each client has to spend a request\nresolving the key before it can ask this one question.",
+        "description": "Return audit entries, newest first.\n\n``project`` takes a key as well as an id, matching every other\nproject-scoped path — otherwise each client has to spend a request\nresolving the key before it can ask this one question.\n\nOnly the projects the caller is a member of are in it. Entries on no\nproject at all — tokens, the people directory — are everybody's.",
         "operationId": "list_activity_api_v1_activity_get",
         "parameters": [
           {

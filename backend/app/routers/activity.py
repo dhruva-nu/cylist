@@ -20,7 +20,7 @@ router = APIRouter(prefix="/activity", tags=["activity"])
 
 @router.get("", response_model=list[ActivityRead], summary="Recent activity")
 async def list_activity(
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     project: str | None = Query(
         default=None,
@@ -35,9 +35,20 @@ async def list_activity(
     ``project`` takes a key as well as an id, matching every other
     project-scoped path — otherwise each client has to spend a request
     resolving the key before it can ask this one question.
+
+    Only the projects the caller is a member of are in it. Entries on no
+    project at all — tokens, the people directory — are everybody's.
     """
-    project_id = (await projects.resolve(session, project)).id if project is not None else None
-    entries = await activity.recent(
-        session, limit=limit, project_id=project_id, entity_type=entity_type
-    )
+    if project is not None:
+        project_id = (await projects.resolve_reachable(session, project, principal)).id
+        entries = await activity.recent(
+            session, limit=limit, project_id=project_id, entity_type=entity_type
+        )
+    else:
+        entries = await activity.recent(
+            session,
+            limit=limit,
+            within=await projects.reachable_ids(session, principal),
+            entity_type=entity_type,
+        )
     return [ActivityRead.model_validate(entry) for entry in entries]

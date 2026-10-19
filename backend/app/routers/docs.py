@@ -17,11 +17,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
+from app.core.errors import NotFoundError
 from app.db import SessionDependency
 from app.models.doc import SECTION_ORDER, Doc, DocTopic
 from app.models.project import Project
@@ -52,7 +53,7 @@ from app.schemas.docs import (
     SectionFound,
 )
 from app.schemas.people import PersonRead
-from app.services import activity, docs
+from app.services import activity, docs, projects
 from app.services.doc_engine import DocEngine
 
 router = APIRouter(tags=["docs"])
@@ -60,18 +61,30 @@ router = APIRouter(tags=["docs"])
 
 async def resolved_topic(
     topic_id: UUID = Path(description="The topic's id."),
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> DocTopic:
-    """Turn the path segment into a topic, 404-ing if nothing matches."""
-    return await docs.get_topic(session, topic_id)
+    """Turn the path segment into a topic, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    topic = await docs.get_topic(session, topic_id)
+    await projects.require_reachable(
+        session, topic.project_id, principal, NotFoundError("No doc topic with that id.")
+    )
+    return topic
 
 
 async def resolved_doc(
     doc_id: UUID = Path(description="The doc's id."),
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> Doc:
-    """Turn the path segment into a doc, 404-ing if nothing matches."""
-    return await docs.get_doc(session, doc_id)
+    """Turn the path segment into a doc, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    doc = await docs.get_doc(session, doc_id)
+    await projects.require_reachable(
+        session, doc.project_id, principal, NotFoundError("No doc with that id.")
+    )
+    return doc
 
 
 def doc_engine(request: Request) -> DocEngine | None:

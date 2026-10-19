@@ -7,9 +7,10 @@ Approved mock: https://claude.ai/code/artifact/27e0344e-ef48-4e2a-a592-5e5c53c1f
 - Personal project/task manager: Projects → { Kanban board, Files, Vault, People }.
 - Stack: React (Vite + TypeScript) · FastAPI (Python 3.12) · PostgreSQL 16.
 - **API-first.** The web UI is one client. An MCP server and a CLI come later and must need *no* backend changes — so every capability is a REST endpoint, auth is token-based, and no logic lives only in React.
-- Several people, plus non-human agents. One shared workspace: everybody
-  signed in sees the same projects, and an account exists to say *which* of
-  them is acting — not to fence off what they can see. Accounts live on the
+- Several people, plus non-human agents. A person sees the projects they have
+  been added to as a member and no others (CYLIST-111); within a project the
+  board is shared by everyone on it, and an account says *which* of them is
+  acting. An agent's token sees what its minter sees. Accounts live on the
   people directory and are opened by invitation — or handed over outright by
   an admin, where there is no mailbox an invitation could reach. (v1 was a
   single owner; see CYLIST-44.)

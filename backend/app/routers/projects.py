@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
@@ -56,10 +56,16 @@ ProjectRef = Path(
 
 async def resolved_project(
     project_ref: str = ProjectRef,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> Project:
-    """Turn the path segment into a project, 404-ing if nothing matches."""
-    return await projects.resolve(session, project_ref)
+    """Turn the path segment into a project, 404-ing if nothing matches.
+
+    A project the caller is not on 404s too, so every route under
+    ``/projects/{project_ref}`` is fenced by membership through this one
+    dependency — see :func:`app.services.projects.require_reachable`.
+    """
+    return await projects.resolve_reachable(session, project_ref, principal)
 
 
 def _project_read(project: Project) -> ProjectRead:
@@ -118,12 +124,13 @@ async def project_admin(
 
 @router.get("", response_model=list[ProjectRead], summary="List projects")
 async def list_projects(
-    _: Principal = Depends(require(Scope.READ)),
+    principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     include_archived: bool = Query(default=False),
 ) -> list[ProjectRead]:
-    """Return every project, newest first — the home screen's grid."""
-    found = await projects.list_projects(session, include_archived=include_archived)
+    """Return the projects the caller is a member of, newest first — the home
+    screen's grid."""
+    found = await projects.list_projects(session, principal, include_archived=include_archived)
     return [_project_read(project) for project in found]
 
 
