@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from httpx import AsyncClient
 
-from tests.conftest import INVITEE_PASSWORD, open_account
+from tests.conftest import INVITEE_PASSWORD, open_account, put_members
 
 FRIDAY = "2026-10-16"
 TODAY_HERE = datetime.now(UTC).date().isoformat()
@@ -203,7 +203,7 @@ async def test_a_plan_is_its_authors_alone(
     picked = await pick(signed_in, project, await make_card(signed_in, project))
     todo = await add_todo(signed_in, picked["id"], "Read the RFC")
 
-    _, token = await open_account(
+    aditi, token = await open_account(
         signed_in,
         {"name": "Aditi K", "kind": "team", "title": "Engineer", "responsibilities": "Billing."},
         "aditi@example.com",
@@ -212,6 +212,8 @@ async def test_a_plan_is_its_authors_alone(
         "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
     )
     assert accepted.status_code == 200, accepted.text
+    # On the project, so it is the plan that is private and not the board.
+    await put_members(signed_in, project, [aditi["id"]])
 
     assert (await plan(other_client, project))["picks"] == []
     assert (

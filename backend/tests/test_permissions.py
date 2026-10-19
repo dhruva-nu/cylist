@@ -15,7 +15,7 @@ from typing import Any
 from httpx import AsyncClient
 
 from app.auth.permissions import Permission
-from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account
+from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 
@@ -459,9 +459,10 @@ class TestTheFence:
         self, signed_in: AsyncClient, other_client: AsyncClient
     ) -> None:
         """Which is the whole reason roles are per project."""
-        await _second_person_on_atlas(signed_in, other_client, role="Reviewer")
+        aditi = await _second_person_on_atlas(signed_in, other_client, role="Reviewer")
         await _allow(signed_in, "Reviewer")
         await signed_in.post("/projects", json={"key": "HRM", "name": "Hermes"})
+        await put_members(signed_in, "HRM", [aditi])
 
         assert (
             await other_client.post(
@@ -595,10 +596,13 @@ class TestEverybodyElse:
             )
         ).status_code == 201
 
-    async def test_somebody_not_on_the_project_gets_the_same_answer(
+    async def test_somebody_not_on_the_project_is_told_there_is_no_such_project(
         self, signed_in: AsyncClient, other_client: AsyncClient
     ) -> None:
-        """Membership has never been a fence, and this did not make it one."""
+        """Before any role is read: a project you are not on is one you cannot see.
+
+        Not the baseline's 403, which would confirm that ATL exists.
+        """
         await signed_in.post("/projects", json=ATLAS)
         _, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
         await other_client.post(
@@ -610,7 +614,8 @@ class TestEverybodyElse:
             "/projects/ATL/tasks", json=_card(await _member_id(signed_in, OWNER_NAME), "Migrate")
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 404
+        assert response.json()["error"]["message"] == "No project matching 'ATL'."
 
 
 class TestBothGatesStillStand:

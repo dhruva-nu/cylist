@@ -18,6 +18,7 @@ from httpx import AsyncClient
 
 from app.realtime.hub import Watcher
 from tests import ws
+from tests.conftest import put_members
 
 BOARD = "/api/v1/projects/ATL/board/ws"
 
@@ -46,7 +47,7 @@ async def make_project(client: AsyncClient, key: str = "ATL") -> str:
             },
         )
     ).json()["id"]
-    await client.put(f"/projects/{key}/members", json={"person_ids": [person]})
+    await put_members(client, key, [person])
     return str(person)
 
 

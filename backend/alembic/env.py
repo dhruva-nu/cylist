@@ -7,6 +7,7 @@ truth, and runs migrations through the async engine the app itself uses.
 from __future__ import annotations
 
 import asyncio
+import logging
 from logging.config import fileConfig
 
 from sqlalchemy import Enum, pool
@@ -19,8 +20,15 @@ from app.models import Base
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# The ini's logging is for the ``alembic`` command line, where nothing else has
+# configured any. Run in-process — the migration tests, ``check_migrations`` —
+# the caller already has, and ``fileConfig`` would replace its root handlers
+# and, by default, disable every logger that already exists: ``app.*`` would
+# then go silent for the rest of the process. So: only when the root logger is
+# still bare, the same test :func:`logging.basicConfig` uses, and never at the
+# expense of loggers somebody else made.
+if config.config_file_name is not None and not logging.getLogger().handlers:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 DATABASE_URL = get_settings().database_url
 """Where the migrations run.

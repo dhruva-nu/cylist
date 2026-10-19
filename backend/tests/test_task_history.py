@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity import Activity, Channel
-from tests.conftest import OWNER_NAME
+from tests.conftest import OWNER_NAME, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -30,7 +30,7 @@ async def _setup(client: AsyncClient) -> list[str]:
     """A project with two members. Returns their ids."""
     await client.post("/projects", json=ATLAS)
     people = [(await client.post("/people", json=who)).json()["id"] for who in (ADITI, ROHAN)]
-    await client.put("/projects/ATL/members", json={"person_ids": people})
+    await put_members(client, "ATL", people)
     return people
 
 

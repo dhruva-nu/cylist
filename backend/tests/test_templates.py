@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from tests.conftest import put_members
+
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
     "name": "Aditi K",
@@ -24,7 +26,7 @@ async def _project(client: AsyncClient) -> str:
     """A project with a member, ready to hold cards."""
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=TEAM)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     return str(person)
 
 

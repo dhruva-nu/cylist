@@ -12,10 +12,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.errors import NotFoundError
 from app.db import SessionDependency
 from app.models.board import BoardColumn
 from app.models.project import Project
@@ -23,17 +24,23 @@ from app.routers import guards
 from app.routers.projects import resolved_project
 from app.schemas.columns import Board, ColumnCreate, ColumnOrder, ColumnRead, ColumnUpdate
 from app.schemas.common import Acknowledged
-from app.services import activity, columns
+from app.services import activity, columns, projects
 
 router = APIRouter(tags=["board"])
 
 
 async def resolved_column(
     column_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> BoardColumn:
-    """Turn the path segment into a column, 404-ing if nothing matches."""
-    return await columns.get(session, column_id)
+    """Turn the path segment into a column, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    column = await columns.get(session, column_id)
+    await projects.require_reachable(
+        session, column.project_id, principal, NotFoundError("No column with that id.")
+    )
+    return column
 
 
 def _column_read(column: BoardColumn, task_count: int) -> ColumnRead:

@@ -15,7 +15,7 @@ from httpx import AsyncClient
 
 from app.config import Settings
 from app.db import Database
-from tests.conftest import INVITEE_PASSWORD, client_for, open_account
+from tests.conftest import INVITEE_PASSWORD, client_for, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -55,7 +55,7 @@ async def _board(client: AsyncClient, *directory: dict[str, str]) -> tuple[str, 
     """A project with a task on it. Returns the task id and the member ids."""
     await client.post("/projects", json=ATLAS)
     members = [await _person(client, details) for details in (ADITI, *directory)]
-    await client.put("/projects/ATL/members", json={"person_ids": members})
+    await put_members(client, "ATL", members)
 
     task = (
         await client.post(
@@ -478,10 +478,7 @@ async def _join(client: AsyncClient, person_id: str) -> None:
     status change and fatal for anything that asks who the admin is.
     """
     members = (await client.get("/projects/ATL/members")).json()["members"]
-    await client.put(
-        "/projects/ATL/members",
-        json={"person_ids": [member["id"] for member in members] + [person_id]},
-    )
+    await put_members(client, "ATL", [member["id"] for member in members] + [person_id])
 
 
 async def _admins_board(client: AsyncClient) -> tuple[str, str]:

@@ -33,7 +33,7 @@ from app.models.activity import Activity, Channel
 from app.models.hook import HookDelivery
 from app.models.task import Task
 from app.services import activity, hook_delivery
-from tests.conftest import INVITEE_PASSWORD, VAULT_KEY, open_account
+from tests.conftest import INVITEE_PASSWORD, VAULT_KEY, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -55,10 +55,7 @@ async def _project(client: AsyncClient) -> str:
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=TEAM)).json()["id"]
     members = (await client.get("/projects/ATL/members")).json()["members"]
-    await client.put(
-        "/projects/ATL/members",
-        json={"person_ids": [member["id"] for member in members] + [person]},
-    )
+    await put_members(client, "ATL", [member["id"] for member in members] + [person])
     staging = await _add_column(client, "In staging")
     columns = await _columns(client)
     await client.put(
@@ -270,10 +267,7 @@ class TestRules:
         )
         assert accepted.status_code == 200, accepted.text
         members = (await signed_in.get("/projects/ATL/members")).json()["members"]
-        await signed_in.put(
-            "/projects/ATL/members",
-            json={"person_ids": [m["id"] for m in members] + [member["id"]]},
-        )
+        await put_members(signed_in, "ATL", [m["id"] for m in members] + [member["id"]])
 
         assert (await other_client.get("/projects/ATL/hooks")).status_code == 403
         refused = await other_client.post(

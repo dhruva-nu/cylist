@@ -12,7 +12,8 @@ from enum import StrEnum
 
 class Scope(StrEnum):
     READ = "read"
-    """Read every project, board, file listing and vault *structure*."""
+    """Read the projects the credential's person is on: board, file listing and
+    vault *structure*."""
 
     WRITE = "write"
     """Create and modify projects, people, tasks, files and vault nodes."""

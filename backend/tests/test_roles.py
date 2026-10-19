@@ -11,10 +11,10 @@ nobody able to.
 from __future__ import annotations
 
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Person, ProjectMember
+from app.models import Person, Project, ProjectMember, ProjectRole
 from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
@@ -53,6 +53,22 @@ async def _member_id(client: AsyncClient, name: str) -> str:
     position says nothing about who created the project."""
     members = (await client.get("/projects/ATL/members")).json()["members"]
     return str(next(member["id"] for member in members if member["name"] == name))
+
+
+async def _roles_on_atlas(session: AsyncSession) -> dict[str, str | None]:
+    """Who is on ATL and the role each wears, read off the rows.
+
+    For the tests whose caller has just taken themselves off the project, and
+    so can no longer ask the API who is still on it.
+    """
+    rows = await session.execute(
+        select(Person.name, ProjectRole.name)
+        .join(ProjectMember, ProjectMember.person_id == Person.id)
+        .join(Project, Project.id == ProjectMember.project_id)
+        .outerjoin(ProjectRole, ProjectRole.id == ProjectMember.role_id)
+        .where(Project.key == "ATL")
+    )
+    return dict(rows.tuples().all())
 
 
 async def _todays_sentences(client: AsyncClient) -> list[str]:
@@ -319,7 +335,9 @@ class TestKeepingAnAdmin:
 
         assert response.status_code == 200
 
-    async def test_dropping_the_last_admin_passes_the_role_on(self, signed_in: AsyncClient) -> None:
+    async def test_dropping_the_last_admin_passes_the_role_on(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
         """A membership edit says who is on the board, not who runs it.
 
         Refusing it over a role would be answering a question nobody asked, so
@@ -330,31 +348,35 @@ class TestKeepingAnAdmin:
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": [added]})
 
-        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
-        assert [m["name"] for m in members] == ["Aditi K"]
-        assert members[0]["role"]["name"] == "Admin"
+        assert await _roles_on_atlas(session) == {"Aditi K": "Admin"}
 
     async def test_an_emptied_project_keeps_the_role_with_nobody_on_it(
-        self, signed_in: AsyncClient
+        self, signed_in: AsyncClient, session: AsyncSession
     ) -> None:
         await signed_in.post("/projects", json=ATLAS)
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": []})
 
-        roles = (await signed_in.get("/projects/ATL/roles")).json()
-        assert roles[0]["member_count"] == 0
+        assert await _roles_on_atlas(session) == {}
+        admin = await session.scalar(
+            select(ProjectRole.name)
+            .join(Project, Project.id == ProjectRole.project_id)
+            .where(Project.key == "ATL", ProjectRole.is_admin.is_(True))
+        )
+        assert admin == "Admin"
 
     async def test_the_next_person_on_an_adminless_project_takes_it(
-        self, signed_in: AsyncClient
+        self, bootstrapped: AsyncClient, session: AsyncSession
     ) -> None:
-        await signed_in.post("/projects", json=ATLAS)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": []})
-        added = (await signed_in.post("/people", json=ADITI)).json()["id"]
+        """The bootstrap session, because it is the one caller still able to
+        reach a project once everybody has left it."""
+        await bootstrapped.post("/projects", json=ATLAS)
+        await bootstrapped.put("/projects/ATL/members", json={"person_ids": []})
+        added = (await bootstrapped.post("/people", json=ADITI)).json()["id"]
 
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [added]})
+        await bootstrapped.put("/projects/ATL/members", json={"person_ids": [added]})
 
-        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
-        assert members[0]["role"]["name"] == "Admin"
+        assert await _roles_on_atlas(session) == {"Aditi K": "Admin"}
 
     async def test_an_existing_role_is_not_overwritten_to_fill_the_vacancy(
         self, signed_in: AsyncClient, session: AsyncSession
@@ -366,8 +388,7 @@ class TestKeepingAnAdmin:
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": [added]})
 
-        members = (await signed_in.get("/projects/ATL/members")).json()["members"]
-        assert members[0]["role"]["name"] == "Reviewer"
+        assert await _roles_on_atlas(session) == {"Aditi K": "Reviewer"}
 
 
 class TestMembershipKeepsRoles:
@@ -456,6 +477,8 @@ class TestWhoMayManageThem:
         await signed_in.post("/projects", json=ATLAS)
         person = await _sign_in_as_a_second_person(signed_in, other_client)
         await other_client.post("/projects", json=HERMES)
+        owner = await _member_id(signed_in, OWNER_NAME)
+        await signed_in.put("/projects/ATL/members", json={"person_ids": [owner, person["id"]]})
 
         assert (await other_client.post("/projects/HRM/roles", json=REVIEWER)).status_code == 201
         assert (await other_client.post("/projects/ATL/roles", json=REVIEWER)).status_code == 403
@@ -501,16 +524,26 @@ class TestWhoMayManageThem:
         assert response.status_code == 403
 
     async def test_an_admin_token_can_step_in_where_nobody_is_left(
-        self, signed_in: AsyncClient, client: AsyncClient
+        self, signed_in: AsyncClient, client: AsyncClient, session: AsyncSession
     ) -> None:
         """The way back from a project whose only admin was archived.
 
         Archiving is not an ordinary route and does not consult the rules that
         keep an admin, so this is what stops a board being unadministrable for
-        good.
+        good. The token still has to belong to somebody on the project — a
+        project nobody is on is one nobody can see — so the vacancy is made
+        straight on the row, leaving its holder a member with no role.
         """
         await signed_in.post("/projects", json=ATLAS)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": []})
+        await session.execute(
+            update(ProjectMember)
+            .where(
+                ProjectMember.project_id
+                == select(Project.id).where(Project.key == "ATL").scalar_subquery()
+            )
+            .values(role_id=None)
+        )
+        await session.commit()
         issued = (
             await signed_in.post(
                 "/tokens", json={"name": "deployment", "scopes": ["write", "admin"]}

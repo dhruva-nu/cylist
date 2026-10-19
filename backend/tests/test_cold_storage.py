@@ -15,7 +15,7 @@ from typing import Any
 from httpx import AsyncClient
 
 from app.auth.permissions import Permission
-from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account
+from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -30,7 +30,7 @@ ADITI_EMAIL = "aditi@example.com"
 async def _setup(client: AsyncClient) -> str:
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=ADITI)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     return str(person)
 
 
@@ -343,7 +343,7 @@ class TestWhoMay:
         assert accepted.status_code == 200, accepted.text
         members = (await admin.get("/projects/ATL/members")).json()["members"]
         owner = next(member["id"] for member in members if member["name"] == OWNER_NAME)
-        await admin.put("/projects/ATL/members", json={"person_ids": [owner, person["id"]]})
+        await put_members(admin, "ATL", [owner, person["id"]])
         await admin.post("/projects/ATL/roles", json={"name": "Reviewer"})
         await admin.put(f"/projects/ATL/members/{person['id']}/role", json={"role": "Reviewer"})
 

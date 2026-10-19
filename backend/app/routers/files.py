@@ -42,7 +42,7 @@ from app.schemas.files import (
     LinkCreate,
 )
 from app.schemas.people import PersonRead
-from app.services import activity, blobs, files, permissions
+from app.services import activity, blobs, files, permissions, projects
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["files"])
@@ -50,18 +50,33 @@ router = APIRouter(tags=["files"])
 
 async def resolved_folder(
     folder_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> Folder:
-    """Turn the path segment into a folder, 404-ing if nothing matches."""
-    return await files.get_folder(session, folder_id)
+    """Turn the path segment into a folder, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    folder = await files.get_folder(session, folder_id)
+    await projects.require_reachable(
+        session, folder.project_id, principal, NotFoundError("No folder with that id.")
+    )
+    return folder
 
 
 async def resolved_item(
     item_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> FileItem:
-    """Turn the path segment into a file or link, 404-ing if nothing matches."""
-    return await files.get_item(session, item_id)
+    """Turn the path segment into a file or link, 404-ing if nothing matches —
+    or if it is on a project the caller is not a member of."""
+    item = await files.get_item(session, item_id)
+    await projects.require_reachable(
+        session,
+        await files.project_id_of_item(session, item),
+        principal,
+        NotFoundError("No file or link with that id."),
+    )
+    return item
 
 
 def _folder_read(folder: Folder) -> FolderRead:

@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.principal import Principal
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
@@ -146,9 +147,72 @@ async def resolve(session: AsyncSession, reference: str) -> Project:
     return project
 
 
-async def list_projects(session: AsyncSession, *, include_archived: bool = False) -> list[Project]:
-    """Return projects, newest first."""
+async def resolve_reachable(session: AsyncSession, reference: str, principal: Principal) -> Project:
+    """:func:`resolve`, for a caller who has to be on the project to see it.
+
+    A project the caller is not a member of is refused in exactly the words a
+    project that does not exist is, so the refusal cannot be used to learn
+    which keys are taken.
+
+    Raises:
+        NotFoundError: if nothing matches, or the caller is not on it.
+    """
+    project = await resolve(session, reference)
+    await require_reachable(
+        session, project.id, principal, NotFoundError(f"No project matching {reference!r}.")
+    )
+    return project
+
+
+async def require_reachable(
+    session: AsyncSession, project_id: UUID, principal: Principal, refusal: NotFoundError
+) -> None:
+    """Refuse a caller who is not on the project, as though it were not there.
+
+    A person sees the projects they have been added to and no others: the
+    list, the board, and everything filed under it — cards, docs, files, the
+    vault. Every path that reaches a project, by its key or by a row on it,
+    asks this, and an API token is held to it the same way because it acts as
+    whoever minted it.
+
+    ``refusal`` is the caller's own "no such thing" error, so a card on a
+    project you are not on reads exactly like a card that does not exist.
+
+    The bootstrap session is the one exception. It is nobody — the deployment
+    owner signing in before any account exists — so it is on no project, and
+    it is what has to add the first person to one.
+
+    Raises:
+        NotFoundError: ``refusal``, if the caller may not see the project.
+    """
+    if principal.person_id is None:
+        return
+    if not await is_member(session, project_id, principal.person_id):
+        raise refusal
+
+
+async def reachable_ids(session: AsyncSession, principal: Principal) -> list[UUID] | None:
+    """The ids of every project this caller may see, or ``None`` for all of them.
+
+    ``None`` only for the bootstrap session — see :func:`require_reachable`.
+    """
+    if principal.person_id is None:
+        return None
+    return list(
+        await session.scalars(
+            select(ProjectMember.project_id).where(ProjectMember.person_id == principal.person_id)
+        )
+    )
+
+
+async def list_projects(
+    session: AsyncSession, principal: Principal, *, include_archived: bool = False
+) -> list[Project]:
+    """Return the projects this caller is on, newest first."""
     statement = select(Project).order_by(Project.created_at.desc())
+    reachable = await reachable_ids(session, principal)
+    if reachable is not None:
+        statement = statement.where(Project.id.in_(reachable))
     if not include_archived:
         statement = statement.where(Project.archived_at.is_(None))
     return list(await session.scalars(statement))

@@ -40,6 +40,7 @@ from app.core.errors import NotFoundError, UnauthorizedError
 from app.core.logging import bind_request_id, new_request_id, reset_request_id
 from app.db import Database
 from app.models.agent_session import AgentPromptStatus, AgentSessionReason
+from app.models.task import Task
 from app.realtime import auth, protocol
 from app.realtime.hub import AgentLink, Hub, Watcher
 from app.services import agent_feed, agent_prompts, agent_reports, projects, tasks
@@ -306,15 +307,15 @@ async def _handle_frame(
     if message.type == "feed":
         # Unacknowledged, and never a reason to close: see the protocol's note
         # on `feed`.
-        await _record_feed(database, client_session_id, message)
+        await _record_feed(database, principal, client_session_id, message)
         return None
     if message.type == "prompt":
-        reply = await _open_prompt(database, client_session_id, message)
+        reply = await _open_prompt(database, principal, client_session_id, message)
         if reply is not None:
             await websocket.send_json(reply)
         return None
     if message.type == "withdraw":
-        await _withdraw_prompt(database, client_session_id, message)
+        await _withdraw_prompt(database, principal, client_session_id, message)
         return None
     if message.type == "bye":
         await _end_row(
@@ -333,8 +334,28 @@ async def _handle_frame(
     return None
 
 
+async def _reachable_task(session: AsyncSession, principal: Principal, reference: str) -> Task:
+    """The card a frame names, if the agent's owner is on its project.
+
+    An agent token sees what the person who minted it sees, so a card on a
+    project they are not a member of is, to the socket, a card that does not
+    exist.
+
+    Raises:
+        NotFoundError: if nothing matches, or the card is out of reach.
+    """
+    task = await tasks.resolve(session, reference)
+    await projects.require_reachable(
+        session, task.project_id, principal, NotFoundError(f"No task matching {reference!r}.")
+    )
+    return task
+
+
 async def _open_prompt(
-    database: Database, client_session_id: str, message: protocol.PromptMessage
+    database: Database,
+    principal: Principal,
+    client_session_id: str,
+    message: protocol.PromptMessage,
 ) -> dict[str, object] | None:
     """Put a permission on the card. Returns a frame to send at once, if any.
 
@@ -343,7 +364,7 @@ async def _open_prompt(
     """
     async with database.session() as session:
         try:
-            task = await tasks.resolve(session, message.task)
+            task = await _reachable_task(session, principal, message.task)
         except NotFoundError:
             return protocol.answer(message.prompt.id, AgentPromptStatus.WITHDRAWN)
         return await agent_prompts.open_permission(
@@ -357,12 +378,15 @@ async def _open_prompt(
 
 
 async def _withdraw_prompt(
-    database: Database, client_session_id: str, message: protocol.WithdrawMessage
+    database: Database,
+    principal: Principal,
+    client_session_id: str,
+    message: protocol.WithdrawMessage,
 ) -> None:
     """The daemon stopped waiting. Unacknowledged: there is nothing to say back."""
     async with database.session() as session:
         try:
-            task = await tasks.resolve(session, message.task)
+            task = await _reachable_task(session, principal, message.task)
             await agent_prompts.withdraw(
                 session,
                 task,
@@ -390,7 +414,7 @@ async def _record_report(
     """
     async with database.session() as session:
         try:
-            task = await tasks.resolve(session, message.task)
+            task = await _reachable_task(session, principal, message.task)
         except NotFoundError as exc:
             return Refusal(auth.NOT_FOUND, "not_found", str(exc))
         applied = await agent_reports.report(
@@ -402,13 +426,14 @@ async def _record_report(
 
 async def _record_feed(
     database: Database,
+    principal: Principal,
     client_session_id: str,
     message: protocol.FeedMessage,
 ) -> None:
     """Keep the lines a session sent. A card that cannot be found keeps none."""
     async with database.session() as session:
         try:
-            task = await tasks.resolve(session, message.task)
+            task = await _reachable_task(session, principal, message.task)
         except NotFoundError:
             return
         await agent_feed.append(session, task, client_session_id, message.entries)
@@ -453,8 +478,8 @@ async def _handshake(
     exists to avoid.
     """
     try:
-        await auth.admit(websocket, session, scope=Scope.READ)
-        project = await projects.resolve(session, project_ref)
+        principal = await auth.admit(websocket, session, scope=Scope.READ)
+        project = await projects.resolve_reachable(session, project_ref, principal)
     except (UnauthorizedError, auth.SocketForbiddenError, NotFoundError) as exc:
         return _refusal_for(exc)
     return project.id

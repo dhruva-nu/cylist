@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from tests.conftest import put_members
+
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
     "name": "Aditi K",
@@ -35,7 +37,7 @@ async def _fill_to_eight(client: AsyncClient) -> None:
 async def _task_in(client: AsyncClient, column_id: str) -> str:
     """Create a task and move it into a column, returning its id."""
     person = (await client.post("/people", json=TEAM)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     task = (
         await client.post(
             "/projects/ATL/tasks",
@@ -257,7 +259,7 @@ class TestReordering:
         await signed_in.put("/projects/ATL/columns/order", json={"column_ids": list(reversed(ids))})
 
         person = (await signed_in.post("/people", json=TEAM)).json()["id"]
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [person]})
+        await put_members(signed_in, "ATL", [person])
         task = (
             await signed_in.post(
                 "/projects/ATL/tasks",

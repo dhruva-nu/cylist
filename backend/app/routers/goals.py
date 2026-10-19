@@ -9,10 +9,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.errors import NotFoundError
 from app.db import SessionDependency
 from app.models.goal import Goal
 from app.models.project import Project
@@ -22,7 +23,7 @@ from app.routers.tasks import read_tasks
 from app.schemas.common import Acknowledged
 from app.schemas.goals import GoalCreate, GoalDetail, GoalProgress, GoalRead, GoalUpdate
 from app.schemas.people import PersonRead
-from app.services import activity, goals, permissions
+from app.services import activity, goals, permissions, projects
 
 router = APIRouter(tags=["goals"])
 
@@ -34,10 +35,16 @@ GoalRef = Path(
 
 async def resolved_goal(
     goal_ref: str = GoalRef,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> Goal:
-    """Turn the path segment into a goal, 404-ing if nothing matches."""
-    return await goals.resolve(session, goal_ref)
+    """Turn the path segment into a goal, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    goal = await goals.resolve(session, goal_ref)
+    await projects.require_reachable(
+        session, goal.project_id, principal, NotFoundError(f"No goal matching {goal_ref!r}.")
+    )
+    return goal
 
 
 def _goal_read(goal: Goal, progress: GoalProgress) -> GoalRead:
