@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +38,17 @@ that falls out for free if the two are the same object.
 """
 
 
-def publish_into(session: AsyncSession, event: dict[str, Any]) -> None:
+def publish_into(session: AsyncSession | Session, event: dict[str, Any]) -> None:
     """Queue one event to be published if — and only if — this session commits.
 
     The alternative, publishing where the change is made, is the bug
     :data:`SessionDependency` already documents, arriving faster: a client
     told that something happened refetches immediately and reads the state
     from before the commit.
+
+    A plain :class:`Session` is accepted for the ORM event listeners, which
+    are handed the synchronous session an :class:`AsyncSession` wraps; the
+    two share one ``info`` dict, so it is the same outbox.
     """
     session.info.setdefault(OUTBOX, []).append(event)
 

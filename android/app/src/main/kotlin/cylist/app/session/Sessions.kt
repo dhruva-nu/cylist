@@ -5,6 +5,7 @@ import cylist.api.AccountService
 import cylist.api.Revocation
 import cylist.api.ServerAddress
 import cylist.api.generated.models.Scope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,13 @@ class Sessions(
     private val deviceName: String,
     private val http: OkHttpClient = OkHttpClient(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Run before the token is revoked, while the server still accepts it: the
+     * phone forgets its push registration here (CYLIST-107). Its failure is
+     * swallowed, because signing out must not depend on it; a revoked token
+     * stops the pushes anyway.
+     */
+    private val beforeSignOut: suspend (Session) -> Unit = {},
 ) {
     private val _state = MutableStateFlow<SessionState>(
         store.read()?.let { SessionState.SignedIn(sessionFor(it)) } ?: SessionState.SignedOut(),
@@ -60,7 +68,7 @@ class Sessions(
      */
     suspend fun signIn(server: ServerAddress, email: String, password: String): Session {
         val account = withContext(io) {
-            val minted = accounts.signIn(server, email, password, tokenName, PHONE_SCOPES)
+            val minted = accounts.signIn(server, email, password, tokenName, PHONE_SCOPES, optional = setOf(Scope.permit))
             Account(
                 server = minted.server.url,
                 token = minted.token,
@@ -83,6 +91,13 @@ class Sessions(
         val session = current() ?: return
         val account = session.account
         val notice = withContext(io) {
+            try {
+                beforeSignOut(session)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Signing out goes on regardless; see beforeSignOut.
+            }
             try {
                 when (accounts.revoke(parse(account.server), account.token, UUID.fromString(account.tokenId))) {
                     Revocation.Revoked, Revocation.AlreadyGone -> null
@@ -114,7 +129,14 @@ class Sessions(
          * comments. Not `admin`, so a lost phone cannot mint tokens or open
          * accounts, and not the vault, which no phone screen shows yet. A card
          * that needs more widens this, and signing in again picks it up.
+         * `permit` lets the person answer an agent's permission prompt from
+         * the Task detail screen (CYLIST-104): the server refuses that to any
+         * token without it, which is every token an agent holds. A server
+         * older than `permit` refuses the scope, so it is asked for as
+         * optional: the phone then signs in without it, and answering a
+         * permission waits until the server is upgraded and the phone signs
+         * in again.
          */
-        val PHONE_SCOPES: List<Scope> = listOf(Scope.read, Scope.write)
+        val PHONE_SCOPES: List<Scope> = listOf(Scope.read, Scope.write, Scope.permit)
     }
 }

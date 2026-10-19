@@ -49,7 +49,8 @@ class SessionsTest {
 
         val session = sessions.signIn(address("https://cylist.in"), "aditi@example.com", "hunter2")
 
-        assertEquals(listOf(Triple("aditi@example.com", "Pixel 9 (Android)", listOf(Scope.read, Scope.write))), accounts.signIns)
+        assertEquals(listOf(Triple("aditi@example.com", "Pixel 9 (Android)", listOf(Scope.read, Scope.write, Scope.permit))), accounts.signIns)
+        assertEquals(listOf(setOf(Scope.permit)), accounts.optionalScopes)
         assertSame(session, sessions.current())
         val stored = store.account!!
         assertEquals("cyl_phone", stored.token)
@@ -78,6 +79,44 @@ class SessionsTest {
         sessions.signOut()
 
         assertEquals(listOf("cyl_phone" to FakeAccounts.TOKEN_ID), accounts.revoked)
+        assertNull(store.account)
+        assertEquals(SessionState.SignedOut(null), sessions.state.value)
+    }
+
+    @Test
+    fun signingOutRunsItsHookWhileTheTokenStillWorks() = runTest {
+        store.account = anAccount
+        val seen = mutableListOf<String>()
+        val sessions = Sessions(
+            store,
+            accounts,
+            deviceName = "Pixel 9",
+            http = OkHttpClient(),
+            io = UnconfinedTestDispatcher(testScheduler),
+            beforeSignOut = { seen += "hook, revoked so far: ${accounts.revoked.size}" },
+        )
+
+        sessions.signOut()
+
+        assertEquals(listOf("hook, revoked so far: 0"), seen)
+        assertEquals(1, accounts.revoked.size)
+    }
+
+    @Test
+    fun aFailingSignOutHookDoesNotStopSigningOut() = runTest {
+        store.account = anAccount
+        val sessions = Sessions(
+            store,
+            accounts,
+            deviceName = "Pixel 9",
+            http = OkHttpClient(),
+            io = UnconfinedTestDispatcher(testScheduler),
+            beforeSignOut = { throw IOException("the server is down") },
+        )
+
+        sessions.signOut()
+
+        assertEquals(1, accounts.revoked.size)
         assertNull(store.account)
         assertEquals(SessionState.SignedOut(null), sessions.state.value)
     }

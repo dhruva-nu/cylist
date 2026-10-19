@@ -14,6 +14,7 @@ from app.routers import (
     agents,
     auth,
     columns,
+    devices,
     docs,
     files,
     goals,
@@ -37,6 +38,7 @@ api_router.include_router(health.router)
 api_router.include_router(setup.router)
 api_router.include_router(auth.router)
 api_router.include_router(tokens.router)
+api_router.include_router(devices.router)
 api_router.include_router(projects.router)
 # Registered after `projects` so `/projects/{project_ref}/vault/trees` resolves
 # against the same `{project_ref}` the rest of that prefix uses.
