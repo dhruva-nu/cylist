@@ -57,7 +57,7 @@ data class BoardState(
  * whatever changed while the app was in the background is picked up when it
  * comes back.
  */
-class BoardViewModel(session: Session) : ViewModel() {
+class BoardViewModel(private val session: Session) : ViewModel() {
     private val client = session.client
     private val _state = MutableStateFlow(BoardState())
     val state: StateFlow<BoardState> = _state.asStateFlow()
@@ -225,6 +225,8 @@ class BoardViewModel(session: Session) : ViewModel() {
 
         override fun onSignedOut() {
             _state.update { it.copy(live = false, signedOut = true) }
+            // The socket was refused its token (4401): the whole app is signed out, not just the board.
+            session.refused()
         }
     }
 

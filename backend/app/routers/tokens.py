@@ -1,7 +1,9 @@
 """API tokens for scripts, the CLI and MCP servers.
 
 Managing credentials requires the ``admin`` scope, so a token issued to an
-agent cannot mint itself a broader one.
+agent cannot mint itself a broader one. The one exception is a credential
+revoking itself: giving up your own access widens nothing, and it is how the
+phone app signs out with a token that, rightly, does not carry ``admin``.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
@@ -74,13 +76,31 @@ async def create_token(
     return TokenIssued(**TokenRead.model_validate(token).model_dump(), token=plaintext)
 
 
+_require_admin = require(Scope.ADMIN)
+
+
+async def _may_revoke(
+    token_id: UUID,
+    principal: Principal = Depends(current_principal),
+) -> Principal:
+    """Admit an ``admin`` caller, or any caller revoking the credential it is using."""
+    if token_id == principal.token_id:
+        return principal
+    return await _require_admin(principal)
+
+
 @router.delete("/{token_id}", response_model=Acknowledged, summary="Revoke an API token")
 async def revoke_token(
     token_id: UUID,
-    principal: Principal = Depends(require(Scope.ADMIN)),
+    principal: Principal = Depends(_may_revoke),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
-    """Revoke a token immediately. Requests using it stop working at once."""
+    """Revoke a token immediately. Requests using it stop working at once.
+
+    Needs ``admin``, except to revoke the very token making the request: any
+    credential may sign itself out (the phone app does, with its own id from
+    ``GET /me``).
+    """
     token = await tokens.revoke(session, token_id)
     await activity.record(
         session,

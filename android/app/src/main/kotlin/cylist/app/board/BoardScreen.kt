@@ -83,7 +83,7 @@ import java.util.UUID
 
 /** The Board tab: one project's columns as tabs, and the cards in the chosen one. */
 @Composable
-fun BoardScreen(viewModel: BoardViewModel, modifier: Modifier = Modifier) {
+fun BoardScreen(viewModel: BoardViewModel, modifier: Modifier = Modifier, openTask: (projectKey: String, ref: String) -> Unit = { _, _ -> }) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     // The socket is held while the screen is started and let go when the app
@@ -104,6 +104,7 @@ fun BoardScreen(viewModel: BoardViewModel, modifier: Modifier = Modifier) {
             setAgentFilter = viewModel::setAgentFilter,
             addCard = viewModel::addCard,
             retry = { viewModel.refresh() },
+            openTask = { ref -> state.project?.key?.let { openTask(it, ref) } },
         ),
         modifier = modifier,
     )
@@ -117,6 +118,8 @@ class BoardActions(
     val setAgentFilter: (AgentFilter) -> Unit = {},
     val addCard: (String, String, (String?) -> Unit) -> Unit = { _, _, done -> done(null) },
     val retry: () -> Unit = {},
+    /** Open a card's detail, by its reference. */
+    val openTask: (String) -> Unit = {},
 )
 
 /** The screen with nothing behind it but [state], so previews and screenshots can draw it. */
@@ -143,8 +146,8 @@ fun BoardContent(state: BoardState, today: LocalDate, actions: BoardActions, mod
                 state.error != null && state.tasks.isEmpty() -> Message(state.error, actions.retry)
                 state.project == null && !state.loading -> Message("No projects yet.", null)
                 state.loading && state.tasks.isEmpty() -> Message("Loading the board…", null)
-                isLast -> DoneList(inColumn, column.name, state.who.isNotEmpty())
-                else -> CardList(inColumn, column?.name.orEmpty(), state, today)
+                isLast -> DoneList(inColumn, column.name, state.who.isNotEmpty(), actions.openTask)
+                else -> CardList(inColumn, column?.name.orEmpty(), state, today, actions.openTask)
             }
         }
         if (state.project != null) {
@@ -369,7 +372,7 @@ private fun ColumnTabs(state: BoardState, shown: List<TaskRead>, select: (UUID) 
 }
 
 @Composable
-private fun CardList(cards: List<TaskRead>, columnName: String, state: BoardState, today: LocalDate) {
+private fun CardList(cards: List<TaskRead>, columnName: String, state: BoardState, today: LocalDate, openTask: (String) -> Unit) {
     val colors = CylistTheme.colors
     val (held, open) = cards.partition(::isHeld)
     var showHeld by rememberSaveable(state.columnId) { mutableStateOf(false) }
@@ -381,7 +384,7 @@ private fun CardList(cards: List<TaskRead>, columnName: String, state: BoardStat
         if (open.isEmpty() && held.isEmpty()) {
             item { EmptyText(columnName.trim(), state.who.isNotEmpty()) }
         }
-        items(open, key = { it.id }) { TaskCard(it, today, state.me?.id) }
+        items(open, key = { it.id }) { TaskCard(it, today, state.me?.id) { openTask(it.reference) } }
         if (held.isNotEmpty()) {
             item(key = "held") {
                 Text(
@@ -394,13 +397,13 @@ private fun CardList(cards: List<TaskRead>, columnName: String, state: BoardStat
                         .clickable(role = Role.Button) { showHeld = !showHeld }.padding(horizontal = 4.dp, vertical = 13.dp),
                 )
             }
-            if (showHeld) items(held, key = { it.id }) { TaskCard(it, today, state.me?.id) }
+            if (showHeld) items(held, key = { it.id }) { TaskCard(it, today, state.me?.id) { openTask(it.reference) } }
         }
     }
 }
 
 @Composable
-private fun DoneList(cards: List<TaskRead>, columnName: String, narrowed: Boolean) {
+private fun DoneList(cards: List<TaskRead>, columnName: String, narrowed: Boolean, open: (String) -> Unit) {
     val colors = CylistTheme.colors
     val finished = cards.sortedByDescending { it.finishedAt.orEmpty() }
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 88.dp), modifier = Modifier.fillMaxSize()) {
@@ -408,7 +411,7 @@ private fun DoneList(cards: List<TaskRead>, columnName: String, narrowed: Boolea
         items(finished, key = { it.id }) { task ->
             Column {
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp, vertical = 6.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { open(task.reference) }.padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -440,7 +443,7 @@ private fun EmptyText(columnName: String, narrowed: Boolean) {
 
 /** One card, as the design's iteration B draws it. */
 @Composable
-fun TaskCard(task: TaskRead, today: LocalDate, viewerId: UUID?) {
+fun TaskCard(task: TaskRead, today: LocalDate, viewerId: UUID?, onOpen: (() -> Unit)? = null) {
     val colors = CylistTheme.colors
     val agent = agentLineOf(task.agentSession, viewerId)
     val blocked = task.status == TaskStatus.blocked
@@ -464,6 +467,7 @@ fun TaskCard(task: TaskRead, today: LocalDate, viewerId: UUID?) {
             .clip(RoundedCornerShape(10.dp))
             .background(colors.paper)
             .border(BorderStroke(1.dp, border), RoundedCornerShape(10.dp))
+            .then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open ${task.reference}", onClick = onOpen) else Modifier)
             // The rail: the goal's colour down the left edge. An agent's card
             // wears its border instead, so the two never say different things.
             .drawBehind {
@@ -609,7 +613,7 @@ private fun Mark(icon: ImageVector, text: String, tone: Color, weight: FontWeigh
 }
 
 @Composable
-private fun Avatar(
+internal fun Avatar(
     name: String,
     colour: String,
     size: Dp,
@@ -699,7 +703,7 @@ private fun Modifier.drawLeftRule(color: Color): Modifier = drawBehind {
 }
 
 /** "#4A7B8C" as a colour, or null when it is missing or not one. */
-private fun hexOrNull(value: String?): Color? =
+internal fun hexOrNull(value: String?): Color? =
     value?.removePrefix("#")?.takeIf { it.length == 6 }?.toLongOrNull(16)?.let { Color(0xFF000000 or it) }
 
-private fun hex(value: String?, fallback: Color): Color = hexOrNull(value) ?: fallback
+internal fun hex(value: String?, fallback: Color): Color = hexOrNull(value) ?: fallback

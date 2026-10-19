@@ -282,6 +282,12 @@ jobs:
       - name: Lint, test and build
         run: ./gradlew lint test assembleDebug
 
+      # buildSrc's own tests: the release tag to versionCode mapping that every
+      # signed release depends on (CYLIST-108). Gradle builds buildSrc without
+      # testing it, so they are run as a build of their own.
+      - name: Test the build logic
+        run: ./gradlew -p buildSrc test
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
@@ -297,6 +303,7 @@ jobs:
           path: |
             android/*/build/reports/
             android/*/build/test-results/
+            android/buildSrc/build/reports/
 
   # Everything above runs on GitHub's machines. This one runs on dnu-home-1
   # itself, through a self-hosted runner that polls GitHub outbound — which is

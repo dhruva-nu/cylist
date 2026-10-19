@@ -33,9 +33,12 @@ private val dayMonth = DateTimeFormatter.ofPattern("d MMM", Locale.UK)
  * for a card that owes nothing (`board/CardFace.tsx`, `owedDateOf`). A
  * cancelled or finished card has nothing left to be late for.
  */
-fun dueOf(task: TaskRead, today: LocalDate): Due? {
-    if (task.status == TaskStatus.cancelled || task.finishedAt != null) return null
-    val owed = task.nextDueDate?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } ?: return null
+fun dueOf(task: TaskRead, today: LocalDate): Due? = dueOf(task.status, task.finishedAt, task.nextDueDate, today)
+
+/** [dueOf] from the three fields it reads, so a card's detail (a `TaskDetail`) says it the same way. */
+fun dueOf(status: TaskStatus, finishedAt: String?, nextDueDate: String?, today: LocalDate): Due? {
+    if (status == TaskStatus.cancelled || finishedAt != null) return null
+    val owed = nextDueDate?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } ?: return null
     val days = ChronoUnit.DAYS.between(today, owed).toInt()
     val date = owed.format(dayMonth)
     return when {
@@ -90,7 +93,8 @@ private fun waitingDetail(reason: AgentSessionReason?): String = when (reason) {
     else -> "waiting for your reply"
 }
 
-private fun promptLine(prompt: AgentPromptRead, viewerId: UUID?): String? = when (prompt.status) {
+/** One prompt as a line on a card or in the agent panel (`routes/agentState.ts`, `promptLine`). */
+fun promptLine(prompt: AgentPromptRead, viewerId: UUID?): String? = when (prompt.status) {
     AgentPromptStatus.`open` -> if (prompt.kind == AgentPromptKind.question) "Asks: ${prompt.text}" else "Permission: ${prompt.text}"
     AgentPromptStatus.answered -> {
         val who = if (viewerId != null && prompt.answeredById == viewerId) "You" else prompt.answeredBy ?: "Answered"

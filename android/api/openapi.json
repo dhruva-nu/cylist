@@ -335,7 +335,7 @@
           "tokens"
         ],
         "summary": "Revoke an API token",
-        "description": "Revoke a token immediately. Requests using it stop working at once.",
+        "description": "Revoke a token immediately. Requests using it stop working at once.\n\nNeeds ``admin``, except to revoke the very token making the request: any\ncredential may sign itself out (the phone app does, with its own id from\n``GET /me``).",
         "operationId": "revoke_token_api_v1_tokens__token_id__delete",
         "parameters": [
           {
@@ -359,6 +359,122 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "List your push devices",
+        "description": "The devices registered to receive pushes for you, newest first.",
+        "operationId": "list_devices_api_v1_devices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceRead"
+                  },
+                  "type": "array",
+                  "title": "Response List Devices Api V1 Devices Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Register a push device",
+        "description": "Register this device's FCM token for the caller, or refresh it.\n\nIdempotent: send it after every sign-in and whenever Firebase rotates the\ntoken. A token another person registered moves to the caller, since an\ninstall is used by whoever is signed in on it now.\n\nThe device is sent to while the credential that registered it stays live;\nrevoking that token stops its pushes.",
+        "operationId": "register_device_api_v1_devices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegister"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRead"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The bootstrap session is nobody to push to."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{device_id}": {
+      "delete": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Unregister a push device",
+        "description": "Stop pushing to one of your devices. The app calls this before signing out.",
+        "operationId": "unregister_device_api_v1_devices__device_id__delete",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Device Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledged"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device of yours."
           },
           "422": {
             "description": "Validation Error",
@@ -9380,6 +9496,91 @@
         ],
         "title": "DeliverySummary"
       },
+      "DevicePlatform": {
+        "type": "string",
+        "enum": [
+          "android"
+        ],
+        "title": "DevicePlatform",
+        "description": "Which push service a device's token belongs to."
+      },
+      "DeviceRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/DevicePlatform"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          },
+          "token_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Token Id",
+            "description": "The API token the device registered with."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_registered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Registered At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "platform",
+          "label",
+          "person_id",
+          "token_id",
+          "created_at",
+          "last_registered_at"
+        ],
+        "title": "DeviceRead",
+        "description": "A registered device. Its FCM token is never sent back."
+      },
+      "DeviceRegister": {
+        "properties": {
+          "fcm_token": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Fcm Token",
+            "description": "The registration token Firebase Cloud Messaging gave this app install. Registering one that is already known moves it to the caller."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/DevicePlatform",
+            "default": "android"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "description": "What the device is called, as a person would recognise it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "fcm_token",
+          "label"
+        ],
+        "title": "DeviceRegister"
+      },
       "DocAnswer": {
         "properties": {
           "question": {
@@ -13602,7 +13803,8 @@
           "write",
           "vault:read",
           "vault:reveal",
-          "admin"
+          "admin",
+          "permit"
         ],
         "title": "Scope"
       },
