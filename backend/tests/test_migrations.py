@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -2398,3 +2399,26 @@ class TestColdStorage:
             2: ("Done", 1),
             3: ("Done", 0),
         }
+
+
+class TestRunningInProcess:
+    """A migration run inside a process that has its own logging."""
+
+    async def test_leaves_the_apps_loggers_alone(
+        self, migrate: Callable[[str], Awaitable[None]]
+    ) -> None:
+        """Not disabled, and the root still hands records to the same handlers.
+
+        ``fileConfig`` with its defaults did both: every ``app.*`` logger that
+        existed went silent, and a test that ran after this one on the same
+        worker could no longer see what the push sender logged.
+        """
+        existing = logging.getLogger("app.services.push.fcm")
+        root = logging.getLogger()
+        handlers, level = list(root.handlers), root.level
+
+        await migrate(BEFORE_ROOTS)
+
+        assert not existing.disabled
+        assert root.handlers == handlers
+        assert root.level == level
