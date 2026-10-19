@@ -544,6 +544,41 @@ pull request on a phone without building anything, download the
 `cylist-debug-apk` artifact from its CI run instead. CI signs every APK with a
 fresh debug key, so uninstall one before installing another.
 
+**Releases.** The repository's release tag is the app's version too. Publishing
+a release (`gh release create vX.Y.Z …`) runs
+`.github/workflows/android-release.yml`, which builds the release APK at that
+tag, signs it with the release key, and attaches it to the release as
+`cylist-vX.Y.Z.apk`. Download it on the phone from the release page and
+install it; it installs over the previous release and keeps the sign-in.
+
+- **Version.** `android/buildSrc/src/main/kotlin/ReleaseVersion.kt` turns the
+  tag into `versionName` `X.Y.Z` and `versionCode` `X*1_000_000 + Y*1_000 + Z`
+  (v0.3.2 is 3002). The build reads the tag from the Gradle property
+  `cylist.version` or the environment variable `CYLIST_VERSION`. Without
+  either, a build is `0.0.0`, code 1. A tag with a suffix (`v0.4.0-rc1`) or a
+  minor or patch above 999 fails the build, because its code could not stay
+  above the last release's. More shows the version at the bottom.
+- **Signing.** `app/build.gradle.kts` signs the release build only when all
+  four of `CYLIST_RELEASE_KEYSTORE` (a path), `CYLIST_RELEASE_KEYSTORE_PASSWORD`,
+  `CYLIST_RELEASE_KEY_ALIAS` and `CYLIST_RELEASE_KEY_PASSWORD` are set. With
+  none of them it builds `app-release-unsigned.apk`; with only some it fails.
+- **Where the key lives.** It lives in the GitHub environment `android-release` (secrets
+  `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`,
+  `ANDROID_RELEASE_KEY_ALIAS`, `ANDROID_RELEASE_KEY_PASSWORD`, plus
+  `ANDROID_GOOGLE_SERVICES_JSON` for pushes) and in one offline backup, nowhere
+  else. The environment variable `ANDROID_RELEASE_CERT_SHA256` holds the
+  certificate's SHA-256, and the workflow fails an APK signed with anything
+  else. The key is PKCS12, alias `cylist-release`, certificate SHA-256
+  `43f7259ec0eb550b56edc8462c6f54de323e2e1638f0f6e38a79fb7a01811517`.
+  **Losing it means every phone has to uninstall to take the next release.**
+- **A release from before this workflow existed**, or a failed run, is rebuilt
+  with *Run workflow* on the Actions tab and the tag. That only works once the
+  workflow is on `main`. The APK on the release is replaced.
+
+To build a signed APK locally, export the four variables, then run
+`./gradlew assembleRelease -Pcylist.version=vX.Y.Z`. Output goes to
+`app/build/outputs/apk/release/app-release.apk`.
+
 **Signing in.** The app opens on a server picker: Production
 (`https://cylist.in`), Staging (`https://stage.cylist.in`), Dev 1–5
 (`https://devN.cylist.in`), or another address typed in. The choice is checked
