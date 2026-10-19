@@ -189,6 +189,13 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     debugImplementation(libs.compose.ui.tooling)
+    // Docs (CYLIST-106): parsed as the web's react-markdown + remark-gfm parses them.
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.gfm.tables)
+    implementation(libs.commonmark.ext.gfm.strikethrough)
+    implementation(libs.commonmark.ext.task.list.items)
+    implementation(libs.commonmark.ext.autolink)
+    implementation(libs.commonmark.ext.footnotes)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

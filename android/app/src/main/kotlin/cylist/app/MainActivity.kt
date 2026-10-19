@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cylist.app.board.BoardScreen
 import cylist.app.board.BoardViewModel
+import cylist.app.docs.DocsScreen
+import cylist.app.docs.DocsViewModel
 import cylist.app.more.MoreScreen
 import cylist.app.push.AgentSessionScreen
 import cylist.app.push.AskForNotifications
@@ -101,7 +103,7 @@ private fun Root(app: CylistApp) {
 enum class Tab(val label: String, val icon: ImageVector, val card: String?) {
     Board("Board", CylistIcons.Board, null),
     Today("Today", CylistIcons.Today, "CYLIST-105"),
-    Docs("Docs", CylistIcons.Docs, "CYLIST-106"),
+    Docs("Docs", CylistIcons.Docs, null),
     People("People", CylistIcons.People, null),
     More("More", CylistIcons.More, null),
 }
@@ -117,6 +119,7 @@ fun AppShell(
     var tab by rememberSaveable { mutableStateOf(Tab.Board) }
     // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
     val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
+    val docs: DocsViewModel = viewModel(key = "docs-${session.account.tokenId}") { DocsViewModel(session) }
     AskForNotifications()
     if (card != null) {
         // An agent notification was tapped: its card's session, over the tabs.
@@ -133,6 +136,11 @@ fun AppShell(
         Box(Modifier.weight(1f)) {
             when (tab) {
                 Tab.Board -> BoardScreen(board, openTask = { key, ref -> openTask = "$key|$ref" })
+                Tab.Docs -> {
+                    // Docs follows the project the board is on.
+                    val onBoard by board.state.collectAsStateWithLifecycle()
+                    DocsScreen(docs, onBoard.project?.key, session.server)
+                }
                 Tab.More -> MoreScreen(session.account, signingOut, signOut)
                 else -> NotYet(tab)
             }
