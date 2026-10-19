@@ -215,6 +215,7 @@ vault-key: ## Generate CYLIST_VAULT_KEY
 
 android: ## Lint, test and build the Android debug APK
 	cd android && ./gradlew lint test assembleDebug
+	cd android && ./gradlew -p buildSrc test
 	@echo "APK: android/app/build/outputs/apk/debug/app-debug.apk"
 
 android-install: ## Build the Android debug APK and install it on the phone adb sees

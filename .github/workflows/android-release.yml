@@ -1,0 +1,122 @@
+name: Android release APK
+
+# Publishing a GitHub release (`gh release create vX.Y.Z …`, see DEVELOPMENT.md
+# › Cutting a release) builds the phone app at that tag, signs it with the
+# release key, and attaches it to the release as cylist-vX.Y.Z.apk, for
+# installing on the phone by hand. The tag is the app's version
+# (buildSrc/ReleaseVersion.kt): v0.3.2 is versionName 0.3.2, versionCode 3002,
+# so every release installs over the one before it.
+#
+# Run it again by hand for a release that already exists (a failed run, or a
+# release older than this file) with workflow_dispatch and the tag; the APK on
+# the release is replaced.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, e.g. v0.3.2
+        required: true
+
+# One build per tag. A second run for the same tag waits, rather than racing
+# the first to upload.
+concurrency:
+  group: android-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Signed APK
+    runs-on: ubuntu-latest
+    # The keystore is held in this environment's secrets, not the repository's,
+    # so no other workflow can read it.
+    environment: android-release
+    env:
+      # Through the environment, never `${{ }}` inside a script: a tag is
+      # attacker-shaped text.
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Check the tag
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a release tag like v1.2.3"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          # A release build must not be put together from another run's cache.
+          cache-read-only: true
+
+      # The keystore arrives base64-encoded and is written to the runner's
+      # temp directory, which is wiped when the job ends. The Firebase config
+      # is optional: without it the APK builds with agent pushes off, and the
+      # run says so.
+      - name: Write the keystore and Firebase config
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_RELEASE_KEYSTORE_BASE64 is not set on the android-release environment"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          echo "CYLIST_RELEASE_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > "$RUNNER_TEMP/google-services.json"
+            echo "CYLIST_GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ANDROID_GOOGLE_SERVICES_JSON is not set: this APK will not receive agent pushes"
+          fi
+
+      - name: Build the release APK
+        working-directory: android
+        env:
+          CYLIST_VERSION: ${{ env.TAG }}
+          CYLIST_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          CYLIST_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          CYLIST_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      # Proves the APK is signed, and with the key every earlier release used:
+      # one signed with any other key would not install over them.
+      - name: Verify the signature
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          apksigner=$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -name apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt")
+          if [ -n "$EXPECTED_CERT_SHA256" ] && [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::signed with $actual, not the release key $EXPECTED_CERT_SHA256"
+            exit 1
+          fi
+          mv "$apk" "$RUNNER_TEMP/cylist-$TAG.apk"
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP/cylist-$TAG.apk" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Forget the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12" "$RUNNER_TEMP/google-services.json"

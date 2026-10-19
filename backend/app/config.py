@@ -164,6 +164,18 @@ class Settings(BaseSettings):
     before the answer is ``ok`` rather than ``unverified``. jev-docs' calibrated
     cut: its correct routes score 0.86 and up, its wrong ones 0.5 to 0.65."""
 
+    # --- Push notifications ---------------------------------------------
+    fcm_service_account_file: Path | None = None
+    """A Firebase service-account key (JSON), for pushing to the phone app.
+
+    Set as ``CYLIST_FCM_SERVICE_ACCOUNT_FILE``: the *path* to the key, never
+    the key itself, so it can be mounted as a secret file and never sits in an
+    environment listing. The Firebase project to send through is the key's own
+    ``project_id``. Unset, every push is a debug line and nothing else — see
+    :mod:`app.services.push.fcm`. A key that cannot be read turns pushes off
+    with an error in the log rather than refusing to start.
+    """
+
     # --- HTTP -------------------------------------------------------------
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     session_ttl_hours: int = Field(default=720, gt=0)

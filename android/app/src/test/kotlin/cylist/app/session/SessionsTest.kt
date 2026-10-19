@@ -83,6 +83,44 @@ class SessionsTest {
     }
 
     @Test
+    fun signingOutRunsItsHookWhileTheTokenStillWorks() = runTest {
+        store.account = anAccount
+        val seen = mutableListOf<String>()
+        val sessions = Sessions(
+            store,
+            accounts,
+            deviceName = "Pixel 9",
+            http = OkHttpClient(),
+            io = UnconfinedTestDispatcher(testScheduler),
+            beforeSignOut = { seen += "hook, revoked so far: ${accounts.revoked.size}" },
+        )
+
+        sessions.signOut()
+
+        assertEquals(listOf("hook, revoked so far: 0"), seen)
+        assertEquals(1, accounts.revoked.size)
+    }
+
+    @Test
+    fun aFailingSignOutHookDoesNotStopSigningOut() = runTest {
+        store.account = anAccount
+        val sessions = Sessions(
+            store,
+            accounts,
+            deviceName = "Pixel 9",
+            http = OkHttpClient(),
+            io = UnconfinedTestDispatcher(testScheduler),
+            beforeSignOut = { throw IOException("the server is down") },
+        )
+
+        sessions.signOut()
+
+        assertEquals(1, accounts.revoked.size)
+        assertNull(store.account)
+        assertEquals(SessionState.SignedOut(null), sessions.state.value)
+    }
+
+    @Test
     fun aTokenAlreadyRevokedSignsOutQuietly() = runTest {
         store.account = anAccount
         accounts.revokeAnswer = { Revocation.AlreadyGone }

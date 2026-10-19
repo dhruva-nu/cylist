@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ButtonDefaults
@@ -18,6 +20,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cylist.app.BuildConfig
+import cylist.app.push.NotificationsSection
 import cylist.app.session.Account
 import cylist.app.theme.CylistTheme
 import cylist.app.theme.Figtree
@@ -26,14 +30,16 @@ import cylist.app.theme.TextSizes
 
 /**
  * The More tab. For now it holds the account: who this phone is signed in
- * as, where, under which token, and signing out. Notification settings come
- * with CYLIST-107.
+ * as, where, under which token, and signing out; and, from CYLIST-107,
+ * whether agent notifications can reach this phone (see [NotificationsSection]);
+ * and, from CYLIST-108, which release is installed, so a phone updated from
+ * the GitHub release page can be checked against it.
  */
 @Composable
 fun MoreScreen(account: Account, signingOut: Boolean, signOut: () -> Unit) {
     val colors = CylistTheme.colors
     Column(
-        Modifier.fillMaxSize().background(colors.bg).statusBarsPadding().padding(16.dp),
+        Modifier.fillMaxSize().background(colors.bg).statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("More", color = colors.ink, fontSize = TextSizes.xl3, fontWeight = FontWeight.Bold, fontFamily = Figtree)
@@ -72,5 +78,13 @@ fun MoreScreen(account: Account, signingOut: Boolean, signOut: () -> Unit) {
                 fontFamily = Figtree,
             )
         }
+        NotificationsSection()
+        Text(
+            "Version ${BuildConfig.VERSION_NAME}",
+            color = colors.ink3,
+            fontSize = TextSizes.sm,
+            fontFamily = Figtree,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }

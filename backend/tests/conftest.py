@@ -48,6 +48,7 @@ from app.models.person import Person, PersonKind
 from app.realtime.hub import Hub
 from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
+from app.services.push.delivery import Pusher
 
 # Before anything below hashes a password. The deployed parameters cost ~70 ms
 # a hash or a check, and the suite does one or more of those in nearly every
@@ -186,7 +187,17 @@ async def session(database: Database) -> AsyncIterator[AsyncSession]:
         yield db_session
 
 
-APP_STATE = {"settings", "hub", "courier", "hook_transport", "doc_engine", "metrics", "mcp"}
+APP_STATE = {
+    "settings",
+    "hub",
+    "courier",
+    "hook_transport",
+    "pusher",
+    "push_sender",
+    "doc_engine",
+    "metrics",
+    "mcp",
+}
 """Everything ``create_app`` hangs on ``app.state``, which :func:`as_new` must
 know how to put back. Checked, so a new one cannot be added and quietly carry
 one test's leftovers into the next."""
@@ -212,6 +223,8 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.hub = Hub()
     app.state.courier = Courier()
     app.state.hook_transport = None
+    app.state.pusher = Pusher()
+    app.state.push_sender = None
     app.state.doc_engine = engine_for(settings)
     # In place, not replaced: MetricsMiddleware holds this object.
     app.state.metrics.__init__()

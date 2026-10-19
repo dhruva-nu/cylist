@@ -78,6 +78,25 @@ Both files are `chmod 600`. Everything that is not actually secret —
 > every vault secret already stored becomes unreadable. It is deliberately kept
 > out of the backups, so keep a copy somewhere you can recover it.
 
+**Push notifications** (CYLIST-107) need one more secret, a Firebase
+service-account key for the `cylist-mobile` project, kept beside the others as
+`~/cylist-prod/fcm-service-account.json` (`chmod 600`). The server reads it from
+the path in `CYLIST_FCM_SERVICE_ACCOUNT_FILE`, never from the environment
+itself. The compose files do not mount it yet, so turning pushes on for a stack
+is two edits made by hand, after the release with migration 0045 is deployed:
+
+1. In that stack's compose file, under `app:` › `volumes:`, add
+   `- ${CYLIST_PROD_DIR}/fcm-service-account.json:/run/secrets/fcm-service-account.json:ro`
+   (`CYLIST_STAGING_DIR` for staging). Add it only once the file exists: a bind
+   mount of a missing file makes Docker create an empty directory in its place.
+2. In `app.env`, add `CYLIST_FCM_SERVICE_ACCOUNT_FILE=/run/secrets/fcm-service-account.json`.
+
+Then redeploy. The log's start-up lines say `Push notifications are on` with the
+Firebase project, or why they are off. Without the key the server runs as
+before and every push is a debug line; a key that cannot be read is an error
+line, not a failed start. Pushes go only to phones whose token is still live,
+so revoking a phone's token in the web app silences it.
+
 Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
 `JEV_API_KEY` is TypeSafe's, for jev (see backend/.env.example); without it the
 server still runs, but `ask_docs` answers nothing and agents read the code.

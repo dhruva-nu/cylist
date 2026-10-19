@@ -33,6 +33,9 @@ from app.routers import api_router
 from app.services import agent_prompts, agent_reports, hooks
 from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
+from app.services.push import triggers as push_triggers
+from app.services.push.delivery import Pusher
+from app.services.push.fcm import sender_for
 from app.spa import mount_spa
 
 API_PREFIX = "/api/v1"
@@ -77,6 +80,14 @@ def build_lifespan(settings: Settings) -> Lifespan:
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
         app.state.database.publish_to(_publisher(app))
+        # Before the sweep below, whose endings are pushes too.
+        pusher = asyncio.create_task(
+            app.state.pusher.run(
+                app.state.database,
+                app.state.push_sender or sender_for(settings.fcm_service_account_file),
+            ),
+            name="cylist-pusher",
+        )
 
         # One process, just started, holding no sockets: whatever the rows
         # say, nothing is running. Without this a card left mid-turn by a
@@ -95,7 +106,7 @@ def build_lifespan(settings: Settings) -> Lifespan:
             async with app.state.mcp.run():
                 yield
         finally:
-            for task in (reaper, courier):
+            for task in (reaper, courier, pusher):
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
@@ -109,13 +120,18 @@ def build_lifespan(settings: Settings) -> Lifespan:
 
 def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
     """Where a committed transaction's news goes: hook deliveries to the
-    courier, everything else to the boards."""
+    courier, agent-session pushes to the pusher, everything else to the
+    boards."""
     hub: Hub = app.state.hub
     courier: Courier = app.state.courier
+    pusher: Pusher = app.state.pusher
 
     def publish(event: dict[str, Any]) -> None:
-        if event.get("type") == hooks.QUEUED:
+        kind = event.get("type")
+        if kind == hooks.QUEUED:
             courier.wake()
+        elif kind == push_triggers.QUEUED:
+            pusher.notify(event)
         else:
             hub.publish(event)
 
@@ -195,6 +211,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # real network — except in a test, which answers in a receiver's place.
     app.state.courier = Courier()
     app.state.hook_transport = None
+
+    # For the courier's reason: the publisher hands it pushes from the first
+    # commit, and its loop starts in the lifespan. The sender is None — built
+    # from the settings when the loop starts — except in a test, which hands
+    # it a fake FCM.
+    app.state.pusher = Pusher()
+    app.state.push_sender = None
 
     # jev-docs: which section answers a question, and where a new fact goes.
     # None without a key, which every caller treats as jev being unavailable.
