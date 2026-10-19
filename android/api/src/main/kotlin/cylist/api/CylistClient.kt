@@ -37,6 +37,13 @@ class CylistClient(
     /** One of the generated API classes, pointed at this server: `api(::TasksApi)`. */
     fun <T> api(create: (basePath: String, client: Call.Factory) -> T): T = create(basePath, http)
 
+    /**
+     * A project's board socket, carrying the same token. Not opened until
+     * [BoardSocket.start]; see [BoardSocket] for what it sends.
+     */
+    fun boardSocket(projectKey: String, listener: BoardSocket.Listener): BoardSocket =
+        BoardSocket(http, BoardSocketProtocol.url(basePath, projectKey), listener)
+
     private class BearerToken(private val token: String) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response = chain.proceed(
             chain.request().newBuilder().header("Authorization", "Bearer $token").build(),

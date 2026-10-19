@@ -26,6 +26,13 @@ class Scope(StrEnum):
     ADMIN = "admin"
     """Manage API tokens."""
 
+    PERMIT = "permit"
+    """Answer an agent's permission prompt: grant or refuse a tool call Claude
+    Code asked a person about. For a person's own device, such as the phone
+    app's token; never for a token an agent holds (``GET /setup``'s
+    ``agent_scopes`` leaves it out), or the agent could grant itself what it
+    asked a person for."""
+
 
 ALL_SCOPES: frozenset[Scope] = frozenset(Scope)
 """Everything, granted to a browser session logged in as the owner."""
