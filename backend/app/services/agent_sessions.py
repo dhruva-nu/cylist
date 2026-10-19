@@ -40,6 +40,10 @@ from app.schemas.agent_sessions import (
     PresenceState,
 )
 
+# For its side effect: every change to an agent session below — and in the
+# modules that import this one — queues a push to the phones it is news to.
+from app.services.push import triggers as _push_triggers  # noqa: F401
+
 
 @dataclass(frozen=True)
 class Transition:

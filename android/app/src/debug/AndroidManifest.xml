@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: a server on this machine, reached from the emulator as
+     10.0.2.2, is plain HTTP. Release builds talk HTTPS and nothing else. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:networkSecurityConfig="@xml/network_security_config">
+    <!-- Simulated agent pushes, for seeing a Live Update without Firebase
+         (push/DebugPushReceiver.kt). DUMP: adb's shell may send one, apps may not. -->
+    <receiver
+      android:name="cylist.app.push.DebugPushReceiver"
+      android:exported="true"
+      android:permission="android.permission.DUMP" />
+  </application>
+</manifest>

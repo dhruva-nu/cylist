@@ -74,6 +74,7 @@ frontend/   React + Vite. Types are generated from the API's OpenAPI document,
             so the UI cannot drift from the server.
 backend/    FastAPI. Routers handle HTTP; business rules live in app/services
             so a future in-process MCP server can call them directly.
+android/    The phone app: Kotlin and Jetpack Compose, built with Gradle.
 ```
 
 **The API is the product.** The web app is one client of `/api/v1`; the CLI and
@@ -508,6 +509,233 @@ uninstall` takes it all back out and leaves any other hooks you have alone.
 
 `cylist board ATL` says the same thing in the terminal. `cli/README.md` has the
 rest, including what each lifecycle event reports.
+
+## The Android app
+
+`android/` is a Gradle project of its own, in Kotlin and Jetpack Compose, with
+two modules: `app`, the phone app, and `api`, the client for `/api/v1`. The
+`api` module is plain Kotlin on the JVM, with no Android in it. It exists
+because Android 16's Live Updates, an agent's progress shown in the status bar,
+are something only a native app can post. Every version is set in
+`android/gradle/libs.versions.toml`.
+
+**You need:** JDK 21 and the Android SDK command-line tools. Gradle itself
+comes from the committed wrapper, and the build downloads the SDK platform it
+compiles against. Both install into your home directory:
+
+```bash
+# JDK 21: any build will do, e.g. Temurin from adoptium.net, unpacked to ~/.local/opt/jdk21
+# SDK: "Command line tools only" from developer.android.com/studio, unzipped so
+# that ~/Android/Sdk/cmdline-tools/latest/bin/sdkmanager exists
+export JAVA_HOME=~/.local/opt/jdk21
+export ANDROID_HOME=~/Android/Sdk
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+yes | sdkmanager --licenses
+sdkmanager platform-tools        # adb, to install onto a phone
+```
+
+```bash
+make android           # lint, unit tests and the debug APK, as CI runs them
+make android-install   # build the debug APK and install it on the phone adb sees
+```
+
+The APK lands in `android/app/build/outputs/apk/debug/app-debug.apk`. To try a
+pull request on a phone without building anything, download the
+`cylist-debug-apk` artifact from its CI run instead. CI signs every APK with a
+fresh debug key, so uninstall one before installing another.
+
+**Releases.** The repository's release tag is the app's version too. Publishing
+a release (`gh release create vX.Y.Z …`) runs
+`.github/workflows/android-release.yml`, which builds the release APK at that
+tag, signs it with the release key, and attaches it to the release as
+`cylist-vX.Y.Z.apk`. Download it on the phone from the release page and
+install it; it installs over the previous release and keeps the sign-in.
+
+- **Version.** `android/buildSrc/src/main/kotlin/ReleaseVersion.kt` turns the
+  tag into `versionName` `X.Y.Z` and `versionCode` `X*1_000_000 + Y*1_000 + Z`
+  (v0.3.2 is 3002). The build reads the tag from the Gradle property
+  `cylist.version` or the environment variable `CYLIST_VERSION`. Without
+  either, a build is `0.0.0`, code 1. A tag with a suffix (`v0.4.0-rc1`) or a
+  minor or patch above 999 fails the build, because its code could not stay
+  above the last release's. More shows the version at the bottom.
+- **Signing.** `app/build.gradle.kts` signs the release build only when all
+  four of `CYLIST_RELEASE_KEYSTORE` (a path), `CYLIST_RELEASE_KEYSTORE_PASSWORD`,
+  `CYLIST_RELEASE_KEY_ALIAS` and `CYLIST_RELEASE_KEY_PASSWORD` are set. With
+  none of them it builds `app-release-unsigned.apk`; with only some it fails.
+- **Where the key lives.** It lives in the GitHub environment `android-release` (secrets
+  `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`,
+  `ANDROID_RELEASE_KEY_ALIAS`, `ANDROID_RELEASE_KEY_PASSWORD`, plus
+  `ANDROID_GOOGLE_SERVICES_JSON` for pushes) and in one offline backup, nowhere
+  else. The environment variable `ANDROID_RELEASE_CERT_SHA256` holds the
+  certificate's SHA-256, and the workflow fails an APK signed with anything
+  else. The key is PKCS12, alias `cylist-release`, certificate SHA-256
+  `43f7259ec0eb550b56edc8462c6f54de323e2e1638f0f6e38a79fb7a01811517`.
+  **Losing it means every phone has to uninstall to take the next release.**
+- **A release from before this workflow existed**, or a failed run, is rebuilt
+  with *Run workflow* on the Actions tab and the tag. That only works once the
+  workflow is on `main`. The APK on the release is replaced.
+
+To build a signed APK locally, export the four variables, then run
+`./gradlew assembleRelease -Pcylist.version=vX.Y.Z`. Output goes to
+`app/build/outputs/apk/release/app-release.apk`.
+
+**Signing in.** The app opens on a server picker: Production
+(`https://cylist.in`), Staging (`https://stage.cylist.in`), Dev 1–5
+(`https://devN.cylist.in`), or another address typed in. The choice is checked
+with `GET /setup` before the email and password are asked for, so a wrong or
+unreachable address says so within about five seconds (`Accounts.defaultHttp`
+sets the timeouts). Signing in is the web app's own login used once:
+`POST /auth/login` buys a session cookie, which mints a personal token named
+for the phone (`"<device name> (Android)"`, scopes `read`, `write` and
+`permit`) with
+`POST /tokens`, and is logged out straight away. The phone keeps the token,
+never the password, sealed with an AES-GCM key held in the Android Keystore
+(`app/.../session/SessionStore.kt`), so it survives a restart and a reboot.
+Sign out (More tab) revokes the token with `DELETE /tokens/{id}` using the
+token itself; any 401 from the server signs the app out with a notice.
+
+The code is in `api/src/main/kotlin/cylist/api/Accounts.kt` (the HTTP side,
+plain JVM) and `app/src/main/kotlin/cylist/app/session/Sessions.kt` (what the
+app holds). Screens take a `Session` from `Sessions` and talk through
+`session.client`; none of them builds a client or reads storage.
+
+To sign in to a backend on this machine from the emulator, choose "Another
+server" and type `http://10.0.2.2:<port>`. Debug builds may use plain HTTP to
+`10.0.2.2` and `localhost` only (`app/src/debug/res/xml/network_security_config.xml`,
+mirrored by `CLEARTEXT_HOSTS` in `app/build.gradle.kts`); everything else, and
+every release build, is HTTPS. A fresh backend has no accounts; sign in to it
+once in a browser with the bootstrap password and give somebody an account
+(`PUT /people/{id}/account`) first.
+
+**The board is live.** While the Board screen is in the foreground it holds the
+project's board socket (`cylist.api.BoardSocket`, the same doorbell the web app
+rings — see `frontend/src/api/realtime.ts`) and refetches on each
+`board.changed`, so a card moved on the web moves on the phone within a second
+or two. The socket closes when the app goes to the background and reopens when
+it comes back, and its `ready` refetches whatever changed meanwhile. The card
+rules — late dates, the agent line, whose cards — are ported from the web app
+in `app/src/main/kotlin/cylist/app/board/BoardRules.kt`, each beside the name of
+the TypeScript it mirrors; change the two together.
+
+A sideways swipe on the card list moves between columns (the commit, flick,
+rubber-band and direction-lock numbers are in `BoardRules.kt` beside
+`swipeStep`). The assignee on a card is its own touch target and opens a sheet
+of the project's members; picking one sends `PATCH /tasks/{ref}` with
+`assignee_id` alone, through `CylistClient.patchTask`, because the generated
+`TaskUpdate` writes every field and a null `due_date`, `goal_id`,
+`template_id` or `jira_ref` would clear it.
+
+**A card opens over the board.** Tapping one opens the Task detail screen
+(`app/src/main/kotlin/cylist/app/task/`): its fields, sub-tasks and checklist
+(a tap ticks one), linked Jira and pull-request rows, the agent sessions on it
+with their feed (`GET /tasks/{ref}/agent-feed`, newest first) and comments with
+a composer held above the keyboard. The column row moves the card. A question
+or a permission an agent is waiting on is answered in place
+(`POST /tasks/{ref}/agent-prompts/{id}/answer`); a permission needs a browser
+session or a token with the `permit` scope, which the phone's has and an
+agent's never does. The screen holds the project's board socket like the board,
+so the feed and changes made on the web arrive by themselves. What it allows
+before asking the server (a card with open sub-tasks or checklist items cannot
+go to the last column; leaving the last column is confirmed first; outcomes
+belong to the last column) is in `TaskRules.kt`, each rule beside the
+TypeScript or Python it mirrors.
+
+**Today is the web planner's day.** The Today tab plans on the project the
+Board tab is on, through the same `/today` routes as the web planner (see
+`frontend/src/components/Today.tsx`), and sends the phone's own zone as
+`timezone`, as the web sends the browser's, so a day planned on one is the
+same day on the other. It holds the board socket while it is on screen, so a
+card ticked on the board ticks its to-do here; a to-do ticked on the web rings
+no doorbell (the plan is not the board), so the phone reads it when Today is
+next opened. Its rules are ported beside the TypeScript they mirror: which
+cards are offered and the dates in `today/TodayRules.kt` (`components/today.ts`,
+`components/dates.ts`), and `@` person / `>` file tags in `today/Tags.kt`
+(`components/mentions.ts`). Change the two together; `TagsTest` and
+`TodayRulesTest` are the web tests, case for case.
+
+The theme is not Material's. It is the web app's tokens
+(`frontend/src/theme/tokens.css`) written out in
+`app/src/main/kotlin/cylist/app/theme/Tokens.kt`, and `ThemeTokensTest`
+compares the two. Change a colour, type size or corner in `tokens.css` and that
+test fails until `Tokens.kt` matches, so CI runs the Android job when
+`tokens.css` changes too.
+
+The API client is not written by hand either. `android/api/openapi.json` is a
+committed copy of the backend's OpenAPI document, and the `api` module
+generates a Kotlin client from it on every build (OpenAPI Generator, OkHttp and
+kotlinx.serialization) into `api/build/generated/`. `CylistClient` hands each
+generated API class the server and a `cyl_…` token, sent as
+`Authorization: Bearer`:
+
+```kotlin
+val tasks = CylistClient("https://cylist.in", token).api(::TasksApi)
+```
+
+Change what a route takes or returns and the snapshot is stale. Refresh it,
+without a server or a database, and commit it with the backend change:
+
+```bash
+make openapi         # rewrite android/api/openapi.json from backend/
+make openapi-check   # what CI's backend job runs: fail if it is out of date
+```
+
+### Agent notifications: FCM and Live Updates
+
+When an agent session on a card starts, changes state, or starts asking
+something, the server pushes it to the phones of the person running the agent
+and of the card's owner (CYLIST-107). The phone shows it as an Android 16
+Live Update that changes in place: working (a chip counting up), needs you (a
+question or permission: rings, with the question), waiting for your reply, then
+finished. Tapping it opens that card's agent session.
+
+**Server side** (`backend/app/services/push/`). A mapper listener on
+`AgentSession` (`triggers.py`) compares each row before and after a flush and
+queues a snapshot on the transaction's outbox when the change is worth a push
+(`messages.worth_pushing`: new, a change of state, or a waiting session's reason
+or question changing; never a working session's note). After commit the
+`Pusher` (`delivery.py`) finds the devices (`services/devices.py`: those
+registered with a token that is still live) and sends each an FCM HTTP v1 *data*
+message (`messages.message_for`), through `fcm.FcmSender`, which mints its own
+OAuth token from the service account. A device FCM calls `UNREGISTERED` is
+deleted. Phones register with `POST /devices` (`write` scope) and leave with
+`DELETE /devices/{id}`; the table is `push_device` (migration 0045).
+
+Set `CYLIST_FCM_SERVICE_ACCOUNT_FILE` to a service-account key's path to send
+for real. Unset, which is normal for development and CI, nothing is sent and
+each push is a debug log line. The tests fake Google and FCM with
+`httpx.MockTransport` (`tests/test_push.py`).
+
+**App side** (`android/app/src/main/kotlin/cylist/app/push/`). Firebase is
+configured without the google-services plugin. `app/build.gradle.kts` reads
+`google-services.json` from the Gradle property `cylist.googleServices`, the
+environment variable `CYLIST_GOOGLE_SERVICES_JSON`, or `app/google-services.json`
+(git-ignored), and turns the client whose package name equals the variant's
+application id into `BuildConfig.FIREBASE_*`. With no file, or no client for
+that id, the fields are empty and push is off in that build, which is why CI
+builds without one. Debug builds are `in.cylist.app.debug`, so the Firebase
+project needs a client registered for that id as well as `in.cylist.app`.
+
+```bash
+cp ~/.secrets/cylist-firebase/google-services.json android/app/   # never commit it
+# or: CYLIST_GOOGLE_SERVICES_JSON=~/.secrets/cylist-firebase/google-services.json ./gradlew assembleDebug
+```
+
+The app registers its FCM token after every sign-in and launch (`PushRegistrar`)
+and unregisters before signing out, through the `beforeSignOut` hook on
+`Sessions`. `PushService` receives the data messages, and `AgentNotifier` posts
+them with `NotificationCompat` and `setRequestPromotedOngoing`. More › Notifications
+shows whether notifications and Live Updates are allowed, and where OxygenOS
+keeps its per-app Live Alerts switch for the camera pill.
+
+**Without Firebase**, a debug build can be sent a push by hand. It goes through
+the same `PushService.deliver` a real one does, and adb's shell is the only
+sender allowed:
+
+```bash
+adb shell am broadcast -n in.cylist.app.debug/cylist.app.push.DebugPushReceiver \
+  --es task ATL-12 --es task_title "Import the March schedule" \
+  --es state waiting --es reason question --es note "Sheet 1 or Mar-2026?"
+```
 
 ## Status
 

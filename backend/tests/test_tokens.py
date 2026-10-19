@@ -111,3 +111,33 @@ class TestRevocation:
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "not_found"
+
+
+class TestRevokingYourself:
+    """Any credential may give itself up; revoking another still needs admin."""
+
+    async def test_a_token_without_admin_can_revoke_itself(self, signed_in: AsyncClient) -> None:
+        created = await signed_in.post(
+            "/tokens", json={"name": "phone", "scopes": ["read", "write"]}
+        )
+        headers = {"Authorization": f"Bearer {created.json()['token']}"}
+
+        response = await signed_in.delete(f"/tokens/{created.json()['id']}", headers=headers)
+
+        assert response.status_code == 200
+        assert (await signed_in.get("/me", headers=headers)).status_code == 401
+        assert (await signed_in.get("/tokens")).json() == []
+
+    async def test_a_token_without_admin_cannot_revoke_another(
+        self, signed_in: AsyncClient
+    ) -> None:
+        phone = await signed_in.post("/tokens", json={"name": "phone", "scopes": ["read", "write"]})
+        other = await signed_in.post("/tokens", json={"name": "agent", "scopes": ["read"]})
+        headers = {"Authorization": f"Bearer {phone.json()['token']}"}
+
+        response = await signed_in.delete(f"/tokens/{other.json()['id']}", headers=headers)
+
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["missing_scopes"] == ["admin"]
+        listed = [token["name"] for token in (await signed_in.get("/tokens")).json()]
+        assert sorted(listed) == ["agent", "phone"]
