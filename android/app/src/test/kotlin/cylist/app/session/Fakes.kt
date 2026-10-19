@@ -60,6 +60,7 @@ class FakeAccounts : AccountService {
     var revokeAnswer: () -> Revocation = { Revocation.Revoked }
     val probed = mutableListOf<ServerAddress>()
     val signIns = mutableListOf<Triple<String, String, List<Scope>>>()
+    val optionalScopes = mutableListOf<Set<Scope>>()
     val revoked = mutableListOf<Pair<String, UUID>>()
 
     override fun probe(server: ServerAddress) {
@@ -67,8 +68,16 @@ class FakeAccounts : AccountService {
         probeFails?.let { throw it }
     }
 
-    override fun signIn(server: ServerAddress, email: String, password: String, tokenName: String, scopes: List<Scope>): MintedToken {
+    override fun signIn(
+        server: ServerAddress,
+        email: String,
+        password: String,
+        tokenName: String,
+        scopes: List<Scope>,
+        optional: Set<Scope>,
+    ): MintedToken {
         signIns += Triple(email, tokenName, scopes)
+        optionalScopes += optional
         signInFails?.let { throw it }
         return MintedToken(server, "cyl_phone", TOKEN_ID, tokenName, "Aditi K", email)
     }

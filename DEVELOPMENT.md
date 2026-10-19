@@ -586,7 +586,8 @@ with `GET /setup` before the email and password are asked for, so a wrong or
 unreachable address says so within about five seconds (`Accounts.defaultHttp`
 sets the timeouts). Signing in is the web app's own login used once:
 `POST /auth/login` buys a session cookie, which mints a personal token named
-for the phone (`"<device name> (Android)"`, scopes `read` and `write`) with
+for the phone (`"<device name> (Android)"`, scopes `read`, `write` and
+`permit`) with
 `POST /tokens`, and is logged out straight away. The phone keeps the token,
 never the password, sealed with an AES-GCM key held in the Android Keystore
 (`app/.../session/SessionStore.kt`), so it survives a restart and a reboot.
@@ -615,6 +616,21 @@ it comes back, and its `ready` refetches whatever changed meanwhile. The card
 rules — late dates, the agent line, whose cards — are ported from the web app
 in `app/src/main/kotlin/cylist/app/board/BoardRules.kt`, each beside the name of
 the TypeScript it mirrors; change the two together.
+
+**A card opens over the board.** Tapping one opens the Task detail screen
+(`app/src/main/kotlin/cylist/app/task/`): its fields, sub-tasks and checklist
+(a tap ticks one), linked Jira and pull-request rows, the agent sessions on it
+with their feed (`GET /tasks/{ref}/agent-feed`, newest first) and comments with
+a composer held above the keyboard. The column row moves the card. A question
+or a permission an agent is waiting on is answered in place
+(`POST /tasks/{ref}/agent-prompts/{id}/answer`); a permission needs a browser
+session or a token with the `permit` scope, which the phone's has and an
+agent's never does. The screen holds the project's board socket like the board,
+so the feed and changes made on the web arrive by themselves. What it allows
+before asking the server (a card with open sub-tasks or checklist items cannot
+go to the last column; leaving the last column is confirmed first; outcomes
+belong to the last column) is in `TaskRules.kt`, each rule beside the
+TypeScript or Python it mirrors.
 
 The theme is not Material's. It is the web app's tokens
 (`frontend/src/theme/tokens.css`) written out in

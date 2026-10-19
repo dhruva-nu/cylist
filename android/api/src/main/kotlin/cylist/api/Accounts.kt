@@ -57,6 +57,10 @@ sealed class AccountError(message: String, cause: Throwable? = null) : Exception
     class RevokeRefused(cause: Throwable? = null) :
         AccountError("The server would not revoke this phone's token. Revoke it from the web app's token list.", cause)
 
+    /** The server signed the person in but would not mint the token asked for, perhaps one older than the app. */
+    class TokenRefused(server: ServerAddress, cause: Throwable? = null) :
+        AccountError("${server.display} signed you in but would not issue this phone a token. It may be older than this app.", cause)
+
     /** The server failed. */
     class ServerTrouble(server: ServerAddress, status: Int) :
         AccountError("${server.display} had a problem (HTTP $status). Try again in a moment.")
@@ -76,8 +80,18 @@ interface AccountService {
     /** Check that [server] is a Cylist server somebody can sign in to, or throw [AccountError]. */
     fun probe(server: ServerAddress)
 
-    /** Sign in as [email] and mint a token called [tokenName] carrying [scopes], or throw [AccountError]. */
-    fun signIn(server: ServerAddress, email: String, password: String, tokenName: String, scopes: List<Scope>): MintedToken
+    /**
+     * Sign in as [email] and mint a token called [tokenName] carrying [scopes], or throw [AccountError].
+     * A server older than one of the [optional] scopes refuses it (422); the token is then minted without them.
+     */
+    fun signIn(
+        server: ServerAddress,
+        email: String,
+        password: String,
+        tokenName: String,
+        scopes: List<Scope>,
+        optional: Set<Scope> = emptySet(),
+    ): MintedToken
 
     /** Revoke [token], whose id is [tokenId], using the token itself, or throw [AccountError]. */
     fun revoke(server: ServerAddress, token: String, tokenId: UUID): Revocation
@@ -110,6 +124,7 @@ class Accounts(private val http: OkHttpClient = defaultHttp()) : AccountService 
         password: String,
         tokenName: String,
         scopes: List<Scope>,
+        optional: Set<Scope>,
     ): MintedToken {
         // One cookie jar per sign-in, dropped with it: the session cookie is a
         // means to the token and lives only in this call.
@@ -118,10 +133,19 @@ class Accounts(private val http: OkHttpClient = defaultHttp()) : AccountService 
             AuthApi(server.url, browser).loginApiV1AuthLoginPost(LoginRequest(password = password, email = email.trim()))
         }
         try {
-            val issued = call(server) {
+            fun mint(asked: List<Scope>) = call(server, unprocessable = { AccountError.TokenRefused(server, it) }) {
                 TokensApi(server.url, browser).createTokenApiV1TokensPost(
-                    TokenCreate(name = tokenName.take(MAX_TOKEN_NAME), scopes = scopes),
+                    TokenCreate(name = tokenName.take(MAX_TOKEN_NAME), scopes = asked),
                 )
+            }
+            val issued = try {
+                mint(scopes)
+            } catch (e: AccountError.TokenRefused) {
+                // A server that predates a scope rejects the whole request, so
+                // ask again for only the scopes every server knows.
+                val known = scopes - optional
+                if (known.size == scopes.size) throw e
+                mint(known)
             }
             return MintedToken(
                 server = server,
@@ -162,6 +186,7 @@ class Accounts(private val http: OkHttpClient = defaultHttp()) : AccountService 
     private fun <T> call(
         server: ServerAddress,
         forbidden: (ClientException) -> AccountError = { AccountError.NotCylist(server, it) },
+        unprocessable: (ClientException) -> AccountError = { AccountError.NotCylist(server, it) },
         block: () -> T,
     ): T = try {
         block()
@@ -169,6 +194,7 @@ class Accounts(private val http: OkHttpClient = defaultHttp()) : AccountService 
         throw when (e.statusCode) {
             HTTP_UNAUTHORIZED -> AccountError.WrongPassword(e)
             HTTP_FORBIDDEN -> forbidden(e)
+            HTTP_UNPROCESSABLE -> unprocessable(e)
             else -> AccountError.NotCylist(server, e)
         }
     } catch (e: ServerException) {
@@ -209,6 +235,7 @@ class Accounts(private val http: OkHttpClient = defaultHttp()) : AccountService 
         private const val HTTP_UNAUTHORIZED = 401
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
+        private const val HTTP_UNPROCESSABLE = 422
 
         /**
          * Short enough that an address nobody answers at is reported within
