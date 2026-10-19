@@ -1,6 +1,39 @@
 import com.android.build.api.variant.BuildConfigField
 import groovy.json.JsonSlurper
 
+/*
+ * The version comes from the release tag (CYLIST-108): the release workflow
+ * passes the tag as the Gradle property `cylist.version`, or the environment
+ * variable CYLIST_VERSION, and ReleaseVersion (buildSrc) turns `v0.3.2` into
+ * versionName 0.3.2 and versionCode 3002. Any other build is 0.0.0, code 1.
+ */
+val releaseVersion: ReleaseVersion =
+    (providers.gradleProperty("cylist.version").orNull ?: providers.environmentVariable("CYLIST_VERSION").orNull)
+        ?.let(ReleaseVersion::parse)
+        ?: ReleaseVersion.UNRELEASED
+
+/*
+ * The release signing key, from the environment only, so its passwords never
+ * appear on a command line. All four are set, or none: with none, the release
+ * APK comes out unsigned (app-release-unsigned.apk), which is what CI and a
+ * plain checkout build. The keystore lives in the repository's Actions secrets
+ * and one offline backup, nowhere else; DEVELOPMENT.md says which secrets.
+ */
+val releaseSigningEnv = listOf(
+    "CYLIST_RELEASE_KEYSTORE",
+    "CYLIST_RELEASE_KEYSTORE_PASSWORD",
+    "CYLIST_RELEASE_KEY_ALIAS",
+    "CYLIST_RELEASE_KEY_PASSWORD",
+).associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotEmpty) }
+val releaseSigning: Map<String, String>? = when {
+    releaseSigningEnv.values.all { it == null } -> null
+    releaseSigningEnv.values.any { it == null } -> throw GradleException(
+        "Release signing needs all of ${releaseSigningEnv.keys.joinToString()}; " +
+            "missing ${releaseSigningEnv.filterValues { it == null }.keys.joinToString()}",
+    )
+    else -> releaseSigningEnv.mapValues { it.value!! }
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -28,8 +61,19 @@ android {
         // 26 for variable fonts: Figtree is shipped as a single variable font.
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = releaseVersion.code
+        versionName = releaseVersion.name
+    }
+
+    signingConfigs {
+        if (releaseSigning != null) {
+            create("release") {
+                storeFile = file(releaseSigning.getValue("CYLIST_RELEASE_KEYSTORE"))
+                storePassword = releaseSigning.getValue("CYLIST_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigning.getValue("CYLIST_RELEASE_KEY_ALIAS")
+                keyPassword = releaseSigning.getValue("CYLIST_RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -44,6 +88,9 @@ android {
         }
         release {
             buildConfigField("String", "CLEARTEXT_HOSTS", "\"\"")
+            if (releaseSigning != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
