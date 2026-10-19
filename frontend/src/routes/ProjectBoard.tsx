@@ -25,10 +25,11 @@ import { useIdentity } from '../api/queries'
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
 import { EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../components/ui'
+import { readStored, writeStored } from '../storage'
 import { anyAgentCounted } from './agentState'
 import { hidesHold } from './boardHiding'
 import { BoardGrid, type LanesLayout, type SharedColumnProps } from './board/BoardGrid'
-import { peopleFromSearch, searchFromPeople } from './board/boardPeople'
+import { peopleFromSearch, rememberedPeopleKey, searchFromPeople } from './board/boardPeople'
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
 import { CardActionsContext, type CardActions } from './board/cardActions'
 import { ColdStorageDialog } from './board/ColdStorageDialog'
@@ -151,12 +152,21 @@ function LoadedBoard({
    * than in this component: it is the one filter a board is opened onto, so a
    * link has to be able to carry it. Replaced rather than pushed, so Back
    * leaves the board instead of walking through every face pressed on it.
+   *
+   * Each pick is remembered too (CYLIST-110), and a board opened with no
+   * `?who=` opens on it. Only a pick made here is: a shared link shows its
+   * people without changing what your own visits open on.
    */
   const navigate = useNavigate({ from: '/p/$projectKey/board' })
-  const filters: ChosenFilters = { ...chosen, people: peopleFromSearch(who, meId, members) }
+  const remembered = readStored(rememberedPeopleKey(projectKey))
+  const filters: ChosenFilters = {
+    ...chosen,
+    people: peopleFromSearch(who, meId, members, remembered),
+  }
   function setFilters(changes: Partial<ChosenFilters>) {
     const { people, ...rest } = changes
     if (people !== undefined) {
+      writeStored(rememberedPeopleKey(projectKey), searchFromPeople(people))
       void navigate({
         search: (current) => ({ ...current, who: searchFromPeople(people) }),
         replace: true,

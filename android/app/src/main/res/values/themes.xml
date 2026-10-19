@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!--
+    Only what shows before Compose draws: the window behind the first frame,
+    in `bg`, so opening the app does not flash white in dark mode. Everything
+    else is CylistTheme.
+  -->
+  <color name="window_bg">#F6F5F1</color>
+  <color name="launcher_bg">#E2B84A</color>
+  <color name="launcher_fg">#3A2E00</color>
+
+  <style name="Theme.Cylist" parent="android:Theme.Material.Light.NoActionBar">
+    <item name="android:windowBackground">@color/window_bg</item>
+  </style>
+</resources>

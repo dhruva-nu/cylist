@@ -41,23 +41,44 @@ export function cardsOwned(tasks: Task[]): Map<string, number> {
 export const EVERYONE = 'everyone'
 
 /**
- * The pick a board opens on, from its `?who=`.
+ * The pick a board opens on, from its `?who=` and the pick last made on it.
  *
- * Absent, it is you — if you are on this project; somebody who is not would
- * otherwise open every board they visit onto nothing. `everyone` is the empty
- * pick, and otherwise it is a comma-separated list of person ids, kept as
- * given: a link shared by somebody else shows the people it was shared with.
+ * Absent, it is whoever you last picked on this board (CYLIST-110), so
+ * walking away and coming back finds the board as you left it. Somebody in
+ * that pick who has since left the project is dropped; if nobody is left, or
+ * nothing was ever picked here, it is you — if you are on this project;
+ * somebody who is not would otherwise open every board they visit onto
+ * nothing. `everyone` is the empty pick, and otherwise it is a comma-separated
+ * list of person ids, kept as given: a link shared by somebody else shows the
+ * people it was shared with.
  */
 export function peopleFromSearch(
   who: string | undefined,
   meId: string | null,
   members: Person[],
+  remembered: string | null = null,
 ): string[] {
   if (who === undefined) {
+    if (remembered === EVERYONE) return []
+    if (remembered !== null) {
+      const stillHere = parsePick(remembered).filter((id) =>
+        members.some((member) => member.id === id),
+      )
+      if (stillHere.length) return stillHere
+    }
     return meId !== null && members.some((member) => member.id === meId) ? [meId] : []
   }
   if (who === EVERYONE) return []
+  return parsePick(who)
+}
+
+function parsePick(who: string): string[] {
   return [...new Set(who.split(',').filter(Boolean))]
+}
+
+/** Where a board's last pick is remembered: per project, like the rest of its view. */
+export function rememberedPeopleKey(projectKey: string): string {
+  return `cylist.board.people.${projectKey}`
 }
 
 /** The `?who=` that says this pick — the inverse of `peopleFromSearch`. */

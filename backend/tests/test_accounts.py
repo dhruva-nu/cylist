@@ -501,7 +501,14 @@ class TestTheBootstrapLogin:
         body = (await bootstrapped.get("/me")).json()
 
         assert body["person"] is None
-        assert set(body["scopes"]) == {"read", "write", "vault:read", "vault:reveal", "admin"}
+        assert set(body["scopes"]) == {
+            "read",
+            "write",
+            "vault:read",
+            "vault:reveal",
+            "admin",
+            "permit",
+        }
 
     async def test_setup_says_whether_it_is_still_available(
         self, client: AsyncClient, signed_in: AsyncClient

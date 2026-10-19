@@ -47,7 +47,14 @@ class TestLogin:
 
         body = response.json()
         assert body["channel"] == "web"
-        assert set(body["scopes"]) == {"read", "write", "vault:read", "vault:reveal", "admin"}
+        assert set(body["scopes"]) == {
+            "read",
+            "write",
+            "vault:read",
+            "vault:reveal",
+            "admin",
+            "permit",
+        }
 
     async def test_rejects_the_wrong_password(self, client: AsyncClient) -> None:
         response = await client.post("/auth/login", json={"password": "wrong"})

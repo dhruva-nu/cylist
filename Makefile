@@ -5,6 +5,7 @@
 #   make up        run the whole stack in Docker instead
 #   make agent     let this machine's agents use a board
 #   make check     everything CI runs
+#   make android   build the phone app
 
 BACKEND  := backend
 TEST_DATABASE_URL := postgresql+asyncpg://cylist:cylist@localhost:5433/cylist_test
@@ -17,7 +18,7 @@ UV       := uv --project $(BACKEND)
         staging-refresh staging-logs staging-ps staging-down \
         dev-slot-given dev-deploy dev-logs dev-ps dev-down dev-db-logs dev-db-ps dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key \
-        agent clean
+        agent android android-install openapi openapi-check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -194,7 +195,7 @@ typecheck: ## Type-check both sides
 	cd $(BACKEND) && uv run mypy app scripts
 	npm --prefix $(FRONTEND) run typecheck
 
-check: lint typecheck test migrate-check ## Everything CI runs
+check: lint typecheck test migrate-check openapi-check ## Everything CI runs
 
 seed: ## Fill an empty database with the three worked-through projects
 	cd $(BACKEND) && uv run python -m scripts.seed
@@ -207,6 +208,27 @@ hash-password: ## Generate CYLIST_PASSWORD_HASH
 
 vault-key: ## Generate CYLIST_VAULT_KEY
 	cd $(BACKEND) && uv run python -m app.cli generate-vault-key
+
+# --- Android -----------------------------------------------------------------
+# Needs JDK 21 and the Android SDK (JAVA_HOME and ANDROID_HOME); DEVELOPMENT.md
+# has the setup. Gradle comes from the wrapper in android/.
+
+android: ## Lint, test and build the Android debug APK
+	cd android && ./gradlew lint test assembleDebug
+	cd android && ./gradlew -p buildSrc test
+	@echo "APK: android/app/build/outputs/apk/debug/app-debug.apk"
+
+android-install: ## Build the Android debug APK and install it on the phone adb sees
+	cd android && ./gradlew installDebug
+
+# The Android client is generated from android/api/openapi.json, a committed
+# copy of the API's OpenAPI document. Refresh it after changing anything a
+# route takes or returns; CI fails the backend job until you do.
+openapi: ## Refresh android/api/openapi.json from the backend
+	cd $(BACKEND) && uv run python -m scripts.openapi
+
+openapi-check: ## Fail if android/api/openapi.json is behind the backend
+	cd $(BACKEND) && uv run python -m scripts.openapi --check
 
 clean: ## Remove caches and build output
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

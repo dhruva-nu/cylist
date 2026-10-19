@@ -37,6 +37,7 @@ jobs:
       agents: ${{ steps.filter.outputs.agents }}
       installers: ${{ steps.filter.outputs.installers }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      android: ${{ steps.filter.outputs.android }}
 
     steps:
       - uses: actions/checkout@v5
@@ -111,6 +112,12 @@ jobs:
       # and that every revision reverses cleanly. Uses its own scratch database.
       - name: Verify migrations
         run: uv run python -m scripts.check_migrations
+
+      # The Android client is generated from a committed copy of the OpenAPI
+      # document. A change to what a route takes or returns has to refresh it,
+      # so the Android job builds against the contract the server now has.
+      - name: Check the OpenAPI snapshot
+        run: uv run python -m scripts.openapi --check
 
   # The CLI and the MCP server talk to the API over HTTP and are tested against
   # an httpx.MockTransport, so neither needs a database or a running backend.
@@ -239,16 +246,75 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The phone app. Lint, the unit tests and a debug build, and the build is kept
+  # as the run's artifact: that APK is what gets installed on a phone to try a
+  # pull request, so there is nothing to build locally first. It is signed with
+  # the runner's throwaway debug key, so one run's APK will not install over
+  # another's without uninstalling first.
+  #
+  # Needs no Android device or emulator. The theme test reads
+  # frontend/src/theme/tokens.css, which is why a change to that file runs
+  # this job too.
+  android:
+    name: Android
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Puts cmdline-tools on the PATH and accepts the SDK licences, so the
+      # Android Gradle plugin can fetch the platform it compiles against.
+      - uses: android-actions/setup-android@v4
+
+      # Caches Gradle's dependencies and build cache between runs.
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Lint, test and build
+        run: ./gradlew lint test assembleDebug
+
+      # buildSrc's own tests: the release tag to versionCode mapping that every
+      # signed release depends on (CYLIST-108). Gradle builds buildSrc without
+      # testing it, so they are run as a build of their own.
+      - name: Test the build logic
+        run: ./gradlew -p buildSrc test
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: cylist-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload lint and test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-reports
+          path: |
+            android/*/build/reports/
+            android/*/build/test-results/
+            android/buildSrc/build/reports/
+
   # Everything above runs on GitHub's machines. This one runs on dnu-home-1
   # itself, through a self-hosted runner that polls GitHub outbound — which is
   # why deploying to a server behind a home router needs no inbound port, no
   # deploy key, and no secrets stored in this repository.
   deploy:
     name: Deploy to dnu-home-1
-    needs: [backend, agents, installers, frontend]
+    needs: [backend, agents, installers, frontend, android]
     # Only main, and only a real push: a pull request that happens to target
     # main must not put anything on the server. A push to `staging` gets the
-    # three test jobs above and nothing else — staging is deployed by hand,
+    # test jobs above and nothing else — staging is deployed by hand,
     # from .github/workflows/deploy-staging.yml.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, cylist]
