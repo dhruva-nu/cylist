@@ -141,9 +141,25 @@ describe('what ?who= opens on', () => {
     expect(peopleFromSearch(EVERYONE, 'ravi', MEMBERS)).toEqual([])
   })
 
+  it('opens on the pick last made here, over you', () => {
+    expect(peopleFromSearch(undefined, 'ravi', MEMBERS, 'aditi,meera')).toEqual(['aditi', 'meera'])
+    expect(peopleFromSearch(undefined, 'ravi', MEMBERS, EVERYONE)).toEqual([])
+  })
+
+  it('drops whoever has left from the remembered pick, and opens on you if nobody is left', () => {
+    expect(peopleFromSearch(undefined, 'ravi', MEMBERS, 'aditi,gone')).toEqual(['aditi'])
+    expect(peopleFromSearch(undefined, 'ravi', MEMBERS, 'gone')).toEqual(['ravi'])
+  })
+
+  it('lets a shared link win over the remembered pick', () => {
+    expect(peopleFromSearch('meera', 'ravi', MEMBERS, 'aditi')).toEqual(['meera'])
+    expect(peopleFromSearch(EVERYONE, 'ravi', MEMBERS, 'aditi')).toEqual([])
+  })
+
   it('writes back what it reads', () => {
     for (const pick of [[], ['aditi'], ['aditi', 'meera']]) {
       expect(peopleFromSearch(searchFromPeople(pick), 'ravi', MEMBERS)).toEqual(pick)
+      expect(peopleFromSearch(undefined, 'ravi', MEMBERS, searchFromPeople(pick))).toEqual(pick)
     }
   })
 })
