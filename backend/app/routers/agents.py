@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
@@ -33,7 +33,7 @@ from app.schemas.agents import (
 )
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
-from app.services import activity, agents, blobs, skill_folders
+from app.services import activity, agents, blobs, projects, skill_folders
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["agents"])
@@ -41,10 +41,19 @@ router = APIRouter(tags=["agents"])
 
 async def resolved_skill(
     skill_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> Skill:
-    """Turn the path segment into a skill, 404-ing if nothing matches."""
-    return await agents.get_skill(session, skill_id)
+    """Turn the path segment into a skill, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    skill = await agents.get_skill(session, skill_id)
+    await projects.require_reachable(
+        session,
+        skill.project_id,
+        principal,
+        NotFoundError("No such skill.", details={"skill_id": str(skill_id)}),
+    )
+    return skill
 
 
 def _skill_read(skill: Skill) -> SkillRead:

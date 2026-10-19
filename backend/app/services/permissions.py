@@ -116,12 +116,10 @@ async def effective(
 ) -> frozenset[Permission]:
     """Everything this caller may do on this project.
 
-    Their role's grants, or the project's baseline if they have no role — and
-    the baseline is also the answer for somebody who is not on the project at
-    all. Membership has never been a fence in Cylist (decision 4) and this
-    ticket did not make it one: the question a role answers is what somebody
-    *is* here, and somebody who is not here is the plainest case of nobody
-    having said.
+    Their role's grants, or the project's baseline if they have no role.
+    Somebody who is not on the project at all never gets this far — every
+    path to a project 404s them first (CYLIST-111) — so the baseline is the
+    answer for a member nobody has given a role.
     """
     if await roles.may_administer(session, project, principal):
         return ALL_PERMISSIONS

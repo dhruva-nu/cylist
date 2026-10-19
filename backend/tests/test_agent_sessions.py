@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AgentSession, AgentSessionReason, AgentSessionState
 from app.services.agent_sessions import presence
+from tests.conftest import put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -28,7 +29,7 @@ SESSION_B = "sess-bbbb"
 async def _setup(client: AsyncClient) -> str:
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=ADITI)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     return str(person)
 
 

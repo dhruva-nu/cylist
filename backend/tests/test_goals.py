@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+from tests.conftest import put_members
+
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
     "name": "Aditi K",
@@ -32,7 +34,7 @@ async def _project(client: AsyncClient) -> str:
     """A project with a member, ready to hold goals and cards."""
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=TEAM)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     return str(person)
 
 
@@ -178,7 +180,7 @@ class TestLinkingCards:
         goal = await _goal(signed_in, person)
 
         await signed_in.post("/projects", json={"key": "HRM", "name": "Hermes"})
-        await signed_in.put("/projects/HRM/members", json={"person_ids": [person]})
+        await put_members(signed_in, "HRM", [person])
         response = await signed_in.post(
             "/projects/HRM/tasks",
             json={

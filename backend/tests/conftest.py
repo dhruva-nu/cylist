@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 import pytest
 from argon2 import PasswordHasher, profiles
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import func, select
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -388,3 +388,16 @@ async def open_account(
     issued = await admin.post(f"/people/{created['id']}/invite")
     assert issued.status_code == 201, issued.text
     return created, issued.json()["token"]
+
+
+async def put_members(client: AsyncClient, project: str, person_ids: list[str]) -> Response:
+    """Put these people on a project, keeping whoever is asking on it too.
+
+    ``PUT /members`` replaces the list, and somebody who leaves a project can
+    no longer see it — so a test staffing a board with the people its cards
+    need would otherwise be locking its own client out of the board. The
+    bootstrap session is on no project and needs no keeping.
+    """
+    me = (await client.get("/me")).json().get("person")
+    keep = [me["id"]] if me is not None and me["id"] not in person_ids else []
+    return await client.put(f"/projects/{project}/members", json={"person_ids": keep + person_ids})

@@ -8,10 +8,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
+from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.core.errors import NotFoundError
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.template import TaskTemplate
@@ -25,17 +26,23 @@ from app.schemas.templates import (
     TemplateRead,
     TemplateUpdate,
 )
-from app.services import activity, permissions, templates
+from app.services import activity, permissions, projects, templates
 
 router = APIRouter(tags=["templates"])
 
 
 async def resolved_template(
     template_id: UUID,
+    principal: Principal = Depends(current_principal),
     session: AsyncSession = SessionDependency,
 ) -> TaskTemplate:
-    """Turn the path segment into a template, 404-ing if nothing matches."""
-    return await templates.get_template(session, template_id)
+    """Turn the path segment into a template, 404-ing if nothing matches — or if it is
+    on a project the caller is not a member of."""
+    template = await templates.get_template(session, template_id)
+    await projects.require_reachable(
+        session, template.project_id, principal, NotFoundError("No template with that id.")
+    )
+    return template
 
 
 def _template_read(template: TaskTemplate, task_count: int) -> TemplateRead:

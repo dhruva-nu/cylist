@@ -382,9 +382,9 @@ class TestTheCreatorJoinsTheirProject:
                 "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
             )
             theirs = (await other.post("/projects", json=HERMES)).json()
+            on_theirs = (await other.get(f"/projects/{theirs['key']}/members")).json()["members"]
 
         on_mine = (await signed_in.get(f"/projects/{mine['key']}/members")).json()["members"]
-        on_theirs = (await signed_in.get(f"/projects/{theirs['key']}/members")).json()["members"]
 
         assert [person["id"] for person in on_mine if not person["is_agent"]] == [str(owner.id)]
         assert [person["id"] for person in on_theirs if not person["is_agent"]] == [aditi["id"]]
@@ -404,9 +404,17 @@ class TestTheCreatorJoinsTheirProject:
         assert [person["is_agent"] for person in members] == [True]
 
     async def test_the_creator_can_be_taken_off_afterwards(self, signed_in: AsyncClient) -> None:
-        """And so can the agent: neither is a member the board cannot lose."""
+        """And so can the agent: neither is a member the board cannot lose.
+
+        Taking yourself off is leaving, and a project you have left is one you
+        no longer see.
+        """
         project = (await signed_in.post("/projects", json=ATLAS)).json()
 
-        await signed_in.put(f"/projects/{project['key']}/members", json={"person_ids": []})
+        response = await signed_in.put(
+            f"/projects/{project['key']}/members", json={"person_ids": []}
+        )
 
-        assert (await signed_in.get(f"/projects/{project['key']}")).json()["member_count"] == 0
+        assert response.json() == {"members": []}
+        assert (await signed_in.get(f"/projects/{project['key']}")).status_code == 404
+        assert (await signed_in.get("/projects")).json() == []

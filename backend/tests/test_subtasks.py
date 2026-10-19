@@ -15,6 +15,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
+from tests.conftest import put_members
+
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
     "name": "Aditi K",
@@ -27,7 +29,7 @@ ADITI = {
 async def _setup(client: AsyncClient) -> str:
     await client.post("/projects", json=ATLAS)
     person = (await client.post("/people", json=ADITI)).json()["id"]
-    await client.put("/projects/ATL/members", json={"person_ids": [person]})
+    await put_members(client, "ATL", [person])
     return str(person)
 
 
@@ -502,7 +504,7 @@ class TestTheGate:
                 },
             )
         ).json()["id"]
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [person, other]})
+        await put_members(signed_in, "ATL", [person, other])
         parent = await _create(signed_in, person)
         await _subtask(signed_in, parent["reference"], person)
         await _subtask(signed_in, parent["reference"], other)

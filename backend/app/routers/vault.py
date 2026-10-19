@@ -31,6 +31,7 @@ from app.core import crypto
 from app.core import sensitivity as sensitivity_of
 from app.core.clock import now
 from app.core.crypto import VaultCipher
+from app.core.errors import NotFoundError
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.db import SessionDependency
 from app.models.project import Project
@@ -50,7 +51,7 @@ from app.schemas.vault import (
     VaultTreeRead,
     VaultTreeUpdate,
 )
-from app.services import activity, permissions, vault
+from app.services import activity, permissions, projects, vault
 
 READ = require(Scope.VAULT_READ)
 WRITE = require(Scope.WRITE, Scope.VAULT_READ)
@@ -70,14 +71,35 @@ def vault_cipher(settings: Settings = Depends(app_settings)) -> VaultCipher:
     return crypto.cipher_for(settings.vault_key)
 
 
-async def resolved_tree(tree_id: UUID, session: AsyncSession = SessionDependency) -> VaultTree:
-    """Turn the path segment into a tree, 404-ing if nothing matches."""
-    return await vault.get_tree(session, tree_id)
+async def resolved_tree(
+    tree_id: UUID,
+    principal: Principal = Depends(current_principal),
+    session: AsyncSession = SessionDependency,
+) -> VaultTree:
+    """Turn the path segment into a tree, 404-ing if nothing matches — or if it
+    is on a project the caller is not a member of."""
+    tree = await vault.get_tree(session, tree_id)
+    await projects.require_reachable(
+        session, tree.project_id, principal, NotFoundError("No vault tree with that id.")
+    )
+    return tree
 
 
-async def resolved_node(node_id: UUID, session: AsyncSession = SessionDependency) -> VaultNode:
-    """Turn the path segment into a node, 404-ing if nothing matches."""
-    return await vault.get_node(session, node_id)
+async def resolved_node(
+    node_id: UUID,
+    principal: Principal = Depends(current_principal),
+    session: AsyncSession = SessionDependency,
+) -> VaultNode:
+    """Turn the path segment into a node, 404-ing if nothing matches — or if it
+    is on a project the caller is not a member of."""
+    node = await vault.get_node(session, node_id)
+    await projects.require_reachable(
+        session,
+        await vault.project_id_of(session, node),
+        principal,
+        NotFoundError("No vault node with that id."),
+    )
+    return node
 
 
 # --- Trees -----------------------------------------------------------------
@@ -134,6 +156,9 @@ async def may_add_node(
     and no second read of the request.
     """
     tree = await vault.get_tree(session, body.tree_id)
+    await projects.require_reachable(
+        session, tree.project_id, principal, NotFoundError("No vault tree with that id.")
+    )
     return await permissions.enforce_on(session, tree.project_id, principal, Permission.VAULT)
 
 

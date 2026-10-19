@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Person, ProjectMember
-from tests.conftest import OWNER_NAME
+from tests.conftest import OWNER_NAME, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
@@ -62,15 +62,15 @@ class TestSettingMembership:
 
     async def test_replaces_rather_than_appends(self, signed_in: AsyncClient) -> None:
         team, client_person = await _project_and_people(signed_in)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [team, client_person]})
+        await put_members(signed_in, "ATL", [team, client_person])
 
-        response = await signed_in.put("/projects/ATL/members", json={"person_ids": [team]})
+        response = await put_members(signed_in, "ATL", [team])
 
-        assert [m["name"] for m in response.json()["members"]] == ["Aditi K"]
+        assert [m["name"] for m in response.json()["members"]] == [OWNER_NAME, "Aditi K"]
 
     async def test_can_be_emptied(self, signed_in: AsyncClient) -> None:
         team, _ = await _project_and_people(signed_in)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [team]})
+        await put_members(signed_in, "ATL", [team])
 
         response = await signed_in.put("/projects/ATL/members", json={"person_ids": []})
 
@@ -99,10 +99,9 @@ class TestSettingMembership:
 
     async def test_is_idempotent(self, signed_in: AsyncClient) -> None:
         team, client_person = await _project_and_people(signed_in)
-        payload = {"person_ids": [team, client_person]}
 
-        first = await signed_in.put("/projects/ATL/members", json=payload)
-        second = await signed_in.put("/projects/ATL/members", json=payload)
+        first = await put_members(signed_in, "ATL", [team, client_person])
+        second = await put_members(signed_in, "ATL", [team, client_person])
 
         assert first.json() == second.json()
 
@@ -129,12 +128,12 @@ class TestValidation:
         self, signed_in: AsyncClient
     ) -> None:
         team, _ = await _project_and_people(signed_in)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [team]})
+        await put_members(signed_in, "ATL", [team])
 
         await signed_in.put("/projects/ATL/members", json={"person_ids": [team, UNKNOWN_ID]})
 
         members = (await signed_in.get("/projects/ATL/members")).json()["members"]
-        assert [m["name"] for m in members] == ["Aditi K"]
+        assert [m["name"] for m in members] == ["Aditi K", OWNER_NAME]
 
 
 class TestCounts:
@@ -142,21 +141,23 @@ class TestCounts:
         self, signed_in: AsyncClient
     ) -> None:
         team, client_person = await _project_and_people(signed_in)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [team, client_person]})
+        await put_members(signed_in, "ATL", [team, client_person])
 
         listed = (await signed_in.get("/projects")).json()
 
-        assert listed[0]["member_count"] == 2
+        # The two added, and whoever is looking — they are on it, or they
+        # would not see it on the grid at all.
+        assert listed[0]["member_count"] == 3
 
     async def test_the_summary_splits_team_from_clients(self, signed_in: AsyncClient) -> None:
         team, client_person = await _project_and_people(signed_in)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [team, client_person]})
+        await put_members(signed_in, "ATL", [team, client_person])
 
         summary = (await signed_in.get("/projects/ATL/summary")).json()
 
-        assert summary["team_count"] == 1
+        assert summary["team_count"] == 2
         assert summary["client_count"] == 1
-        assert summary["member_count"] == 2
+        assert summary["member_count"] == 3
 
     async def test_a_fresh_project_counts_its_creator_and_the_agent(
         self, signed_in: AsyncClient

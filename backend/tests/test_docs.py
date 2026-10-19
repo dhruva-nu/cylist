@@ -14,7 +14,7 @@ from typing import Any
 from httpx import AsyncClient
 
 from app.auth.permissions import Permission
-from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account
+from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 
@@ -289,7 +289,7 @@ class TestTheFence:
         )
         members = (await signed_in.get("/projects/ATL/members")).json()["members"]
         owner = next(member["id"] for member in members if member["name"] == OWNER_NAME)
-        await signed_in.put("/projects/ATL/members", json={"person_ids": [owner, person["id"]]})
+        await put_members(signed_in, "ATL", [owner, person["id"]])
         await signed_in.put(
             "/projects/ATL/permissions/everyone-else",
             json={"permissions": [Permission.FILES.value]},

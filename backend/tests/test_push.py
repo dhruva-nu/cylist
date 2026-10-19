@@ -50,7 +50,7 @@ from app.services.push.messages import (
     message_for,
     worth_pushing,
 )
-from tests.conftest import INVITEE_PASSWORD, open_account
+from tests.conftest import INVITEE_PASSWORD, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -568,10 +568,7 @@ class TestPushingAgentSessions:
         assert accepted.status_code == 200, accepted.text
         await _phone(other_client, ADITI_FCM)
         members = (await wired.get("/projects/ATL/members")).json()["members"]
-        await wired.put(
-            "/projects/ATL/members",
-            json={"person_ids": [m["id"] for m in members] + [aditi["id"]]},
-        )
+        await put_members(wired, "ATL", [m["id"] for m in members] + [aditi["id"]])
         agent = await _token(wired)
         ref = await _card(wired, assignee=aditi["id"])
 
