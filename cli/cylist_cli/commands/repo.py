@@ -389,6 +389,8 @@ def _the_board_today(
         *_doc_lines(key, docs),
         "",
         *_skill_lines(key, skills),
+        "",
+        *_finishing_lines(),
     ]
 
 
@@ -449,6 +451,15 @@ def _skill_lines(key: str, skills: Sequence[dict[str, Any]]) -> list[str]:
             f"| `{_verbatim(skill['name'])}` | {_cell(skill.get('description')) or '—'} |"
             for skill in skills
         ),
+    ]
+
+
+def _finishing_lines() -> list[str]:
+    return [
+        "**Finishing a card.** A pull request for the card's branch must exist, and its",
+        "link be commented on the card with `add_comment`, before the card moves to",
+        "Dev. A card must not enter Dev without the PR link on it. The `deploy-dev`",
+        "skill has the steps, in order.",
     ]
 
 

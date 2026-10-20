@@ -1,12 +1,19 @@
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+}
+
+.quiet {
+  margin: 0;
+  padding: 14px 0;
+  color: var(--ink-3);
+  font-size: var(--text-md);
 }
 
 .entry {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   font-size: var(--text-base);
 }
 
@@ -21,15 +28,18 @@
 .bubble {
   flex: 1;
   max-width: 80ch;
-  padding: 9px 13px;
+  min-width: 0;
+  padding: 10px 14px;
   border-radius: var(--radius-card);
   background: var(--paper-2);
 }
 
 .who {
   display: flex;
+  gap: 12px;
   justify-content: space-between;
-  color: var(--ink-2);
+  margin-bottom: 3px;
+  color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
@@ -88,4 +98,102 @@
 
 .system.blocked .bubble {
   border-color: var(--blocked);
+}
+
+/* The box to write in: one card, set apart from the entries above by a rule
+   and some air, with the speaker's face where an entry's would be. */
+.composer {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.card {
+  flex: 1;
+  min-width: 0;
+  max-width: 80ch;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.card:focus-within {
+  border-color: var(--focus);
+}
+
+/* The card draws the border; the box inside is bare, and grows with what is
+   typed where the browser can (field-sizing), else scrolls. */
+.draft textarea {
+  display: block;
+  min-height: 72px;
+  max-height: 320px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  outline: 0;
+  background: transparent;
+  field-sizing: content;
+  resize: none;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 6px 8px 8px 14px;
+}
+
+.as {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.as strong {
+  color: var(--ink-2);
+  font-weight: var(--weight-bold);
+}
+
+.change {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.change:hover,
+.change:focus-visible {
+  color: var(--ink-2);
+}
+
+.asSelect {
+  width: auto;
+  max-width: 100%;
+  font-size: var(--text-sm);
+}
+
+.hint {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+/* Narrow: the hint goes, and the button takes the footer's second line. */
+@media (width <= 480px) {
+  .hint {
+    display: none;
+  }
+
+  .composer {
+    gap: 8px;
+  }
 }

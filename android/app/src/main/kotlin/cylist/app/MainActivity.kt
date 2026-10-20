@@ -49,6 +49,7 @@ import cylist.app.board.BoardViewModel
 import cylist.app.docs.DocsScreen
 import cylist.app.docs.DocsViewModel
 import cylist.app.more.MoreScreen
+import cylist.app.projects.ProjectsScreen
 import cylist.app.push.AgentSessionScreen
 import cylist.app.push.AskForNotifications
 import cylist.app.push.CardLink
@@ -109,8 +110,9 @@ private fun Root(app: CylistApp) {
     }
 }
 
-/** The five places the tab bar goes to. Those not built yet name the card that brings them. */
+/** The six places the tab bar goes to. Those not built yet name the card that brings them. */
 enum class Tab(val label: String, val icon: ImageVector, val card: String?) {
+    Projects("Projects", CylistIcons.Projects, null),
     Board("Board", CylistIcons.Board, null),
     Today("Today", CylistIcons.Today, null),
     Docs("Docs", CylistIcons.Docs, null),
@@ -127,7 +129,7 @@ fun AppShell(
     closeCard: () -> Unit = {},
     signOut: () -> Unit,
 ) {
-    var tab by rememberSaveable { mutableStateOf(Tab.Board) }
+    var tab by rememberSaveable { mutableStateOf(Tab.Projects) }
     // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
     val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
     // Today plans on the project the Board is on, and its count rides on the tab.
@@ -152,6 +154,7 @@ fun AppShell(
     Column(Modifier.fillMaxSize().background(CylistTheme.colors.bg).imePadding()) {
         Box(Modifier.weight(1f)) {
             when (tab) {
+                Tab.Projects -> ProjectsScreen(boardState, open = { key -> board.selectProject(key); tab = Tab.Board })
                 Tab.Board -> BoardScreen(board, openTask = { key, ref -> openTask = "$key|$ref" })
                 Tab.Today -> TodayScreen(today)
                 // Docs follows the project the board is on.

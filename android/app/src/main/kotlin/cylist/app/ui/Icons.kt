@@ -56,6 +56,7 @@ object CylistIcons {
     )
     val Blocked = icon("blocked", 24f, 2.2f, "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.6 5.6l12.8 12.8")
 
+    val Projects = icon("projects", 24f, 1.9f, "M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v8a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18z")
     val Board = icon("board", 24f, 1.9f, "M6 4h12a2.5 2.5 0 0 1 2.5 2.5v11A2.5 2.5 0 0 1 18 20H6a2.5 2.5 0 0 1-2.5-2.5v-11A2.5 2.5 0 0 1 6 4z", "M9.2 4v16M14.8 4v16")
     val Today = icon("today", 24f, 1.9f, "M6.5 5h11A2.5 2.5 0 0 1 20 7.5v10a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-10A2.5 2.5 0 0 1 6.5 5z", "M8.5 3v4M15.5 3v4M4 10h16", "m9.2 14.8 2 2 3.8-3.9")
     val Docs = icon("docs", 24f, 1.9f, "M6 3h8l4 4v14H6z", "M14 3v4h4M9 12h6M9 16h6")

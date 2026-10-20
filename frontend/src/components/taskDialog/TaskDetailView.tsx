@@ -1,4 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { api, type BoardColumn, type ColumnDueDate, type TaskDetail } from '../../api/client'
@@ -18,12 +19,14 @@ import {
   TaskRef,
   TypeIcon,
 } from '../ui'
-import { Timeline } from './Comments'
+import { CommentComposer, Timeline } from './Comments'
 import type { DialogData, TaskDialogProps } from './dialogProps'
 import { History } from './History'
 import { PrRefsRead } from './PullRequests'
 import { SubtasksRead } from './Subtasks'
+import { useCommentAuthor } from './useCommentAuthor'
 import { useCommentDeleting } from './useCommentDeleting'
+import { useRefreshTask } from './useRefreshTask'
 import shared from './shared.module.css'
 import styles from './TaskDetailView.module.css'
 
@@ -62,6 +65,17 @@ export function TaskDetailView({
   // wanted done is a fact about the past rather than something outstanding.
   const late = task.next_due_date !== null && isOverdue(task.due_date)
   const deleting = useCommentDeleting({ projectKey, announce, onDone })
+  const refreshTask = useRefreshTask(onDone)
+  const [author, setAuthor] = useCommentAuthor(members)
+  const [draft, setDraft] = useState('')
+  const post = useMutation({
+    mutationFn: () => api.addComment(task.id, draft.trim(), author || null),
+    onSuccess: async () => {
+      setDraft('')
+      announce('Comment added.')
+      await refreshTask(task.id)
+    },
+  })
 
   const editButton = (
     <Button variant="ghost" small onClick={onEdit} aria-label="Edit task" title="Edit task">
@@ -200,7 +214,20 @@ export function TaskDetailView({
             files={files}
             deleting={deleting}
             emptyText="Nothing has been said about this card yet."
-          />
+          >
+            <ErrorNotice error={post.error} />
+            <CommentComposer
+              members={members}
+              files={files}
+              author={author}
+              onAuthor={setAuthor}
+              comment={draft}
+              onComment={setDraft}
+              onSubmit={() => post.mutate()}
+              submitLabel={post.isPending ? 'Posting…' : 'Add comment'}
+              canSubmit={Boolean(draft.trim()) && !post.isPending}
+            />
+          </Timeline>
         </ReadField>
 
         <History taskId={task.id} />
