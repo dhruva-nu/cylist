@@ -223,16 +223,10 @@ export function TaskDetailView({
               onAuthor={setAuthor}
               comment={draft}
               onComment={setDraft}
+              onSubmit={() => post.mutate()}
+              submitLabel={post.isPending ? 'Posting…' : 'Add comment'}
+              canSubmit={Boolean(draft.trim()) && !post.isPending}
             />
-            <div>
-              <Button
-                small
-                disabled={!draft.trim() || post.isPending}
-                onClick={() => post.mutate()}
-              >
-                {post.isPending ? 'Posting…' : 'Add comment'}
-              </Button>
-            </div>
           </Timeline>
         </ReadField>
 

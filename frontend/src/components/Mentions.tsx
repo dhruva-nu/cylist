@@ -64,6 +64,11 @@ interface MentionBoxProps {
    */
   onEnter?: (() => void) | undefined
   /**
+   * What Cmd/Ctrl+Enter does in a multi-line box, where plain enter is a new
+   * line. Like `onEnter` it yields to an open suggestion list.
+   */
+  onSubmit?: (() => void) | undefined
+  /**
    * For the wrapper, not the field. The suggestion list is positioned against
    * the wrapper, so the wrapper has to be the element the surrounding layout
    * sizes — a row that stretched the input inside a wrapper that had not
@@ -94,6 +99,7 @@ export function MentionBox({
   maxLength,
   'aria-label': label,
   onEnter,
+  onSubmit,
   className,
 }: MentionBoxProps) {
   const field = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
@@ -125,7 +131,10 @@ export function MentionBox({
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if (!matches.length) {
-      if (event.key === 'Enter' && onEnter) {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && onSubmit) {
+        event.preventDefault()
+        onSubmit()
+      } else if (event.key === 'Enter' && onEnter) {
         event.preventDefault()
         onEnter()
       }

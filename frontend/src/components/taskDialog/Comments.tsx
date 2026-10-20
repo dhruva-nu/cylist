@@ -1,10 +1,9 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { FiledItem, Person, TaskComment, TaskDetail } from '../../api/client'
 import { Field } from '../Modal'
 import { MentionBox } from '../Mentions'
-import { Avatar, ErrorNotice, Tagged } from '../ui'
+import { Avatar, Button, ErrorNotice, Tagged } from '../ui'
 import type { CommentDeleting } from './useCommentDeleting'
-import shared from './shared.module.css'
 import styles from './Comments.module.css'
 
 /**
@@ -43,7 +42,7 @@ export function Comments({
         members={members}
         files={files}
         deleting={deleting}
-        emptyText="No comments yet."
+        emptyText="No comments yet — start the conversation below."
       >
         <CommentComposer
           members={members}
@@ -58,7 +57,11 @@ export function Comments({
   )
 }
 
-/** Who is speaking and what they say — the form's composer, and the detail view's. */
+/**
+ * Who is speaking and what they say — the form's composer, and the detail
+ * view's. One card: the speaker's face, a roomy box, and a footer holding who
+ * it is posted as and, where this composer posts on its own, the button.
+ */
 export function CommentComposer({
   members,
   files,
@@ -66,6 +69,9 @@ export function CommentComposer({
   onAuthor,
   comment,
   onComment,
+  onSubmit,
+  submitLabel = 'Add comment',
+  canSubmit = true,
 }: {
   members: Person[]
   files: readonly FiledItem[]
@@ -73,30 +79,76 @@ export function CommentComposer({
   onAuthor: (id: string) => void
   comment: string
   onComment: (text: string) => void
+  /** Present where the composer posts by itself; the form posts with Save. */
+  onSubmit?: (() => void) | undefined
+  submitLabel?: string
+  canSubmit?: boolean
 }) {
+  const [changing, setChanging] = useState(false)
+  const speaker = members.find((person) => person.id === author)
+
   return (
-    <div className={shared.composer}>
-      <select
-        value={author}
-        onChange={(event) => onAuthor(event.target.value)}
-        aria-label="Comment as"
-      >
-        <option value="">Unattributed</option>
-        {members.map((person) => (
-          <option key={person.id} value={person.id}>
-            {person.name}
-          </option>
-        ))}
-      </select>
-      <MentionBox
-        value={comment}
-        onChange={onComment}
-        members={members}
-        files={files}
-        className={shared.grow}
-        aria-label="Add a comment"
-        placeholder="Add a comment, @ to tag someone, > a file…"
-      />
+    <div className={styles.composer}>
+      {speaker ? (
+        <Avatar name={speaker.name} colour={speaker.colour} />
+      ) : (
+        <Avatar name="?" colour="var(--ink-3)" />
+      )}
+      <div className={styles.card}>
+        <MentionBox
+          value={comment}
+          onChange={onComment}
+          members={members}
+          files={files}
+          multiline
+          rows={3}
+          onSubmit={onSubmit && canSubmit ? onSubmit : undefined}
+          className={styles.draft}
+          aria-label="Add a comment"
+          placeholder="Add a comment, @ to tag someone, > a file…"
+        />
+        <div className={styles.footer}>
+          <div className={styles.as}>
+            {changing ? (
+              <select
+                value={author}
+                onChange={(event) => {
+                  onAuthor(event.target.value)
+                  setChanging(false)
+                }}
+                onBlur={() => setChanging(false)}
+                aria-label="Comment as"
+                className={styles.asSelect}
+                autoFocus
+              >
+                <option value="">Unattributed</option>
+                {members.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <span>
+                  Commenting as <strong>{speaker?.name ?? 'no one (unattributed)'}</strong>
+                </span>
+                <button type="button" className={styles.change} onClick={() => setChanging(true)}>
+                  Change
+                </button>
+              </>
+            )}
+          </div>
+          {onSubmit ? (
+            <>
+              <span className={styles.hint}>⌘↵ to post</span>
+              <Button small variant="go" disabled={!canSubmit} onClick={onSubmit}>
+                {submitLabel}
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }
@@ -138,10 +190,10 @@ export function Timeline({
             />
           ))
         ) : (
-          <span className={shared.empty}>{emptyText}</span>
+          <p className={styles.quiet}>{emptyText}</p>
         )}
-        {children}
       </div>
+      {children}
     </>
   )
 }
