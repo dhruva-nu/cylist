@@ -64,4 +64,12 @@ class AgentUpdateTest {
         assertNull(AgentUpdate.parse(questionData + ("task" to "")))
         assertNull(AgentUpdate.parse(questionData + ("started_at" to "yesterday")))
     }
+
+    @Test
+    fun readsBackWhatItWrites() {
+        val update = checkNotNull(AgentUpdate.parse(questionData))
+
+        assertEquals(update, AgentUpdate.parse(update.toData()))
+        assertEquals(update.copy(reason = null, note = null), AgentUpdate.parse(update.copy(reason = null, note = null).toData()))
+    }
 }

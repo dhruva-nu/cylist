@@ -13,7 +13,6 @@ import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
 import cylist.app.MainActivity
-import cylist.app.R
 
 /**
  * Posts an [AgentUpdate] as a notification: one per agent session, replaced in
@@ -24,10 +23,17 @@ import cylist.app.R
  * in the status bar, and on OxygenOS the camera pill, once Live Alerts are on
  * for Cylist. Before 36 they are ordinary ongoing notifications.
  *
+ * Only one of them is promoted at a time, though: the pill shows one, and
+ * [AgentPill] picks which and puts the count of running agents in its icon.
+ * When that choice moves, the notifications it touched are redrawn quietly.
+ * Each notification carries its [AgentUpdate], so the choice can be made again
+ * from what is showing, even after the process was killed between pushes.
+ *
  * Tapping one opens the app on that card's agent session ([CardLink]).
  */
 class AgentNotifier(private val context: Context) {
     private val manager: NotificationManager = context.getSystemService(NotificationManager::class.java)
+    private val icons = PillIcons(context)
 
     /** Make the three channels. Idempotent; called before every post and once at start-up. */
     fun ensureChannels() {
@@ -48,10 +54,17 @@ class AgentNotifier(private val context: Context) {
     fun show(update: AgentUpdate) {
         if (!allowed()) return
         ensureChannels()
-        val showing = manager.activeNotifications.firstOrNull { it.tag == update.sessionId && it.id == ID }
-        val shownAt = showing?.notification?.extras?.getLong(EXTRA_CHANGED_AT, Long.MIN_VALUE) ?: Long.MIN_VALUE
-        if (shownAt > update.changedAtMillis) return
-        manager.notify(update.sessionId, ID, build(update, AgentAlert.of(update)))
+        val shown = showing()
+        val before = shown[update.sessionId]
+        if (before != null && before.update.changedAtMillis > update.changedAtMillis) return
+        val live = shown.values.map { it.update }.filter { it.state != AgentState.Done && it.sessionId != update.sessionId } +
+            listOfNotNull(update.takeIf { it.state != AgentState.Done })
+        val pill = AgentPill.of(live)
+        post(update, pill, quiet = false)
+        // The pill moved to another session, or its count changed: redraw the
+        // ones that changed role, without ringing for a question twice.
+        live.filter { it.sessionId != update.sessionId && shown[it.sessionId]?.role != pill.roleOf(it.sessionId) }
+            .forEach { post(it, pill, quiet = true) }
     }
 
     /** Take every agent notification down, as signing out does. */
@@ -59,7 +72,25 @@ class AgentNotifier(private val context: Context) {
         manager.activeNotifications.filter { it.id == ID }.forEach { manager.cancel(it.tag, it.id) }
     }
 
-    private fun build(update: AgentUpdate, alert: AgentAlert): Notification {
+    /** A notification of ours that is up, read back: its session's update and its role in the pill. */
+    private class Shown(val update: AgentUpdate, val role: String?)
+
+    private fun showing(): Map<String, Shown> = manager.activeNotifications
+        .filter { it.id == ID }
+        .mapNotNull { posted ->
+            val extras = posted.notification.extras
+            val data = extras.getBundle(EXTRA_UPDATE) ?: return@mapNotNull null
+            val update = AgentUpdate.parse(data.keySet().associateWith { data.getString(it).orEmpty() }) ?: return@mapNotNull null
+            update.sessionId to Shown(update, extras.getString(EXTRA_ROLE))
+        }
+        .toMap()
+
+    private fun post(update: AgentUpdate, pill: AgentPill, quiet: Boolean) {
+        manager.notify(update.sessionId, ID, build(update, AgentAlert.of(update), pill, quiet))
+    }
+
+    private fun build(update: AgentUpdate, alert: AgentAlert, pill: AgentPill, quiet: Boolean): Notification {
+        val leads = pill.leader == update.sessionId
         val link = CardLink(update.task, update.sessionId)
         val open = PendingIntent.getActivity(
             context,
@@ -74,7 +105,7 @@ class AgentNotifier(private val context: Context) {
         // Android 16 reads it: the platform's own setter arrived a release
         // later (36.1) than the extra it sets, which Compat writes directly.
         val builder = NotificationCompat.Builder(context, alert.channel.id)
-            .setSmallIcon(R.drawable.ic_stat_agent)
+            .setSmallIcon(if (leads) icons.of(pill.mark) else icons.plain())
             .setContentTitle(alert.title)
             .setContentText(alert.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(alert.text))
@@ -82,7 +113,7 @@ class AgentNotifier(private val context: Context) {
             .setContentIntent(open)
             .setOngoing(alert.ongoing)
             .setAutoCancel(!alert.ongoing)
-            .setOnlyAlertOnce(alert.channel != AlertChannel.NeedsYou)
+            .setOnlyAlertOnce(quiet || alert.channel != AlertChannel.NeedsYou)
             .setCategory(
                 when (alert.channel) {
                     AlertChannel.NeedsYou -> NotificationCompat.CATEGORY_REMINDER
@@ -90,9 +121,14 @@ class AgentNotifier(private val context: Context) {
                     AlertChannel.Finished -> NotificationCompat.CATEGORY_STATUS
                 },
             )
-            .addExtras(Bundle().apply { putLong(EXTRA_CHANGED_AT, update.changedAtMillis) })
-            .setRequestPromotedOngoing(alert.promoted)
-        alert.chip?.let(builder::setShortCriticalText)
+            .addExtras(
+                Bundle().apply {
+                    putBundle(EXTRA_UPDATE, Bundle().apply { update.toData().forEach { (key, value) -> putString(key, value) } })
+                    putString(EXTRA_ROLE, pill.roleOf(update.sessionId))
+                },
+            )
+            .setRequestPromotedOngoing(alert.promoted && leads)
+        if (leads) alert.chip?.let(builder::setShortCriticalText)
         val since = alert.chronometerSinceMillis
         if (since != null) {
             builder.setWhen(since).setShowWhen(true).setUsesChronometer(true)
@@ -115,6 +151,7 @@ class AgentNotifier(private val context: Context) {
     private companion object {
         /** Every agent notification has this id; its tag is the session. */
         const val ID = 107
-        const val EXTRA_CHANGED_AT = "cylist.agent.changedAt"
+        const val EXTRA_UPDATE = "cylist.agent.update"
+        const val EXTRA_ROLE = "cylist.agent.pillRole"
     }
 }
