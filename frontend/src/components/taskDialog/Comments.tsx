@@ -45,31 +45,59 @@ export function Comments({
         deleting={deleting}
         emptyText="No comments yet."
       >
-        <div className={shared.composer}>
-          <select
-            value={author}
-            onChange={(event) => onAuthor(event.target.value)}
-            aria-label="Comment as"
-          >
-            <option value="">Unattributed</option>
-            {members.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-          <MentionBox
-            value={comment}
-            onChange={onComment}
-            members={members}
-            files={files}
-            className={shared.grow}
-            aria-label="Add a comment"
-            placeholder="Add a comment, @ to tag someone, > a file…"
-          />
-        </div>
+        <CommentComposer
+          members={members}
+          files={files}
+          author={author}
+          onAuthor={onAuthor}
+          comment={comment}
+          onComment={onComment}
+        />
       </Timeline>
     </Field>
+  )
+}
+
+/** Who is speaking and what they say — the form's composer, and the detail view's. */
+export function CommentComposer({
+  members,
+  files,
+  author,
+  onAuthor,
+  comment,
+  onComment,
+}: {
+  members: Person[]
+  files: readonly FiledItem[]
+  author: string
+  onAuthor: (id: string) => void
+  comment: string
+  onComment: (text: string) => void
+}) {
+  return (
+    <div className={shared.composer}>
+      <select
+        value={author}
+        onChange={(event) => onAuthor(event.target.value)}
+        aria-label="Comment as"
+      >
+        <option value="">Unattributed</option>
+        {members.map((person) => (
+          <option key={person.id} value={person.id}>
+            {person.name}
+          </option>
+        ))}
+      </select>
+      <MentionBox
+        value={comment}
+        onChange={onComment}
+        members={members}
+        files={files}
+        className={shared.grow}
+        aria-label="Add a comment"
+        placeholder="Add a comment, @ to tag someone, > a file…"
+      />
+    </div>
   )
 }
 
