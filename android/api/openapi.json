@@ -3,7 +3,7 @@
   "info": {
     "title": "Cylist",
     "description": "Cylist keeps a project's **board**, **files**, **vault** and **people** in one\nplace — for you in the browser, and for your agents over the same HTTP API.\n\nAuthenticate with either an `Authorization: Bearer cyl_…` header or the\nsession cookie set by `POST /auth/login`. Tokens carry scopes; read each\nendpoint's description to see which one it needs.",
-    "version": "0.4.1"
+    "version": "0.4.2"
   },
   "paths": {
     "/api/v1/health": {
