@@ -85,6 +85,21 @@ def test_a_fresh_repository_gets_the_half_read_off_the_board(
     assert "Created" in result.out
 
 
+def test_the_block_says_a_pr_comes_before_dev(run: Runner, tmp_path: Path) -> None:
+    """Sessions that never saw /work still get the rule, even with no skills listed."""
+    bare = {("GET", "/projects/ATL/skills"): httpx.Response(200, json=[])}
+
+    result = run("repo", "setup", "ATL", "--path", str(tmp_path), overrides=bare)
+
+    assert result.code == 0
+    text = _claude_md(tmp_path).read_text("utf-8")
+    assert "**Finishing a card.**" in text
+    assert "link be commented on the card" in text
+    assert "before the card moves to" in text
+    assert "A card must not enter Dev without the PR link on it." in text
+    assert "`deploy-dev`" in text
+
+
 def test_a_column_name_is_copied_character_for_character(run: Runner, tmp_path: Path) -> None:
     """Boards really do have a column called 'Dev ', and move_task is literal.
 
