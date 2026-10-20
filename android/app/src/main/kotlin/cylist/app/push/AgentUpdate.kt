@@ -1,6 +1,8 @@
 package cylist.app.push
 
+import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 
 /** What an agent session is doing, as the server reports it. */
@@ -30,6 +32,24 @@ data class AgentUpdate(
     val startedAtMillis: Long,
     val changedAtMillis: Long,
 ) {
+    /**
+     * This update in the server's shape again, so a notification can carry it
+     * and be redrawn later from what is showing: [parse] reads it back as is.
+     */
+    fun toData(): Map<String, String> = mapOf(
+        "kind" to KIND,
+        "session_id" to sessionId,
+        "task" to task,
+        "task_title" to taskTitle,
+        "project" to project,
+        "state" to state.name.lowercase(),
+        "reason" to reason.orEmpty(),
+        "note" to note.orEmpty(),
+        "client_name" to clientName.orEmpty(),
+        "started_at" to iso(startedAtMillis),
+        "state_changed_at" to iso(changedAtMillis),
+    )
+
     companion object {
         const val KIND = "agent_session"
 
@@ -57,6 +77,8 @@ data class AgentUpdate(
                 changedAtMillis = millis(data["state_changed_at"]) ?: return null,
             )
         }
+
+        private fun iso(millis: Long): String = Instant.ofEpochMilli(millis).atOffset(ZoneOffset.UTC).toString()
 
         private fun millis(iso: String?): Long? = try {
             iso?.let { OffsetDateTime.parse(it).toInstant().toEpochMilli() }
