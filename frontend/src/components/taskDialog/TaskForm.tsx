@@ -38,6 +38,7 @@ import {
   summariseSave,
   taskPayload,
 } from './taskForm'
+import { useCommentAuthor } from './useCommentAuthor'
 import { useCommentDeleting } from './useCommentDeleting'
 import styles from './TaskForm.module.css'
 
@@ -105,7 +106,7 @@ export function TaskForm({
   const statusChange = useStatusChange(task)
   const { status, reason, tagged, changing, stalling } = statusChange
   const [comment, setComment] = useState('')
-  const [author, setAuthor] = useState('')
+  const [author, setAuthor] = useCommentAuthor(members)
   const [tab, setTab] = useState<TabId>('basics')
 
   // Never for a sub-task: it has no column, so `columnId` fell back to the
