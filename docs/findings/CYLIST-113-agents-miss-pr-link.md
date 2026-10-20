@@ -49,3 +49,19 @@ columns and skills only, so it carries no PR step either.
    refuse when the card has no comment containing a GitHub PR URL.
 
 Recommended: 1, 3 and 4. Item 5 changes server behaviour and needs a decision.
+
+## Implemented
+
+- `docs/skills/deploy-dev/SKILL.md`: new step 2 "Put the PR on the card"
+  (`gh pr view`, else `gh pr create`; `add_comment` the URL unless already
+  there), before the deploy and the move. Later steps renumbered; the final
+  step now verifies both the PR comment and the `Deployed to dev_N` comment and
+  the summary lists both. The rule that a card must not enter Dev without the
+  PR link is stated at the top and in step 6.
+- `~/.claude/commands/work.md` (outside the repo, edited in place): the PR
+  sentence is now a numbered "Finishing" list pointing at `deploy-dev`.
+- `cylist repo setup`: the CLAUDE.md block gains a "Finishing a card" line
+  (`_finishing_lines` in `cli/cylist_cli/commands/repo.py`), with a test in
+  `cli/tests/test_repo.py`. CLI suite: 544 passed.
+- Item 5 (server-side `move_task` check) was left for a decision.
+
