@@ -82,14 +82,18 @@ Both files are `chmod 600`. Everything that is not actually secret —
 service-account key for the `cylist-mobile` project, kept beside the others as
 `~/cylist-prod/fcm-service-account.json` (`chmod 600`). The server reads it from
 the path in `CYLIST_FCM_SERVICE_ACCOUNT_FILE`, never from the environment
-itself. The compose files do not mount it yet, so turning pushes on for a stack
-is two edits made by hand, after the release with migration 0045 is deployed:
+itself. `docker-compose.prod.yml` mounts it at
+`/run/secrets/fcm-service-account.json`, so on production there are two things to
+do, **before** deploying a release that has that mount:
 
-1. In that stack's compose file, under `app:` › `volumes:`, add
-   `- ${CYLIST_PROD_DIR}/fcm-service-account.json:/run/secrets/fcm-service-account.json:ro`
-   (`CYLIST_STAGING_DIR` for staging). Add it only once the file exists: a bind
-   mount of a missing file makes Docker create an empty directory in its place.
+1. Put the key at `~/cylist-prod/fcm-service-account.json` (`chmod 600`). The
+   mount needs the file to exist: a bind mount of a missing file makes Docker
+   create an empty directory in its place.
 2. In `app.env`, add `CYLIST_FCM_SERVICE_ACCOUNT_FILE=/run/secrets/fcm-service-account.json`.
+
+Staging's compose file does not mount it yet. To turn pushes on there, add the
+same line under `app:` › `volumes:` with `${CYLIST_STAGING_DIR}` in place of
+`${CYLIST_PROD_DIR}`, and do the same two steps in `~/cylist-staging`.
 
 Then redeploy. The log's start-up lines say `Push notifications are on` with the
 Firebase project, or why they are off. Without the key the server runs as
