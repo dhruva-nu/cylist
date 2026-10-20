@@ -75,6 +75,10 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - cylist-data:/data
+      # The Firebase service-account key for agent pushes (CYLIST-107). It must
+      # exist before this is deployed: a bind mount of a missing file makes
+      # Docker create an empty directory in its place. See DEPLOY.md.
+      - ${CYLIST_PROD_DIR}/fcm-service-account.json:/run/secrets/fcm-service-account.json:ro
     depends_on:
       postgres:
         condition: service_healthy
