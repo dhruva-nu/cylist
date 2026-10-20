@@ -35,7 +35,13 @@ data class AgentAlert(
     val channel: AlertChannel,
     val title: String,
     val text: String,
-    /** The status-bar chip's few characters, or null to show [chronometerSinceMillis] instead. */
+    /**
+     * The status-bar chip's few characters, or null for an icon-only chip.
+     * Android 16 fits at most 96dp here and drops text that will not mostly
+     * fit; OxygenOS's camera pill, given none, scrolls the title through it
+     * instead. So every promoted state sets one, and keeps it near the
+     * length of a card reference.
+     */
     val chip: String?,
     val ongoing: Boolean,
     /** Ask Android 16 to show it as a Live Update. */
@@ -52,7 +58,9 @@ data class AgentAlert(
                     channel = AlertChannel.Running,
                     title = "Working on $ref",
                     text = update.note ?: card,
-                    chip = null,
+                    // Not the elapsed time: the chip counts only down, to a
+                    // `when` ahead, and the agent's clock runs up from its start.
+                    chip = ref,
                     ongoing = true,
                     promoted = true,
                     chronometerSinceMillis = update.startedAtMillis,
