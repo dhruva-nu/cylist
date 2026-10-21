@@ -7,6 +7,7 @@ import { usePermissions } from '../../routes/usePermissions'
 import { AgentPanel } from '../AgentPanel'
 import { localDate } from '../dates'
 import { GoalChip } from '../GoalMarks'
+import { Markdown } from '../Markdown'
 import { Modal, ModalBody } from '../Modal'
 import { PRIORITIES, STATUS_LABELS } from '../taskLabels'
 import {
@@ -15,7 +16,6 @@ import {
   ErrorNotice,
   PriorityIcon,
   SubStatusBar,
-  Tagged,
   TaskRef,
   TypeIcon,
 } from '../ui'
@@ -138,9 +138,7 @@ export function TaskDetailView({
         ) : null}
 
         <ReadField label="Description">
-          <p className={styles.prose}>
-            <Tagged text={task.description} members={members} files={files} />
-          </p>
+          <Markdown source={task.description} tags={{ members, files }} />
         </ReadField>
 
         <div className={styles.readPair}>
