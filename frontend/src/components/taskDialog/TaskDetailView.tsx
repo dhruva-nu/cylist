@@ -10,15 +10,7 @@ import { GoalChip } from '../GoalMarks'
 import { Markdown } from '../Markdown'
 import { Modal, ModalBody } from '../Modal'
 import { PRIORITIES, STATUS_LABELS } from '../taskLabels'
-import {
-  Avatar,
-  Button,
-  ErrorNotice,
-  PriorityIcon,
-  SubStatusBar,
-  TaskRef,
-  TypeIcon,
-} from '../ui'
+import { Avatar, Button, ErrorNotice, PriorityIcon, SubStatusBar, TaskRef, TypeIcon } from '../ui'
 import { CommentComposer, Timeline } from './Comments'
 import type { DialogData, TaskDialogProps } from './dialogProps'
 import { History } from './History'
