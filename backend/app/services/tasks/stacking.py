@@ -30,6 +30,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.orm.util import identity_key
 
 from app.models.board import BoardColumn
+from app.models.project import Project
 from app.models.task import Task
 
 GAP = 1 << 16
@@ -136,7 +137,21 @@ async def _lock(session: AsyncSession, column_id: UUID) -> None:
     other placement in this column behind this one, but not the key-share lock
     a foreign key check takes, so a card merely pointing at the column is not
     held up being written.
+
+    The project's row first, in the shared ``FOR KEY SHARE`` mode, as
+    :func:`app.db.lock_row` asks of anything locking a row on a project: a
+    placement goes on to write an activity entry, which takes that same lock
+    through its foreign key. Taken there, after the column, it waited behind a
+    column being deleted — which holds the project and wants the column — and
+    the two deadlocked. Taken here it queues behind the delete instead, and
+    two placements still never wait on each other for it.
     """
+    project_id = select(BoardColumn.project_id).where(BoardColumn.id == column_id)
+    await session.execute(
+        select(Project.id)
+        .where(Project.id == project_id.scalar_subquery())
+        .with_for_update(read=True, key_share=True)
+    )
     await session.execute(
         select(BoardColumn.id).where(BoardColumn.id == column_id).with_for_update(key_share=True)
     )

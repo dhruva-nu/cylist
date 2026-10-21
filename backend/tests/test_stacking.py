@@ -22,9 +22,11 @@ from sqlalchemy import event, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ConflictError
 from app.db import Database
 from app.models.task import Task
 from app.schemas.tasks import TaskMove
+from app.services import columns
 from app.services.tasks import lookup, moves, stacking
 from tests.conftest import cards_of, put_members
 
@@ -232,6 +234,31 @@ class TestTwoMovesAtOnce:
         await _no_duplicate_positions(database)
         assert await _titles_in(signed_in, todo) == ["C", "B"]
         assert await _titles_in(signed_in, done) == ["A", "D"]
+
+    async def test_a_column_being_deleted_waits_for_a_move_into_it(
+        self, signed_in: AsyncClient, database: Database
+    ) -> None:
+        """The placement holds the project before the column, as everything on
+        a project does. When it took the column alone, a delete could take the
+        project in between and then wait on the column, while the move's own
+        activity entry waited on the project: a deadlock, which Postgres broke
+        by failing one of the two with a 500."""
+        person = await _setup(signed_in)
+        await _create(signed_in, person, "Card")
+        done = (await _columns(signed_in))[1]
+
+        async with database.session() as mover, database.session() as deleter:
+            card = await lookup.resolve(mover, "ATL-1")
+            await moves.move(mover, card, TaskMove.model_validate({"column_id": done}))
+
+            column = await columns.get(deleter, done)
+            deleting = asyncio.create_task(columns.delete(deleter, column))
+            await asyncio.sleep(0.5)
+            assert not deleting.done(), "the delete should be waiting on the move's project lock"
+
+            await mover.commit()
+            with pytest.raises(ConflictError, match="Move this column's tasks"):
+                await deleting
 
     async def test_many_at_once_over_http(self, signed_in: AsyncClient, database: Database) -> None:
         person = await _setup(signed_in)
