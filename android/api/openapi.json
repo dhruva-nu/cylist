@@ -2789,7 +2789,7 @@
           "people"
         ],
         "summary": "Update a person",
-        "description": "Change any subset of a person's details. Omitted fields are left alone.",
+        "description": "Change any subset of a person's details. Omitted fields are left alone.\n\nNames, titles, responsibilities and colours need `write`. Archiving or\nun-archiving somebody, and changing the email of anybody who has an\naccount or an invitation, need `admin` as well.",
         "operationId": "update_person_api_v1_people__person_id__patch",
         "parameters": [
           {
@@ -2824,15 +2824,11 @@
               }
             }
           },
+          "403": {
+            "description": "Archiving, or changing a sign-in email, needs `admin`."
+          },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "They are the last person who can sign in."
           }
         }
       },
@@ -2841,7 +2837,7 @@
           "people"
         ],
         "summary": "Archive a person",
-        "description": "Archive someone rather than deleting them.\n\nTasks they were assigned and files they uploaded keep naming them; they\nsimply stop appearing in pickers. Bring them back with\n`PATCH /people/{id}` and `{\"archived\": false}`.",
+        "description": "Archive someone rather than deleting them.\n\nTasks they were assigned and files they uploaded keep naming them; they\nsimply stop appearing in pickers. Bring them back with\n`PATCH /people/{id}` and `{\"archived\": false}`.\n\nNeeds `admin`, because archiving revokes every credential they hold — and\n`write` is the scope an agent carries. The last person who can sign in\ncannot be archived at all.",
         "operationId": "archive_person_api_v1_people__person_id__delete",
         "parameters": [
           {
@@ -2866,15 +2862,11 @@
               }
             }
           },
+          "403": {
+            "description": "Archiving somebody needs `admin`."
+          },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "They are the last person who can sign in."
           }
         }
       }

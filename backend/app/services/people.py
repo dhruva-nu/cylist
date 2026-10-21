@@ -118,6 +118,10 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
 
     ``archived`` is translated to a timestamp here rather than exposing
     ``archived_at`` for a client to set to an arbitrary moment.
+
+    Raises:
+        UnprocessableRequestError: if this archives the last person who can
+            sign in.
     """
     person = await get(session, person_id)
 
@@ -138,6 +142,8 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
     for field, value in fields.items():
         setattr(person, field, value)
 
+    if data.archived and not person.is_archived:
+        await _require_another_way_in(session, person)
     if data.archived is not None:
         person.archived_at = now() if data.archived else None
     if data.archived:
@@ -150,12 +156,48 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
 
 
 async def archive(session: AsyncSession, person_id: UUID) -> Person:
-    """Hide someone from the pickers, keeping every reference to them intact."""
+    """Hide someone from the pickers, keeping every reference to them intact.
+
+    Raises:
+        UnprocessableRequestError: if they are the last person able to sign in.
+    """
     person = await get(session, person_id)
     if not person.is_archived:
+        await _require_another_way_in(session, person)
         person.archived_at = now()
     await _withdraw_access(session, person)
     return person
+
+
+async def _require_another_way_in(session: AsyncSession, person: Person) -> None:
+    """Refuse to archive the last person who can still sign in (CYLIST-118).
+
+    Archiving takes every credential somebody holds, and
+    :func:`has_any_account` counts archived accounts on purpose, so the
+    bootstrap password does not come back either. Archiving the last live
+    password would leave a deployment nobody can get into short of the
+    database — which is not a thing any caller means by "archive".
+
+    Raises:
+        UnprocessableRequestError: naming them, if nobody else could sign in.
+    """
+    if person.password_hash is None:
+        return
+    another = await session.scalar(
+        select(Person.id)
+        .where(
+            Person.password_hash.is_not(None),
+            Person.archived_at.is_(None),
+            Person.id != person.id,
+        )
+        .limit(1)
+    )
+    if another is None:
+        raise UnprocessableRequestError(
+            f"{person.name} is the last person who can sign in, and archiving them "
+            "would lock everybody out. Open an account for somebody else first.",
+            details={"person_id": str(person.id)},
+        )
 
 
 async def _withdraw_access(session: AsyncSession, person: Person) -> None:

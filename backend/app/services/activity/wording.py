@@ -392,6 +392,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "person.added": lambda p: f"Added {p.get('name')} as a {_worded(p.get('kind'))}.",
     "person.updated": lambda p: f"Changed a person's {_worded_fields(p)}.",
     "person.archived": lambda p: f"Archived {p.get('name')}.",
+    "person.restored": lambda p: f"Brought {p.get('name')} back out of the archive.",
     "token.issued": lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
     "token.revoked": lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
     "session.started": lambda p: "Signed in.",

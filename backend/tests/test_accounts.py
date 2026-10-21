@@ -474,8 +474,12 @@ class TestSigningIn:
         )
 
     async def test_an_archived_person_cannot_sign_in(
-        self, signed_in: AsyncClient, client: AsyncClient, owner: Person
+        self, signed_in: AsyncClient, client: AsyncClient, other_client: AsyncClient, owner: Person
     ) -> None:
+        # Somebody else has to be able to sign in, or the archive is refused.
+        _, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+
         await signed_in.delete(f"/people/{owner.id}")
 
         response = await client.post(
@@ -606,6 +610,98 @@ class TestArchivingWithdrawsAccess:
             "/auth/login", json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD}
         )
         assert response.status_code == 200
+
+
+class TestWhatWriteCannotReach:
+    """CYLIST-118: ``write`` is every agent's scope, so it cannot lock people out."""
+
+    async def _writer(self, signed_in: AsyncClient) -> dict[str, str]:
+        created = await signed_in.post("/tokens", json={"name": "agent", "scopes": ["write"]})
+        return {"Authorization": f"Bearer {created.json()['token']}"}
+
+    async def test_a_write_token_cannot_archive_anybody(
+        self, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+        writer = await self._writer(signed_in)
+
+        deleted = await signed_in.delete(f"/people/{person['id']}", headers=writer)
+        patched = await signed_in.patch(
+            f"/people/{person['id']}", json={"archived": True}, headers=writer
+        )
+
+        assert deleted.status_code == patched.status_code == 403
+        assert patched.json()["error"]["details"]["missing_scopes"] == ["admin"]
+        assert (await other_client.get("/me")).status_code == 200
+
+    async def test_nor_bring_anybody_back(
+        self, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+        await signed_in.delete(f"/people/{person['id']}")
+        writer = await self._writer(signed_in)
+
+        response = await signed_in.patch(
+            f"/people/{person['id']}", json={"archived": False}, headers=writer
+        )
+
+        assert response.status_code == 403
+
+    async def test_nor_change_the_address_an_account_signs_in_with(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        writer = await self._writer(signed_in)
+
+        response = await signed_in.patch(
+            f"/people/{owner.id}", json={"email": "elsewhere@cylist.dev"}, headers=writer
+        )
+
+        assert response.status_code == 403
+
+    async def test_but_can_still_tidy_the_directory(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        """A name, a title, or the email of somebody who never signs in."""
+        writer = await self._writer(signed_in)
+        client_person = (await signed_in.post("/people", json=SANJAY)).json()
+
+        renamed = await signed_in.patch(
+            f"/people/{owner.id}", json={"title": "Owner", "email": OWNER_EMAIL}, headers=writer
+        )
+        readdressed = await signed_in.patch(
+            f"/people/{client_person['id']}", json={"email": "sanjay@atlas.dev"}, headers=writer
+        )
+
+        assert renamed.status_code == readdressed.status_code == 200
+
+    async def test_the_last_person_who_can_sign_in_is_not_archived(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        deleted = await signed_in.delete(f"/people/{owner.id}")
+        patched = await signed_in.patch(f"/people/{owner.id}", json={"archived": True})
+
+        assert deleted.status_code == patched.status_code == 422
+        assert "lock everybody out" in deleted.json()["error"]["message"]
+        assert (await signed_in.get("/me")).status_code == 200
+
+    async def test_archiving_through_a_patch_is_logged_as_archiving(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        person = (await signed_in.post("/people", json=SANJAY)).json()
+
+        await signed_in.patch(f"/people/{person['id']}", json={"archived": True})
+        await signed_in.patch(f"/people/{person['id']}", json={"archived": False})
+
+        verbs = list(
+            await session.scalars(
+                select(Activity.verb)
+                .where(Activity.entity_id == person["id"])
+                .order_by(Activity.occurred_at)
+            )
+        )
+        assert verbs == ["person.added", "person.archived", "person.restored"]
 
 
 class TestChangingAPassword:
