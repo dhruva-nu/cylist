@@ -19,16 +19,16 @@ shape as a zip somebody uploaded by hand.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from collections.abc import Set as AbstractSet
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from typing import NamedTuple
 from uuid import UUID
 
-from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import multipart
 from app.core.errors import NotFoundError, PayloadTooLargeError, UnprocessableRequestError
 from app.models.agent import Skill
 from app.models.file import Blob
@@ -36,6 +36,7 @@ from app.models.project import Project
 from app.schemas.agents import SkillUpdate
 from app.services import blobs, skill_folders
 from app.services.files import ensure_person_exists, filename_of
+from app.services.skill_folders import MAX_UNPACKED_BYTES
 from app.storage import BlobStore
 
 
@@ -70,41 +71,53 @@ async def list_skills(session: AsyncSession, project: Project) -> list[Skill]:
     return list(rows)
 
 
+DESCRIPTION_MAX_LENGTH = 2000
+"""The longest description an upload may carry — the same as
+:class:`~app.schemas.agents.SkillUpdate` allows when it is changed later."""
+
+
+class Received(NamedTuple):
+    """What a skill upload's form came to, before it is filed."""
+
+    name: str
+    blob: Blob
+    mime: str
+    description: str | None
+    files: int
+    """How many file parts it carried — one, or a folder's worth."""
+
+
 async def upload_skill(
     session: AsyncSession,
     store: BlobStore,
     project: Project,
-    sources: Sequence[UploadFile],
+    form: multipart.Form,
     *,
-    description: str | None,
-    folder: str | None = None,
-    executable: AbstractSet[str] = frozenset(),
     max_bytes: int,
     added_by: UUID | None,
-) -> tuple[Skill, bool]:
+) -> tuple[Skill, Received, bool]:
     """Put a skill on the project, or replace the one of that name.
 
-    ``sources`` is one file, or the parts of a folder — :func:`_stored_as`
-    decides which and is where the difference ends. Returns the skill and
-    whether it replaced an existing one, so the caller can record the right
-    activity and answer 201 or 200.
+    The form is read here, after the route's permission checks (CYLIST-123)
+    — see :func:`_received` for what it may hold. Returns the skill, what was
+    received, and whether it replaced an existing one, so the caller can
+    record the right activity and answer 201 or 200.
 
     Raises:
         PayloadTooLargeError: if the content exceeds ``max_bytes``.
+        RequestValidationError: if there is no file, or a field is too long.
         UnprocessableRequestError: if the upload has no usable filename, if
             the parts are not a skill's folder, or if ``added_by`` names
             nobody in the directory.
     """
     await ensure_person_exists(session, added_by)
 
-    name, blob, mime = await _stored_as(
-        session,
-        store,
-        sources,
-        description=description,
-        folder=folder,
-        executable=executable,
-        max_bytes=max_bytes,
+    received = await _received(session, store, form, max_bytes=max_bytes)
+    name, blob, mime, description = (
+        received.name,
+        received.blob,
+        received.mime,
+        received.description,
     )
 
     existing = await session.scalar(
@@ -127,7 +140,7 @@ async def upload_skill(
         await session.flush()
         await blobs.collect_garbage(session, {previous})
         await session.refresh(existing, ["added_by_person"])
-        return existing, True
+        return existing, received, True
 
     skill = Skill(
         project_id=project.id,
@@ -148,19 +161,28 @@ async def upload_skill(
             details={"name": name},
         ) from exc
     await session.refresh(skill, ["added_by_person"])
-    return skill, False
+    return skill, received, False
 
 
-async def _stored_as(
+_SKILL_FIELDS = frozenset({"folder", "executable", "description"})
+
+
+@dataclass
+class _Held:
+    """A file part read into memory, while it may still be part of a folder."""
+
+    filename: str | None
+    content_type: str | None
+    data: bytes
+
+
+async def _received(
     session: AsyncSession,
     store: BlobStore,
-    sources: Sequence[UploadFile],
+    form: multipart.Form,
     *,
-    description: str | None,
-    folder: str | None,
-    executable: AbstractSet[str],
     max_bytes: int,
-) -> tuple[str, Blob, str]:
+) -> Received:
     """The name, bytes and type to file this upload under.
 
     **One part and no ``folder``** is a single-file skill, stored exactly as
@@ -176,48 +198,33 @@ async def _stored_as(
     would have uploaded had they zipped the folder by hand, so
     ``/skills/{id}/folder`` unpacks it with no second code path.
 
+    Which of the two it is cannot be known until the form is over — a
+    ``folder`` field may come last — so the first part is held in memory
+    while it is small enough to be in a folder at all. One that outgrows
+    :data:`~app.services.skill_folders.MAX_UNPACKED_BYTES` can only be a
+    single file, and goes on to the blob store as it arrives instead of
+    being held whole.
+
     Raises:
         PayloadTooLargeError: if the parts together exceed ``max_bytes``.
-        UnprocessableRequestError: if nothing was sent, or the parts are not
-            a skill's folder.
+        RequestValidationError: if nothing was sent, or a field is too long.
+        UnprocessableRequestError: if the parts are not a skill's folder.
     """
-    if not sources:
-        raise UnprocessableRequestError("Send the skill's file, or a folder's files.")
-
-    if len(sources) == 1 and folder is None:
-        source = sources[0]
-        blob, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
-        return filename_of(source), blob, mime
-
-    bodies = await _read_all(sources, max_bytes)
-    parts = [
-        skill_folders.FolderFile(
-            path=source.filename or "",
-            data=data,
-            executable=(source.filename or "") in executable,
-        )
-        for source, data in zip(sources, bodies, strict=True)
-    ]
-    laid_out = skill_folders.gather(parts, description, folder=folder)
-    blob = await blobs.store_bytes(
-        session, store, skill_folders.pack(laid_out), max_bytes=max_bytes
-    )
-    return f"{laid_out.name}{skill_folders.ZIP_SUFFIX}", blob, skill_folders.ZIP_MIME
-
-
-async def _read_all(sources: Sequence[UploadFile], max_bytes: int) -> list[bytes]:
-    """Every part's bytes, refused as soon as they pass the upload limit.
-
-    A folder has to be in memory to be zipped, so it is read against the same
-    cap a single upload is streamed against rather than measured after the
-    fact. :data:`~app.services.skill_folders.MAX_UNPACKED_BYTES` caps it
-    again, lower, once the parts are known to be a folder.
-    """
-    read: list[bytes] = []
+    held: list[_Held] = []
+    streamed: list[tuple[str, Blob, str]] = []
     total = 0
-    for source in sources:
+
+    async def take(part: multipart.Part, before: Mapping[str, list[str]]) -> None:
+        nonlocal total
+        if streamed:
+            raise _too_large_for_a_folder()
+        chunks = part.chunks()
+        # Held in memory: every part of a folder, and the first part of
+        # anything until it is too big to be one. Read against the upload
+        # limit across all parts, as a single file is streamed against it.
+        cap = max_bytes if held or multipart.single(before, "folder") else MAX_UNPACKED_BYTES
         body = bytearray()
-        while chunk := await source.read(blobs.CHUNK_BYTES):
+        async for chunk in chunks:
             total += len(chunk)
             if total > max_bytes:
                 raise PayloadTooLargeError(
@@ -225,8 +232,79 @@ async def _read_all(sources: Sequence[UploadFile], max_bytes: int) -> list[bytes
                     details={"max_bytes": max_bytes},
                 )
             body += chunk
-        read.append(bytes(body))
-    return read
+            if len(body) > cap:
+                break
+        else:
+            held.append(_Held(part.filename, part.content_type, bytes(body)))
+            return
+
+        # Too big to be a folder's file, so it is a single file, and the rest
+        # of it goes to the store as it arrives.
+        name = filename_of(part.filename)
+        blob = await blobs.store_stream(
+            session, store, _resumed(bytes(body), chunks), max_bytes=max_bytes
+        )
+        streamed.append((name, blob, blobs.declared_mime(part.content_type)))
+
+    fields = await form.read(file_field="file", on_file=take, text_fields=_SKILL_FIELDS)
+    folder = multipart.single(fields, "folder")
+    description = multipart.single(fields, "description")
+    if description is not None and len(description) > DESCRIPTION_MAX_LENGTH:
+        raise multipart.invalid_field(
+            "description", f"must be at most {DESCRIPTION_MAX_LENGTH} characters"
+        )
+
+    if streamed:
+        if folder is not None:
+            raise _too_large_for_a_folder()
+        name, blob, mime = streamed[0]
+        return Received(name, blob, mime, description, files=1)
+
+    if not held:
+        raise multipart.invalid_field("file", "Field required", kind="missing")
+
+    if len(held) == 1 and folder is None:
+        only = held[0]
+        name = filename_of(only.filename)
+        blob = await blobs.store_bytes(session, store, only.data, max_bytes=max_bytes)
+        return Received(name, blob, blobs.declared_mime(only.content_type), description, files=1)
+
+    executable = set(fields.get("executable", []))
+    parts = [
+        skill_folders.FolderFile(
+            path=part.filename or "",
+            data=part.data,
+            executable=(part.filename or "") in executable,
+        )
+        for part in held
+    ]
+    laid_out = skill_folders.gather(parts, description, folder=folder)
+    blob = await blobs.store_bytes(
+        session, store, skill_folders.pack(laid_out), max_bytes=max_bytes
+    )
+    return Received(
+        f"{laid_out.name}{skill_folders.ZIP_SUFFIX}",
+        blob,
+        skill_folders.ZIP_MIME,
+        description,
+        files=len(held),
+    )
+
+
+async def _resumed(head: bytes, rest: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """A part's content from where holding it in memory left off."""
+    yield head
+    async for chunk in rest:
+        yield chunk
+
+
+def _too_large_for_a_folder() -> UnprocessableRequestError:
+    """A folder one of whose files is already past the folder's own cap."""
+    return UnprocessableRequestError(
+        f"That folder unpacks to more than "
+        f"{MAX_UNPACKED_BYTES // (1024 * 1024)} MB, which is more than a skill should.",
+        details={"max_bytes": MAX_UNPACKED_BYTES},
+    )
 
 
 async def update_skill(session: AsyncSession, skill: Skill, data: SkillUpdate) -> Skill:

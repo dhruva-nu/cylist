@@ -6407,7 +6407,7 @@
           "files"
         ],
         "summary": "Upload a file",
-        "description": "Store a file in this folder as `multipart/form-data`.\n\nContent is addressed by its SHA-256, so uploading bytes the server already\nholds costs a row and no disk. Anything over `CYLIST_MAX_UPLOAD_MB` is\nrefused with a 413 part-way through rather than after it has all arrived.",
+        "description": "Store a file in this folder as `multipart/form-data`.\n\nContent is addressed by its SHA-256, so uploading bytes the server already\nholds costs a row and no disk. Anything over `CYLIST_MAX_UPLOAD_MB` is\nrefused with a 413 — before any of it is read, if the request says how\nlong it is, and part-way through if it does not.\n\nThe body is read only once the caller is known to be allowed to upload\nhere (CYLIST-123). Send `added_by` and `sensitivity` before `file` and\nthey are checked before the file is stored, too.",
         "operationId": "upload_file_api_v1_folders__folder_id__upload_post",
         "parameters": [
           {
@@ -6421,16 +6421,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_file_api_v1_folders__folder_id__upload_post"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -6455,6 +6445,49 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "contentMediaType": "application/octet-stream",
+                    "description": "The file itself."
+                  },
+                  "added_by": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Which person is uploading it."
+                  },
+                  "sensitivity": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/Sensitivity"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "How far it may travel. Omit to take the folder's default."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
               }
             }
           }
@@ -7479,7 +7512,7 @@
           "agents"
         ],
         "summary": "Upload a skill, as one file or as a folder",
-        "description": "Upload a skill as `multipart/form-data`.\n\n**A skill can be a whole folder.** A skill is usually a `SKILL.md` beside\nthe scripts and references it points an agent at, so send one `file` part\nper file, each named with its path inside the folder, and `folder` with\nthe folder's own name. The server lays it out, checks it the way it checks\nan uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,\nat most 200 files and 20 MB — and stores it as `<folder>.zip`, which\n`/skills/{skill_id}/folder` unpacks again file for file. A single part with\nno `folder` is stored exactly as it was sent, as it always was.\n\n**Uploading a name that already exists replaces it** and answers 200 rather\nthan 201 — the name is the skill, so sending `board-tidy.md` again means\nyou have a newer version of it, not that you have a conflict. This is the\none place Cylist's upload rules differ from the file tree's, where a\nduplicate name is refused.\n\nContent is addressed by its SHA-256 and shared with the file store, so\nuploading bytes the server already holds costs a row and no disk.\n\n**It is filed under whoever is uploading it** — the person behind the\nsession or token — and there is no field to say otherwise (CYLIST-142).\nAn agent's upload is its owner's, which is the person its token acts as.",
+        "description": "Upload a skill as `multipart/form-data`.\n\n**A skill can be a whole folder.** A skill is usually a `SKILL.md` beside\nthe scripts and references it points an agent at, so send one `file` part\nper file, each named with its path inside the folder, and `folder` with\nthe folder's own name. The server lays it out, checks it the way it checks\nan uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,\nat most 200 files and 20 MB — and stores it as `<folder>.zip`, which\n`/skills/{skill_id}/folder` unpacks again file for file. A single part with\nno `folder` is stored exactly as it was sent, as it always was.\n\n**Uploading a name that already exists replaces it** and answers 200 rather\nthan 201 — the name is the skill, so sending `board-tidy.md` again means\nyou have a newer version of it, not that you have a conflict. This is the\none place Cylist's upload rules differ from the file tree's, where a\nduplicate name is refused.\n\nContent is addressed by its SHA-256 and shared with the file store, so\nuploading bytes the server already holds costs a row and no disk.\n\n**It is filed under whoever is uploading it** — the person behind the\nsession or token — and there is no field to say otherwise (CYLIST-142).\nAn agent's upload is its owner's, which is the person its token acts as.\n\nThe body is read only once the caller is known to be allowed to upload\nhere (CYLIST-123), and a body over the upload limit is refused with a 413\nbefore it is read.",
         "operationId": "upload_skill_api_v1_projects__project_ref__skills_post",
         "parameters": [
           {
@@ -7497,16 +7530,6 @@
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_skill_api_v1_projects__project_ref__skills_post"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -7526,6 +7549,60 @@
           },
           "422": {
             "description": "The parts sent are not a skill's folder — see the message."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "contentMediaType": "application/octet-stream"
+                    },
+                    "description": "The skill. One part for a single-file skill, or one part per file for a folder — each named with the path it has inside the folder, 'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
+                  },
+                  "folder": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name of the folder being uploaded. Send it and every part is read as a path inside a folder, even if there is only one."
+                  },
+                  "executable": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "Which parts to mark executable, by the same path, repeated once each. A browser cannot know; a client walking a directory can."
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "One line on what the skill does."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
           }
         }
       }
@@ -8726,96 +8803,6 @@
         ],
         "title": "Board",
         "description": "A board's columns, left to right, with the limits that govern them."
-      },
-      "Body_upload_file_api_v1_folders__folder_id__upload_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "description": "The file itself."
-          },
-          "added_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Added By",
-            "description": "Which person is uploading it."
-          },
-          "sensitivity": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Sensitivity"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How far it may travel. Omit to take the folder's default."
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_file_api_v1_folders__folder_id__upload_post"
-      },
-      "Body_upload_skill_api_v1_projects__project_ref__skills_post": {
-        "properties": {
-          "file": {
-            "items": {
-              "type": "string",
-              "contentMediaType": "application/octet-stream"
-            },
-            "type": "array",
-            "title": "File",
-            "description": "The skill. One part for a single-file skill, or one part per file for a folder — each named with the path it has inside the folder, 'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
-          },
-          "folder": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Folder",
-            "description": "The name of the folder being uploaded. Send it and every part is read as a path inside a folder, even if there is only one."
-          },
-          "executable": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Executable",
-            "description": "Which parts to mark executable, by the same path, repeated once each. A browser cannot know; a client walking a directory can.",
-            "default": []
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "One line on what the skill does."
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_skill_api_v1_projects__project_ref__skills_post"
       },
       "CardTodos": {
         "properties": {

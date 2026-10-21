@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +20,12 @@ from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
-from app.core import sensitivity
+from app.core import multipart, sensitivity
+from app.core.body_limit import streams_upload
 from app.core.errors import NotFoundError, UnprocessableRequestError
-from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
+from app.core.multipart import multipart_body
+from app.core.security_headers import DOWNLOAD_HEADERS
+from app.core.sensitivity import DEFAULT_LEVEL
 from app.db import SessionDependency
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
@@ -358,35 +361,47 @@ async def delete_folder(
         409: {"description": "The folder already has something with that name."},
         413: {"description": "The file is larger than the configured upload limit."},
     },
+    openapi_extra=multipart_body(
+        {
+            "file": {
+                "type": "string",
+                "contentMediaType": "application/octet-stream",
+                "description": "The file itself.",
+            },
+            "added_by": {
+                "anyOf": [{"type": "string", "format": "uuid"}, {"type": "null"}],
+                "description": "Which person is uploading it.",
+            },
+            "sensitivity": {
+                "anyOf": [{"$ref": "#/components/schemas/Sensitivity"}, {"type": "null"}],
+                "description": "How far it may travel. Omit to take the folder's default.",
+            },
+        },
+        required=["file"],
+    ),
 )
+@streams_upload
 async def upload_file(
+    request: Request,
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(WRITE_IN_THIS_FOLDER),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
-    file: UploadFile = File(description="The file itself."),
-    added_by: UUID | None = Form(default=None, description="Which person is uploading it."),
-    classified: Sensitivity | None = Form(
-        default=None,
-        alias="sensitivity",
-        description="How far it may travel. Omit to take the folder's default.",
-    ),
 ) -> ItemRead:
     """Store a file in this folder as `multipart/form-data`.
 
     Content is addressed by its SHA-256, so uploading bytes the server already
     holds costs a row and no disk. Anything over `CYLIST_MAX_UPLOAD_MB` is
-    refused with a 413 part-way through rather than after it has all arrived.
+    refused with a 413 — before any of it is read, if the request says how
+    long it is, and part-way through if it does not.
+
+    The body is read only once the caller is known to be allowed to upload
+    here (CYLIST-123). Send `added_by` and `sensitivity` before `file` and
+    they are checked before the file is stored, too.
     """
     item = await files.upload(
-        session,
-        store,
-        folder,
-        file,
-        max_bytes=settings.max_upload_bytes,
-        added_by=added_by,
-        sensitivity=classified.value if classified is not None else None,
+        session, store, folder, multipart.Form(request), max_bytes=settings.max_upload_bytes
     )
     await activity.record(
         session,
@@ -548,6 +563,7 @@ async def download_item(
 
     return FileResponse(
         store.locate(item.blob.path),
-        media_type=item.mime or blobs.DEFAULT_MIME,
+        media_type=blobs.declared_mime(item.mime),
         filename=item.name,
+        headers=DOWNLOAD_HEADERS,
     )

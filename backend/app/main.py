@@ -29,10 +29,12 @@ from app.config import (
     get_settings,
 )
 from app.core.base_path import BasePathMiddleware
+from app.core.body_limit import BodyLimitMiddleware
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
 from app.core.request_log import RequestLogMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.db import Database
 from app.mcp import mount_mcp
 from app.realtime.bus import Bus
@@ -281,6 +283,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Read by GET /health/requests. Set on app.state, not module-level, so each
     # app built by the test suite starts its own counters.
     app.state.metrics = Metrics()
+
+    # Innermost, so the 413 it answers with is counted, logged and given
+    # CORS headers like any other response. Handed the live route list, which
+    # it reads when the stack is built on the first request — after every
+    # router below is included — to find the routes marked as uploads.
+    app.add_middleware(
+        BodyLimitMiddleware,
+        routes=app.router.routes,
+        upload_bytes=settings.max_upload_bytes,
+        request_bytes=settings.max_request_bytes,
+    )
     app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)
 
     if settings.cors_origins:
@@ -302,6 +315,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # log without one.
     app.add_middleware(
         RequestLogMiddleware, api_prefix=API_PREFIX, trusted_proxies=settings.trusted_proxies
+    )
+
+    # Outside the request log, so the 500 it sends for an unhandled error
+    # carries the headers too; inside the base path, so the docs pages are
+    # recognised under a dev slot's prefix as well as at the root.
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        hsts=settings.is_deployed,
+        docs_paths=frozenset(
+            path for path in (app.docs_url, app.swagger_ui_oauth2_redirect_url) if path
+        ),
     )
 
     # Outside even that, so the request it logs is already under the base path

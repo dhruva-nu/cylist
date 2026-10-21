@@ -20,8 +20,8 @@ export const skillsApi = {
   /** Filed under whoever is signed in: the server takes the uploader from the session. */
   uploadSkill: (projectKey: string, file: File, description?: string) => {
     const form = new FormData()
-    form.append('file', file)
     if (description) form.append('description', description)
+    form.append('file', file)
     return request<Skill>(`/projects/${projectKey}/skills`, { method: 'POST', body: form })
   },
   /**
@@ -39,9 +39,11 @@ export const skillsApi = {
     description?: string,
   ) => {
     const form = new FormData()
+    // The fields before the files, so the server knows it is reading a
+    // folder from the first part on.
     form.append('folder', folder)
-    for (const file of files) form.append('file', file, file.webkitRelativePath || file.name)
     if (description) form.append('description', description)
+    for (const file of files) form.append('file', file, file.webkitRelativePath || file.name)
     return request<Skill>(`/projects/${projectKey}/skills`, { method: 'POST', body: form })
   },
   deleteSkill: (id: string) => request<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
