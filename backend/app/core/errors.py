@@ -9,6 +9,7 @@ Every error reaches the client as::
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -31,12 +32,45 @@ class AppError(Exception):
         self.message = message
         self.details = details or {}
 
+    @property
+    def headers(self) -> dict[str, str]:
+        """Response headers this refusal carries, beyond the envelope.
+
+        Empty for nearly every error. The ones with something to say — a
+        ``Retry-After``, a ``WWW-Authenticate`` — override this rather than
+        teaching the handler about each class.
+        """
+        return {}
+
 
 class UnauthorizedError(AppError):
     """No valid credentials were presented."""
 
     status_code = status.HTTP_401_UNAUTHORIZED
     code = "unauthorized"
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"WWW-Authenticate": "Bearer"}
+
+
+class TooManyRequestsError(AppError):
+    """The caller has tried this too often, too quickly (CYLIST-121).
+
+    Carries ``Retry-After`` in whole seconds, both as a header and in
+    ``details.retry_after``, so a client can wait exactly as long as it must.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+
+    def __init__(self, message: str, *, retry_after: float) -> None:
+        self.retry_after = max(1, math.ceil(retry_after))
+        super().__init__(message, details={"retry_after": self.retry_after})
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"Retry-After": str(self.retry_after)}
 
 
 class ForbiddenError(AppError):
@@ -148,11 +182,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(request: Request, exc: AppError) -> JSONResponse:
         _log_app_error(request, exc)
-        headers = {"WWW-Authenticate": "Bearer"} if isinstance(exc, UnauthorizedError) else None
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(exc.code, exc.message, exc.details),
-            headers=headers,
+            headers=exc.headers or None,
         )
 
     @app.exception_handler(RequestValidationError)

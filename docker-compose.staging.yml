@@ -74,6 +74,9 @@ services:
       # As production, for :8001: loopback, then staging's own hostname through
       # the Cloudflare Tunnel (see DEPLOY.md, "Staging").
       CYLIST_CLIENT_URLS: '["http://localhost:8001","https://stage.cylist.in"]'
+      # As in production: the peer is the Docker bridge, the client is in
+      # CF-Connecting-IP, and the header is believed only from the bridge.
+      CYLIST_TRUSTED_PROXY_CIDRS: '["172.16.0.0/12"]'
     ports:
       # Loopback only, and 8001 rather than production's 8000. cloudflared
       # relays stage.cylist.in here; nothing else should reach it directly.

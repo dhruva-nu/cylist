@@ -17,10 +17,11 @@ import asyncio
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 
 from app.services import goals, hooks, people, templates
-from tests.conftest import INVITEE_PASSWORD, put_members
+from tests.conftest import INVITEE_PASSWORD, client_on, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
@@ -259,3 +260,34 @@ class TestTwoAtOnce:
         assert moved.status_code < 500, moved.text
         assert deleted.status_code < 500, deleted.text
         assert (moved.status_code == 200) != (deleted.status_code == 200)
+
+
+class TestConsumedExactlyOnce:
+    """CYLIST-126: a one-time credential redeemed twice at once opens once."""
+
+    async def test_an_invitation_accepted_twice_at_once(
+        self, signed_in: AsyncClient, app: FastAPI
+    ) -> None:
+        _, token = await open_account(signed_in, TEAM, "aditi@cylist.dev")
+        passwords = ["first-browser-password", "second-browser-password"]
+
+        async with client_on(app) as one, client_on(app) as two:
+            first, second = await asyncio.gather(
+                one.post("/auth/accept-invite", json={"token": token, "password": passwords[0]}),
+                two.post("/auth/accept-invite", json={"token": token, "password": passwords[1]}),
+            )
+
+        assert sorted([first.status_code, second.status_code]) == [200, 422], (
+            first.text,
+            second.text,
+        )
+        # The password that works is the one the accept that succeeded set.
+        winner = passwords[0] if first.status_code == 200 else passwords[1]
+        loser = passwords[1] if winner == passwords[0] else passwords[0]
+        login = {"email": "aditi@cylist.dev"}
+        assert (
+            await signed_in.post("/auth/login", json={**login, "password": winner})
+        ).status_code == 200
+        assert (
+            await signed_in.post("/auth/login", json={**login, "password": loser})
+        ).status_code == 401

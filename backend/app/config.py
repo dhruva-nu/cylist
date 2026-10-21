@@ -6,9 +6,11 @@ readable next to unrelated variables. See ``.env.example`` for the full list.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from datetime import timedelta
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network
 from pathlib import Path
 from typing import Literal
 
@@ -180,6 +182,21 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     session_ttl_hours: int = Field(default=720, gt=0)
 
+    trusted_proxy_cidrs: list[str] = Field(default_factory=list)
+    """The networks a request may arrive from with a forwarded address to be
+    believed (CYLIST-122): ``["172.16.0.0/12"]`` for a container behind a
+    proxy on the host.
+
+    Empty — the default — means no header is ever read and every request's
+    client is the socket's peer, which is right for a server reached
+    directly and safe for one that is not: the worst case is a log full of
+    the proxy's address, which is what it was before. Set it, and a request
+    from inside one of these networks has its client taken from
+    ``CF-Connecting-IP`` or ``X-Forwarded-For`` instead — see
+    :func:`app.core.request_log.resolve_client`. Never widen it to a network
+    clients sit on: anything inside it can name any address it likes.
+    """
+
     client_urls: list[str] = Field(default_factory=list)
     """Every address this deployment can be reached at, most local first.
 
@@ -233,6 +250,26 @@ class Settings(BaseSettings):
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("database_url must use the postgresql+asyncpg:// driver")
         return value
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def _require_networks(cls, value: list[str]) -> list[str]:
+        """Refuse anything that is not a network at startup, not at the first
+        request from behind it."""
+        for cidr in value:
+            try:
+                ipaddress.ip_network(cidr.strip(), strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"trusted_proxy_cidrs holds {cidr!r}, which is not a network such as "
+                    "172.16.0.0/12 or 127.0.0.1/32"
+                ) from exc
+        return [cidr.strip() for cidr in value]
+
+    @property
+    def trusted_proxies(self) -> tuple[IPv4Network | IPv6Network, ...]:
+        """:attr:`trusted_proxy_cidrs`, parsed."""
+        return tuple(ipaddress.ip_network(cidr, strict=False) for cidr in self.trusted_proxy_cidrs)
 
     @field_validator("base_path")
     @classmethod

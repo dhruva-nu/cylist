@@ -38,7 +38,8 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.auth import passwords
-from app.auth.passwords import hash_password
+from app.auth.passwords import hash_password_sync
+from app.auth.throttle import SignInThrottle
 from app.config import Settings
 from app.core.palette import colour_for
 from app.db import Database
@@ -65,7 +66,7 @@ INVITEE_PASSWORD = "sixteen-horses-and-one-stapler"
 OWNER_EMAIL = "dhruva@cylist.dev"
 OWNER_NAME = "Dhruva N"
 
-OWNER_PASSWORD_HASH = hash_password(OWNER_PASSWORD)
+OWNER_PASSWORD_HASH = hash_password_sync(OWNER_PASSWORD)
 """Hashed once for the whole run, rather than once per test that signs in."""
 
 VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
@@ -197,6 +198,7 @@ APP_STATE = {
     "doc_engine",
     "metrics",
     "mcp",
+    "sign_in_throttle",
 }
 """Everything ``create_app`` hangs on ``app.state``, which :func:`as_new` must
 know how to put back. Checked, so a new one cannot be added and quietly carry
@@ -226,6 +228,8 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.pusher = Pusher()
     app.state.push_sender = None
     app.state.doc_engine = engine_for(settings)
+    # Fresh buckets, so one test's sign-in attempts are not another's.
+    app.state.sign_in_throttle = SignInThrottle()
     # In place, not replaced: MetricsMiddleware holds this object.
     app.state.metrics.__init__()
     return app

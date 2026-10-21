@@ -70,6 +70,11 @@ services:
       # callers: the app never dials these, so `localhost` here means the
       # caller's localhost, not the container's.
       CYLIST_CLIENT_URLS: '["http://localhost:8000","https://cylist.in"]'
+      # Requests reach this container from cloudflared on the host, over the
+      # Docker bridge, so the socket's peer is always the bridge gateway. The
+      # real client is in CF-Connecting-IP, believed only from these networks
+      # (CYLIST-122) — the sign-in log and the login rate limit depend on it.
+      CYLIST_TRUSTED_PROXY_CIDRS: '["172.16.0.0/12"]'
     ports:
       # Loopback only. See the note at the top of this file.
       - "127.0.0.1:8000:8000"

@@ -13,10 +13,11 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.invites import INVITE_TTL, generate_invite, looks_like_invite
-from app.auth.passwords import hash_password, needs_rehash, verify_password
+from app.auth.passwords import dummy_hash, hash_password, needs_rehash, verify_password
 from app.auth.principal import Principal
 from app.auth.tokens import hash_token
 from app.core.clock import now
@@ -314,17 +315,19 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Pers
         )
     )
     if person is None:
-        # Verify against nothing anyway. Returning early here would make a
-        # wrong email measurably faster to reject than a wrong password, which
-        # is how an attacker learns which addresses have accounts.
-        verify_password(password, None)
+        # Verify against a real hash anyway (CYLIST-121). Returning early here
+        # would make a wrong email measurably faster to reject than a wrong
+        # password, which is how an attacker learns which addresses have
+        # accounts; and a check against nothing returns at once, so it has
+        # to be a hash of a password nobody holds.
+        await verify_password(password, dummy_hash())
         return None
-    if not verify_password(password, person.password_hash):
+    if not await verify_password(password, person.password_hash):
         return None
     if person.is_archived:
         return None
     if person.password_hash is not None and needs_rehash(person.password_hash):
-        person.password_hash = hash_password(password)
+        person.password_hash = await hash_password(password)
     return person
 
 
@@ -388,7 +391,7 @@ async def open_account(
     had_one = person.password_hash is not None
     await _close_the_bootstrap_door(session)
     person.email = email
-    person.password_hash = hash_password(password)
+    person.password_hash = await hash_password(password)
     # Any outstanding invitation is answered by this: the account it would have
     # opened is open, and a link that still worked would be a second way in
     # that nobody is watching.
@@ -405,12 +408,23 @@ async def withdraw_invite(session: AsyncSession, person_id: UUID) -> Person:
     return person
 
 
+INVITE_NOT_VALID = "That invitation link is not valid, or it has expired."
+"""One message for unknown, spent, expired and archived alike: an invitation
+is a bare secret with no second factor, so what it is worth saying about one
+is whether it works, not why it does not."""
+
+
 async def accept_invite(session: AsyncSession, token: str, password: str) -> Person:
     """Turn an invitation into a password, and return whose it was.
 
-    Clearing the digest is what makes the link single-use; it happens in the
-    same transaction as setting the password, so a failure part-way leaves the
-    invitation still good rather than spent on nothing.
+    Clearing the digest is what makes the link single-use, and it is done in
+    the one statement that sets the password: ``UPDATE … WHERE the invitation
+    is still good RETURNING id``. Two accepts of one link at the same moment
+    both pass a read, and a read-then-write would hand both of them a session
+    with the second password winning (CYLIST-126). Of two conditional
+    updates the second waits on the row, finds the digest gone, touches
+    nothing, and is refused like a spent link. The read before it is only so
+    that a dead link is refused before the hash is paid for.
 
     Raises:
         UnprocessableRequestError: if the token is unknown, already used or
@@ -419,25 +433,34 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
     if not looks_like_invite(token):
         raise UnprocessableRequestError("That invitation link is not valid.")
 
-    person = await session.scalar(
-        select(Person).where(Person.invite_token_hash == hash_token(token))
-    )
-    # One message for unknown, spent, expired and archived alike: an
-    # invitation is a bare secret with no second factor, so what it is worth
-    # saying about one is whether it works, not why it does not.
+    digest = hash_token(token)
+    person = await session.scalar(select(Person).where(Person.invite_token_hash == digest))
     if person is None or not person.invite_is_pending:
-        raise UnprocessableRequestError("That invitation link is not valid, or it has expired.")
+        raise UnprocessableRequestError(INVITE_NOT_VALID)
 
     await _close_the_bootstrap_door(session)
-    person.password_hash = hash_password(password)
-    _clear_invitation(person)
-    await session.flush()
+    password_hash = await hash_password(password)
+    consumed = await session.execute(
+        sql_update(Person)
+        .where(
+            Person.invite_token_hash == digest,
+            Person.invite_expires_at > now(),
+            Person.archived_at.is_(None),
+        )
+        .values(password_hash=password_hash, invite_token_hash=None, invite_expires_at=None)
+        .returning(Person.id)
+        .execution_options(synchronize_session=False)
+    )
+    if consumed.scalar_one_or_none() is None:
+        raise UnprocessableRequestError(INVITE_NOT_VALID)
+    # The row in hand still shows the invitation; the statement went past it.
+    await session.refresh(person)
     return person
 
 
 async def set_password(session: AsyncSession, person: Person, new_password: str) -> Person:
     """Replace somebody's password. The caller has already proved it is theirs."""
-    person.password_hash = hash_password(new_password)
+    person.password_hash = await hash_password(new_password)
     _clear_invitation(person)
     await session.flush()
     return person
