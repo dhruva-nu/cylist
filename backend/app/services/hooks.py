@@ -50,6 +50,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -587,6 +588,10 @@ async def update(
         url = checked_url(fields.url)
         if url != hook.url:
             hook.url = url
+            # Somewhere new has earned a fresh start: whatever the old address
+            # kept failing to do says nothing about this one.
+            hook.consecutive_failures = 0
+            hook.paused_until = None
             changed.append("url")
     changed += await _apply_filters(session, project, hook, filters)
     _refuse_rules_on_manual(hook)
@@ -702,14 +707,26 @@ def refuse_unless_fireable(project: Project, hook: Hook) -> None:
 
 
 def checked_url(url: str) -> str:
-    """An absolute ``http``/``https`` URL, or a 422 saying what is wrong with it."""
+    """An absolute ``http``/``https`` URL, or a 422 saying what is wrong with it.
+
+    Read twice: once by ``urlsplit`` for its shape, and once by the client the
+    courier sends with, which is stricter — a port that is not a number, say.
+    A URL only the second refuses would otherwise be saved, and then fail
+    every delivery at the moment it was sent rather than here, where the
+    person typing it can see why.
+    """
     url = url.strip()
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
-        raise UnprocessableRequestError(
-            "A hook's URL must be an absolute http:// or https:// address.",
-            details={"url": url},
-        )
+    refused = UnprocessableRequestError(
+        "A hook's URL must be an absolute http:// or https:// address.",
+        details={"url": url},
+    )
+    try:
+        parts = urlsplit(url)
+        parsed = httpx.URL(url)
+    except (ValueError, httpx.InvalidURL) as exc:
+        raise refused from exc
+    if parts.scheme not in ("http", "https") or not parts.netloc or not parsed.host:
+        raise refused
     return url
 
 

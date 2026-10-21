@@ -14,9 +14,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import Callable
+import logging
+from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
 from typing import Any
+from uuid import UUID, uuid4
 
 import httpx
 import httpx2
@@ -24,13 +26,13 @@ import pytest
 from httpx import AsyncClient
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.auth.principal import Principal
 from app.core.clock import now
 from app.db import Database
 from app.models.activity import Activity, Channel
-from app.models.hook import HookDelivery
+from app.models.hook import Hook, HookDelivery
 from app.models.task import Task
 from app.services import activity, hook_delivery
 from tests.conftest import INVITEE_PASSWORD, VAULT_KEY, open_account, put_members
@@ -212,6 +214,10 @@ class TestRules:
             ({"verbs": ["vault.secret_revealed"]}, 422),
             ({"url": "ftp://ci.example.com/"}, 422),
             ({"url": "/relative"}, 422),
+            # Each fine by ``urlsplit`` or not, but none a URL the client
+            # could ever send to.
+            ({"url": "http://ci.example.com:deploy/"}, 422),
+            ({"url": "http://[::1/hook"}, 422),
             ({"secret": "short"}, 422),
         ],
     )
@@ -640,7 +646,7 @@ class TestDelivery:
 
         # Not before its time, and then once it has come.
         assert await _deliver(signed_in, Receiver(200)) == 0
-        assert await _deliver(signed_in, Receiver(200), after=timedelta(seconds=31)) == 1
+        assert await _deliver(signed_in, Receiver(200), after=timedelta(seconds=37)) == 1
 
         log = (await signed_in.get(f"/projects/ATL/hooks/{hook['id']}/deliveries")).json()
         assert [entry["state"] for entry in log] == ["delivered"]
@@ -683,7 +689,10 @@ class TestDelivery:
         )
         assert response.status_code == 200, response.text
         assert response.json()["state"] == "pending"
-        assert await _deliver(signed_in, Receiver(200)) == 1
+        # Seven refusals in a row have opened the hook's breaker too, so it is
+        # sent once that has closed — and the success closes it.
+        assert await _deliver(signed_in, Receiver(200)) == 0
+        assert await _deliver(signed_in, Receiver(200), after=timedelta(days=2)) == 1
         [delivery] = await _queued(signed_in)
         assert delivery.state == "delivered"
 
@@ -736,6 +745,299 @@ class TestDelivery:
                 await running
         assert len(receiver.requests) == 2
         assert {delivery.state for delivery in await _queued(signed_in)} == {"delivered"}
+
+
+# --- One bad receiver -------------------------------------------------------
+
+
+SLOW = "https://slow.example.com/cylist"
+
+
+async def _hook_row(client: AsyncClient, hook_id: str) -> Hook:
+    async with _database(client).session() as session:
+        hook = await session.get(Hook, UUID(hook_id))
+        assert hook is not None
+        return hook
+
+
+class TestOneBadReceiver:
+    """Whatever one receiver does — hang, flood, refuse for hours, or sit
+    behind a URL that cannot be sent to — every other hook's deliveries still
+    go, and an operator can see it happening."""
+
+    async def test_a_receiver_that_trickles_is_cut_off_in_total(
+        self, signed_in: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        person = await _project(signed_in)
+        await _hook(signed_in, verbs=["task.created"])
+        await _task(signed_in, person)
+        monkeypatch.setattr(hook_delivery, "TOTAL_TIMEOUT", timedelta(seconds=0.3))
+
+        async def drip() -> AsyncIterator[bytes]:
+            # A byte well inside the per-read timeout, for ever.
+            while True:
+                await asyncio.sleep(0.02)
+                yield b"."
+
+        async def trickle(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=drip())
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(trickle)) as http:
+            sent = await asyncio.wait_for(
+                hook_delivery.deliver_due(_database(signed_in), http, VAULT_KEY), 5
+            )
+        assert sent == 1
+        [delivery] = await _queued(signed_in)
+        assert delivery.state == "pending"
+        assert delivery.last_status_code is None
+        assert delivery.last_error == "TimeoutError: no answer within 0.3 seconds"
+
+    async def test_no_more_than_the_cap_of_an_answer_is_read(self, signed_in: AsyncClient) -> None:
+        person = await _project(signed_in)
+        await _hook(signed_in, verbs=["task.created"])
+        await _task(signed_in, person)
+        pulled = 0
+
+        async def flood() -> AsyncIterator[bytes]:
+            nonlocal pulled
+            while True:
+                pulled += 1
+                yield b"x" * 4096
+
+        class Flood(httpx.AsyncBaseTransport):
+            """Streams its answer as it is read, as the network does —
+            ``MockTransport`` reads the whole of it first."""
+
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                assert request.headers["Accept-Encoding"] == "identity"
+                return httpx.Response(500, content=flood())
+
+        async with httpx.AsyncClient(transport=Flood()) as http:
+            sent = await asyncio.wait_for(
+                hook_delivery.deliver_due(_database(signed_in), http, VAULT_KEY), 5
+            )
+        assert sent == 1
+        assert pulled * 4096 <= hook_delivery.RESPONSE_MAX_BYTES + 4096
+        [delivery] = await _queued(signed_in)
+        assert delivery.last_status_code == 500
+        assert delivery.last_error is not None
+        assert delivery.last_error.startswith("HTTP 500: xxx")
+        assert len(delivery.last_error) == hook_delivery.ERROR_MAX_LENGTH
+
+    async def test_a_url_that_cannot_be_sent_to_fails_alone(self, signed_in: AsyncClient) -> None:
+        person = await _project(signed_in)
+        broken = await _hook(signed_in, name="Broken", verbs=["task.created"])
+        await _hook(signed_in, name="Fine", verbs=["task.created"])
+        # Saved before URLs were read the way the client reads them.
+        async with _database(signed_in).session() as session:
+            await session.execute(
+                update(Hook)
+                .where(Hook.id == UUID(broken["id"]))
+                .values(url="http://ci.example.com:deploy/")
+            )
+        await _task(signed_in, person)
+        receiver = Receiver(200)
+
+        assert await _deliver(signed_in, receiver) == 2
+
+        assert len(receiver.requests) == 1
+        [bad] = await _queued(signed_in, broken["id"])
+        assert bad.state == "pending"
+        assert bad.attempt_count == 1
+        assert bad.last_error is not None
+        assert bad.last_error.startswith("InvalidURL")
+        states = {delivery.state for delivery in await _queued(signed_in)}
+        assert states == {"pending", "delivered"}
+        # Recorded, so not sent again until its retry is due.
+        assert await _deliver(signed_in, Receiver(200)) == 0
+
+    async def test_anything_a_send_raises_is_a_failed_attempt(
+        self, signed_in: AsyncClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        person = await _project(signed_in)
+        await _hook(signed_in, name="Buggy", url=SLOW, verbs=["task.created"])
+        await _hook(signed_in, name="Fine", verbs=["task.created"])
+        await _task(signed_in, person)
+
+        def answer(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == SLOW:
+                raise RuntimeError("something nobody planned for")
+            return httpx.Response(200)
+
+        with caplog.at_level(logging.ERROR, logger=hook_delivery.__name__):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+                assert await hook_delivery.deliver_due(_database(signed_in), http, VAULT_KEY) == 2
+        errors = {delivery.last_error for delivery in await _queued(signed_in)}
+        assert errors == {None, "RuntimeError: something nobody planned for"}
+        assert "failed unexpectedly" in caplog.text
+
+    async def test_a_pass_takes_only_a_few_of_one_hooks_rows(self, signed_in: AsyncClient) -> None:
+        person = await _project(signed_in)
+        busy = await _hook(signed_in, name="Busy", url=SLOW, verbs=["task.created"])
+        await _task(signed_in, person)
+        await _hook(signed_in, name="Quiet", verbs=["task.created"])
+        for _ in range(hook_delivery.PER_HOOK + 2):
+            await _task(signed_in, person)
+        receiver = Receiver(200)
+
+        # Busy has seven waiting and Quiet six, yet each gets its share.
+        assert await _deliver(signed_in, receiver) == 2 * hook_delivery.PER_HOOK
+        hosts = [request.url.host for request in receiver.requests]
+        assert hosts.count("slow.example.com") == hook_delivery.PER_HOOK
+        assert await _deliver(signed_in, receiver) == 3 + 2
+        assert len(await _queued(signed_in, busy["id"])) == hook_delivery.PER_HOOK + 3
+
+    async def test_a_slow_receiver_does_not_hold_up_the_others(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = await _project(signed_in)
+        await _hook(signed_in, name="Slow", url=SLOW, verbs=["task.created"])
+        fast = await _hook(signed_in, name="Fast", verbs=["task.created"])
+        released = asyncio.Event()
+        answered: list[str] = []
+
+        async def answer(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == SLOW:
+                await released.wait()
+            answered.append(str(request.url))
+            return httpx.Response(200)
+
+        courier = hook_delivery.Courier()
+        running = asyncio.create_task(
+            courier.run(_database(signed_in), VAULT_KEY, httpx.MockTransport(answer))
+        )
+        try:
+            # Each card queues one for each hook. Slow never answers; Fast's
+            # keep going out as they are queued, not after Slow's.
+            for count in range(1, 4):
+                await _task(signed_in, person)
+                courier.wake()
+                for _ in range(100):
+                    if answered.count(RECEIVER) == count:
+                        break
+                    await asyncio.sleep(0.02)
+                assert answered.count(RECEIVER) == count
+            assert SLOW not in answered
+            fast_states = {d.state for d in await _queued(signed_in, fast["id"])}
+            assert fast_states == {"delivered"}
+
+            released.set()
+            for _ in range(100):
+                if answered.count(SLOW) == 3:
+                    break
+                courier.wake()
+                await asyncio.sleep(0.02)
+            assert answered.count(SLOW) == 3
+        finally:
+            running.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await running
+
+    async def test_retries_are_spread_around_their_step(self) -> None:
+        moments = set()
+        for _ in range(50):
+            delivery = HookDelivery(
+                hook_id=uuid4(), event="task.created", payload={}, attempts=[], attempt_count=0
+            )
+            attempt = hook_delivery.Attempt(
+                at=now(), status_code=503, error="HTTP 503", duration_ms=1
+            )
+            hook_delivery.record(delivery, attempt)
+            assert delivery.next_attempt_at is not None
+            wait = delivery.next_attempt_at - attempt.at
+            assert timedelta(seconds=24) <= wait <= timedelta(seconds=36)
+            moments.add(wait)
+        assert len(moments) > 1
+
+    async def test_a_delivery_that_gives_up_says_so_in_the_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        hook_id = uuid4()
+        delivery = HookDelivery(
+            id=uuid4(),
+            hook_id=hook_id,
+            event="task.moved",
+            payload={},
+            attempts=[],
+            attempt_count=hook_delivery.MAX_ATTEMPTS - 1,
+        )
+        attempt = hook_delivery.Attempt(at=now(), status_code=502, error="HTTP 502", duration_ms=1)
+        with caplog.at_level(logging.WARNING, logger=hook_delivery.__name__):
+            hook_delivery.record(delivery, attempt)
+        assert delivery.state == "failed"
+        [entry] = caplog.records
+        assert entry.levelno == logging.WARNING
+        message = entry.getMessage()
+        assert str(hook_id) in message
+        assert "task.moved" in message
+        assert f"attempt {hook_delivery.MAX_ATTEMPTS}" in message
+
+    async def test_a_receiver_that_keeps_failing_is_paused_then_probed(
+        self, signed_in: AsyncClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        person = await _project(signed_in)
+        hook = await _hook(signed_in, verbs=["task.created"])
+        for _ in range(hook_delivery.BREAKER_THRESHOLD):
+            await _task(signed_in, person)
+
+        # Four, then the fifth: five refusals in a row open the breaker.
+        assert await _deliver(signed_in, Receiver(500)) == hook_delivery.PER_HOOK
+        assert (await _hook_row(signed_in, hook["id"])).paused_until is None
+        with caplog.at_level(logging.WARNING, logger=hook_delivery.__name__):
+            assert await _deliver(signed_in, Receiver(500)) == 1
+        paused = await _hook_row(signed_in, hook["id"])
+        assert paused.consecutive_failures == hook_delivery.BREAKER_THRESHOLD
+        assert paused.paused_until is not None
+        # Its receiver failing is not somebody editing the hook.
+        assert paused.updated_at == paused.created_at
+        assert f"Hook {hook['id']} has failed 5 attempts in a row" in caplog.text
+
+        # Every retry has come due, but nothing goes while the breaker is open,
+        # and the wait spends none of their attempts.
+        receiver = Receiver(200)
+        assert await _deliver(signed_in, receiver, after=timedelta(seconds=40)) == 0
+        assert receiver.requests == []
+        assert {d.attempt_count for d in await _queued(signed_in)} == {1}
+
+        # Then one goes alone. Refused, the breaker opens again for longer.
+        assert await _deliver(signed_in, Receiver(500), after=timedelta(minutes=2)) == 1
+        assert await _deliver(signed_in, receiver, after=timedelta(minutes=1)) == 0
+        reopened = await _hook_row(signed_in, hook["id"])
+        assert reopened.paused_until is not None
+        assert reopened.paused_until - now() > timedelta(minutes=1, seconds=50)
+
+        # Answered, it closes, and the rest follow.
+        assert await _deliver(signed_in, receiver, after=timedelta(minutes=5)) == 1
+        closed = await _hook_row(signed_in, hook["id"])
+        assert (closed.consecutive_failures, closed.paused_until) == (0, None)
+        assert await _deliver(signed_in, receiver, after=timedelta(minutes=5)) == 4
+        assert {d.state for d in await _queued(signed_in)} == {"delivered"}
+
+    async def test_a_new_url_starts_with_its_breaker_closed(self, signed_in: AsyncClient) -> None:
+        await _project(signed_in)
+        hook = await _hook(signed_in)
+        async with _database(signed_in).session() as session:
+            await session.execute(
+                update(Hook)
+                .where(Hook.id == UUID(hook["id"]))
+                .values(consecutive_failures=9, paused_until=now() + timedelta(hours=1))
+            )
+        response = await signed_in.patch(
+            f"/projects/ATL/hooks/{hook['id']}", json={"url": "https://ci.example.com/v2"}
+        )
+        assert response.status_code == 200, response.text
+        moved = await _hook_row(signed_in, hook["id"])
+        assert (moved.consecutive_failures, moved.paused_until) == (0, None)
+
+    async def test_a_url_that_cannot_be_sent_to_is_refused_on_change(
+        self, signed_in: AsyncClient
+    ) -> None:
+        await _project(signed_in)
+        hook = await _hook(signed_in)
+        response = await signed_in.patch(
+            f"/projects/ATL/hooks/{hook['id']}", json={"url": "http://ci.example.com:deploy/"}
+        )
+        assert response.status_code == 422, response.text
 
 
 class TestSendTest:
@@ -854,7 +1156,7 @@ class TestFiring:
         assert sent["next_attempt_at"] is not None
 
         receiver = Receiver(200)
-        assert await _deliver(signed_in, receiver, after=timedelta(seconds=31)) == 1
+        assert await _deliver(signed_in, receiver, after=timedelta(seconds=37)) == 1
         assert receiver.bodies()[0]["event"] == "hook.fired"
         [delivery] = await _queued(signed_in, hook["id"])
         assert delivery.state == "delivered"
