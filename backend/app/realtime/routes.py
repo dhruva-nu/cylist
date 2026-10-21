@@ -203,7 +203,6 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
             return
         principal, key = outcome
 
-        await websocket.send_json(protocol.ready(client_session_id, principal.label))
         link = AgentLink(key=key)
         hub.register_agent(link)
         # Any other process holding an older socket for this session lets go.
@@ -215,7 +214,10 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
                 "link_id": link.id,
             }
         )
+        # Before `ready`, so that by the time the agent hears it, this socket
+        # already holds the session and vouches for it to every process.
         await _stamp(database, link)
+        await websocket.send_json(protocol.ready(client_session_id, principal.label))
 
         code, cause = await _serve_agent(websocket, database, principal, link)
     except WebSocketDisconnect as exc:
