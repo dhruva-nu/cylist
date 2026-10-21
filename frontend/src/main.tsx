@@ -2,6 +2,7 @@ import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { keptCurrentBySocket } from './routes/useBoardSocket'
 import { applyStoredTheme } from './theme/theme'
 import './theme/tokens.css'
 
@@ -36,8 +37,10 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       // Cylist is written on by agents over the same API, so coming back to
-      // the tab is a good moment to find out what changed while you were gone.
-      refetchOnWindowFocus: true,
+      // the tab is a good moment to find out what changed while you were gone —
+      // except for a board's cards while its socket is up, which hears of every
+      // change anyway and catches up on its own when the tab comes back.
+      refetchOnWindowFocus: (query) => !keptCurrentBySocket(query.queryKey),
     },
   },
 })

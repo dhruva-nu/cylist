@@ -15,6 +15,21 @@ import { backoffDelay, boardSocketUrl, isFinal, parseEvent } from '../api/realti
 /** Collapse a burst into one refetch. */
 const DEBOUNCE_MS = 250
 
+/**
+ * The boards whose socket is up right now, by project key.
+ *
+ * Read by the window-focus rule in `main.tsx`: a board with a live socket is
+ * told about every change to its cards, and settles up for the ones it missed
+ * while hidden (`missedWhileHidden`), so reading all of them again because the
+ * tab came back into view is a second copy of what the socket already does.
+ */
+const liveBoards = new Set<string>()
+
+/** Whether a board socket already keeps this query's data current. */
+export function keptCurrentBySocket(queryKey: readonly unknown[]): boolean {
+  return queryKey[0] === 'tasks' && typeof queryKey[1] === 'string' && liveBoards.has(queryKey[1])
+}
+
 export interface BoardSocketState {
   /** Whether the server has said `ready`. False means the board should poll. */
   connected: boolean
@@ -84,6 +99,7 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
           // Only here, not on `open`: a socket that is accepted and then
           // immediately refused would otherwise reset the backoff and spin.
           attempt = 0
+          liveBoards.add(projectKey)
           setConnected(true)
           // Whatever happened while there was no socket, happened. One
           // unconditional refetch is the entire resync protocol.
@@ -101,7 +117,11 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
         // retry would open a second socket beside the live one.
         if (socket !== current) return
         setConnected(false)
+        // An unmounted board's socket says nothing for the set either: the
+        // cleanup below already took it out, and under StrictMode this close
+        // can land after the second mount's socket has put it back.
         if (!live) return
+        liveBoards.delete(projectKey)
         if (isFinal(event.code)) {
           refused = true
           setSignedOut(true)
@@ -136,6 +156,7 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
       if (retry) clearTimeout(retry)
       if (debounce.current) clearTimeout(debounce.current)
       socket?.close()
+      liveBoards.delete(projectKey)
       setConnected(false)
     }
   }, [projectKey, queryClient])

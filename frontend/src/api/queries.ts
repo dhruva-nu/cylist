@@ -51,6 +51,19 @@ export const queryKeys = {
 export const refreshesItself = { refreshesItself: true } as const
 
 /**
+ * How long a list that hardly ever changes counts as fresh: who you are, what
+ * you may do, the projects, a project and its people and templates.
+ *
+ * The default is half a minute, and every time the tab comes back into view
+ * whatever is older than that is read again — which, for a reader moving
+ * between this and a terminal, was all of these every visit. A change to one
+ * from this tab still shows at once, because a write invalidates them
+ * regardless of age; this only decides how soon someone else's change is
+ * noticed.
+ */
+const SETTLED_MS = 5 * 60_000
+
+/**
  * Who this session is.
  *
  * Not being signed in is an answer rather than a failure, so it is not retried
@@ -60,6 +73,7 @@ export function useIdentity() {
   return useQuery({
     queryKey: queryKeys.identity,
     queryFn: api.me,
+    staleTime: SETTLED_MS,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.isUnauthenticated) && failureCount < 2,
   })
@@ -71,13 +85,18 @@ export function useSetup() {
 }
 
 export function useProjects() {
-  return useQuery({ queryKey: queryKeys.projects, queryFn: api.listProjects })
+  return useQuery({
+    queryKey: queryKeys.projects,
+    queryFn: api.listProjects,
+    staleTime: SETTLED_MS,
+  })
 }
 
 export function useProject(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.project(projectKey),
     queryFn: () => api.getProject(projectKey),
+    staleTime: SETTLED_MS,
   })
 }
 
@@ -90,6 +109,7 @@ export function useMembers(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.members(projectKey),
     queryFn: () => api.listMembers(projectKey),
+    staleTime: SETTLED_MS,
   })
 }
 
@@ -109,6 +129,7 @@ export function usePermissionGrid(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.permissions(projectKey),
     queryFn: () => api.getPermissions(projectKey),
+    staleTime: SETTLED_MS,
   })
 }
 
@@ -124,6 +145,7 @@ export function useTemplates(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.templates(projectKey),
     queryFn: () => api.listTemplates(projectKey),
+    staleTime: SETTLED_MS,
   })
 }
 
