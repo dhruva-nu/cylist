@@ -14,15 +14,9 @@
 
 import { useId, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { queryKeys } from '../api/queries'
+import { queryKeys, type BoardCards } from '../api/queries'
 
-import {
-  api,
-  type AgentPrompt,
-  type AgentPromptAnswer,
-  type Task,
-  type TaskDetail,
-} from '../api/client'
+import { api, type AgentPrompt, type AgentPromptAnswer, type TaskDetail } from '../api/client'
 import { Button, ErrorBanner } from './ui'
 import { useViewerId } from '../routes/useViewerId'
 import {
@@ -49,8 +43,8 @@ export function useAnswerPrompt(taskRef: string, onAnswered?: (answered: AgentPr
     mutationFn: ({ prompt, answer }: { prompt: AgentPrompt; answer: AgentPromptAnswer }) =>
       api.answerAgentPrompt(taskRef, prompt.id, answer),
     onSuccess: (answered) => {
-      queryClient.setQueriesData<Task[]>({ queryKey: ['tasks'] }, (old) =>
-        old ? tasksWithPromptAnswered(old, answered) : old,
+      queryClient.setQueriesData<BoardCards>({ queryKey: ['tasks'] }, (old) =>
+        old ? { ...old, tasks: tasksWithPromptAnswered(old.tasks, answered) } : old,
       )
       queryClient.setQueriesData<TaskDetail>({ queryKey: queryKeys.allTasks }, (old) =>
         old ? detailWithPromptAnswered(old, answered) : old,

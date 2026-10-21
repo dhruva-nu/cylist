@@ -155,7 +155,7 @@ export function useBoardMutations(
     onMutate: (move) => {
       const landedGoal =
         move.goalId === undefined ? null : (goals ?? []).find((goal) => goal.id === move.goalId)
-      const cards = queryClient.getQueryData<Task[]>(tasksKey) ?? []
+      const cards = queryClient.getQueryData<BoardCards>(tasksKey)?.tasks ?? []
       return changeCardsOptimistically((task) =>
         task.id === move.taskId ? withMoveApplied(task, move, landedGoal, cards) : task,
       )
