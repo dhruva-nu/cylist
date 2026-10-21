@@ -4,14 +4,15 @@ Two halves. :mod:`.filing` is what people do on the Docs page — topics and
 docs made, renamed, moved and reordered — and owns the rules about where a
 doc may sit. The rest is what agents do, through jev-docs: :mod:`.asking`
 finds the section that answers a question, :mod:`.placing` plans where a new
-fact belongs, and :mod:`.writing` files what the agent wrote. The agent half
+fact belongs — both over the corpus :mod:`.corpora` keeps between questions —
+and :mod:`.writing` files what the agent wrote. The agent half
 only ever files through the first, so the rules about where a doc may sit
 are kept in one place.
 """
 
 from app.services.docs.asking import Answer, Found, Weighed, ask
+from app.services.docs.corpora import CorpusCache, corpus_for
 from app.services.docs.filing import (
-    corpus_for,
     count_for_project,
     counts_by_topic,
     create_doc,
@@ -33,6 +34,7 @@ from app.services.docs.writing import TopicUnclearError, Written, appended, writ
 
 __all__ = [
     "Answer",
+    "CorpusCache",
     "Edit",
     "Found",
     "Placed",

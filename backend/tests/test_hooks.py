@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
@@ -24,16 +23,17 @@ import pytest
 from httpx import AsyncClient
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.auth.principal import Principal
 from app.core.clock import now
 from app.db import Database
 from app.models.activity import Activity, Channel
-from app.models.hook import HookDelivery
+from app.models.hook import Hook, HookDelivery
 from app.models.task import Task
 from app.services import activity, hook_delivery
 from tests.conftest import INVITEE_PASSWORD, VAULT_KEY, open_account, put_members
+from tests.connections import assert_no_connection_held
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -143,8 +143,13 @@ class Receiver:
     def __init__(self, *answers: int) -> None:
         self.answers = list(answers) or [200]
         self.requests: list[httpx.Request] = []
+        self.database: Database | None = None
+        """The pool that must hold no connection while this answers, once the
+        receiver is wired to an app or a courier pass."""
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        if self.database is not None:
+            assert_no_connection_held(self.database, f"a hook receiver at {request.url}")
         self.requests.append(request)
         status = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
         return httpx.Response(status, text="" if status < 300 else "receiver says no")
@@ -160,6 +165,7 @@ async def _deliver(
     client: AsyncClient, receiver: Receiver, *, after: timedelta | None = None
 ) -> int:
     at = now() + after if after is not None else None
+    receiver.database = _database(client)
     async with receiver.client() as http:
         return await hook_delivery.deliver_due(_database(client), http, VAULT_KEY, at=at)
 
@@ -740,9 +746,8 @@ class TestDelivery:
 
 class TestSendTest:
     @staticmethod
-    def _answering(
-        client: AsyncClient, receiver: Callable[[httpx.Request], httpx.Response]
-    ) -> None:
+    def _answering(client: AsyncClient, receiver: Receiver) -> None:
+        receiver.database = _database(client)
         client.app.state.hook_transport = httpx.MockTransport(receiver)  # type: ignore[attr-defined]
 
     async def test_a_test_send_answers_with_what_came_back(self, signed_in: AsyncClient) -> None:
@@ -776,6 +781,29 @@ class TestSendTest:
             )
         assert pending == 0
 
+    async def test_a_hook_deleted_while_its_test_is_sent_is_a_404(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """Nothing of the hook's is locked across the send — deleting it from
+        another connection meanwhile would otherwise wait for the send to
+        finish — so the delivery has nowhere to go and the answer says so."""
+        await _project(signed_in)
+        hook = await _hook(signed_in)
+        database = _database(signed_in)
+
+        async def receiver(request: httpx.Request) -> httpx.Response:
+            assert_no_connection_held(database, "a hook receiver")
+            async with database.session() as session:
+                await session.execute(delete(Hook).where(Hook.id == hook["id"]))
+            return httpx.Response(200)
+
+        signed_in.app.state.hook_transport = httpx.MockTransport(receiver)  # type: ignore[attr-defined]
+        response = await asyncio.wait_for(
+            signed_in.post(f"/projects/ATL/hooks/{hook['id']}/test"), timeout=10
+        )
+        assert response.status_code == 404, response.text
+        assert await _queued(signed_in) == []
+
 
 # --- Fired by hand ---------------------------------------------------------
 
@@ -783,6 +811,7 @@ class TestSendTest:
 class TestFiring:
     @staticmethod
     def _answering(client: AsyncClient, receiver: Receiver) -> None:
+        receiver.database = _database(client)
         client.app.state.hook_transport = httpx.MockTransport(receiver)  # type: ignore[attr-defined]
 
     async def test_a_manual_hook_hears_nothing_of_the_boards_changes(

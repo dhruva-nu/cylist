@@ -7,13 +7,11 @@ from dataclasses import dataclass
 from typing import cast
 
 from jevdocs import Route
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
 from app.schemas.docs import AnswerStatus
 from app.services.doc_corpus import FiledDoc, ProjectCorpus
 from app.services.doc_engine import DocEngine, EngineUnavailableError
-from app.services.docs.filing import corpus_for
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +54,7 @@ def _miss(status: AnswerStatus, reason: str) -> Answer:
 
 
 async def ask(
-    session: AsyncSession, project: Project, question: str, engine: DocEngine | None
+    filed: ProjectCorpus, project: Project, question: str, engine: DocEngine | None
 ) -> Answer:
     """The section of the project's docs that answers ``question``.
 
@@ -66,8 +64,11 @@ async def ask(
     the code, and so does jev being unreachable: ``unavailable`` is a miss, not
     an error, because an agent that stopped whenever a model was down would
     stop for nothing.
+
+    Takes the corpus rather than a session, because nothing here may hold a
+    database connection: jev can take tens of seconds to answer, and a
+    connection waiting on it is one the rest of the server cannot have.
     """
-    filed = await corpus_for(session, project)
     if filed.empty:
         return _miss("not_documented", f"{project.key} has no docs yet.")
     if engine is None:

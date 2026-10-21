@@ -49,6 +49,7 @@ from app.models.person import Person, PersonKind
 from app.realtime.bus import Bus
 from app.realtime.hub import Hub
 from app.services.doc_engine import engine_for
+from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
 from app.services.push.delivery import Pusher
 
@@ -157,7 +158,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory, database_url: str) -> Set
 @pytest.fixture(scope="session")
 async def database(settings: Settings) -> AsyncIterator[Database]:
     """Create the schema once, drop it at the end of the run."""
-    db = Database(settings.database_url)
+    db = Database.configured(settings)
     async with db.engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
@@ -198,6 +199,7 @@ APP_STATE = {
     "pusher",
     "push_sender",
     "doc_engine",
+    "doc_corpora",
     "metrics",
     "mcp",
     "sign_in_throttle",
@@ -231,6 +233,7 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.pusher = Pusher()
     app.state.push_sender = None
     app.state.doc_engine = engine_for(settings)
+    app.state.doc_corpora = CorpusCache()
     # Fresh buckets, so one test's sign-in attempts are not another's.
     app.state.sign_in_throttle = SignInThrottle()
     # In place, not replaced: MetricsMiddleware holds this object.

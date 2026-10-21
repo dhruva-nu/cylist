@@ -131,6 +131,28 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://cylist:cylist@localhost:5432/cylist"
     database_echo: bool = False
 
+    # --- Database pool ----------------------------------------------------
+    # Each process holds its own pool, so a deployment's connections are these
+    # times its workers, plus one each for the event bus. Spelled out rather
+    # than left to SQLAlchemy because its defaults wait 30 s for a connection
+    # and let a statement run forever, and between them a few stuck requests
+    # starve /health until the container is restarted (CYLIST-131).
+    database_pool_size: int = Field(default=10, gt=0)
+    """Connections kept open once made."""
+
+    database_max_overflow: int = Field(default=10, ge=0)
+    """Connections opened beyond the pool under load, and closed again after."""
+
+    database_pool_timeout_seconds: float = Field(default=10.0, gt=0)
+    """How long a request waits for a free connection before it fails. Shorter
+    than a healthcheck's patience, so an exhausted pool shows as failed
+    requests rather than a container that stops answering."""
+
+    database_statement_timeout_seconds: float = Field(default=30.0, ge=0)
+    """The longest one statement may run before Postgres cancels it; 0 turns it
+    off. No query a request makes should come near it — it is the backstop for
+    the one that does, which would otherwise hold its connection forever."""
+
     # --- Storage ----------------------------------------------------------
     data_dir: Path = Path("./data")
     max_upload_mb: int = Field(default=200, gt=0)

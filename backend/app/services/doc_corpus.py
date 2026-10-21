@@ -3,8 +3,9 @@
 jev-docs (``vendor/jev-docs``) routes a question over a tree of markdown files —
 domain → group → file → section — and plans where a new fact belongs in one.
 Cylist keeps its docs as rows instead, so this builds that tree in memory from
-them, fresh for each question: a project's docs are small, and a tree built
-from the rows is never behind them.
+them. Building is the whole corpus's bodies loaded and parsed, so the tree is
+kept between questions until the rows change — see
+:mod:`app.services.docs.corpora`, which also decides when that is.
 
 The mapping:
 

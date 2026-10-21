@@ -40,6 +40,7 @@ from app.realtime.hub import Hub
 from app.routers import api_router
 from app.services import agent_prompts, agent_reports, hooks
 from app.services.doc_engine import engine_for
+from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
 from app.services.push import triggers as push_triggers
 from app.services.push.delivery import Pusher
@@ -83,7 +84,7 @@ def build_lifespan(settings: Settings) -> Lifespan:
             },
         )
         settings.blob_dir.mkdir(parents=True, exist_ok=True)
-        app.state.database = Database(settings.database_url, echo=settings.database_echo)
+        app.state.database = Database.configured(settings)
         # Committed changes reach the boards watching them, and queued hook
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
@@ -246,6 +247,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Here for the hub's reason: a test replaces it with a fake on an app it
     # built.
     app.state.doc_engine = engine_for(settings)
+    # What it reads, kept between questions until the docs change. Here so
+    # each app the tests build starts with nothing kept.
+    app.state.doc_corpora = CorpusCache()
 
     # Read by GET /health/requests. Set on app.state, not module-level, so each
     # app built by the test suite starts its own counters.
