@@ -43,7 +43,7 @@ from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
 from app.services.push import triggers as push_triggers
 from app.services.push.delivery import Pusher
-from app.services.push.fcm import sender_for
+from app.services.push.fcm import PushSender, sender_for
 from app.spa import mount_spa
 
 API_PREFIX = "/api/v1"
@@ -88,12 +88,13 @@ def build_lifespan(settings: Settings) -> Lifespan:
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
         app.state.database.publish_to(_publisher(app))
+        # One sender, and so one HTTP client to FCM, for the process's life;
+        # closed below, once the pusher that uses it has stopped.
+        push_sender: PushSender = app.state.push_sender or sender_for(
+            settings.fcm_service_account_file
+        )
         pusher = asyncio.create_task(
-            app.state.pusher.run(
-                app.state.database,
-                app.state.push_sender or sender_for(settings.fcm_service_account_file),
-            ),
-            name="cylist-pusher",
+            app.state.pusher.run(app.state.database, push_sender), name="cylist-pusher"
         )
         # The line to every other process of this deployment, if there are
         # any; harmless if there are not.
@@ -118,6 +119,7 @@ def build_lifespan(settings: Settings) -> Lifespan:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+            await push_sender.aclose()
             await app.state.database.dispose()
             # Logged after the pool is closed, so the line is a statement that
             # shutdown finished rather than that it was attempted.

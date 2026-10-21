@@ -326,6 +326,23 @@ class TestFcmSender:
 
         assert await sender.send(message_for("t", _snapshot(), CARD)) is SendOutcome.FAILED
 
+    async def test_one_client_serves_every_message_until_the_sender_is_closed(self) -> None:
+        # A client closes its transport when it closes, so a client per
+        # message would close this one after every send.
+        closed: list[bool] = []
+
+        class Watched(httpx.MockTransport):
+            async def aclose(self) -> None:
+                closed.append(True)
+
+        sender = FcmSender(ServiceAccount.from_json(KEY_JSON), transport=Watched(FakeGoogle()))
+        for device in ("a", "b", "c"):
+            assert await sender.send(message_for(device, _snapshot(), CARD)) is SendOutcome.SENT
+        assert closed == []
+
+        await sender.aclose()
+        assert closed == [True]
+
 
 class TestServiceAccount:
     def test_never_shows_its_key(self) -> None:
@@ -402,6 +419,9 @@ class FakeSender:
     async def send(self, message: dict[str, Any]) -> SendOutcome:
         self.messages.append(message)
         return self.answers.get(message["token"], SendOutcome.SENT)
+
+    async def aclose(self) -> None:
+        return None
 
     def states(self) -> list[tuple[str, str]]:
         return [(m["data"]["state"], m["data"]["reason"]) for m in self.messages]
@@ -621,6 +641,47 @@ class TestPushingAgentSessions:
         await pushing.drain(database, sender)
 
         assert (await wired.get("/devices", headers=phone)).json() == []
+
+    async def test_a_token_endpoint_answering_html_costs_one_phone_not_the_rest(
+        self,
+        wired: AsyncClient,
+        pushing: Pusher,
+        database: Database,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        google = FakeGoogle()
+        portal = [True]
+
+        def google_behind_a_portal(request: httpx.Request) -> httpx.Response:
+            # The first exchange meets a captive portal's page, with a 200.
+            if request.url == "https://oauth2.example/token" and portal:
+                portal.clear()
+                return httpx.Response(200, text="<html><body>Sign in to Wi-Fi</body></html>")
+            return google(request)
+
+        sender = FcmSender(
+            ServiceAccount.from_json(KEY_JSON),
+            transport=httpx.MockTransport(google_behind_a_portal),
+        )
+        await _phone(wired)
+        await _phone(wired, "phone-install:APA91b-owner-0003")
+        agent = await _token(wired)
+        ref = await _card(wired)
+        await _report(wired, agent, ref, "working")
+
+        logger = logging.getLogger(fcm.__name__)
+        logger.addHandler(caplog.handler)
+        try:
+            assert await pushing.drain(database, sender) == 1
+        finally:
+            logger.removeHandler(caplog.handler)
+            await sender.aclose()
+
+        assert len(google.sends) == 1
+        # Once or twice — caplog may hear it on the root too, as well as here.
+        failures = [r for r in caplog.records if r.message == "Push failed before FCM answered"]
+        assert failures
+        assert all("not JSON" in r.__dict__["context"]["detail"] for r in failures)
 
     async def test_with_no_key_configured_nothing_is_sent_and_nothing_breaks(
         self, wired: AsyncClient, pushing: Pusher, database: Database
