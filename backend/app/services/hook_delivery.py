@@ -48,7 +48,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now
-from app.core.crypto import cipher_for
+from app.core.crypto import VaultKeys, cipher_for
 from app.db import Database
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.services import hooks
@@ -244,7 +244,7 @@ def record(delivery: HookDelivery, attempt: Attempt) -> None:
 async def send_now(
     session: AsyncSession,
     client: httpx.AsyncClient,
-    vault_key: str,
+    vault_keys: VaultKeys,
     hook: Hook,
     delivery: HookDelivery,
 ) -> HookDelivery:
@@ -254,7 +254,7 @@ async def send_now(
     answer, which a courier pass could only give it later. A firing the
     receiver refuses is left pending, for the courier to try again.
     """
-    secret = hooks.secret_of(cipher_for(vault_key), hook)
+    secret = hooks.secret_of(cipher_for(vault_keys), hook)
     await session.flush()
     attempt = await _send(client, _Parcel.of(delivery, hook, secret))
     record(delivery, attempt)
@@ -276,12 +276,16 @@ def requeue(delivery: HookDelivery) -> None:
 
 
 async def deliver_due(
-    database: Database, client: httpx.AsyncClient, vault_key: str, *, at: datetime | None = None
+    database: Database,
+    client: httpx.AsyncClient,
+    vault_keys: VaultKeys,
+    *,
+    at: datetime | None = None,
 ) -> int:
     """One pass: send every delivery that is due, up to :data:`BATCH`. Returns
     how many were sent, delivered or not."""
     moment = at or now()
-    parcels = await _claim(database, vault_key, moment)
+    parcels = await _claim(database, vault_keys, moment)
     if not parcels:
         return 0
     attempts = await asyncio.gather(*(_send(client, parcel) for parcel in parcels))
@@ -294,7 +298,7 @@ async def deliver_due(
     return len(parcels)
 
 
-async def _claim(database: Database, vault_key: str, moment: datetime) -> list[_Parcel]:
+async def _claim(database: Database, vault_keys: VaultKeys, moment: datetime) -> list[_Parcel]:
     async with database.session() as session:
         rows = (
             await session.execute(
@@ -311,7 +315,7 @@ async def _claim(database: Database, vault_key: str, moment: datetime) -> list[_
         ).all()
         if not rows:
             return []
-        cipher = cipher_for(vault_key)
+        cipher = cipher_for(vault_keys)
         parcels = []
         for delivery, hook in rows:
             delivery.next_attempt_at = moment + LEASE
@@ -344,7 +348,7 @@ class Courier:
     async def run(
         self,
         database: Database,
-        vault_key: str,
+        vault_keys: VaultKeys,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Never returns until cancelled, and never dies of one bad pass — the
@@ -359,7 +363,7 @@ class Courier:
                 # earns another pass rather than being swallowed.
                 self._wake.clear()
                 try:
-                    while await deliver_due(database, client, vault_key) == BATCH:
+                    while await deliver_due(database, client, vault_keys) == BATCH:
                         pass
                     if last_pruned is None or now() - last_pruned > PRUNE_EVERY:
                         await prune(database)

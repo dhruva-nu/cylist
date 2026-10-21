@@ -55,7 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now
-from app.core.crypto import HOOK_SECRET_DOMAIN, KEY_VERSION, VaultCipher
+from app.core.crypto import HOOK_SECRET_DOMAIN, VaultCipher
 from app.core.errors import (
     ConflictError,
     NotFoundError,
@@ -827,6 +827,6 @@ def _seal(cipher: VaultCipher, hook: Hook, secret: str | None) -> str:
             "or left out to have one generated.",
         )
     hook.secret_ciphertext = cipher.seal(plaintext, node_id=hook.id, domain=HOOK_SECRET_DOMAIN)
-    hook.key_version = KEY_VERSION
+    hook.key_version = cipher.version
     hook.secret_hint = plaintext[-4:]
     return plaintext

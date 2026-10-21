@@ -23,7 +23,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import KEY_VERSION, VaultCipher
+from app.core.crypto import VaultCipher
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.ids import uuid7
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
@@ -468,7 +468,7 @@ def _seal(cipher: VaultCipher, node_id: UUID, data: SecretCreate) -> VaultSecret
         url=data.url,
         notes=data.notes,
         secret_ciphertext=cipher.seal(data.value, node_id=node_id),
-        key_version=KEY_VERSION,
+        key_version=cipher.version,
     )
 
 
@@ -487,7 +487,7 @@ def _amend_secret(cipher: VaultCipher, node: VaultNode, data: SecretUpdate) -> N
         # Resealing draws a new nonce, so storing the same credential twice
         # never produces the same bytes.
         node.secret.secret_ciphertext = cipher.seal(data.value, node_id=node.id)
-        node.secret.key_version = KEY_VERSION
+        node.secret.key_version = cipher.version
 
 
 async def _require_secret(session: AsyncSession, node: VaultNode) -> VaultSecret:

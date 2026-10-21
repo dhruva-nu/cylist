@@ -33,7 +33,7 @@ from app.models.activity import Activity, Channel
 from app.models.hook import HookDelivery
 from app.models.task import Task
 from app.services import activity, hook_delivery
-from tests.conftest import INVITEE_PASSWORD, VAULT_KEY, open_account, put_members
+from tests.conftest import INVITEE_PASSWORD, VAULT_KEYS, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -161,7 +161,7 @@ async def _deliver(
 ) -> int:
     at = now() + after if after is not None else None
     async with receiver.client() as http:
-        return await hook_delivery.deliver_due(_database(client), http, VAULT_KEY, at=at)
+        return await hook_delivery.deliver_due(_database(client), http, VAULT_KEYS, at=at)
 
 
 # --- The catalogue and the rules -------------------------------------------
@@ -657,7 +657,7 @@ class TestDelivery:
             raise httpx.ConnectError("connection refused", request=request)
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as http:
-            await hook_delivery.deliver_due(_database(signed_in), http, VAULT_KEY)
+            await hook_delivery.deliver_due(_database(signed_in), http, VAULT_KEYS)
         [delivery] = await _queued(signed_in)
         assert delivery.state == "pending"
         assert delivery.last_status_code is None
@@ -717,7 +717,7 @@ class TestDelivery:
         receiver = Receiver(200)
         courier = hook_delivery.Courier()
         running = asyncio.create_task(
-            courier.run(_database(signed_in), VAULT_KEY, httpx.MockTransport(receiver))
+            courier.run(_database(signed_in), VAULT_KEYS, httpx.MockTransport(receiver))
         )
         try:
             for _ in range(100):

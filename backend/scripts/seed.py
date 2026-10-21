@@ -662,7 +662,7 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
         )
         return 1
 
-    if not settings.vault_key:
+    if not settings.vault_keyring:
         print(
             "\nCYLIST_VAULT_KEY is not set, and the sample data includes vault secrets, "
             "which are encrypted before they are stored.\n"
@@ -670,7 +670,7 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
             file=sys.stderr,
         )
         return 1
-    cipher = cipher_for(settings.vault_key)
+    cipher = cipher_for(settings.vault_keyring)
     store = LocalBlobStore(settings.blob_dir)
 
     removable: list[str] = []

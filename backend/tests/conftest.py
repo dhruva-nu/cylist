@@ -75,6 +75,9 @@ VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
 the next. Never used anywhere but here; a real one comes from
 ``python -m app.cli generate-vault-key``."""
 
+VAULT_KEYS = ((1, VAULT_KEY),)
+"""The keyring :data:`VAULT_KEY` alone makes: version 1, as in every deployment."""
+
 TEST_DATABASE_NAME = "cylist_test"
 
 XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER")

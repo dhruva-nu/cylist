@@ -65,7 +65,7 @@ overwrite them:
 ```
 ~/cylist-prod/
   app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
-                 JEV_API_KEY
+                 (CYLIST_VAULT_KEYS, once rotated), JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   backups/       the dumps deploy.sh leaves behind
 ```
@@ -77,6 +77,60 @@ Both files are `chmod 600`. Everything that is not actually secret —
 > **`CYLIST_VAULT_KEY` is the one irreplaceable value here.** Change it and
 > every vault secret already stored becomes unreadable. It is deliberately kept
 > out of the backups, so keep a copy somewhere you can recover it.
+
+#### Rotating the vault key
+
+Changing a key is never done by editing `CYLIST_VAULT_KEY`. The vault holds a
+numbered *keyring*: `CYLIST_VAULT_KEY` is version 1, and later versions go in
+`CYLIST_VAULT_KEYS` as JSON. Every stored ciphertext — vault secrets and hook
+signing secrets alike — carries the version that sealed it and opens with that
+key; everything new is sealed with the highest version. So a rotation, for a
+suspected leak or on a schedule, is three steps, and nothing is unreadable at
+any point along the way:
+
+1. **Add a key.** Generate one with `make vault-key` (only the value is used),
+   keep a copy beside the old one, and add it to `app.env` with the next
+   number, leaving `CYLIST_VAULT_KEY` where it is:
+
+   ```
+   CYLIST_VAULT_KEYS={"2": "<new key>"}
+   ```
+
+   Redeploy, or `docker compose -f docker-compose.prod.yml up -d app`. From
+   now on new and edited secrets are sealed under version 2; old rows still
+   open under version 1.
+
+2. **Reseal.** Re-encrypt every row still on an older key, while the app keeps
+   serving:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml exec app python -m app.cli vault-reseal
+   ```
+
+   It works in batches of 200 rows (`--batch-size` to change), each its own
+   transaction, so it can be interrupted and run again. It ends by counting
+   the rows on each version and naming the versions no row needs any more. A
+   row that will not open — tampered with, or sealed under a key already gone
+   — is named, left as it was, and makes the command exit 1.
+
+3. **Retire the old key.** Once the reseal says version 1 is no longer needed,
+   empty `CYLIST_VAULT_KEY=` and redeploy. The keyring is now just version 2.
+   A later rotation adds `"3"` the same way, and retiring 2 means removing it
+   from `CYLIST_VAULT_KEYS`.
+
+Three things outlive the retirement and still need the old key:
+
+- **Backups.** A dump taken before the reseal holds version-1 ciphertext.
+  Keep the retired key, offline, for as long as you keep those dumps.
+- **Staging.** It restores production's data, so its `app.env` needs
+  production's keyring — add the same `CYLIST_VAULT_KEYS` there in step 1, and
+  retire the old key there in step 3.
+- **Dev slots** restored from production, for the same reason.
+
+For a *leaked* key, retiring it is the point; do steps 1–3 back to back, and
+remember the leak exposed every secret sealed under it, so the credentials in
+the vault and every hook's signing secret should be changed at their source
+too.
 
 **Push notifications** (CYLIST-107) need one more secret, a Firebase
 service-account key for the `cylist-mobile` project, kept beside the others as

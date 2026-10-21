@@ -17,7 +17,7 @@ UV       := uv --project $(BACKEND)
         up down logs image deploy prod-logs prod-ps staging-deploy \
         staging-refresh staging-logs staging-ps staging-down \
         dev-slot-given dev-deploy dev-logs dev-ps dev-down dev-db-logs dev-db-ps dashboard-sync migrate-check \
-        test lint format typecheck check seed backup hash-password vault-key \
+        test lint format typecheck check seed backup hash-password vault-key vault-reseal \
         agent android android-install openapi openapi-check clean
 
 help: ## Show this help
@@ -208,6 +208,9 @@ hash-password: ## Generate CYLIST_PASSWORD_HASH
 
 vault-key: ## Generate CYLIST_VAULT_KEY
 	cd $(BACKEND) && uv run python -m app.cli generate-vault-key
+
+vault-reseal: ## Re-encrypt every vault and hook secret under the newest vault key
+	cd $(BACKEND) && uv run python -m app.cli vault-reseal
 
 # --- Android -----------------------------------------------------------------
 # Needs JDK 21 and the Android SDK (JAVA_HOME and ANDROID_HOME); DEVELOPMENT.md

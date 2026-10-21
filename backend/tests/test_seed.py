@@ -35,12 +35,12 @@ from app.models.vault import VaultNode, VaultNodeKind
 from app.services import vault
 from app.storage import BlobStore, LocalBlobStore
 from scripts import seed
-from tests.conftest import VAULT_KEY
+from tests.conftest import VAULT_KEYS
 
 
 @pytest.fixture
 def cipher() -> VaultCipher:
-    return cipher_for(VAULT_KEY)
+    return cipher_for(VAULT_KEYS)
 
 
 @pytest.fixture
