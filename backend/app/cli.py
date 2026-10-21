@@ -7,12 +7,23 @@ These are the two things you need before the first login::
 
 Both print a value to paste into ``.env``. Neither touches the database.
 
-One more is for later, when a vault key is rotated::
+Two more are for later. One is for when a vault key is rotated::
 
     uv run python -m app.cli vault-reseal
 
 It re-encrypts every stored secret under the newest key in the keyring, so the
 older keys can be retired — see :mod:`app.services.reseal` and DEPLOY.md.
+
+The other takes uploaded bytes off the disk::
+
+    uv run python -m app.cli blobs gc
+
+It removes the bytes no row refers to now, rather than at the
+application's next hourly sweep — after deleting a large project, say. In a
+deployment it runs inside the app container, against the configuration the
+server itself runs with::
+
+    docker compose -f docker-compose.prod.yml exec app python -m app.cli blobs gc
 
 ``hash-password`` makes the *bootstrap* password: the one login that belongs
 to nobody, accepted only while no person in the directory has an account. It
@@ -33,12 +44,15 @@ import base64
 import getpass
 import secrets
 import sys
+from datetime import timedelta
 
 from app.auth.passwords import hash_password_sync
 from app.config import Settings, get_settings
 from app.core.crypto import VaultCipher, VaultUnavailableError, cipher_for
 from app.db import Database
+from app.services import blobs
 from app.services.reseal import BATCH, ResealReport, reseal
+from app.storage import LocalBlobStore
 
 _VAULT_KEY_BYTES = 32
 
@@ -103,6 +117,24 @@ def _print_reseal(report: ResealReport) -> None:
         )
 
 
+async def _sweep(idle_for: timedelta) -> blobs.Swept:
+    settings = get_settings()
+    database = Database(settings.database_url)
+    try:
+        return await blobs.sweep(database, LocalBlobStore(settings.blob_dir), idle_for=idle_for)
+    finally:
+        await database.dispose()
+
+
+def _blobs_gc(idle_minutes: int) -> int:
+    if idle_minutes < 0:
+        print("--idle-minutes cannot be negative.", file=sys.stderr)
+        return 2
+    swept = asyncio.run(_sweep(timedelta(minutes=idle_minutes)))
+    print(f"Removed {swept.orphans} unreferenced blob(s) and {swept.incoming} abandoned upload(s).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.cli", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -122,11 +154,30 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Rows per transaction (default {BATCH}).",
     )
 
+    blob_commands = subcommands.add_parser("blobs", help="Uploaded bytes on disk.").add_subparsers(
+        dest="blob_command", required=True
+    )
+    gc = blob_commands.add_parser(
+        "gc", help="Remove bytes no row refers to, and abandoned uploads, now."
+    )
+    gc.add_argument(
+        "--idle-minutes",
+        type=int,
+        default=int(blobs.SWEEP_IDLE_FOR.total_seconds() // 60),
+        help=(
+            "Leave anything touched more recently than this alone (default: %(default)s). "
+            "0 sweeps everything, which is safe for published bytes but would also "
+            "take an upload still arriving."
+        ),
+    )
+
     args = parser.parse_args(argv)
     if args.command == "vault-reseal":
         if args.batch_size < 1:
             parser.error("--batch-size must be at least 1")
         return _vault_reseal(get_settings(), args.batch_size)
+    if args.command == "blobs":
+        return _blobs_gc(args.idle_minutes)
     handlers = {"hash-password": _hash_password, "generate-vault-key": _generate_vault_key}
     return handlers[args.command]()
 

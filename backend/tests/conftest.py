@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import pytest
 from argon2 import PasswordHasher, profiles
@@ -48,9 +49,11 @@ from app.models import Base
 from app.models.person import Person, PersonKind
 from app.realtime.bus import Bus
 from app.realtime.hub import Hub
+from app.services import blobs
 from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
 from app.services.push.delivery import Pusher
+from app.storage import LocalBlobStore
 
 # Before anything below hashes a password. The deployed parameters cost ~70 ms
 # a hash or a check, and the suite does one or more of those in nearly every
@@ -326,6 +329,15 @@ async def sign_in(client: AsyncClient) -> AsyncClient:
     )
     assert response.status_code == 200, response.text
     return client
+
+
+async def sweep_blobs(database: Database, settings: Settings) -> blobs.Swept:
+    """Run the blob sweep now, with no idle margin.
+
+    A delete takes rows only; the bytes leave at the next sweep (CYLIST-129).
+    A test asking whether content left the disk has to run that sweep first.
+    """
+    return await blobs.sweep(database, LocalBlobStore(settings.blob_dir), idle_for=timedelta(0))
 
 
 async def bootstrap_sign_in(client: AsyncClient) -> AsyncClient:

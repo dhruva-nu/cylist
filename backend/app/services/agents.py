@@ -125,7 +125,7 @@ async def upload_skill(
         if description is not None:
             existing.description = description
         await session.flush()
-        await blobs.collect_garbage(session, store, {previous})
+        await blobs.collect_garbage(session, {previous})
         await session.refresh(existing, ["added_by_person"])
         return existing, True
 
@@ -238,12 +238,12 @@ async def update_skill(session: AsyncSession, skill: Skill, data: SkillUpdate) -
     return skill
 
 
-async def delete_skill(session: AsyncSession, store: BlobStore, skill: Skill) -> None:
+async def delete_skill(session: AsyncSession, skill: Skill) -> None:
     """Remove a skill, and its content if nothing else refers to it."""
     blob_id = skill.blob_id
     await session.delete(skill)
     await session.flush()
-    await blobs.collect_garbage(session, store, {blob_id})
+    await blobs.collect_garbage(session, {blob_id})
 
 
 # --- Counts ----------------------------------------------------------------

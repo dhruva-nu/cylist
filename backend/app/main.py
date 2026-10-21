@@ -38,7 +38,7 @@ from app.mcp import mount_mcp
 from app.realtime.bus import Bus
 from app.realtime.hub import Hub
 from app.routers import api_router
-from app.services import agent_prompts, agent_reports, hooks
+from app.services import agent_prompts, agent_reports, blobs, hooks
 from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
 from app.services.push import triggers as push_triggers
@@ -46,6 +46,7 @@ from app.services.push.delivery import Pusher
 from app.services.push.fcm import PushSender, sender_for
 from app.services.retention import Retention
 from app.spa import mount_spa
+from app.storage import LocalBlobStore
 
 API_PREFIX = "/api/v1"
 
@@ -112,13 +113,15 @@ def build_lifespan(settings: Settings) -> Lifespan:
             ),
             name="cylist-hook-courier",
         )
+        # The only thing that deletes uploaded bytes — see blobs.sweep.
+        sweeper = asyncio.create_task(_sweep_blobs_forever(app), name="cylist-blob-sweeper")
         try:
             # The MCP tools at /mcp answer nothing until their session
             # managers are running, and those live for exactly this long.
             async with app.state.mcp.run():
                 yield
         finally:
-            for task in (reaper, courier, pusher, bus):
+            for task in (reaper, courier, sweeper, pusher, bus):
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
@@ -194,6 +197,25 @@ async def _reap_forever(app: FastAPI) -> None:
             raise
         except Exception:
             logger.exception("The agent-session reaper failed a pass")
+
+
+async def _sweep_blobs_forever(app: FastAPI) -> None:
+    """Take bytes off the disk that no row refers to any more, once an hour.
+
+    A delete only removes rows (CYLIST-129), so this is where the content of
+    deleted files actually goes, along with what a rolled-back upload left and
+    any upload abandoned part-way. One process sweeps a pass; the rest find
+    the lease taken. Never dies of one bad pass, for the reaper's reason.
+    """
+    store = LocalBlobStore(app.state.settings.blob_dir)
+    while True:
+        await asyncio.sleep(blobs.SWEEP_EVERY.total_seconds())
+        try:
+            await blobs.sweep_if_first(app.state.database, store)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("The blob sweeper failed a pass")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
