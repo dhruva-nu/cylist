@@ -10,7 +10,7 @@ import base64
 from uuid import UUID
 
 from anyio import to_thread
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +19,11 @@ from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
+from app.core import multipart
+from app.core.body_limit import streams_upload
 from app.core.errors import NotFoundError
+from app.core.multipart import multipart_body
+from app.core.security_headers import DOWNLOAD_HEADERS
 from app.db import SessionDependency
 from app.models.agent import Skill
 from app.models.project import Project
@@ -120,36 +124,53 @@ async def list_skills(
         413: {"description": "The upload is larger than the configured limit."},
         422: {"description": "The parts sent are not a skill's folder — see the message."},
     },
+    openapi_extra=multipart_body(
+        {
+            "file": {
+                "type": "array",
+                "items": {"type": "string", "contentMediaType": "application/octet-stream"},
+                "description": (
+                    "The skill. One part for a single-file skill, or one part per file "
+                    "for a folder — each named with the path it has inside the folder, "
+                    "'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
+                ),
+            },
+            "folder": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "The name of the folder being uploaded. Send it and every part is "
+                    "read as a path inside a folder, even if there is only one."
+                ),
+            },
+            "executable": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+                "description": (
+                    "Which parts to mark executable, by the same path, repeated once each. "
+                    "A browser cannot know; a client walking a directory can."
+                ),
+            },
+            "description": {
+                "anyOf": [
+                    {"type": "string", "maxLength": agents.DESCRIPTION_MAX_LENGTH},
+                    {"type": "null"},
+                ],
+                "description": "One line on what the skill does.",
+            },
+        },
+        required=["file"],
+    ),
 )
+@streams_upload
 async def upload_skill(
+    request: Request,
     response: Response,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(WRITE_AGENT_KIT),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
-    file: list[UploadFile] = File(
-        description=(
-            "The skill. One part for a single-file skill, or one part per file "
-            "for a folder — each named with the path it has inside the folder, "
-            "'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
-        )
-    ),
-    folder: str | None = Form(
-        default=None,
-        description=(
-            "The name of the folder being uploaded. Send it and every part is "
-            "read as a path inside a folder, even if there is only one."
-        ),
-    ),
-    executable: list[str] = Form(
-        default=[],
-        description=(
-            "Which parts to mark executable, by the same path, repeated once each. "
-            "A browser cannot know; a client walking a directory can."
-        ),
-    ),
-    description: str | None = Form(default=None, description="One line on what the skill does."),
 ) -> SkillRead:
     """Upload a skill as `multipart/form-data`.
 
@@ -174,15 +195,16 @@ async def upload_skill(
     **It is filed under whoever is uploading it** — the person behind the
     session or token — and there is no field to say otherwise (CYLIST-142).
     An agent's upload is its owner's, which is the person its token acts as.
+
+    The body is read only once the caller is known to be allowed to upload
+    here (CYLIST-123), and a body over the upload limit is refused with a 413
+    before it is read.
     """
-    skill, replaced = await agents.upload_skill(
+    skill, received, replaced = await agents.upload_skill(
         session,
         store,
         project,
-        file,
-        description=description,
-        folder=folder,
-        executable=set(executable),
+        multipart.Form(request),
         max_bytes=settings.max_upload_bytes,
         # The credential's person, never the form's: "added by" is an audit
         # fact, and one the caller could choose would name somebody who never
@@ -199,7 +221,7 @@ async def upload_skill(
         entity_type="skill",
         entity_id=skill.id,
         project_id=project.id,
-        payload={"name": skill.name, "size": skill.size, "files": len(file)},
+        payload={"name": skill.name, "size": skill.size, "files": received.files},
     )
     return _skill_read(skill)
 
@@ -271,8 +293,9 @@ async def download_skill(
 
     return FileResponse(
         store.locate(skill.blob.path),
-        media_type=skill.mime or blobs.DEFAULT_MIME,
+        media_type=blobs.declared_mime(skill.mime),
         filename=skill.name,
+        headers=DOWNLOAD_HEADERS,
     )
 
 

@@ -109,11 +109,13 @@ export const filesApi = {
     level?: Sensitivity | null,
   ) => {
     const form = new FormData()
-    form.append('file', file)
+    // The fields before the file: the server reads the form as it arrives,
+    // and checks what it has already seen before it stores the file.
     if (addedBy) form.append('added_by', addedBy)
     // Left off rather than sent empty: omitting it is what makes the server
     // fall back to the folder's default.
     if (level) form.append('sensitivity', level)
+    form.append('file', file)
     return request<FileItem>(`/folders/${folderId}/upload`, { method: 'POST', body: form })
   },
   addLink: (folderId: string, input: LinkInput) =>

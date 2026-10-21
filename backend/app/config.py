@@ -134,6 +134,15 @@ class Settings(BaseSettings):
     # --- Storage ----------------------------------------------------------
     data_dir: Path = Path("./data")
     max_upload_mb: int = Field(default=200, gt=0)
+    max_request_kb: int = Field(default=4096, gt=0)
+    """The largest body any route but an upload accepts (CYLIST-123).
+
+    Every other route takes JSON, and the biggest honest one is a doc of
+    200,000 characters — under a megabyte even escaped. Four leaves room for
+    that and refuses a body nobody could have meant before it is read. Upload
+    routes are capped at :attr:`max_upload_mb` instead — see
+    :mod:`app.core.body_limit`.
+    """
 
     # --- The web app ------------------------------------------------------
     # Where the built SPA lives, relative to the working directory. The
@@ -348,6 +357,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def max_request_bytes(self) -> int:
+        return self.max_request_kb * 1024
 
     @property
     def log_dir(self) -> Path:

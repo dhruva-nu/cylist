@@ -55,19 +55,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import io
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from uuid import UUID
 
-from fastapi import UploadFile
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.datastructures import Headers
 
 from app.config import Settings, get_settings
 from app.core.crypto import VaultCipher, cipher_for
@@ -532,15 +529,15 @@ async def _write_item(
             LinkCreate(name=spec.name, url=spec.url, source=spec.source, added_by=added_by),
         )
     else:
-        content = spec.placeholder
-        upload = UploadFile(
-            file=io.BytesIO(content),
-            size=len(content),
-            filename=spec.name,
-            headers=Headers({"content-type": spec.mime}),
-        )
-        await files.upload(
-            session, store, folder, upload, max_bytes=max_upload_bytes, added_by=added_by
+        await files.store_generated(
+            session,
+            store,
+            folder,
+            name=spec.name,
+            data=spec.placeholder,
+            mime=spec.mime,
+            max_bytes=max_upload_bytes,
+            added_by=added_by,
         )
     summary.items += 1
 

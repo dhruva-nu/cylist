@@ -19,17 +19,18 @@ renamed, moved or deleted — see :func:`_ensure_not_the_root`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import NamedTuple
 from uuid import UUID
 
-from fastapi import UploadFile
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import multipart
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.sensitivity import Sensitivity
-from app.models.file import FileItem, Folder, ItemKind, ItemSource
+from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.person import Person
 from app.models.project import Project
 from app.schemas.files import FolderCreate, FolderUpdate, ItemUpdate, LinkCreate, clean_name
@@ -286,30 +287,48 @@ async def upload(
     session: AsyncSession,
     store: BlobStore,
     folder: Folder,
-    source: UploadFile,
+    form: multipart.Form,
     *,
     max_bytes: int,
-    added_by: UUID | None,
-    sensitivity: str | None = None,
 ) -> FileItem:
-    """Store an uploaded file in a folder.
+    """Store the file a ``multipart/form-data`` body carries in a folder.
+
+    The form is read here, part by part, after the route's permission checks
+    have run (CYLIST-123): ``file`` is the file, ``added_by`` and
+    ``sensitivity`` are optional fields beside it.
 
     The name is checked before a single byte is written: an upload that is
     going to be refused for a duplicate name should not first be copied onto
-    the disk. The content itself is written straight through in chunks, so a
-    file over the cap is refused part-way rather than after it has all arrived.
+    the disk — and nor should one naming nobody as its uploader, if the form
+    says so before the file. The content goes from the socket to the blob
+    store in chunks, so a file over the cap is refused part-way rather than
+    after it has all arrived.
 
     Raises:
         ConflictError: if the folder already has an item with this name.
         PayloadTooLargeError: if the content exceeds ``max_bytes``.
+        RequestValidationError: if there is no file, more than one, or a
+            field that does not parse.
         UnprocessableRequestError: if the upload has no usable filename, or
             ``added_by`` names nobody in the directory.
     """
-    name = filename_of(source)
-    await _ensure_name_is_free(session, folder, name)
-    await ensure_person_exists(session, added_by)
+    stored: list[tuple[str, Blob, str]] = []
 
-    blob, mime = await blobs.store_upload(session, store, source, max_bytes=max_bytes)
+    async def take(part: multipart.Part, before: Mapping[str, list[str]]) -> None:
+        if stored:
+            raise multipart.invalid_field("file", "send one file")
+        name = filename_of(part.filename)
+        await _ensure_name_is_free(session, folder, name)
+        await ensure_person_exists(session, _added_by(before))
+        blob = await blobs.store_stream(session, store, part.chunks(), max_bytes=max_bytes)
+        stored.append((name, blob, blobs.declared_mime(part.content_type)))
+
+    fields = await form.read(file_field="file", on_file=take, text_fields=_UPLOAD_FIELDS)
+    if not stored:
+        raise multipart.invalid_field("file", "Field required", kind="missing")
+    name, blob, mime = stored[0]
+    added_by = _added_by(fields)
+    await ensure_person_exists(session, added_by)
 
     return await _add_item(
         session,
@@ -321,9 +340,35 @@ async def upload(
             source=ItemSource.UPLOAD,
             mime=mime,
             added_by=added_by,
-            sensitivity=(sensitivity or folder.default_sensitivity),
+            sensitivity=_sensitivity(fields) or folder.default_sensitivity,
         ),
     )
+
+
+_UPLOAD_FIELDS = frozenset({"added_by", "sensitivity"})
+
+
+def _added_by(fields: Mapping[str, list[str]]) -> UUID | None:
+    value = multipart.single(fields, "added_by")
+    if value is None:
+        return None
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise multipart.invalid_field("added_by", "must be a UUID", kind="uuid_parsing") from exc
+
+
+def _sensitivity(fields: Mapping[str, list[str]]) -> str | None:
+    value = multipart.single(fields, "sensitivity")
+    if value is None:
+        return None
+    try:
+        return Sensitivity(value).value
+    except ValueError as exc:
+        levels = ", ".join(level.value for level in Sensitivity)
+        raise multipart.invalid_field(
+            "sensitivity", f"must be one of {levels}", kind="enum"
+        ) from exc
 
 
 async def store_generated(
@@ -500,7 +545,7 @@ async def counts(
 # --- Internals -------------------------------------------------------------
 
 
-def filename_of(source: UploadFile) -> str:
+def filename_of(filename: str | None) -> str:
     """The name to file an upload under, stripped of any directory part.
 
     Browsers send a bare filename, but a directory upload or a hand-rolled
@@ -510,12 +555,12 @@ def filename_of(source: UploadFile) -> str:
     is a name rather than a path does not differ because the row it lands in is
     a different table.
     """
-    candidate = (source.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    candidate = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
     try:
         return clean_name(candidate)
     except ValueError as exc:
         raise UnprocessableRequestError(
-            "That upload has no usable filename.", details={"filename": source.filename}
+            "That upload has no usable filename.", details={"filename": filename}
         ) from exc
 
 

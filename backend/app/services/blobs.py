@@ -23,12 +23,12 @@ are never removed while a row for them exists or is about to.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
-from fastapi import UploadFile
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,11 +39,6 @@ from app.db import Database
 from app.models.agent import Skill
 from app.models.file import Blob, FileItem, Folder
 from app.storage import BlobStore, BlobTooLargeError, StagedBlob
-
-CHUNK_BYTES = 1 << 20
-"""How much of an upload is held in memory at once. Starlette has already
-spooled anything past its own megabyte to a temporary file, so this bounds the
-copy from there into the blob store rather than the receive itself."""
 
 DEFAULT_MIME = "application/octet-stream"
 
@@ -98,56 +93,34 @@ def digest_lock(sha256: str) -> tuple[int, int]:
     return BLOB_LOCK_CLASS, int.from_bytes(bytes.fromhex(sha256[:8]), "big", signed=True)
 
 
-async def chunks(source: UploadFile, size: int = CHUNK_BYTES) -> AsyncIterator[bytes]:
-    """Read an upload a chunk at a time.
-
-    Deliberately not ``await source.read()``: that would pull however many
-    hundred megabytes the client sent into memory, only to hand them to a store
-    that is going to write them out again anyway.
-    """
-    while chunk := await source.read(size):
-        yield chunk
-
-
-async def store_upload(
-    session: AsyncSession,
-    store: BlobStore,
-    source: UploadFile,
-    *,
-    max_bytes: int,
-) -> tuple[Blob, str]:
-    """Write an upload's bytes and return the blob holding them.
-
-    Returns the blob and the MIME type *this* upload declared. The type goes
-    on the row that refers to the blob rather than on the blob, because the
-    content is what is shared and the label is not.
-
-    Raises:
-        PayloadTooLargeError: if the content exceeds ``max_bytes``. Written
-            straight through in chunks, so an oversized file is refused
-            part-way rather than after all of it has arrived.
-    """
-    blob = await store_stream(session, store, chunks(source), max_bytes=max_bytes)
-    return blob, declared_mime(source)
-
-
 MIME_MAX_LENGTH = 255
 """The ``mime`` columns' width, on files and on skills alike."""
 
+_MIME_TYPE = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*")
+"""A media type's essence — ``type/subtype`` in RFC 6838's characters."""
 
-def declared_mime(source: UploadFile) -> str:
-    """The type an upload declared, or the generic one if it declared nothing usable.
+
+def declared_mime(declared: str | None) -> str:
+    """The type an upload declared, normalised, or the generic one if it
+    declared nothing usable (CYLIST-136).
 
     Whatever the client sent in the part's ``Content-Type``, which is not
-    checked against the bytes and is only ever a label. One longer than the
-    column is no real type — the longest registered ones are well under a
-    hundred characters — so it is treated as no type at all rather than as a
-    reason to refuse a file whose content is fine.
+    checked against the bytes and is only ever a label — but it is a label a
+    download sends back, so it is reduced to its lower-cased ``type/subtype``
+    first. Parameters go, and with them anything a client could smuggle into
+    a header after a ``;``; something that is not a media type at all, or is
+    longer than the column, is no type, and stored as the generic one rather
+    than refusing a file whose content is fine.
+
+    Run again on the way out, so a row stored before this rule came in is
+    served under the type it would have been stored as now.
     """
-    declared = source.content_type
-    if not declared or len(declared) > MIME_MAX_LENGTH:
+    if not declared:
         return DEFAULT_MIME
-    return declared
+    essence = declared.split(";", 1)[0].strip().lower()
+    if len(essence) > MIME_MAX_LENGTH or not _MIME_TYPE.fullmatch(essence):
+        return DEFAULT_MIME
+    return essence
 
 
 async def store_bytes(
@@ -155,10 +128,10 @@ async def store_bytes(
 ) -> Blob:
     """Write bytes the server itself assembled and return the blob holding them.
 
-    Separate from :func:`store_upload` because not everything stored came off
+    Separate from :func:`store_stream` because not everything stored came off
     the wire as one part: a skill uploaded as a folder is zipped here and
-    stored as what was assembled, which has no ``UploadFile`` behind it and no
-    content type of its own to report.
+    stored as what was assembled, which has no part behind it and no content
+    type of its own to report.
 
     Raises:
         PayloadTooLargeError: if the content exceeds ``max_bytes``.
@@ -176,8 +149,13 @@ async def store_stream(
     """Write a stream under its digest, reusing the row if the bytes are held.
 
     The entry point for anything that stores bytes and then refers to them;
-    :func:`store_upload` and :func:`store_bytes` are this with the stream made
-    for them. In three steps, and the order is the fix for CYLIST-129:
+    :func:`store_bytes` is this with the stream made for it. An upload's
+    stream is its file part read straight off the socket (see
+    :mod:`app.core.multipart`, CYLIST-123), so nothing lands on the disk but
+    the store's own staging file — no spool beforehand, and nothing at all for
+    a request its route refused before reading.
+
+    In three steps, and the order is the fix for CYLIST-129:
 
     1. Stage the bytes — all of them, fsynced — with no lock held, since a
        large upload can take minutes to arrive.
