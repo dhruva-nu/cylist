@@ -91,7 +91,7 @@ class TestWhatAProjectStartsWith:
     async def test_a_new_project_has_an_admin_role(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)
 
-        roles = (await signed_in.get("/projects/ATL/roles")).json()
+        roles = (await signed_in.get("/projects/ATL/roles")).json()["items"]
 
         assert [role["name"] for role in roles] == ["Admin"]
         assert roles[0]["is_admin"] is True
@@ -136,7 +136,7 @@ class TestCreating:
         for name in ("Reviewer", "Designer"):
             await signed_in.post("/projects/ATL/roles", json={"name": name})
 
-        roles = (await signed_in.get("/projects/ATL/roles")).json()
+        roles = (await signed_in.get("/projects/ATL/roles")).json()["items"]
 
         assert [role["name"] for role in roles] == ["Admin", "Designer", "Reviewer"]
 
@@ -228,7 +228,9 @@ class TestDeleting:
         response = await signed_in.delete(f"/projects/ATL/roles/{role['id']}")
 
         assert response.status_code == 204
-        assert [r["name"] for r in (await signed_in.get("/projects/ATL/roles")).json()] == ["Admin"]
+        assert [
+            r["name"] for r in (await signed_in.get("/projects/ATL/roles")).json()["items"]
+        ] == ["Admin"]
 
     async def test_a_held_role_is_refused_and_names_the_holder(
         self, signed_in: AsyncClient

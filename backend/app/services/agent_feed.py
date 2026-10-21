@@ -35,6 +35,7 @@ from app.models.task import Task
 from app.realtime import protocol
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentFeedEntryRead
 from app.services import agent_sessions
+from app.services.paging import PageRequest, keyset
 
 KEEP_PER_SESSION = 200
 """How many lines each session keeps. Enough to scroll back through a long
@@ -101,24 +102,40 @@ async def _trim(session: AsyncSession, agent_session_id: UUID) -> None:
     )
 
 
-async def recent(session: AsyncSession, task: Task, *, limit: int) -> list[AgentFeedEntryRead]:
-    """A card's newest lines, newest first, from every session that was on it."""
-    rows = await session.execute(
-        select(AgentFeedEntry, AgentSession.client_name)
-        .join(AgentSession, AgentSession.id == AgentFeedEntry.agent_session_id)
-        .where(AgentFeedEntry.task_id == task.id)
-        .order_by(AgentFeedEntry.seq.desc())
-        .limit(limit)
+async def recent(
+    session: AsyncSession, task: Task, page: PageRequest
+) -> tuple[list[AgentFeedEntryRead], UUID | None]:
+    """A page of a card's lines, newest first, from every session that was on
+    it — and the cursor for the page before them."""
+    window = await keyset(
+        session,
+        select(AgentFeedEntry).where(AgentFeedEntry.task_id == task.id),
+        keys=(AgentFeedEntry.seq, AgentFeedEntry.id),
+        page=page,
+        descending=True,
+    )
+    # Named once per session rather than joined onto every line: a page is a
+    # hundred lines from, nearly always, one or two sessions.
+    names: dict[UUID, str | None] = dict(
+        (
+            await session.execute(
+                select(AgentSession.id, AgentSession.client_name).where(
+                    AgentSession.id.in_({entry.agent_session_id for entry in window.rows})
+                )
+            )
+        )
+        .tuples()
+        .all()
     )
     return [
         AgentFeedEntryRead(
             id=entry.id,
             agent_session_id=entry.agent_session_id,
-            client_name=client_name,
+            client_name=names.get(entry.agent_session_id),
             at=entry.at,
             kind=entry.kind,
             tool=entry.tool,
             text=entry.text,
         )
-        for entry, client_name in rows.all()
-    ]
+        for entry in window.rows
+    ], window.next

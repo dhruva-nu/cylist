@@ -35,6 +35,7 @@ from app.models.person import (
 )
 from app.schemas.people import PersonCreate, PersonUpdate
 from app.services import tokens
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def create(session: AsyncSession, data: PersonCreate) -> Person:
@@ -103,17 +104,18 @@ async def get(session: AsyncSession, person_id: UUID) -> Person:
 
 async def list_people(
     session: AsyncSession,
+    page: PageRequest,
     *,
     kind: PersonKind | None = None,
     include_archived: bool = False,
-) -> list[Person]:
-    """Return the directory, team first, alphabetical within each kind."""
-    statement = select(Person).order_by(KIND_ORDER, Person.name)
+) -> Window[Person]:
+    """A page of the directory, team first, alphabetical within each kind."""
+    statement = select(Person)
     if kind is not None:
         statement = statement.where(Person.kind == kind)
     if not include_archived:
         statement = statement.where(Person.archived_at.is_(None))
-    return list(await session.scalars(statement))
+    return await keyset(session, statement, keys=(KIND_ORDER, Person.name, Person.id), page=page)
 
 
 async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> Person:

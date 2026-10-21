@@ -29,22 +29,27 @@ from app.config import (
     get_settings,
 )
 from app.core.base_path import BasePathMiddleware
+from app.core.body_limit import BodyLimitMiddleware
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
 from app.core.request_log import RequestLogMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.db import Database
 from app.mcp import mount_mcp
 from app.realtime.bus import Bus
 from app.realtime.hub import Hub
 from app.routers import api_router
-from app.services import agent_prompts, agent_reports, hooks
+from app.services import agent_prompts, agent_reports, blobs, hooks
 from app.services.doc_engine import engine_for
+from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
 from app.services.push import triggers as push_triggers
 from app.services.push.delivery import Pusher
-from app.services.push.fcm import sender_for
+from app.services.push.fcm import PushSender, sender_for
+from app.services.retention import Retention
 from app.spa import mount_spa
+from app.storage import LocalBlobStore
 
 API_PREFIX = "/api/v1"
 
@@ -83,17 +88,18 @@ def build_lifespan(settings: Settings) -> Lifespan:
             },
         )
         settings.blob_dir.mkdir(parents=True, exist_ok=True)
-        app.state.database = Database(settings.database_url, echo=settings.database_echo)
+        app.state.database = Database.configured(settings)
         # Committed changes reach the boards watching them, and queued hook
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
         app.state.database.publish_to(_publisher(app))
+        # One sender, and so one HTTP client to FCM, for the process's life;
+        # closed below, once the pusher that uses it has stopped.
+        push_sender: PushSender = app.state.push_sender or sender_for(
+            settings.fcm_service_account_file
+        )
         pusher = asyncio.create_task(
-            app.state.pusher.run(
-                app.state.database,
-                app.state.push_sender or sender_for(settings.fcm_service_account_file),
-            ),
-            name="cylist-pusher",
+            app.state.pusher.run(app.state.database, push_sender), name="cylist-pusher"
         )
         # The line to every other process of this deployment, if there are
         # any; harmless if there are not.
@@ -105,19 +111,24 @@ def build_lifespan(settings: Settings) -> Lifespan:
         # this runs. Sessions nobody reconnects to are the reaper's.
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
         courier = asyncio.create_task(
-            app.state.courier.run(app.state.database, settings.vault_key, app.state.hook_transport),
+            app.state.courier.run(
+                app.state.database, settings.vault_keyring, app.state.hook_transport
+            ),
             name="cylist-hook-courier",
         )
+        # The only thing that deletes uploaded bytes — see blobs.sweep.
+        sweeper = asyncio.create_task(_sweep_blobs_forever(app), name="cylist-blob-sweeper")
         try:
             # The MCP tools at /mcp answer nothing until their session
             # managers are running, and those live for exactly this long.
             async with app.state.mcp.run():
                 yield
         finally:
-            for task in (reaper, courier, pusher, bus):
+            for task in (reaper, courier, sweeper, pusher, bus):
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+            await push_sender.aclose()
             await app.state.database.dispose()
             # Logged after the pool is closed, so the line is a statement that
             # shutdown finished rather than that it was attempted.
@@ -191,6 +202,25 @@ async def _reap_forever(app: FastAPI) -> None:
             logger.exception("The agent-session reaper failed a pass")
 
 
+async def _sweep_blobs_forever(app: FastAPI) -> None:
+    """Take bytes off the disk that no row refers to any more, once an hour.
+
+    A delete only removes rows (CYLIST-129), so this is where the content of
+    deleted files actually goes, along with what a rolled-back upload left and
+    any upload abandoned part-way. One process sweeps a pass; the rest find
+    the lease taken. Never dies of one bad pass, for the reaper's reason.
+    """
+    store = LocalBlobStore(app.state.settings.blob_dir)
+    while True:
+        await asyncio.sleep(blobs.SWEEP_EVERY.total_seconds())
+        try:
+            await blobs.sweep_if_first(app.state.database, store)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("The blob sweeper failed a pass")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application.
 
@@ -231,7 +261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # For the hub's reason too. The courier's loop starts in the lifespan; the
     # object exists here so a route can wake it. The transport is None — the
     # real network — except in a test, which answers in a receiver's place.
-    app.state.courier = Courier()
+    app.state.courier = Courier(Retention.of(settings))
     app.state.hook_transport = None
 
     # For the courier's reason: the publisher hands it pushes from the first
@@ -246,10 +276,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Here for the hub's reason: a test replaces it with a fake on an app it
     # built.
     app.state.doc_engine = engine_for(settings)
+    # What it reads, kept between questions until the docs change. Here so
+    # each app the tests build starts with nothing kept.
+    app.state.doc_corpora = CorpusCache()
 
     # Read by GET /health/requests. Set on app.state, not module-level, so each
     # app built by the test suite starts its own counters.
     app.state.metrics = Metrics()
+
+    # Innermost, so the 413 it answers with is counted, logged and given
+    # CORS headers like any other response. Handed the live route list, which
+    # it reads when the stack is built on the first request — after every
+    # router below is included — to find the routes marked as uploads.
+    app.add_middleware(
+        BodyLimitMiddleware,
+        routes=app.router.routes,
+        upload_bytes=settings.max_upload_bytes,
+        request_bytes=settings.max_request_bytes,
+    )
     app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)
 
     if settings.cors_origins:
@@ -271,6 +315,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # log without one.
     app.add_middleware(
         RequestLogMiddleware, api_prefix=API_PREFIX, trusted_proxies=settings.trusted_proxies
+    )
+
+    # Outside the request log, so the 500 it sends for an unhandled error
+    # carries the headers too; inside the base path, so the docs pages are
+    # recognised under a dev slot's prefix as well as at the root.
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        hsts=settings.is_deployed,
+        docs_paths=frozenset(
+            path for path in (app.docs_url, app.swagger_ui_oauth2_redirect_url) if path
+        ),
     )
 
     # Outside even that, so the request it logs is already under the base path

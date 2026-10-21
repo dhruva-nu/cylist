@@ -16,13 +16,12 @@ from jevdocs.placement import (
     SPLIT_GROUP,
     UPDATE_GROUP_README,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
 from app.schemas.docs import DocPlace
 from app.services.doc_corpus import FiledDoc, FiledTopic, ProjectCorpus
 from app.services.doc_engine import DocEngine, EngineUnavailableError
-from app.services.docs.filing import corpus_for, no_topics_error
+from app.services.docs.filing import no_topics_error
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ home for a new doc — see :func:`_edit`."""
 
 
 async def place(
-    session: AsyncSession, project: Project, data: DocPlace, engine: DocEngine | None
+    filed: ProjectCorpus, project: Project, data: DocPlace, engine: DocEngine | None
 ) -> Placed:
     """Where each fact in ``data`` belongs in the project's docs. Writes nothing.
 
@@ -67,11 +66,11 @@ async def place(
     of each should hold it — or a doc of its own when none accepts it — and
     which sections the facts leave out of date. The agent makes the edits with
     ``write_doc``; a plan it can read is worth more than an edit it cannot.
+    Given the corpus, not a session, for :func:`~.asking.ask`'s reason.
 
     Raises:
         UnprocessableRequestError: if the project has no topics to file under.
     """
-    filed = await corpus_for(session, project)
     if not filed.topics:
         raise no_topics_error(project)
     if engine is None:

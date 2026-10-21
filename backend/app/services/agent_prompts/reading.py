@@ -13,6 +13,7 @@ from app.models.agent_session import AgentPrompt, AgentPromptKind, AgentSession
 from app.models.person import Person
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead
+from app.services.paging import PageRequest, keyset
 
 
 @dataclass(frozen=True)
@@ -87,17 +88,22 @@ async def shown_for(
     return {row_id: read(prompt, owners.get(row_id)) for row_id, prompt in shown.items()}
 
 
-async def recent(session: AsyncSession, task: Task, *, limit: int) -> list[AgentPromptRead]:
-    """A card's prompts, newest first — what was asked of whom, and what came of it."""
-    found = await session.scalars(
-        select(AgentPrompt)
-        .where(AgentPrompt.task_id == task.id)
-        .order_by(AgentPrompt.asked_at.desc())
-        .limit(limit)
+async def recent(
+    session: AsyncSession, task: Task, page: PageRequest
+) -> tuple[list[AgentPromptRead], UUID | None]:
+    """A page of a card's prompts, newest first — what was asked of whom, and
+    what came of it — and the cursor for the page before them."""
+    window = await keyset(
+        session,
+        select(AgentPrompt).where(AgentPrompt.task_id == task.id),
+        keys=(AgentPrompt.asked_at, AgentPrompt.id),
+        page=page,
+        descending=True,
     )
-    prompts = list(found)
-    owners = await owners_of(session, (prompt.agent_session_id for prompt in prompts))
-    return [read(prompt, owners.get(prompt.agent_session_id)) for prompt in prompts]
+    owners = await owners_of(session, (prompt.agent_session_id for prompt in window.rows))
+    return [read(prompt, owners.get(prompt.agent_session_id)) for prompt in window.rows], (
+        window.next
+    )
 
 
 def read(prompt: AgentPrompt, owner: Owner | None) -> AgentPromptRead:

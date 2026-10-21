@@ -23,7 +23,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import KEY_VERSION, VaultCipher
+from app.core.crypto import VaultCipher
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.ids import uuid7
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
@@ -39,6 +39,7 @@ from app.schemas.vault import (
     VaultTreeUpdate,
 )
 from app.services import permissions
+from app.services.paging import PageRequest, Window, keyset
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,14 +83,16 @@ async def create_tree(session: AsyncSession, project: Project, data: VaultTreeCr
     return tree
 
 
-async def list_trees(session: AsyncSession, project: Project) -> list[VaultTree]:
-    """Return a project's trees in display order."""
-    statement = (
-        select(VaultTree)
-        .where(VaultTree.project_id == project.id)
-        .order_by(VaultTree.position, VaultTree.created_at)
+async def list_trees(
+    session: AsyncSession, project: Project, page: PageRequest
+) -> Window[VaultTree]:
+    """Return a page of a project's trees in display order."""
+    return await keyset(
+        session,
+        select(VaultTree).where(VaultTree.project_id == project.id),
+        keys=(VaultTree.position, VaultTree.created_at, VaultTree.id),
+        page=page,
     )
-    return list(await session.scalars(statement))
 
 
 async def get_tree(session: AsyncSession, tree_id: UUID) -> VaultTree:
@@ -468,7 +471,7 @@ def _seal(cipher: VaultCipher, node_id: UUID, data: SecretCreate) -> VaultSecret
         url=data.url,
         notes=data.notes,
         secret_ciphertext=cipher.seal(data.value, node_id=node_id),
-        key_version=KEY_VERSION,
+        key_version=cipher.version,
     )
 
 
@@ -487,7 +490,7 @@ def _amend_secret(cipher: VaultCipher, node: VaultNode, data: SecretUpdate) -> N
         # Resealing draws a new nonce, so storing the same credential twice
         # never produces the same bytes.
         node.secret.secret_ciphertext = cipher.seal(data.value, node_id=node.id)
-        node.secret.key_version = KEY_VERSION
+        node.secret.key_version = cipher.version
 
 
 async def _require_secret(session: AsyncSession, node: VaultNode) -> VaultSecret:

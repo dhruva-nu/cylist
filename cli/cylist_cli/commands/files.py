@@ -59,6 +59,10 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
 
     folder = resolve.folder(ctx.client, args.project, args.path)
     listing = ctx.client.get(f"/folders/{folder['id']}/children")
+    # The folder's items come a page at a time; a listing of the folder is all of them.
+    if listing.get("next"):
+        rest = ctx.client.get_all(f"/folders/{folder['id']}/children", after=listing["next"])
+        listing = {**listing, "items": [*listing.get("items", []), *rest], "next": None}
 
     if ctx.as_json:
         output.emit_json(listing)

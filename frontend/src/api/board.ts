@@ -1,6 +1,7 @@
 /** A board's columns, and the templates that say where a card may go on it. */
 
 import { jsonBody, request } from './http'
+import { fetchAllPages } from './paging'
 
 export interface BoardColumn {
   id: string
@@ -108,7 +109,8 @@ export const boardApi = {
       body: jsonBody({ column_ids: columnIds }),
     }),
 
-  listTemplates: (projectKey: string) => request<Template[]>(`/projects/${projectKey}/templates`),
+  listTemplates: (projectKey: string) =>
+    fetchAllPages<Template>(`/projects/${projectKey}/templates`),
   createTemplate: (projectKey: string, input: TemplateInput) =>
     request<Template>(`/projects/${projectKey}/templates`, {
       method: 'POST',

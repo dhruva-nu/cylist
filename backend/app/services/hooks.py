@@ -50,12 +50,13 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now
-from app.core.crypto import HOOK_SECRET_DOMAIN, KEY_VERSION, VaultCipher
+from app.core.crypto import HOOK_SECRET_DOMAIN, VaultCipher
 from app.core.errors import (
     ConflictError,
     NotFoundError,
@@ -72,6 +73,7 @@ from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
 from app.services import projects
+from app.services.paging import PageRequest, Window, keyset
 
 
 @dataclass(frozen=True)
@@ -444,11 +446,13 @@ class HookLabels:
     last_delivery: HookDelivery | None
 
 
-async def list_hooks(session: AsyncSession, project: Project) -> list[Hook]:
-    found = await session.scalars(
-        select(Hook).where(Hook.project_id == project.id).order_by(Hook.name)
+async def list_hooks(session: AsyncSession, project: Project, page: PageRequest) -> Window[Hook]:
+    return await keyset(
+        session,
+        select(Hook).where(Hook.project_id == project.id),
+        keys=(Hook.name, Hook.id),
+        page=page,
     )
-    return list(found)
 
 
 async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID, HookLabels]:
@@ -587,6 +591,10 @@ async def update(
         url = checked_url(fields.url)
         if url != hook.url:
             hook.url = url
+            # Somewhere new has earned a fresh start: whatever the old address
+            # kept failing to do says nothing about this one.
+            hook.consecutive_failures = 0
+            hook.paused_until = None
             changed.append("url")
     changed += await _apply_filters(session, project, hook, filters)
     _refuse_rules_on_manual(hook)
@@ -612,14 +620,14 @@ def secret_of(cipher: VaultCipher, hook: Hook) -> str:
     )
 
 
-async def deliveries(session: AsyncSession, hook: Hook, *, limit: int) -> list[HookDelivery]:
-    found = await session.scalars(
-        select(HookDelivery)
-        .where(HookDelivery.hook_id == hook.id)
-        .order_by(HookDelivery.created_at.desc(), HookDelivery.id.desc())
-        .limit(limit)
+async def deliveries(session: AsyncSession, hook: Hook, page: PageRequest) -> Window[HookDelivery]:
+    return await keyset(
+        session,
+        select(HookDelivery).where(HookDelivery.hook_id == hook.id),
+        keys=(HookDelivery.created_at, HookDelivery.id),
+        page=page,
+        descending=True,
     )
-    return list(found)
 
 
 async def delivery(session: AsyncSession, hook: Hook, delivery_id: UUID) -> HookDelivery:
@@ -702,14 +710,26 @@ def refuse_unless_fireable(project: Project, hook: Hook) -> None:
 
 
 def checked_url(url: str) -> str:
-    """An absolute ``http``/``https`` URL, or a 422 saying what is wrong with it."""
+    """An absolute ``http``/``https`` URL, or a 422 saying what is wrong with it.
+
+    Read twice: once by ``urlsplit`` for its shape, and once by the client the
+    courier sends with, which is stricter — a port that is not a number, say.
+    A URL only the second refuses would otherwise be saved, and then fail
+    every delivery at the moment it was sent rather than here, where the
+    person typing it can see why.
+    """
     url = url.strip()
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
-        raise UnprocessableRequestError(
-            "A hook's URL must be an absolute http:// or https:// address.",
-            details={"url": url},
-        )
+    refused = UnprocessableRequestError(
+        "A hook's URL must be an absolute http:// or https:// address.",
+        details={"url": url},
+    )
+    try:
+        parts = urlsplit(url)
+        parsed = httpx.URL(url)
+    except (ValueError, httpx.InvalidURL) as exc:
+        raise refused from exc
+    if parts.scheme not in ("http", "https") or not parts.netloc or not parsed.host:
+        raise refused
     return url
 
 
@@ -827,6 +847,6 @@ def _seal(cipher: VaultCipher, hook: Hook, secret: str | None) -> str:
             "or left out to have one generated.",
         )
     hook.secret_ciphertext = cipher.seal(plaintext, node_id=hook.id, domain=HOOK_SECRET_DOMAIN)
-    hook.key_version = KEY_VERSION
+    hook.key_version = cipher.version
     hook.secret_hint = plaintext[-4:]
     return plaintext

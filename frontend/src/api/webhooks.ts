@@ -7,6 +7,7 @@
 
 import type { TaskType } from './tasks'
 import { jsonBody, request } from './http'
+import { fetchAllPages, fetchPage } from './paging'
 
 /**
  * One change a hook can fire on — `task.moved` — how the page words it, and
@@ -123,7 +124,7 @@ export interface HookDelivery {
 
 export const webhooksApi = {
   listHookEvents: () => request<HookEvent[]>('/hooks/events'),
-  listHooks: (projectKey: string) => request<Hook[]>(`/projects/${projectKey}/hooks`),
+  listHooks: (projectKey: string) => fetchAllPages<Hook>(`/projects/${projectKey}/hooks`),
   createHook: (projectKey: string, input: HookInput) =>
     request<HookCreated>(`/projects/${projectKey}/hooks`, {
       method: 'POST',
@@ -149,8 +150,10 @@ export const webhooksApi = {
       method: 'POST',
       body: jsonBody({ message: message.trim() || null }),
     }),
-  listHookDeliveries: (projectKey: string, id: string) =>
-    request<HookDelivery[]>(`/projects/${projectKey}/hooks/${id}/deliveries`),
+  /** The newest page of a hook's deliveries: what a reader checks to see whether it works. */
+  listHookDeliveries: async (projectKey: string, id: string) =>
+    (await fetchPage<HookDelivery>(`/projects/${projectKey}/hooks/${id}/deliveries`, null, 25))
+      .items,
   redeliverHook: (projectKey: string, id: string, deliveryId: string) =>
     request<HookDelivery>(
       `/projects/${projectKey}/hooks/${id}/deliveries/${deliveryId}/redeliver`,

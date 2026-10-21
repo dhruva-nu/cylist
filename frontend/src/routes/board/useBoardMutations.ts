@@ -17,7 +17,8 @@ import {
   type Person,
   type Task,
 } from '../../api/client'
-import { queryKeys, useInvalidate } from '../../api/queries'
+import { queryKeys, useInvalidate, type BoardCards } from '../../api/queries'
+import { sortKeyAt } from './sortKey'
 
 /** A card dropped somewhere: where it lands, and what that changes about it. */
 export interface Move {
@@ -26,6 +27,11 @@ export interface Move {
   taskRef: string
   /** Null when the card was dropped in the column it was already in. */
   columnId: string | null
+  /**
+   * How many cards from the top of the column it lands — what the server is
+   * asked for. Not the card's `position`, which is a sort key: `sortKeyAt`
+   * works out the one the board draws it with meanwhile.
+   */
   position: number
   /**
    * The section of a divided column the card lands on, by name, and where the
@@ -47,11 +53,23 @@ export interface Move {
  * A card as it will look once a move has landed, so the board can draw it
  * there before the server has answered.
  */
-function withMoveApplied(task: Task, move: Move, landedGoal: Goal | null | undefined): Task {
+function withMoveApplied(
+  task: Task,
+  move: Move,
+  landedGoal: Goal | null | undefined,
+  cards: Task[],
+): Task {
   const { columnId, position, outcome, outcomeIndex, goalId } = move
   return {
     ...task,
-    ...(columnId ? { column_id: columnId, position, outcome, outcome_index: outcomeIndex } : {}),
+    ...(columnId
+      ? {
+          column_id: columnId,
+          position: sortKeyAt(cards, columnId, position, task.id),
+          outcome,
+          outcome_index: outcomeIndex,
+        }
+      : {}),
     ...(goalId === undefined
       ? {}
       : {
@@ -104,14 +122,16 @@ export function useBoardMutations(
    */
   async function changeCardsOptimistically(
     change: (task: Task) => Task,
-  ): Promise<Snapshot<Task[]>> {
+  ): Promise<Snapshot<BoardCards>> {
     await queryClient.cancelQueries({ queryKey: tasksKey })
-    const previous = queryClient.getQueryData<Task[]>(tasksKey)
-    queryClient.setQueryData<Task[]>(tasksKey, (current) => current?.map(change))
+    const previous = queryClient.getQueryData<BoardCards>(tasksKey)
+    queryClient.setQueryData<BoardCards>(tasksKey, (current) =>
+      current ? { ...current, tasks: current.tasks.map(change) } : current,
+    )
     return { previous }
   }
 
-  function restoreCards(snapshot: Snapshot<Task[]> | undefined) {
+  function restoreCards(snapshot: Snapshot<BoardCards> | undefined) {
     queryClient.setQueryData(tasksKey, snapshot?.previous)
   }
 
@@ -125,7 +145,7 @@ export function useBoardMutations(
    * a moment later would show the reader two things happening where they did
    * one.
    */
-  const moveTask = useMutation<Task | null, Error, Move, Snapshot<Task[]>>({
+  const moveTask = useMutation<Task | null, Error, Move, Snapshot<BoardCards>>({
     mutationFn: async ({ taskId, taskRef, columnId, position, outcome, goalId }) => {
       const moved = columnId ? await api.moveTask(taskId, columnId, position, outcome) : null
       // By reference rather than by id for the same reason the dialog does:
@@ -135,8 +155,9 @@ export function useBoardMutations(
     onMutate: (move) => {
       const landedGoal =
         move.goalId === undefined ? null : (goals ?? []).find((goal) => goal.id === move.goalId)
+      const cards = queryClient.getQueryData<Task[]>(tasksKey) ?? []
       return changeCardsOptimistically((task) =>
-        task.id === move.taskId ? withMoveApplied(task, move, landedGoal) : task,
+        task.id === move.taskId ? withMoveApplied(task, move, landedGoal, cards) : task,
       )
     },
     onError: (_error, _move, snapshot) => restoreCards(snapshot),
@@ -152,7 +173,7 @@ export function useBoardMutations(
     Task,
     Error,
     { taskId: string; index: number },
-    Snapshot<Task[]>
+    Snapshot<BoardCards>
   >({
     mutationFn: ({ taskId, index }) => api.setSubStatus(taskId, index),
     onMutate: ({ taskId, index }) =>
@@ -172,7 +193,7 @@ export function useBoardMutations(
     Task,
     Error,
     { taskId: string; taskRef: string; assigneeId: string },
-    Snapshot<Task[]>
+    Snapshot<BoardCards>
   >({
     mutationFn: ({ taskRef, assigneeId }) => api.updateTask(taskRef, { assignee_id: assigneeId }),
     onMutate: ({ taskId, assigneeId }) => {

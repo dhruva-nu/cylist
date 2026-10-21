@@ -85,7 +85,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cylist.api.generated.models.FiledItem
 import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.PickRead
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TodoRead
 import cylist.api.generated.models.TodoState
 import cylist.api.generated.models.WrapUpResult
@@ -142,7 +142,7 @@ fun TodayScreen(viewModel: TodayViewModel, modifier: Modifier = Modifier) {
 class TodayActions(
     val showDay: (LocalDate) -> Unit = {},
     val backToToday: () -> Unit = {},
-    val pick: (TaskRead) -> Unit = {},
+    val pick: (TaskSummary) -> Unit = {},
     val unpick: (UUID) -> Unit = {},
     val addTodo: (UUID, String, (String?) -> Unit) -> Unit = { _, _, done -> done(null) },
     val tick: (UUID, Boolean) -> Unit = { _, _ -> },
@@ -645,7 +645,7 @@ private fun CardsSheet(state: TodayState, actions: TodayActions, unpick: (PickRe
 
 /** One card to pick: a press puts it on the day, another takes it off (`CardRow`). */
 @Composable
-private fun CardRow(task: TaskRead, columnName: String, picked: Boolean, today: LocalDate, toggle: () -> Unit) {
+private fun CardRow(task: TaskSummary, columnName: String, picked: Boolean, today: LocalDate, toggle: () -> Unit) {
     val colors = CylistTheme.colors
     val due = pickDueOf(task, today)
     Row(

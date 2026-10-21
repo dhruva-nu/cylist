@@ -401,3 +401,10 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Under a long folder's files, the way to the rest of them. */
+.more {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 14px;
+}

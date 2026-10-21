@@ -7,13 +7,14 @@ called and which folder it is in; this package holds the bytes.
 from fastapi import Depends
 
 from app.config import Settings, app_settings
-from app.storage.base import BlobStore, BlobTooLargeError, StoredBlob
+from app.storage.base import BlobStore, BlobTooLargeError, StagedBlob, StoredBlob
 from app.storage.local import LocalBlobStore
 
 __all__ = [
     "BlobStore",
     "BlobTooLargeError",
     "LocalBlobStore",
+    "StagedBlob",
     "StoredBlob",
     "get_blob_store",
 ]

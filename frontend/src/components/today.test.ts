@@ -79,7 +79,6 @@ function card(
     column_id: fields.column ?? TO_DO.id,
     position: 0,
     title: reference,
-    description: '',
     type: 'feature',
     priority: fields.priority ?? 'p3',
     sub_statuses: [],

@@ -6,7 +6,7 @@ import cylist.api.generated.models.AgentPromptRead
 import cylist.api.generated.models.AgentPromptStatus
 import cylist.api.generated.models.AgentSessionReason
 import cylist.api.generated.models.PrState
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -36,7 +36,7 @@ private val dayMonth = DateTimeFormatter.ofPattern("d MMM", Locale.UK)
  * for a card that owes nothing (`board/CardFace.tsx`, `owedDateOf`). A
  * cancelled or finished card has nothing left to be late for.
  */
-fun dueOf(task: TaskRead, today: LocalDate): Due? = dueOf(task.status, task.finishedAt, task.nextDueDate, today)
+fun dueOf(task: TaskSummary, today: LocalDate): Due? = dueOf(task.status, task.finishedAt, task.nextDueDate, today)
 
 /** [dueOf] from the three fields it reads, so a card's detail (a `TaskDetail`) says it the same way. */
 fun dueOf(status: TaskStatus, finishedAt: String?, nextDueDate: String?, today: LocalDate): Due? {
@@ -112,19 +112,19 @@ fun promptLine(prompt: AgentPromptRead, viewerId: UUID?): String? = when (prompt
  * The PR state a card shows: the one furthest behind, since a card with one
  * merged and one still raised is not finished being reviewed.
  */
-fun prStateOf(task: TaskRead): PrState? {
+fun prStateOf(task: TaskSummary): PrState? {
     val states = task.prRefs.map { it.state ?: PrState.raised }
     return listOf(PrState.raised, PrState.approved, PrState.merged).firstOrNull { it in states }
 }
 
 /** Everybody a card belongs to: its assignee and whoever owns one of its sub-tasks (`boardPeople.ts`). */
-fun ownersOf(task: TaskRead): List<UUID> = listOf(task.assignee.id) + task.subtaskAssignees.map { it.id }
+fun ownersOf(task: TaskSummary): List<UUID> = listOf(task.assignee.id) + task.subtaskAssignees.map { it.id }
 
-fun ownedByAny(task: TaskRead, people: Set<UUID>): Boolean =
+fun ownedByAny(task: TaskSummary, people: Set<UUID>): Boolean =
     people.isEmpty() || ownersOf(task).any { it in people }
 
 /** How many cards each person owns, counting a card once however many of its sub-tasks they hold. */
-fun cardsOwned(tasks: List<TaskRead>): Map<UUID, Int> =
+fun cardsOwned(tasks: List<TaskSummary>): Map<UUID, Int> =
     tasks.flatMap { ownersOf(it).toSet() }.groupingBy { it }.eachCount()
 
 /** The people filter's faces: you first, then by cards owned, then by name. */
@@ -140,16 +140,16 @@ fun <P> facesInOrder(people: List<P>, id: (P) -> UUID, name: (P) -> String, owne
  * are hidden board-wide, as on the web (`boardHiding.ts`); archived ones are
  * in cold storage.
  */
-fun onBoard(task: TaskRead): Boolean =
+fun onBoard(task: TaskSummary): Boolean =
     task.parentId == null && task.columnId != null && task.archivedAt == null && task.status != TaskStatus.cancelled
 
 /** Cards on hold are folded into a line at their column's foot rather than listed. */
-fun isHeld(task: TaskRead): Boolean = task.status == TaskStatus.hold
+fun isHeld(task: TaskSummary): Boolean = task.status == TaskStatus.hold
 
 /** Which agent cards to show: everything, only those working, or only those waiting on someone. */
 enum class AgentFilter { All, Working, NeedsYou }
 
-fun passesAgentFilter(task: TaskRead, filter: AgentFilter): Boolean = when (filter) {
+fun passesAgentFilter(task: TaskSummary, filter: AgentFilter): Boolean = when (filter) {
     AgentFilter.All -> true
     AgentFilter.Working -> task.agentSession?.state == AgentPresence.State.working
     AgentFilter.NeedsYou -> task.agentSession?.state == AgentPresence.State.waiting
@@ -223,7 +223,7 @@ fun assigneeLabel(id: UUID, name: String, viewerId: UUID?): String =
  * How many open cards each person is the assignee of: cards on the board and
  * not yet finished, which is what the assign sheet orders by.
  */
-fun openCardsOf(tasks: List<TaskRead>, lastColumnId: UUID?): Map<UUID, Int> =
+fun openCardsOf(tasks: List<TaskSummary>, lastColumnId: UUID?): Map<UUID, Int> =
     tasks.filter { onBoard(it) && it.finishedAt == null && it.columnId != lastColumnId }
         .groupingBy { it.assignee.id }.eachCount()
 

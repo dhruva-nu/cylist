@@ -28,6 +28,8 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
+from typing import Any
 
 import pytest
 from argon2 import PasswordHasher, profiles
@@ -48,9 +50,12 @@ from app.models import Base
 from app.models.person import Person, PersonKind
 from app.realtime.bus import Bus
 from app.realtime.hub import Hub
+from app.services import blobs
 from app.services.doc_engine import engine_for
+from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
 from app.services.push.delivery import Pusher
+from app.storage import LocalBlobStore
 
 # Before anything below hashes a password. The deployed parameters cost ~70 ms
 # a hash or a check, and the suite does one or more of those in nearly every
@@ -74,6 +79,9 @@ VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
 """A fixed 32-byte AES key, so a ciphertext written by one test is readable by
 the next. Never used anywhere but here; a real one comes from
 ``python -m app.cli generate-vault-key``."""
+
+VAULT_KEYS = ((1, VAULT_KEY),)
+"""The keyring :data:`VAULT_KEY` alone makes: version 1, as in every deployment."""
 
 TEST_DATABASE_NAME = "cylist_test"
 
@@ -157,7 +165,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory, database_url: str) -> Set
 @pytest.fixture(scope="session")
 async def database(settings: Settings) -> AsyncIterator[Database]:
     """Create the schema once, drop it at the end of the run."""
-    db = Database(settings.database_url)
+    db = Database.configured(settings)
     async with db.engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
@@ -198,6 +206,7 @@ APP_STATE = {
     "pusher",
     "push_sender",
     "doc_engine",
+    "doc_corpora",
     "metrics",
     "mcp",
     "sign_in_throttle",
@@ -231,6 +240,7 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.pusher = Pusher()
     app.state.push_sender = None
     app.state.doc_engine = engine_for(settings)
+    app.state.doc_corpora = CorpusCache()
     # Fresh buckets, so one test's sign-in attempts are not another's.
     app.state.sign_in_throttle = SignInThrottle()
     # In place, not replaced: MetricsMiddleware holds this object.
@@ -325,6 +335,15 @@ async def sign_in(client: AsyncClient) -> AsyncClient:
     return client
 
 
+async def sweep_blobs(database: Database, settings: Settings) -> blobs.Swept:
+    """Run the blob sweep now, with no idle margin.
+
+    A delete takes rows only; the bytes leave at the next sweep (CYLIST-129).
+    A test asking whether content left the disk has to run that sweep first.
+    """
+    return await blobs.sweep(database, LocalBlobStore(settings.blob_dir), idle_for=timedelta(0))
+
+
 async def bootstrap_sign_in(client: AsyncClient) -> AsyncClient:
     """Sign in with ``CYLIST_PASSWORD_HASH``, as a fresh deployment does.
 
@@ -408,3 +427,13 @@ async def put_members(client: AsyncClient, project: str, person_ids: list[str]) 
     me = (await client.get("/me")).json().get("person")
     keep = [me["id"]] if me is not None and me["id"] not in person_ids else []
     return await client.put(f"/projects/{project}/members", json={"person_ids": keep + person_ids})
+
+
+def cards_of(board: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every card on a page of ``GET /projects/{ref}/tasks``, left to right and
+    top to bottom — the flat list a test about the cards themselves reads.
+
+    Only what the page holds: a test that wants a column past its first page
+    reads ``GET /columns/{id}/tasks`` itself.
+    """
+    return [card for column in board["columns"] for card in column["items"]]

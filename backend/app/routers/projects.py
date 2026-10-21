@@ -20,6 +20,7 @@ from app.models.project import Project
 from app.models.role import ADMIN_ROLE_NAME
 from app.models.task import TaskStatus
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
@@ -27,6 +28,7 @@ from app.schemas.projects import (
     Membership,
     MembershipUpdate,
     ProjectCreate,
+    ProjectPage,
     ProjectRead,
     ProjectSummary,
     ProjectUpdate,
@@ -45,7 +47,7 @@ from app.services import (
     tasks,
     vault,
 )
-from app.storage import BlobStore, get_blob_store
+from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -110,16 +112,19 @@ asked one way: :func:`app.services.roles.may_administer`.
 """
 
 
-@router.get("", response_model=list[ProjectRead], summary="List projects")
+@router.get("", response_model=ProjectPage, summary="List projects")
 async def list_projects(
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     include_archived: bool = Query(default=False),
-) -> list[ProjectRead]:
-    """Return the projects the caller is a member of, newest first — the home
-    screen's grid."""
-    found = await projects.list_projects(session, principal, include_archived=include_archived)
-    return [_project_read(project) for project in found]
+    page: PageRequest = PageQuery,
+) -> ProjectPage:
+    """Return the projects the caller is a member of, newest first, a page at a
+    time — the home screen's grid."""
+    found = await projects.list_projects(
+        session, principal, page, include_archived=include_archived
+    )
+    return ProjectPage(items=[_project_read(project) for project in found.rows], next=found.next)
 
 
 @router.post(
@@ -264,7 +269,6 @@ async def delete_project(
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(DELETE_PROJECT),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Delete a project, and with it everything filed under it.
 
@@ -285,7 +289,7 @@ async def delete_project(
     projects.require_confirmation(project, confirm)
 
     key, name, project_id = project.key, project.name, project.id
-    await projects.delete(session, store, project)
+    await projects.delete(session, project)
     await activity.record(
         session,
         principal,

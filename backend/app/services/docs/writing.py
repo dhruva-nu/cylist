@@ -83,6 +83,9 @@ async def write(
             "Set append to add to it, or edit it by its id.",
             details={"doc_id": str(existing.id), "topic_id": str(topic.id)},
         )
+    # Read now and not with the titles: only the doc being appended to needs
+    # its body, and the topic's others may be long.
+    await session.refresh(existing, ["body"])
     combined = appended(existing.body, data.body)
     if len(combined) > BODY_MAX_LENGTH:
         raise UnprocessableRequestError(

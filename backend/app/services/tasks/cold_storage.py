@@ -39,7 +39,9 @@ from app.models.file import FileItem, Folder
 from app.models.project import Project
 from app.models.task import Task
 from app.services import columns, files, templates
+from app.services.paging import PageRequest, Window, keyset
 from app.services.tasks.history import FieldChange, field_change
+from app.services.tasks.lookup import LISTED_WITHOUT
 from app.services.tasks.moves import refuse_open_work
 from app.services.tasks.stacking import cards_in_column, restack
 from app.storage import BlobStore
@@ -134,6 +136,11 @@ async def store_finished(
 
     for card in cards:
         card.archived_at = stored_at
+        # A card in the last column is finished, but one that was there before
+        # Cylist kept the moment may not say when; cold storage is read by when
+        # its cards finished, so a stored card has to answer.
+        if card.finished_at is None:
+            card.finished_at = stored_at
         # Through the relationship rather than the id, so the card in hand
         # stops pointing at the column it left without a reload per card.
         card.column = None
@@ -178,14 +185,21 @@ async def restore(session: AsyncSession, task: Task) -> tuple[Task, list[FieldCh
     return task, [field_change("column", "column", None, finished.name)]
 
 
-async def list_stored(session: AsyncSession, project: Project) -> list[Task]:
-    """The project's cards in cold storage, most recently stored first."""
-    return list(
-        await session.scalars(
-            select(Task)
-            .where(Task.project_id == project.id, Task.archived_at.is_not(None))
-            .order_by(Task.archived_at.desc(), Task.number.desc())
-        )
+async def stored_page(session: AsyncSession, project: Project, page: PageRequest) -> Window[Task]:
+    """One page of the project's cards in cold storage, most recently finished first.
+
+    By when the work finished rather than when it was stored: a run stores a
+    whole column at one instant, so every card in it shares an ``archived_at``
+    and that order says nothing; when each was finished is what a reader of
+    a log of finished work is looking for.
+    """
+    return await keyset(
+        session,
+        select(Task).where(Task.project_id == project.id, Task.archived_at.is_not(None)),
+        keys=(Task.finished_at, Task.id),
+        page=page,
+        descending=True,
+        options=LISTED_WITHOUT,
     )
 
 

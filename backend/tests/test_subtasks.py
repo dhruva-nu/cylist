@@ -15,7 +15,7 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from tests.conftest import put_members
+from tests.conftest import cards_of, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -120,7 +120,7 @@ class TestBoardSubtasks:
 
         subtask = await _subtask(signed_in, parent["reference"], person)
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
         assert [task["reference"] for task in board] == ["ATL-1"]
         assert subtask["column_id"] is None
         assert subtask["position"] is None
@@ -149,10 +149,11 @@ class TestBoardSubtasks:
         await _subtask(signed_in, first["reference"], person)
 
         board = {
-            task["reference"]: task for task in (await signed_in.get("/projects/ATL/tasks")).json()
+            task["reference"]: task
+            for task in cards_of((await signed_in.get("/projects/ATL/tasks")).json())
         }
-        assert board[first["reference"]]["position"] == 0
-        assert board[second["reference"]]["position"] == 1
+        assert board[first["reference"]]["position"] == first["position"]
+        assert board[second["reference"]]["position"] == second["position"]
 
     async def test_a_subtask_is_addressed_by_its_reference(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -190,7 +191,7 @@ class TestBoardSubtasks:
         await _subtask(signed_in, parent["reference"], person, title="Replay endpoint")
 
         detail = (await signed_in.get(f"/tasks/{parent['reference']}")).json()
-        listed = (await signed_in.get(f"/tasks/{parent['reference']}/subtasks")).json()
+        listed = (await signed_in.get(f"/tasks/{parent['reference']}/subtasks")).json()["items"]
 
         assert [child["reference"] for child in detail["subtasks"]] == ["ATL-1-1"]
         assert [child["title"] for child in listed] == ["Replay endpoint"]
@@ -203,7 +204,7 @@ class TestBoardSubtasks:
         assert (await signed_in.delete(f"/tasks/{parent['id']}")).status_code == 200
 
         assert (await signed_in.get(f"/tasks/{subtask['id']}")).status_code == 404
-        assert (await signed_in.get("/projects/ATL/tasks")).json() == []
+        assert cards_of((await signed_in.get("/projects/ATL/tasks")).json()) == []
 
 
 class TestChecklist:
@@ -449,7 +450,8 @@ class TestTheGate:
         await _tick(signed_in, first["reference"])
 
         board = {
-            task["reference"]: task for task in (await signed_in.get("/projects/ATL/tasks")).json()
+            task["reference"]: task
+            for task in cards_of((await signed_in.get("/projects/ATL/tasks")).json())
         }
 
         assert board["ATL-1"]["subtask_count"] == 3
@@ -510,7 +512,7 @@ class TestTheGate:
         await _subtask(signed_in, parent["reference"], other)
         await _subtask(signed_in, parent["reference"], person)
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
 
         # In sub-number order, and each person once however many they own.
         assert [owner["name"] for owner in board[0]["subtask_assignees"]] == ["Aditi K", "Ravi S"]

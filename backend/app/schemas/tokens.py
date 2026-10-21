@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from app.auth.scopes import Scope
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 
 class TokenCreate(Schema):
@@ -53,3 +53,7 @@ class TokenIssued(TokenRead):
     """A freshly minted token, including the only copy of its plaintext."""
 
     token: str = Field(description="Copy this now — it is never shown again.")
+
+
+class TokenPage(Page[TokenRead]):
+    """A page of the live API tokens, newest first."""

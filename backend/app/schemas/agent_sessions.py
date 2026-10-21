@@ -15,7 +15,7 @@ from app.models.agent_session import (
     AgentSessionReason,
     AgentSessionState,
 )
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 NOTE_MAX = 300
 """Longest note a report may carry. A line on a card, not a log."""
@@ -295,3 +295,15 @@ class AgentFeedEntryRead(Schema):
     kind: AgentFeedKind
     tool: str | None
     text: str
+
+
+class AgentSessionPage(Page[AgentSessionRead]):
+    """A page of a card's agent sessions: the open ones first."""
+
+
+class AgentFeedPage(Page[AgentFeedEntryRead]):
+    """A page of a card's agent feed, newest first."""
+
+
+class AgentPromptPage(Page[AgentPromptRead]):
+    """A page of what the agents on a card have asked, newest first."""

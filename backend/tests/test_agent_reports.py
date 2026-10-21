@@ -84,7 +84,7 @@ async def working(client: AsyncClient, ref: str, session_id: str) -> None:
 
 
 async def states(client: AsyncClient, ref: str) -> list[tuple[str, str | None]]:
-    rows = (await client.get(f"/tasks/{ref}/agent-sessions")).json()
+    rows = (await client.get(f"/tasks/{ref}/agent-sessions")).json()["items"]
     return [(row["state"], row["reason"]) for row in rows]
 
 

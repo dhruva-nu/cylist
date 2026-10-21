@@ -37,7 +37,8 @@ def register(server: MCPServer, client: Api, *, hosted: bool) -> None:
             "recorded with who did it and whether it came through the web or "
             "the API, so this answers 'what changed, and was it a person or an "
             "agent?'. Filter by project or by entity type ('task', 'project', "
-            "'vault_node', 'token')."
+            "'vault_node', 'token'). Comes a page at a time: when 'next' is not "
+            "null there are older entries, and passing it back as 'after' reads them."
         ),
     )
     async def read_activity(
@@ -48,14 +49,18 @@ def register(server: MCPServer, client: Api, *, hosted: bool) -> None:
             str | None, Field(description="e.g. 'task', 'project', 'vault_node'.")
         ] = None,
         limit: Annotated[
-            int, Field(description="How many entries. Default 20, maximum 200.", ge=1, le=200)
+            int, Field(description="How many entries. Default 20, maximum 100.", ge=1, le=100)
         ] = 20,
+        after: Annotated[
+            str | None,
+            Field(description="The 'next' of an earlier call, to read the entries before it."),
+        ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            entries = await client.get(
-                "/activity", project=project, entity_type=entity_type, limit=limit
+            page = await client.get(
+                "/activity", project=project, entity_type=entity_type, limit=limit, after=after
             )
-            return {"activity": entries}
+            return {"activity": page.get("items", []), "next": page.get("next")}
 
         return await as_tool_result(call)
 

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AgentSession, AgentSessionReason, AgentSessionState
 from app.services.agent_sessions import presence
-from tests.conftest import put_members
+from tests.conftest import cards_of, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -74,12 +74,12 @@ async def _put(
 
 
 async def _card_read(client: AsyncClient, ref: str) -> dict[str, Any]:
-    board = (await client.get("/projects/ATL/tasks")).json()
+    board = cards_of((await client.get("/projects/ATL/tasks")).json())
     return next(task for task in board if task["reference"] == ref)
 
 
 async def _agent_activity(client: AsyncClient) -> list[str]:
-    feed = (await client.get("/activity")).json()
+    feed = (await client.get("/activity")).json()["items"]
     return [entry["verb"] for entry in feed if entry["verb"].startswith("agent_session.")]
 
 
@@ -211,9 +211,9 @@ class TestOneCardAtATime:
 
         await _put(signed_in, agent, second, "working")
 
-        on_first = (await signed_in.get(f"/tasks/{first}/agent-sessions")).json()
+        on_first = (await signed_in.get(f"/tasks/{first}/agent-sessions")).json()["items"]
         assert [(row["state"], row["reason"]) for row in on_first] == [("done", "moved")]
-        on_second = (await signed_in.get(f"/tasks/{second}/agent-sessions")).json()
+        on_second = (await signed_in.get(f"/tasks/{second}/agent-sessions")).json()["items"]
         assert [row["state"] for row in on_second] == ["working"]
 
         history = (await signed_in.get(f"/tasks/{first}/history")).json()["entries"]
@@ -226,7 +226,7 @@ class TestOneCardAtATime:
         await _put(signed_in, agent, ref, "working", SESSION_A, client_name="A")
         await _put(signed_in, agent, ref, "working", SESSION_B, client_name="B")
 
-        rows = (await signed_in.get(f"/tasks/{ref}/agent-sessions")).json()
+        rows = (await signed_in.get(f"/tasks/{ref}/agent-sessions")).json()["items"]
         assert sorted(row["client_name"] for row in rows) == ["A", "B"]
 
 
@@ -277,7 +277,7 @@ class TestWhatTheCardSays:
         assert dismissed.status_code == 204
 
         assert (await _card_read(signed_in, ref))["agent_session"] is None
-        assert (await signed_in.get(f"/tasks/{ref}/agent-sessions")).json() == []
+        assert (await signed_in.get(f"/tasks/{ref}/agent-sessions")).json()["items"] == []
 
     async def test_a_goals_page_draws_the_same_card(self, signed_in: AsyncClient) -> None:
         agent = await _agent(signed_in)
@@ -366,7 +366,7 @@ class TestWhatItIsDoingNow:
 
 async def _last_seen(client: AsyncClient, ref: str) -> str:
     """When the card's one session last reported in."""
-    rows = (await client.get(f"/tasks/{ref}/agent-sessions")).json()
+    rows = (await client.get(f"/tasks/{ref}/agent-sessions")).json()["items"]
     assert len(rows) == 1, rows
     return str(rows[0]["last_seen_at"])
 

@@ -13,15 +13,23 @@ Two rules here are choices rather than mechanics:
   live work is how work gets forgotten rather than finished. Dropping a goal
   is not refused, because giving up on a goal is exactly the thing you do
   while its work is unfinished.
+
+The second rule is asked from both ends — by the goal being achieved, and by a
+card being put on it, reopened or uncancelled — and both ends lock the goal's
+row before they read what they decide on (:func:`lock`). Two requests at the
+same moment take turns, and the second sees what the first committed. The late
+write is refused, naming the goal, rather than reopening the goal behind
+whoever achieved it: see :func:`refuse_open_card_on_achieved`.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import Numeric, Select, case, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.core.errors import (
     ConflictError,
@@ -31,12 +39,15 @@ from app.core.errors import (
 )
 from app.core.palette import GOAL_PALETTE, colour_for
 from app.db import flush_or_refuse
-from app.models.board import BoardColumn
+from app.models.board import MAX_COLUMNS, BoardColumn
 from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
 from app.services import columns, projects, references
+from app.services.paging import PageRequest, SortKey, Window, keyset
+
+_ANY_DATE = date(1970, 1, 1)
 
 _SETTLED_LAST = case((Goal.status == GoalStatus.OPEN, 0), else_=1)
 """Open goals first, whatever the alphabet says.
@@ -47,10 +58,10 @@ what is still being worked towards is what a goals page is for.
 """
 
 
-async def list_for_project(
-    session: AsyncSession, project: Project, *, include_settled: bool = True
-) -> list[Goal]:
-    """The project's goals: open ones first, then those that are settled.
+async def page_for_project(
+    session: AsyncSession, project: Project, page: PageRequest, *, include_settled: bool = True
+) -> Window[Goal]:
+    """One page of the project's goals: open ones first, then those that are settled.
 
     Within each half, the dated ones come first in date order, then the undated
     by name. A goal with a date is a goal with a deadline, and a list that
@@ -59,15 +70,20 @@ async def list_for_project(
     statement: Select[tuple[Goal]] = select(Goal).where(Goal.project_id == project.id)
     if not include_settled:
         statement = statement.where(Goal.status == GoalStatus.OPEN)
-    return list(
-        await session.scalars(
-            statement.order_by(
-                _SETTLED_LAST,
-                Goal.target_date.is_(None),
-                Goal.target_date,
-                Goal.name,
-            )
-        )
+    return await keyset(
+        session,
+        statement,
+        keys=(
+            _SETTLED_LAST,
+            Goal.target_date.is_(None),
+            # Any date will do for the undated: the key before this one has
+            # already put them after every dated goal. It only has to be one
+            # that is not NULL, which a page could not continue past.
+            func.coalesce(Goal.target_date, _ANY_DATE),
+            Goal.name,
+            Goal.id,
+        ),
+        page=page,
     )
 
 
@@ -196,6 +212,10 @@ async def update(session: AsyncSession, goal: Goal, data: GoalUpdate) -> Goal:
         await projects.require_members(session, goal.project_id, [fields["owner_id"]])
 
     status = fields.pop("status", None)
+    if status is GoalStatus.ACHIEVED and goal.status is not GoalStatus.ACHIEVED:
+        # Before anything is written to the goal: the lock reloads it, and a
+        # field set first would be read back over.
+        await lock(session, goal.id)
     for field, value in fields.items():
         setattr(goal, field, value)
     if status is not None and status != goal.status:
@@ -240,6 +260,38 @@ async def tasks_for(session: AsyncSession, goal: Goal) -> list[Task]:
                 Task.archived_at.desc(),
             )
         )
+    )
+
+
+def _board_order() -> tuple[SortKey, ...]:
+    # The order :func:`tasks_for` reads in, said as keys a page can continue
+    # from: every one non-null and ascending. Cards in cold storage have no
+    # column, so they sort past the widest board; among themselves, most
+    # recently finished first, which is the epoch negated. A card on the board
+    # gets 0 there and is ordered by where it sits.
+    return (
+        func.coalesce(BoardColumn.position, MAX_COLUMNS),
+        func.coalesce(Task.position, 0),
+        case(
+            (Task.archived_at.is_(None), literal(0, Numeric())),
+            else_=-func.extract("epoch", Task.finished_at),
+        ),
+        Task.id,
+    )
+
+
+async def tasks_page(session: AsyncSession, goal: Goal, page: PageRequest) -> Window[Task]:
+    """One page of the cards linked to this goal: the board's slice of it,
+    left to right and top to bottom, then its cards in cold storage, most
+    recently finished first."""
+    return await keyset(
+        session,
+        select(Task)
+        .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
+        .where(Task.goal_id == goal.id, Task.parent_id.is_(None)),
+        keys=_board_order(),
+        page=page,
+        options=(defer(Task.description),),
     )
 
 
@@ -323,17 +375,89 @@ async def _set_status(session: AsyncSession, goal: Goal, status: GoalStatus) -> 
     goal.status = status
 
 
+async def lock(session: AsyncSession, goal_id: UUID) -> Goal:
+    """Lock a goal's row until the transaction ends, and reload it as committed.
+
+    Taken by both ends of the rule that an achieved goal has no open card on
+    it, so they take turns rather than each reading the other's state from
+    before the other wrote it.
+
+    ``FOR NO KEY UPDATE`` rather than ``FOR UPDATE``, and not only to spare the
+    rows that merely point at the goal. Creating a card locks its project and
+    then inserts a row referencing the goal, which takes a key-share lock on
+    it; a goal held ``FOR UPDATE`` by a request about to write its own activity
+    entry — which references the project — would be the other half of a
+    deadlock. ``NO KEY UPDATE`` does not conflict with a key share.
+
+    Raises:
+        NotFoundError: if the goal has gone since it was read.
+    """
+    goal = await session.get(
+        Goal, goal_id, with_for_update={"key_share": True}, populate_existing=True
+    )
+    if goal is None:
+        raise NotFoundError("No goal with that id.")
+    return goal
+
+
+async def refuse_open_card_on_achieved(
+    session: AsyncSession, goal_id: UUID | None, *, card: str, act: str
+) -> None:
+    """Refuse to leave an open card on a goal that is achieved.
+
+    Called before a card is put on a goal, reopened or uncancelled while on
+    one — with the goal locked for the rest of the transaction, so a request
+    achieving it at the same moment waits for this one and then finds the card
+    open. ``card`` names the card, or describes it where it has no reference
+    yet, and ``act`` says what was refused, as the sentence's object.
+
+    Refused rather than taken as reopening the goal: whoever marked the goal
+    achieved said something about it, and a card turning up afterwards does
+    not get to unsay it on their behalf. Reopening the goal is one request, and
+    the refusal says which.
+
+    Raises:
+        UnprocessableRequestError: naming the goal, if it is achieved.
+    """
+    if goal_id is None:
+        return
+    goal = await lock(session, goal_id)
+    if goal.status is not GoalStatus.ACHIEVED:
+        return
+    raise UnprocessableRequestError(
+        f"{goal.reference} ({goal.name}) is achieved, so {card} cannot be open on it. "
+        f"Reopen {goal.reference} first, or take the card off it, before {act}.",
+        details={"goal": goal.reference},
+    )
+
+
 async def _refuse_open_cards(session: AsyncSession, goal: Goal) -> None:
     """Stop a goal being marked achieved over cards that are still open.
+
+    The cards are read afresh, under the lock :func:`update` took on the goal,
+    rather than through anything this session loaded earlier: a card put on
+    the goal by another request a moment ago is the one this has to see.
+
+    A card in cold storage is not open — it left the board from the last
+    column, and :func:`progress` counts it as done.
 
     Raises:
         UnprocessableRequestError: naming the cards still outstanding.
     """
     finished = await columns.last(session, goal.project_id)
+    cards = await session.scalars(
+        select(Task)
+        .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
+        .where(Task.goal_id == goal.id, Task.parent_id.is_(None))
+        .order_by(BoardColumn.position.asc().nulls_last(), Task.position)
+        .execution_options(populate_existing=True)
+    )
     outstanding = [
         task
-        for task in await tasks_for(session, goal)
-        if task.status is not TaskStatus.CANCELLED and task.column_id != finished.id
+        for task in cards
+        if task.status is not TaskStatus.CANCELLED
+        and task.column_id is not None
+        and task.column_id != finished.id
     ]
     if not outstanding:
         return

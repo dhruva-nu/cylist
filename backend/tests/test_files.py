@@ -17,7 +17,7 @@ from app.config import Settings
 from app.db import Database
 from app.models import Blob, FileItem, Folder, ItemKind, ItemSource, Project
 from app.services.files import MAX_DEPTH
-from tests.conftest import client_for, sign_in
+from tests.conftest import client_for, sign_in, sweep_blobs
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -341,7 +341,7 @@ class TestEveryItemInAProject:
             json={"name": "Tax portal", "url": "https://tax.example/atlas", "source": "other"},
         )
 
-        body = (await project.get("/projects/ATL/items")).json()
+        body = (await project.get("/projects/ATL/items")).json()["items"]
 
         assert [(item["name"], item["folder_path"]) for item in body] == [
             ("readme.md", ""),
@@ -353,7 +353,7 @@ class TestEveryItemInAProject:
         """The root is the project, so naming it would say nothing."""
         await upload(project, await root_id(project), "brief.pdf", BRIEF)
 
-        body = (await project.get("/projects/ATL/items")).json()
+        body = (await project.get("/projects/ATL/items")).json()["items"]
 
         assert body[0]["folder_path"] == ""
 
@@ -363,7 +363,7 @@ class TestEveryItemInAProject:
         folder = await make_folder(project, "Briefs")
         await upload(project, folder, "brief.pdf", BRIEF, added_by=person)
 
-        item = (await project.get("/projects/ATL/items")).json()[0]
+        item = (await project.get("/projects/ATL/items")).json()["items"][0]
 
         assert item["kind"] == "file"
         assert item["source"] == "upload"
@@ -378,12 +378,12 @@ class TestEveryItemInAProject:
         await upload(project, hermes_root, "hermes.md", content_of("hermes"))
         await upload(project, await root_id(project), "atlas.md", content_of("atlas"))
 
-        body = (await project.get("/projects/ATL/items")).json()
+        body = (await project.get("/projects/ATL/items")).json()["items"]
 
         assert [item["name"] for item in body] == ["atlas.md"]
 
     async def test_an_empty_project_lists_nothing(self, project: AsyncClient) -> None:
-        assert (await project.get("/projects/ATL/items")).json() == []
+        assert (await project.get("/projects/ATL/items")).json()["items"] == []
 
     async def test_an_unknown_project_is_a_clean_404(self, project: AsyncClient) -> None:
         response = await project.get("/projects/NOPE/items")
@@ -772,8 +772,8 @@ class TestDeletingItems:
         assert (await project.delete(f"/items/{item['id']}")).status_code == 200
         assert (await project.get(f"/folders/{folder}/children")).json()["items"] == []
 
-    async def test_takes_the_content_off_the_disk_with_it(
-        self, project: AsyncClient, settings: Settings
+    async def test_takes_the_content_off_the_disk_at_the_next_sweep(
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         folder = await make_folder(project, "Architecture")
         content = content_of("deleted with its item")
@@ -781,10 +781,12 @@ class TestDeletingItems:
 
         await project.delete(f"/items/{item['id']}")
 
+        assert blob_path(settings, content).exists(), "a request never unlinks"
+        await sweep_blobs(database, settings)
         assert not blob_path(settings, content).exists()
 
     async def test_keeps_content_another_item_still_needs(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         folder = await make_folder(project, "Architecture")
         content = content_of("shared, so kept")
@@ -792,6 +794,7 @@ class TestDeletingItems:
         await upload(project, folder, "brief-copy.pdf", content)
 
         await project.delete(f"/items/{first['id']}")
+        await sweep_blobs(database, settings)
 
         assert blob_path(settings, content).is_file()
 
@@ -826,7 +829,7 @@ class TestDeletingFolders:
         assert (await project.get("/projects/ATL/tree")).json()["children"] == []
 
     async def test_cleans_the_content_out_of_the_store(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         parent = await make_folder(project, "Finance inputs")
         child = await make_folder(project, "2025", parent)
@@ -834,11 +837,12 @@ class TestDeletingFolders:
         await upload(project, child, "vat.xlsx", content)
 
         await project.delete(f"/folders/{parent}")
+        await sweep_blobs(database, settings)
 
         assert not blob_path(settings, content).exists()
 
     async def test_keeps_content_a_file_elsewhere_still_needs(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         doomed = await make_folder(project, "Exports")
         kept = await make_folder(project, "Architecture")
@@ -847,6 +851,7 @@ class TestDeletingFolders:
         survivor = (await upload(project, kept, "brief.pdf", content)).json()
 
         await project.delete(f"/folders/{doomed}")
+        await sweep_blobs(database, settings)
 
         assert blob_path(settings, content).is_file()
         assert (await project.get(f"/items/{survivor['id']}/download")).content == content
@@ -914,7 +919,7 @@ class TestAuditTrail:
         await project.delete(f"/folders/{folder}")
 
         project_id = (await project.get("/projects/ATL")).json()["id"]
-        entries = (await project.get("/activity", params={"project": project_id})).json()
+        entries = (await project.get("/activity", params={"project": project_id})).json()["items"]
 
         assert {entry["verb"] for entry in entries} == {
             "project.created",
@@ -933,7 +938,7 @@ class TestAuditTrail:
         await project.get("/projects/ATL/tree")
 
         project_id = (await project.get("/projects/ATL")).json()["id"]
-        entries = (await project.get("/activity", params={"project": project_id})).json()
+        entries = (await project.get("/activity", params={"project": project_id})).json()["items"]
         assert [entry["verb"] for entry in entries] == ["folder.created", "project.created"]
 
 
@@ -1010,19 +1015,20 @@ class TestDeletingAProject:
     """
 
     async def test_takes_its_content_off_the_disk(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         folder = await make_folder(project, "Architecture")
         content = content_of("deleted with its project")
         await upload(project, folder, "brief.pdf", content)
 
         deleted = await project.delete("/projects/ATL", params={"confirm": "ATL"})
+        await sweep_blobs(database, settings)
 
         assert deleted.status_code == 200, deleted.text
         assert not blob_path(settings, content).exists()
 
     async def test_keeps_content_another_project_still_needs(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         """The same bytes in two projects are one blob. One leaving is not both."""
         content = content_of("shared across two projects, so kept")
@@ -1032,11 +1038,12 @@ class TestDeletingAProject:
         await upload(project, elsewhere, "brief.pdf", content)
 
         await project.delete("/projects/ATL", params={"confirm": "ATL"})
+        await sweep_blobs(database, settings)
 
         assert blob_path(settings, content).is_file()
 
     async def test_keeps_content_a_skill_on_another_project_needs(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         """A skill is the other thing that can hold a blob — see `blobs.REFERRERS`."""
         content = content_of("filed here, a skill there")
@@ -1050,11 +1057,12 @@ class TestDeletingAProject:
         assert kept.status_code == 201, kept.text
 
         await project.delete("/projects/ATL", params={"confirm": "ATL"})
+        await sweep_blobs(database, settings)
 
         assert blob_path(settings, content).is_file()
 
     async def test_takes_its_own_skills_content_with_it(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         content = content_of("a skill with nothing else behind it")
         uploaded = await project.post(
@@ -1065,5 +1073,6 @@ class TestDeletingAProject:
         assert uploaded.status_code == 201, uploaded.text
 
         await project.delete("/projects/ATL", params={"confirm": "ATL"})
+        await sweep_blobs(database, settings)
 
         assert not blob_path(settings, content).exists()

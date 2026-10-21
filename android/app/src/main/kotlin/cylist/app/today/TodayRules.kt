@@ -3,7 +3,7 @@ package cylist.app.today
 import cylist.api.generated.models.ColumnRead
 import cylist.api.generated.models.PickRead
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TodoRead
 import cylist.api.generated.models.TodoState
@@ -61,8 +61,8 @@ fun apiDate(value: String?): LocalDate? = value?.let { runCatching { LocalDate.p
 // --- today.ts -------------------------------------------------------------
 
 /** Most urgent first, then the order the cards were numbered (`byPriority`). */
-private val byPriority: Comparator<TaskRead> =
-    compareBy<TaskRead> { priorityRank(it.priority) }.thenBy { it.number ?: 0 }.thenBy { it.reference }
+private val byPriority: Comparator<TaskSummary> =
+    compareBy<TaskSummary> { priorityRank(it.priority) }.thenBy { it.number ?: 0 }.thenBy { it.reference }
 
 private fun priorityRank(priority: TaskPriority): Int = when (priority) {
     TaskPriority.p0 -> 0
@@ -73,14 +73,14 @@ private fun priorityRank(priority: TaskPriority): Int = when (priority) {
 }
 
 /** Today's work off one board (`TodayWork`). */
-data class TodayWork(val overdue: List<TaskRead>, val due: List<TaskRead>)
+data class TodayWork(val overdue: List<TaskSummary>, val due: List<TaskSummary>)
 
 /**
  * The cards wanted by today (`todaysWork`): not in the last column, not
  * cancelled or on hold, yours when [me] is known, with a next due date on or
  * before [today]. Overdue is oldest first, then by priority.
  */
-fun todaysWork(tasks: List<TaskRead>, columns: List<ColumnRead>, me: UUID?, today: LocalDate): TodayWork {
+fun todaysWork(tasks: List<TaskSummary>, columns: List<ColumnRead>, me: UUID?, today: LocalDate): TodayWork {
     val doneColumn = columns.lastOrNull()?.id
     val wanted = tasks.filter { task ->
         val due = apiDate(task.nextDueDate)
@@ -91,13 +91,13 @@ fun todaysWork(tasks: List<TaskRead>, columns: List<ColumnRead>, me: UUID?, toda
     }
     return TodayWork(
         overdue = wanted.filter { apiDate(it.nextDueDate)!!.isBefore(today) }
-            .sortedWith(compareBy<TaskRead> { apiDate(it.nextDueDate) }.then(byPriority)),
+            .sortedWith(compareBy<TaskSummary> { apiDate(it.nextDueDate) }.then(byPriority)),
         due = wanted.filter { apiDate(it.nextDueDate) == today }.sortedWith(byPriority),
     )
 }
 
 /** One heading's worth of cards a day can be planned from (`CardGroup`). */
-data class CardGroup(val name: String, val late: Boolean, val tasks: List<TaskRead>)
+data class CardGroup(val name: String, val late: Boolean, val tasks: List<TaskSummary>)
 
 /**
  * Every open card on a board as the planner offers them (`openCardGroups`):
@@ -106,7 +106,7 @@ data class CardGroup(val name: String, val late: Boolean, val tasks: List<TaskRe
  * [mine] narrows to your own cards and [query] to reference or title.
  */
 fun openCardGroups(
-    tasks: List<TaskRead>,
+    tasks: List<TaskSummary>,
     columns: List<ColumnRead>,
     me: UUID?,
     mine: Boolean,
@@ -123,7 +123,7 @@ fun openCardGroups(
     }
     val dueOrLate = open
         .filter { apiDate(it.nextDueDate)?.let { due -> !due.isAfter(today) } == true }
-        .sortedWith(compareBy<TaskRead> { apiDate(it.nextDueDate) }.then(byPriority))
+        .sortedWith(compareBy<TaskSummary> { apiDate(it.nextDueDate) }.then(byPriority))
     val pulledUp = dueOrLate.map { it.id }.toSet()
 
     val groups = mutableListOf<CardGroup>()
@@ -144,11 +144,11 @@ fun cardCount(groups: List<CardGroup>): Int = groups.sumOf { it.tasks.size }
  * the Today count red on the web (`lateAndUnplanned`), and what the phone's
  * nudge names.
  */
-fun lateAndUnplanned(tasks: List<TaskRead>, columns: List<ColumnRead>, me: UUID?, today: LocalDate, planned: Set<UUID>): TaskRead? =
+fun lateAndUnplanned(tasks: List<TaskSummary>, columns: List<ColumnRead>, me: UUID?, today: LocalDate, planned: Set<UUID>): TaskSummary? =
     todaysWork(tasks, columns, me, today).overdue.firstOrNull { it.id !in planned }
 
 /** "HWL-3 is 3 days late", for the nudge above the plan. */
-fun lateSaid(task: TaskRead, today: LocalDate): String {
+fun lateSaid(task: TaskSummary, today: LocalDate): String {
     val days = apiDate(task.nextDueDate)?.let { ChronoUnit.DAYS.between(it, today).toInt() } ?: 0
     return "${task.reference} is ${if (days == 1) "a day" else "$days days"} late"
 }
@@ -160,7 +160,7 @@ enum class DueTone { Late, Today, Plain }
 data class PickDue(val text: String, val tone: DueTone)
 
 /** The due mark on a card in the add-cards sheet (`CardRow`): `13 Oct, late`, `Today` or `23 Oct`. */
-fun pickDueOf(task: TaskRead, today: LocalDate): PickDue? {
+fun pickDueOf(task: TaskSummary, today: LocalDate): PickDue? {
     val due = apiDate(task.nextDueDate) ?: return null
     return when {
         due.isBefore(today) -> PickDue("${formatDue(due)}, late", DueTone.Late)

@@ -51,7 +51,7 @@ def register(subparsers: Any) -> None:
 
 
 def _list(args: argparse.Namespace, ctx: Context) -> None:
-    projects = ctx.client.get("/projects", include_archived=True if args.all else None)
+    projects = ctx.client.get_all("/projects", include_archived=True if args.all else None)
     if ctx.as_json:
         output.emit_json(projects)
         return
@@ -137,7 +137,7 @@ def _members(args: argparse.Namespace, ctx: Context) -> None:
         by_id.pop(str(person["id"]), None)
 
     if args.add:
-        directory = ctx.client.get("/people")
+        directory = ctx.client.get_all("/people")
         for name in args.add:
             person = resolve.pick(directory, name, kind="person", where="the people directory")
             by_id[str(person["id"])] = person

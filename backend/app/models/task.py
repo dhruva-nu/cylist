@@ -34,6 +34,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
@@ -230,17 +231,32 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # is invisible to any lookup that does not repeat its predicate, which
         # finding ``ATL-41`` by key and number does not.
         Index("ix_task_project_id_number", "project_id", "number", unique=True),
-        # A column top to bottom: read on every create, move and renumber, and
-        # by the check that refuses to delete a column still holding cards.
-        # The column says which project it is on, so the project is not here.
-        Index("ix_task_column_id_position", "column_id", "position"),
+        # A column top to bottom: read on every create and move, and by the
+        # check that refuses to delete a column still holding cards. The
+        # column says which project it is on, so the project is not here.
+        # Unique because two cards at one key have no order between them, and
+        # deferrable so that spreading a column out (see
+        # `app.services.tasks.stacking`), one UPDATE whose rows pass through
+        # each other's keys, is checked at the end of the statement rather
+        # than row by row. NULLs never collide: sub-tasks and stored cards
+        # have no column and no position.
+        UniqueConstraint(
+            "column_id",
+            "position",
+            name="uq_task_column_id_position",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
         Index("ix_task_parent_id_sub_number", "parent_id", "sub_number", unique=True),
-        # A project's cold storage, newest first. Partial, because nearly every
-        # card is on the board and an index of NULLs answers nothing.
+        # A project's cold storage, most recently finished first, a page at a
+        # time. Partial, because nearly every card is on the board and an index
+        # of NULLs answers nothing. The id is in it because a page continues
+        # from a (finished_at, id) pair.
         Index(
-            "ix_task_project_id_archived_at",
+            "ix_task_project_id_finished_at_id",
             "project_id",
-            "archived_at",
+            "finished_at",
+            "id",
             postgresql_where=sql_text("archived_at IS NOT NULL"),
         ),
         # What a goal's progress and a template's "in use by" are counted
@@ -275,6 +291,12 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         CheckConstraint(
             "archived_at IS NULL OR parent_id IS NULL",
             name="archived_only_on_cards",
+        ),
+        # Only finished work is stored, and cold storage is read in the order
+        # its cards finished — so a stored card always says when that was.
+        CheckConstraint(
+            "archived_at IS NULL OR finished_at IS NOT NULL",
+            name="archived_only_when_finished",
         ),
         # A card can be split into at most 4 stages — enough to read as a
         # position along a bar, not so many that a segment on a board card is
@@ -355,8 +377,11 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     holds tasks fails rather than quietly taking the tasks with it."""
 
     position: Mapped[int | None] = mapped_column(Integer)
-    """Top to bottom within the column, contiguous from zero. Null on a
-    sub-task, which is ordered by ``sub_number`` under its parent instead."""
+    """Top to bottom within the column: a sort key with room left between
+    neighbours, not an index, so a card can be put between two others by
+    writing it alone (see :mod:`app.services.tasks.stacking`). May be negative
+    and has gaps. Null on a sub-task, which is ordered by ``sub_number`` under
+    its parent instead."""
 
     outcome_index: Mapped[int | None] = mapped_column(Integer)
     """Which of the column's ``outcomes`` this card ended on, or null.

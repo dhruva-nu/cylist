@@ -39,20 +39,32 @@ def register(subparsers: Any) -> None:
         ),
     )
     board.add_argument("project", metavar="PROJECT", help="Project key or id, e.g. ATL.")
+    board.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="Cards to show from the top of each column (at most 100; the server's default "
+        "otherwise). A column holding more says how many more.",
+    )
     board.set_defaults(handler=_board)
 
 
 def _board(args: argparse.Namespace, ctx: Context) -> None:
     columns = ctx.client.get(f"/projects/{args.project}/columns").get("columns", [])
-    tasks = ctx.client.get(f"/projects/{args.project}/tasks")
+    # The top of each column rather than the whole board: a column can hold
+    # thousands of cards, and a terminal shows a screenful.
+    board = ctx.client.get(f"/projects/{args.project}/tasks", limit=args.limit)
 
     if ctx.as_json:
-        output.emit_json({"columns": columns, "tasks": tasks})
+        output.emit_json({"columns": columns, "tasks": board})
         return
 
     grouped: dict[str, list[dict[str, Any]]] = {str(column["id"]): [] for column in columns}
-    for task in tasks:
-        grouped.setdefault(str(task["column_id"]), []).append(task)
+    hidden: dict[str, int] = {}
+    for stack in board.get("columns", []):
+        shown = list(stack.get("items", []))
+        grouped[str(stack["column_id"])] = shown
+        hidden[str(stack["column_id"])] = max(0, int(stack.get("total", 0)) - len(shown))
 
     if not columns:
         output.echo("This board has no columns.")
@@ -62,9 +74,14 @@ def _board(args: argparse.Namespace, ctx: Context) -> None:
     per_column = (width - len(GUTTER) * (len(columns) - 1)) // len(columns)
 
     if per_column < MIN_COLUMN:
-        _stacked(columns, grouped, width)
+        _stacked(columns, grouped, hidden, width)
     else:
-        _side_by_side(columns, grouped, min(per_column, MAX_COLUMN))
+        _side_by_side(columns, grouped, hidden, min(per_column, MAX_COLUMN))
+
+
+def _more(count: int) -> str:
+    """The line under a column that is longer than what was fetched of it."""
+    return f"… {count} more"
 
 
 def _card_lines(task: dict[str, Any], width: int) -> list[str]:
@@ -82,7 +99,10 @@ def _card_lines(task: dict[str, Any], width: int) -> list[str]:
 
 
 def _side_by_side(
-    columns: list[dict[str, Any]], grouped: dict[str, list[dict[str, Any]]], width: int
+    columns: list[dict[str, Any]],
+    grouped: dict[str, list[dict[str, Any]]],
+    hidden: dict[str, int],
+    width: int,
 ) -> None:
     headers: list[list[str]] = []
     bodies: list[list[str]] = []
@@ -99,6 +119,8 @@ def _side_by_side(
         for task in tasks:
             body.extend(_card_lines(task, width))
             body.append("")
+        if hidden.get(str(column["id"])):
+            body.append(output.truncate(_more(hidden[str(column["id"])]), width))
         if not tasks:
             body.append("(empty)")
         bodies.append(body)
@@ -120,14 +142,18 @@ def _zip_columns(blocks: list[list[str]], width: int) -> list[str]:
 
 
 def _stacked(
-    columns: list[dict[str, Any]], grouped: dict[str, list[dict[str, Any]]], width: int
+    columns: list[dict[str, Any]],
+    grouped: dict[str, list[dict[str, Any]]],
+    hidden: dict[str, int],
+    width: int,
 ) -> None:
     """The narrow-terminal rendering: each column as its own section."""
     for index, column in enumerate(columns):
         if index:
             output.echo()
         tasks = grouped.get(str(column["id"]), [])
-        output.echo(f"{str(column['name']).upper()} ({len(tasks)})")
+        more = hidden.get(str(column["id"]), 0)
+        output.echo(f"{str(column['name']).upper()} ({len(tasks) + more})")
         output.echo("-" * min(width, 40))
         if not tasks:
             output.echo("(empty)")
@@ -135,3 +161,5 @@ def _stacked(
         for task in tasks:
             for line in _card_lines(task, width - 2):
                 output.echo(f"  {line}" if line else "")
+        if more:
+            output.echo(f"  {_more(more)}")

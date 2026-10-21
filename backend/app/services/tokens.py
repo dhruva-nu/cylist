@@ -15,6 +15,7 @@ from app.auth.tokens import generate_token
 from app.core.clock import now
 from app.core.errors import NotFoundError
 from app.models.api_token import ApiToken, TokenKind
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def issue(
@@ -60,8 +61,8 @@ async def get(session: AsyncSession, token_id: UUID) -> ApiToken:
     return token
 
 
-async def list_api_tokens(session: AsyncSession) -> list[ApiToken]:
-    """Return every non-revoked API token, newest first.
+async def list_api_tokens(session: AsyncSession, page: PageRequest) -> Window[ApiToken]:
+    """Return a page of the non-revoked API tokens, newest first.
 
     Session cookies are excluded: they are an implementation detail of being
     logged in, not something to manage on a settings page.
@@ -71,12 +72,13 @@ async def list_api_tokens(session: AsyncSession) -> list[ApiToken]:
     admin who cannot do the job the scope exists for. Which person each one
     acts as is on the row.
     """
-    tokens = await session.scalars(
-        select(ApiToken)
-        .where(ApiToken.kind == TokenKind.API, ApiToken.revoked_at.is_(None))
-        .order_by(ApiToken.created_at.desc())
+    return await keyset(
+        session,
+        select(ApiToken).where(ApiToken.kind == TokenKind.API, ApiToken.revoked_at.is_(None)),
+        keys=(ApiToken.created_at, ApiToken.id),
+        page=page,
+        descending=True,
     )
-    return list(tokens)
 
 
 async def revoke(session: AsyncSession, token_id: UUID) -> ApiToken:

@@ -69,7 +69,9 @@ def register(subparsers: Any) -> None:
 
 
 def _list(args: argparse.Namespace, ctx: Context) -> None:
-    goals = ctx.client.get(f"/projects/{args.project}/goals", open_only=True if args.open else None)
+    goals = ctx.client.get_all(
+        f"/projects/{args.project}/goals", open_only=True if args.open else None
+    )
 
     if ctx.as_json:
         output.emit_json(goals)
@@ -95,6 +97,14 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
 
 def _show(args: argparse.Namespace, ctx: Context) -> None:
     goal = ctx.client.get(f"/goals/{args.goal}")
+    # The goal carries the first page of its cards; a goal's page lists them
+    # all, so the rest are read here.
+    tasks = list(goal.get("tasks") or [])
+    if goal.get("tasks_next"):
+        tasks.extend(
+            ctx.client.get_all(f"/goals/{goal['reference']}/tasks", after=goal["tasks_next"])
+        )
+    goal = {**goal, "tasks": tasks, "tasks_next": None}
 
     if ctx.as_json:
         output.emit_json(goal)
@@ -117,7 +127,6 @@ def _show(args: argparse.Namespace, ctx: Context) -> None:
         for line in output.wrap(str(goal["description"]), output.terminal_width()):
             output.echo(line)
 
-    tasks = goal.get("tasks") or []
     output.echo()
     output.table(
         ["REF", "CARD", "STATUS", "OWNER"],

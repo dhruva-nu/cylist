@@ -5,6 +5,7 @@
  */
 
 import { jsonBody, request } from './http'
+import { fetchAllPages } from './paging'
 import type { Sensitivity } from './roles'
 
 export type VaultNodeKind = 'branch' | 'secret'
@@ -77,7 +78,7 @@ export interface RevealedSecret {
 
 export const vaultApi = {
   listVaultTrees: (projectKey: string) =>
-    request<VaultTree[]>(`/projects/${projectKey}/vault/trees`),
+    fetchAllPages<VaultTree>(`/projects/${projectKey}/vault/trees`),
   createVaultTree: (projectKey: string, name: string, defaultSensitivity?: Sensitivity | null) =>
     request<VaultTree>(`/projects/${projectKey}/vault/trees`, {
       method: 'POST',

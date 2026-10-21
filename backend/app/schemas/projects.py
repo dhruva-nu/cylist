@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from app.models.project import KEY_MAX_LENGTH
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 from app.schemas.people import PersonRead
 from app.schemas.roles import RoleRead
 
@@ -140,3 +140,7 @@ class MemberRead(PersonRead):
 
 class Membership(Schema):
     members: list[MemberRead]
+
+
+class ProjectPage(Page[ProjectRead]):
+    """A page of the caller's projects, newest first."""

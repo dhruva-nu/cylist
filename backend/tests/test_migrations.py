@@ -2401,6 +2401,146 @@ class TestColdStorage:
         }
 
 
+SPARSE_POSITIONS = "0049"
+
+
+class TestSparsePositions:
+    """Revision 0047: positions are sort keys with room between them, unique
+    within a column (CYLIST-127)."""
+
+    async def _with_a_tie(self, connection: AsyncConnection) -> None:
+        """The board above, plus card 4 sharing card 3's place — what two
+        unlocked moves at once could leave behind."""
+        await seed_board_for_cold_storage(connection)
+        await connection.execute(
+            text(
+                "INSERT INTO task (id, project_id, number, column_id, position, title,"
+                " description, type, assignee_id, status)"
+                " SELECT gen_random_uuid(), project_id, 4, column_id, position, 'Card 4',"
+                " description, type, assignee_id, status FROM task WHERE number = 3"
+            )
+        )
+
+    async def test_every_card_keeps_its_place_and_a_tie_is_broken(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0048")
+        await self._with_a_tie(connection)
+
+        await migrate(SPARSE_POSITIONS)
+
+        placed = await placed_by_number(connection)
+        assert placed[1] == ("To do", 65536)
+        assert placed[2] == ("Done", 65536)
+        assert {placed[3], placed[4]} == {("Done", 131072), ("Done", 196608)}
+
+    async def test_two_cards_can_no_longer_share_a_place(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0048")
+        await self._with_a_tie(connection)
+        await migrate(SPARSE_POSITIONS)
+
+        with pytest.raises(IntegrityError, match="uq_task_column_id_position"):
+            await connection.execute(
+                text(
+                    "UPDATE task SET position = (SELECT position FROM task WHERE number = 2)"
+                    " WHERE number = 3"
+                )
+            )
+
+    async def test_the_undo_numbers_each_column_from_zero(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0048")
+        await seed_board_for_cold_storage(connection)
+        await migrate(SPARSE_POSITIONS)
+        # A card dropped between two others, as the service now does.
+        await connection.execute(text("UPDATE task SET position = 100000 WHERE number = 1"))
+        await connection.execute(
+            text(
+                "UPDATE task SET column_id = (SELECT column_id FROM task WHERE number = 2)"
+                " WHERE number = 1"
+            )
+        )
+
+        await rewind("0048")
+
+        assert await placed_by_number(connection) == {
+            1: ("Done", 1),
+            2: ("Done", 0),
+            3: ("Done", 2),
+        }
+
+
+class TestColdStorageByFinish:
+    """Revision 0050: cold storage is paged by when its cards finished, so every
+    stored card has to say when that was."""
+
+    async def _stored(self, connection: AsyncConnection) -> None:
+        await seed_board_for_cold_storage(connection)
+        # Card 2 was stored before Cylist kept the moment it finished; card 3 says.
+        await connection.execute(
+            text(
+                "UPDATE task SET archived_at = '2026-10-01T09:00:00Z', column_id = NULL,"
+                " position = NULL, finished_at = CASE WHEN number = 3"
+                " THEN timestamptz '2026-09-30T12:00:00Z' END WHERE number IN (2, 3)"
+            )
+        )
+
+    async def test_a_stored_card_without_a_finish_takes_the_moment_it_was_stored(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0049")
+        await self._stored(connection)
+
+        await migrate("0050")
+
+        rows = await connection.execute(
+            text("SELECT number, finished_at FROM task ORDER BY number")
+        )
+        assert dict(rows.tuples().all()) == {
+            1: None,
+            2: datetime(2026, 10, 1, 9, tzinfo=UTC),
+            3: datetime(2026, 9, 30, 12, tzinfo=UTC),
+        }
+
+    async def test_then_a_stored_card_cannot_lose_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0049")
+        await self._stored(connection)
+        await migrate("0050")
+
+        with pytest.raises(IntegrityError, match="archived_only_when_finished"):
+            await connection.execute(text("UPDATE task SET finished_at = NULL WHERE number = 3"))
+
+    async def test_the_undo_lifts_the_rule(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0049")
+        await self._stored(connection)
+        await migrate("0050")
+
+        await rewind("0049")
+
+        await connection.execute(text("UPDATE task SET finished_at = NULL WHERE number = 3"))
+
+
 class TestRunningInProcess:
     """A migration run inside a process that has its own logging."""
 
@@ -2422,3 +2562,48 @@ class TestRunningInProcess:
         assert not existing.disabled
         assert root.handlers == handlers
         assert root.level == level
+
+
+# --- Somewhere for old activity to go (CYLIST-139) --------------------------
+
+BEFORE_THE_ARCHIVE = "0047"
+WITH_THE_ARCHIVE = "0048"
+
+
+class TestUndoingTheActivityArchive:
+    async def test_archived_rows_go_back_on_the_trail(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The audit record survives a downgrade; a reference to something that
+        has gone since is nulled on the way, as the trail's own keys would."""
+        await migrate(WITH_THE_ARCHIVE)
+        await seed_a_card(connection)
+        await connection.execute(
+            text(
+                "INSERT INTO activity_archive (id, occurred_at, actor_token_id, actor_person_id,"
+                " actor_label, channel, verb, entity_type, entity_id, project_id, payload)"
+                " SELECT gen_random_uuid(), now() - interval '2 years', gen_random_uuid(),"
+                " person.id, 'claude', 'api', 'task.created', 'task', task.id, project.id,"
+                ' \'{"title": "Stripe webhook idempotency"}\'::jsonb'
+                " FROM project, task, person WHERE person.name = 'Aditi K'"
+            )
+        )
+
+        await rewind(BEFORE_THE_ARCHIVE)
+
+        rows = await connection.execute(
+            text(
+                "SELECT activity.verb, activity.actor_token_id IS NULL,"
+                " activity.actor_person_id = person.id, activity.project_id = project.id,"
+                " activity.payload ->> 'title'"
+                " FROM activity, person, project WHERE person.name = 'Aditi K'"
+            )
+        )
+        assert rows.tuples().all() == [
+            ("task.created", True, True, True, "Stripe webhook idempotency")
+        ]
+        archive = await connection.scalar(text("SELECT to_regclass('activity_archive')"))
+        assert archive is None

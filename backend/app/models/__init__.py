@@ -5,7 +5,7 @@ what Alembic autogenerate and the test fixtures rely on. Add new model modules
 to the imports below.
 """
 
-from app.models.activity import Activity, Channel
+from app.models.activity import Activity, ActivityArchive, Channel
 from app.models.agent import Skill
 from app.models.agent_session import (
     AgentFeedEntry,
@@ -54,6 +54,7 @@ from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
 __all__ = [
     "EVERYONE_ELSE",
     "Activity",
+    "ActivityArchive",
     "AgentFeedEntry",
     "AgentFeedKind",
     "AgentPrompt",

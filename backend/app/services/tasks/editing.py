@@ -13,7 +13,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import UnprocessableRequestError
-from app.models.task import Task
+from app.models.task import Task, TaskStatus
 from app.models.template import TaskTemplate
 from app.schemas.tasks import TaskUpdate
 from app.services import columns, goals, projects, templates
@@ -163,7 +163,8 @@ async def _refuse_invalid_references(
     Raises:
         UnprocessableRequestError: if the assignee is not a project member, if
             the goal or template is another project's, if a sub-task is being
-            given a goal, or if the new template strands the card.
+            given a goal, if an open card is being put on an achieved goal, or
+            if the new template strands the card.
     """
     if "assignee_id" in fields:
         await projects.require_members(session, task.project_id, [fields["assignee_id"]])
@@ -171,6 +172,10 @@ async def _refuse_invalid_references(
     if "goal_id" in fields and fields["goal_id"] != task.goal_id:
         _refuse_goal_on_subtask(task, fields["goal_id"])
         await goals.require_goal(session, task.project_id, fields["goal_id"])
+        if task.finished_at is None and task.status is not TaskStatus.CANCELLED:
+            await goals.refuse_open_card_on_achieved(
+                session, fields["goal_id"], card=task.reference, act="putting it on the goal"
+            )
 
     if "template_id" in fields and fields["template_id"] != task.template_id:
         new_template = await templates.require_template(

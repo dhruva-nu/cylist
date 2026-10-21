@@ -90,7 +90,7 @@ class AgentSessionViewModel(private val session: Session, private val link: Card
         try {
             val (detail, feed) = io {
                 client.api(::TasksApi).getTaskApiV1TasksTaskRefGet(link.task) to
-                    client.api(::AgentSessionsApi).listAgentFeedApiV1TasksTaskRefAgentFeedGet(link.task, FEED_LINES)
+                    client.api(::AgentSessionsApi).listAgentFeedApiV1TasksTaskRefAgentFeedGet(link.task, limit = FEED_LINES).items
             }
             taskId = detail.id
             val chosen = pick(detail.agentSessions.orEmpty(), link.sessionId)

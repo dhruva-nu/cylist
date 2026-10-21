@@ -12,13 +12,15 @@ from datetime import timedelta
 from functools import lru_cache
 from ipaddress import IPv4Network, IPv6Network
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from fastapi import Request
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+from app.core.crypto import VaultKeys
 
 Environment = Literal["dev", "test", "preview", "staging", "prod"]
 
@@ -131,9 +133,40 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://cylist:cylist@localhost:5432/cylist"
     database_echo: bool = False
 
+    # --- Database pool ----------------------------------------------------
+    # Each process holds its own pool, so a deployment's connections are these
+    # times its workers, plus one each for the event bus. Spelled out rather
+    # than left to SQLAlchemy because its defaults wait 30 s for a connection
+    # and let a statement run forever, and between them a few stuck requests
+    # starve /health until the container is restarted (CYLIST-131).
+    database_pool_size: int = Field(default=10, gt=0)
+    """Connections kept open once made."""
+
+    database_max_overflow: int = Field(default=10, ge=0)
+    """Connections opened beyond the pool under load, and closed again after."""
+
+    database_pool_timeout_seconds: float = Field(default=10.0, gt=0)
+    """How long a request waits for a free connection before it fails. Shorter
+    than a healthcheck's patience, so an exhausted pool shows as failed
+    requests rather than a container that stops answering."""
+
+    database_statement_timeout_seconds: float = Field(default=30.0, ge=0)
+    """The longest one statement may run before Postgres cancels it; 0 turns it
+    off. No query a request makes should come near it — it is the backstop for
+    the one that does, which would otherwise hold its connection forever."""
+
     # --- Storage ----------------------------------------------------------
     data_dir: Path = Path("./data")
     max_upload_mb: int = Field(default=200, gt=0)
+    max_request_kb: int = Field(default=4096, gt=0)
+    """The largest body any route but an upload accepts (CYLIST-123).
+
+    Every other route takes JSON, and the biggest honest one is a doc of
+    200,000 characters — under a megabyte even escaped. Four leaves room for
+    that and refuses a body nobody could have meant before it is read. Upload
+    routes are capped at :attr:`max_upload_mb` instead — see
+    :mod:`app.core.body_limit`.
+    """
 
     # --- The web app ------------------------------------------------------
     # Where the built SPA lives, relative to the working directory. The
@@ -163,6 +196,22 @@ class Settings(BaseSettings):
     """
 
     vault_key: str = ""
+    """Vault key version 1 — the one every deployment started with.
+
+    Still the only key most deployments have. Later keys go in
+    :attr:`vault_keys`; once every row has been resealed onto one of them
+    (``python -m app.cli vault-reseal``) this may be emptied, which is what
+    retiring the first key means. See :attr:`vault_keyring`.
+    """
+
+    vault_keys: dict[int, str] = Field(default_factory=dict)
+    """Further vault keys by version, as JSON: ``CYLIST_VAULT_KEYS={"2": "…"}``.
+
+    The highest version seals everything written from now on; every version
+    listed, plus :attr:`vault_key` as version 1, can still open what it sealed.
+    Version 1 may be given here too, in place of :attr:`vault_key` rather than
+    beside it with a different value.
+    """
 
     # --- Jev ----------------------------------------------------------------
     # TypeSafe's System One model, which jev-docs asks which section of a
@@ -267,6 +316,33 @@ class Settings(BaseSettings):
     logs it was meant to prevent.
     """
 
+    # --- Retention --------------------------------------------------------
+    # How long the tables that only ever grow keep what they hold. Applied
+    # once an hour by the hook courier's prune pass — see
+    # app/services/retention.py. Zero means keep forever.
+    agent_session_retention_days: int = Field(default=30, ge=0)
+    """How long a *dismissed* agent session is kept, with its feed and its
+    prompts, counted from when it was dismissed.
+
+    Only a session that has finished and been cleared off its card is ever
+    taken: an open one — working, or waiting on a person — is never touched,
+    however old, and neither is a finished one still showing on its card.
+    Thirty days because a dismissed session is drawn nowhere; the month is for
+    whoever goes looking in the database after something went wrong. What the
+    agent *did* is on the activity trail, which this does not touch.
+    """
+
+    activity_retention_days: int = Field(default=365, ge=0)
+    """How long the activity trail keeps a row before moving it to
+    ``activity_archive``.
+
+    Moved, not deleted: the trail is the audit record, so an old row goes to a
+    cold table nothing reads in the ordinary course and stays there. What
+    stops showing is a card's history, the feed and day reports from further
+    back than this — a year, so the archive is for the cards nobody is
+    working any more.
+    """
+
     @field_validator("database_url")
     @classmethod
     def _require_async_driver(cls, value: str) -> str:
@@ -289,6 +365,44 @@ class Settings(BaseSettings):
                     "172.16.0.0/12 or 127.0.0.1/32"
                 ) from exc
         return [cidr.strip() for cidr in value]
+
+    @field_validator("vault_keys")
+    @classmethod
+    def _require_positive_versions(cls, value: dict[int, str]) -> dict[int, str]:
+        """Versions are stored in an integer column and compared by size; zero
+        or less would sort below the key every deployment already has."""
+        for version in value:
+            if version < 1:
+                raise ValueError(f"vault_keys has version {version}; versions start at 1")
+        return value
+
+    @model_validator(mode="after")
+    def _one_key_per_version(self) -> Self:
+        """Refuse two different version-1 keys at startup.
+
+        Whichever one won, the secrets sealed under the other would read as
+        tampered with, which is a far more alarming message than the truth.
+        """
+        listed = self.vault_keys.get(1, "").strip()
+        if listed and self.vault_key.strip() and listed != self.vault_key.strip():
+            raise ValueError(
+                "vault_key and vault_keys both give a version 1 key, and they differ. "
+                "Keep one of them."
+            )
+        return self
+
+    @property
+    def vault_keyring(self) -> VaultKeys:
+        """Every vault key this deployment holds, by version, oldest first.
+
+        :attr:`vault_key` is version 1; :attr:`vault_keys` adds the rest. Empty
+        when neither is set, which the cipher turns into a loud refusal — see
+        :class:`app.core.crypto.VaultCipher`.
+        """
+        keys = dict(self.vault_keys)
+        if self.vault_key.strip():
+            keys[1] = self.vault_key
+        return tuple(sorted(keys.items()))
 
     @property
     def trusted_proxies(self) -> tuple[IPv4Network | IPv6Network, ...]:
@@ -348,6 +462,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def max_request_bytes(self) -> int:
+        return self.max_request_kb * 1024
 
     @property
     def log_dir(self) -> Path:

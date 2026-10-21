@@ -7,7 +7,7 @@ import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.PrRef
 import cylist.api.generated.models.PrState
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TaskType
 import org.junit.Assert.assertEquals
@@ -184,10 +184,10 @@ class BoardRulesTest {
         archivedAt: String? = null,
         prs: List<PrState?> = emptyList(),
         columnId: UUID = UUID.randomUUID(),
-    ) = TaskRead(
+    ) = TaskSummary(
         id = UUID.randomUUID(), projectId = UUID.randomUUID(), reference = "ATL-1", number = 1,
         parentId = parentId, parentReference = null, subNumber = null, columnId = columnId, position = 0,
-        title = "A card", description = "", type = TaskType.feature, priority = TaskPriority.p3,
+        title = "A card", type = TaskType.feature, priority = TaskPriority.p3,
         subStatuses = emptyList(), subStatusIndex = null, dueDate = due, columnDueDates = emptyList(), nextDueDate = due,
         assignee = assignee, status = status, templateId = null, templateName = null,
         goalId = null, goalReference = null, goalName = null, goalColour = null, jiraRef = null,
