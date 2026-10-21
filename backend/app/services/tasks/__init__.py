@@ -36,7 +36,9 @@ whichever module it lives in:
 * :mod:`.lifecycle` creates and deletes them;
 * :mod:`.editing` changes fields in place, and :mod:`.dates` owns the per-column
   due dates and how they read against the board;
-* :mod:`.moves` puts a card in a column and finishes or reopens it;
+* :mod:`.moves` puts a card in a column and finishes or reopens it, and
+  :mod:`.parentage` holds the rule between a finished card and the sub-tasks
+  under it, both ends under one lock;
 * :mod:`.cold_storage` takes the finished ones off the board, and puts them back;
 * :mod:`.status` stalls and unstalls it;
 * :mod:`.timeline` and :mod:`.checklists` are what hangs off a card;

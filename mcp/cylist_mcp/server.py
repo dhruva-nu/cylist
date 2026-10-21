@@ -82,7 +82,9 @@ is what the board colours it by. `list_goals` shows a project's goals with the
 progress counted from their own cards; `set_task_goal` puts a card on one or
 takes it off. A card belongs to at most one goal, and a goal cannot be marked
 achieved while a card on it is still open — `set_goal_status` refuses that and
-names the cards holding it open.
+names the cards holding it open. The other way round is refused too: an open
+card cannot be written on, put on, moved back out of the last column on, or
+uncancelled on an achieved goal; the refusal names the goal to reopen first.
 
 A task can be split two ways. `create_subtask` makes a sub-task with a
 reference of its own, `ATL-41-2`, addressable like any other task and carrying
@@ -91,7 +93,8 @@ lives on the parent alone. Neither is on the board — a sub-task has no column,
 so `move_task` refuses one and `finish_subtask` is what completes it. Either
 way, every one of them has to be finished or cancelled before the parent can be
 moved into the board's last column, and `move_task` refuses that too, naming
-what is still outstanding.
+what is still outstanding. Once the parent is there, no sub-task can be added,
+reopened or uncancelled under it: move the parent back out first.
 
 Each project carries what its agents work from. `list_skills` and `read_skill`
 give you the procedures somebody has already written down for this project —

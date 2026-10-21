@@ -243,9 +243,11 @@ async def populate(
         )
 
         board = await _shape_board(session, project, spec, summary)
-        # Before the cards, because a card names the goal it is written under.
+        # Before the cards, because a card names the goal it is written under;
+        # settled after them, because an achieved goal takes no open card on.
         goal_ids = await _write_goals(session, project, spec, directory, summary)
         await _write_tasks(session, project, spec, board, directory, goal_ids, summary)
+        await _settle_goals(session, spec, goal_ids)
         await _write_files(
             session,
             project,
@@ -318,11 +320,12 @@ async def _write_goals(
     directory: dict[str, UUID],
     summary: Summary,
 ) -> dict[str, UUID]:
-    """Write the project's goals, and hand back their ids by name.
+    """Write the project's goals, open, and hand back their ids by name.
 
-    A goal's status is set in a second pass rather than at creation, because
-    creating one achieved is not a thing the API allows — a goal is reached,
-    which is a thing that happens to it after its cards are done.
+    A goal's status is set in a second pass — :func:`_settle_goals`, once the
+    cards are written and placed — because creating one achieved is not a
+    thing the API allows: a goal is reached, which is a thing that happens to
+    it after its cards are done, and an achieved goal takes no open card on.
     """
     written: dict[str, UUID] = {}
     for goal_spec in spec.goals:
@@ -337,11 +340,19 @@ async def _write_goals(
                 owner_id=directory[goal_spec.owner],
             ),
         )
-        if goal_spec.status is not GoalStatus.OPEN:
-            await goals.update(session, goal, GoalUpdate(status=goal_spec.status))
         written[goal_spec.name] = goal.id
         summary.goals += 1
     return written
+
+
+async def _settle_goals(
+    session: AsyncSession, spec: ProjectSpec, goal_ids: dict[str, UUID]
+) -> None:
+    """Achieve or drop the goals the mock has settled, now their cards are placed."""
+    for goal_spec in spec.goals:
+        if goal_spec.status is not GoalStatus.OPEN:
+            goal = await goals.get(session, goal_ids[goal_spec.name])
+            await goals.update(session, goal, GoalUpdate(status=goal_spec.status))
 
 
 async def _write_tasks(
@@ -365,6 +376,14 @@ async def _write_tasks(
             session, project, task_spec, directory, goal_ids, summary
         )
 
+    # Before the cards are placed: a sub-task cannot be written under a card
+    # already in the last column, and a card cannot reach that column over a
+    # sub-task still open, so the parts are settled before the whole is moved.
+    for task_spec in spec.tasks:
+        await _write_subtasks(
+            session, project, created[task_spec.number], task_spec, directory, summary
+        )
+
     filled: dict[int, int] = {}
     for task_spec in spec.tasks:  # the mock's order is the board's order
         position = filled.get(task_spec.column, 0)
@@ -374,13 +393,6 @@ async def _write_tasks(
             TaskMove(column_id=board[task_spec.column], position=position),
         )
         filled[task_spec.column] = position + 1
-
-    # After the parents are placed, so a sub-task never lands on top of the
-    # card it belongs to.
-    for task_spec in spec.tasks:
-        await _write_subtasks(
-            session, project, created[task_spec.number], task_spec, directory, summary
-        )
 
 
 async def _write_task(
