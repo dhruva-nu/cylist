@@ -369,6 +369,56 @@ h3 {
 }
 
 /*
+ * Form controls a component did not style itself. :where() keeps this at zero
+ * specificity, so every module's own rule still wins and only the controls
+ * that were falling back to the browser's look pick up the Cylist one.
+ */
+:where(
+    input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='button'], [type='submit'], [type='hidden'])
+  ),
+:where(select),
+:where(textarea) {
+  padding: 8px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background-color: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  accent-color: var(--brand);
+}
+
+:where(input, textarea)::placeholder {
+  color: var(--ink-3);
+}
+
+:where(select) {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23857f72' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+:where(select) option {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:where(input, select, textarea):focus-visible {
+  border-color: var(--ink-3);
+}
+
+:where(input, select, textarea):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+:where(input[type='checkbox'], input[type='radio']) {
+  accent-color: var(--brand);
+}
+
+/*
  * Everything focusable, not just buttons, inputs and links: tree rows and
  * board cards take focus through tabindex, and an element you can reach but
  * cannot see is worse than one you cannot reach.
