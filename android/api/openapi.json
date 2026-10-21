@@ -839,7 +839,7 @@
           "projects"
         ],
         "summary": "Replace the member list",
-        "description": "Set the project's membership to exactly these people.\n\nThis replaces the list rather than adding to it: anyone not named is\nremoved from the project. They stay in the directory, and anything they are\nalready assigned keeps naming them.",
+        "description": "Set the project's membership to exactly these people.\n\nThis replaces the list rather than adding to it: anyone not named is\nremoved from the project. They stay in the directory, and anything they are\nalready assigned keeps naming them.\n\nTaking an admin off the project needs an admin (CYLIST-116). The `people`\npermission is the baseline's, so every member holds it; without this\nfence a member could drop the admin, inherit the vacancy and add them back\nwith no role. For the same reason the vacancy is only filled on an admin's\nsave — handing out the role is never a side effect of somebody else's.",
         "operationId": "set_members_api_v1_projects__project_ref__members_put",
         "parameters": [
           {
@@ -877,6 +877,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "This would remove an admin, and you are not an admin here."
           },
           "422": {
             "description": "An id is unknown, or names an archived person."

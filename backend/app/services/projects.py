@@ -6,6 +6,7 @@ Project lookups accept either a UUID or a project key, so an agent can address
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import delete as sql_delete
@@ -272,9 +273,28 @@ async def delete(session: AsyncSession, store: BlobStore, project: Project) -> N
     await blobs.collect_garbage(session, store, blob_ids)
 
 
+@dataclass(frozen=True)
+class MembershipChange:
+    """What one membership save did, for the router to report and to log.
+
+    Who joined and who left are worked out here because only the diff knows
+    them, and the audit line is worth more naming people than counting them:
+    "set the membership to 4 people" says nothing about who was taken off.
+    """
+
+    members: list[Person]
+    joined: list[Person]
+    left: list[Person]
+    promoted: Person | None
+
+
 async def set_members(
-    session: AsyncSession, project: Project, person_ids: list[UUID]
-) -> list[Person]:
+    session: AsyncSession,
+    project: Project,
+    person_ids: list[UUID],
+    *,
+    fill_vacancy: bool,
+) -> MembershipChange:
     """Replace the project's membership with exactly these people.
 
     A diff rather than a rewrite. The obvious implementation — delete every
@@ -284,11 +304,13 @@ async def set_members(
     --add`` reads the list, appends one name and PUTs the whole thing back.
     So the rows that survive are left exactly where they are.
 
-    Dropping the project's last admin is allowed, and the role passes to
-    whoever has been on the board longest — see
-    :func:`app.services.roles.fill_admin_vacancy`. This caller is saying who
-    is on the project, not who administers it, and refusing a membership edit
-    over a role would be answering a question nobody asked.
+    Whether this caller may take an admin off the project is the router's
+    question, not this one's (CYLIST-116). What is decided here is only what
+    happens once the project has no admin: with ``fill_vacancy`` the role
+    passes to whoever has been on the board longest — see
+    :func:`app.services.roles.fill_admin_vacancy` — and without it the role is
+    left unworn. A promotion is authority being handed out, so it happens only
+    on a save made by somebody who could have handed it out themselves.
 
     Raises:
         UnprocessableRequestError: if any id is not in the directory, or names
@@ -310,7 +332,13 @@ async def set_members(
     )
 
     leaving = current - wanted
+    left: list[Person] = []
     if leaving:
+        left = list(
+            await session.scalars(
+                select(Person).where(Person.id.in_(leaving)).order_by(Person.name)
+            )
+        )
         await session.execute(
             sql_delete(ProjectMember).where(
                 ProjectMember.project_id == project.id,
@@ -318,19 +346,16 @@ async def set_members(
             )
         )
 
-    session.add_all(
-        ProjectMember(project_id=project.id, person_id=person_id)
-        for person_id in person_ids
-        if person_id not in current
-    )
+    joined = [person for person in people if person.id not in current]
+    session.add_all(ProjectMember(project_id=project.id, person_id=person.id) for person in joined)
     await session.flush()
 
-    await roles.fill_admin_vacancy(session, project)
+    promoted = await roles.fill_admin_vacancy(session, project) if fill_vacancy else None
 
     # The relationship was loaded before the change; drop it so the next read
     # reflects what we just wrote.
     await session.refresh(project, ["members"])
-    return people
+    return MembershipChange(members=people, joined=joined, left=left, promoted=promoted)
 
 
 async def _load_people(session: AsyncSession, person_ids: list[UUID]) -> list[Person]:

@@ -17,6 +17,7 @@ from app.core.errors import ForbiddenError
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
 from app.models.project import Project
+from app.models.role import ADMIN_ROLE_NAME
 from app.models.task import TaskStatus
 from app.routers import guards
 from app.schemas.common import Acknowledged
@@ -351,7 +352,10 @@ async def list_members(
     "/{project_ref}/members",
     response_model=Membership,
     summary="Replace the member list",
-    responses={422: {"description": "An id is unknown, or names an archived person."}},
+    responses={
+        403: {"description": "This would remove an admin, and you are not an admin here."},
+        422: {"description": "An id is unknown, or names an archived person."},
+    },
 )
 async def set_members(
     body: MembershipUpdate,
@@ -364,8 +368,25 @@ async def set_members(
     This replaces the list rather than adding to it: anyone not named is
     removed from the project. They stay in the directory, and anything they are
     already assigned keeps naming them.
+
+    Taking an admin off the project needs an admin (CYLIST-116). The `people`
+    permission is the baseline's, so every member holds it; without this
+    fence a member could drop the admin, inherit the vacancy and add them back
+    with no role. For the same reason the vacancy is only filled on an admin's
+    save — handing out the role is never a side effect of somebody else's.
     """
-    people = await projects.set_members(session, project, body.person_ids)
+    administers = await roles.may_administer(session, project, principal)
+    removed_admins = await roles.admin_holder_ids(session, project) - set(body.person_ids)
+    if removed_admins and not administers:
+        raise ForbiddenError(
+            f"Only an admin of {project.key} can take an admin off it.",
+            details={
+                "project_key": project.key,
+                "admin_person_ids": sorted(str(person_id) for person_id in removed_admins),
+            },
+        )
+
+    change = await projects.set_members(session, project, body.person_ids, fill_vacancy=administers)
     await activity.record(
         session,
         principal,
@@ -373,6 +394,23 @@ async def set_members(
         entity_type="project",
         entity_id=project.id,
         project_id=project.id,
-        payload={"member_count": len(people)},
+        payload={
+            "member_count": len(change.members),
+            "joined": [person.name for person in change.joined],
+            "left": [person.name for person in change.left],
+        },
     )
-    return await _membership(session, project, people)
+    if change.promoted is not None:
+        # Written as the same event an admin handing the role out by hand
+        # would leave, because to anybody reading the trail later it is the
+        # same thing: from here on, this person runs the project.
+        await activity.record(
+            session,
+            principal,
+            "member.role_set",
+            entity_type="person",
+            entity_id=change.promoted.id,
+            project_id=project.id,
+            payload={"person": change.promoted.name, "role": ADMIN_ROLE_NAME},
+        )
+    return await _membership(session, project, change.members)
