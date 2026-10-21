@@ -1178,7 +1178,7 @@
           "today"
         ],
         "summary": "Put a card on your day",
-        "description": "Pick a card up for a day. Picking one that is already on the day hands it back.",
+        "description": "Pick a card up for a day. Picking one that is already on the day hands it back.\n\nA card that is not on this project — on another board, or nowhere — is\none 422, whichever it is.",
         "operationId": "add_pick_api_v1_projects__project_ref__today_picks_post",
         "parameters": [
           {

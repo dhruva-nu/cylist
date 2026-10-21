@@ -420,9 +420,9 @@ async def _checked_columns(
     stray = [entry.column_id for entry in body.columns if entry.column_id not in board]
     if stray:
         raise UnprocessableRequestError(
-            f"{len(stray)} of those columns are not on {project.key}'s board."
+            f"{len(stray)} of those columns are not on this project."
             if len(stray) > 1
-            else f"That column is not on {project.key}'s board.",
+            else "That column is not on this project.",
             details={"column_ids": [str(column_id) for column_id in stray]},
         )
     return {entry.column_id: (entry.may_enter, entry.may_stage) for entry in body.columns}

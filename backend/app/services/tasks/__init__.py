@@ -70,7 +70,14 @@ from app.services.tasks.dates import BoardDates, ColumnDue, board_dates, set_col
 from app.services.tasks.editing import set_sub_status, update
 from app.services.tasks.history import FieldChange, field_change
 from app.services.tasks.lifecycle import create, delete
-from app.services.tasks.lookup import all_for_project, get, list_for_project, resolve, subtasks
+from app.services.tasks.lookup import (
+    all_for_project,
+    get,
+    list_for_project,
+    require_on_project,
+    resolve,
+    subtasks,
+)
 from app.services.tasks.moves import move, set_finished
 from app.services.tasks.status import change_status
 from app.services.tasks.timeline import (
@@ -108,6 +115,7 @@ __all__ = [
     "list_for_project",
     "list_stored",
     "move",
+    "require_on_project",
     "resolve",
     "restore",
     "set_column_due_dates",

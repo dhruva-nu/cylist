@@ -97,30 +97,17 @@ Confirmation = Query(
 )
 
 
-async def project_admin(
-    project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = SessionDependency,
-) -> Principal:
-    """Admit only an admin of this project to destroying it.
+DELETE_PROJECT = guards.project_admin_only("delete it", Scope.WRITE)
+"""Destroying the project, which only its admin may do.
 
-    Deliberately not :data:`CHANGE_PROJECT`. `Permission.PROJECT` is renaming,
-    rewording and archiving — three things somebody else can put back — and a
-    role carrying it was given the right to tidy the project up, not to end it.
-    Deleting one takes its vault and its uploads with it, and the only person
-    on a board who can hand that right out is the only one who should hold it.
-
-    Written out rather than built from :mod:`app.routers.guards`, because what
-    it asks is not a permission: it is the question
-    :func:`app.services.roles.may_administer` answers, the same one
-    `/projects/{ref}/roles` asks before it lets anybody change a role.
-    """
-    if not await roles.may_administer(session, project, principal):
-        raise ForbiddenError(
-            f"Only an admin of {project.key} can delete it.",
-            details={"project_key": project.key},
-        )
-    return principal
+Deliberately not :data:`CHANGE_PROJECT`. `Permission.PROJECT` is renaming,
+rewording and archiving — three things somebody else can put back — and a
+role carrying it was given the right to tidy the project up, not to end it.
+Deleting one takes its vault and its uploads with it, and the only person on
+a board who can hand that right out is the only one who should hold it. The
+same guard as every other admin-only route (CYLIST-146), so the question is
+asked one way: :func:`app.services.roles.may_administer`.
+"""
 
 
 @router.get("", response_model=list[ProjectRead], summary="List projects")
@@ -275,7 +262,7 @@ async def update_project(
 async def delete_project(
     confirm: str = Confirmation,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(project_admin),
+    principal: Principal = Depends(DELETE_PROJECT),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:

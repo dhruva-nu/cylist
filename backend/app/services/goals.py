@@ -23,7 +23,12 @@ from uuid import UUID
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    UnprocessableRequestError,
+    not_on_this_project,
+)
 from app.core.palette import GOAL_PALETTE, colour_for
 from app.db import flush_or_refuse
 from app.models.board import BoardColumn
@@ -133,10 +138,7 @@ async def require_goal(
         return None
     goal = await session.get(Goal, goal_id)
     if goal is None or goal.project_id != project_id:
-        raise UnprocessableRequestError(
-            "That goal is not on this project.",
-            details={"goal_id": str(goal_id)},
-        )
+        raise not_on_this_project("goal", goal_id=goal_id)
     return goal
 
 

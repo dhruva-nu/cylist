@@ -34,7 +34,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import ALL_SCOPES
 from app.auth.tokens import hash_token
 from app.config import Settings, app_settings
-from app.core.errors import UnauthorizedError, UnprocessableRequestError
+from app.core.errors import ForbiddenError, UnauthorizedError
 from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import TokenKind
@@ -234,7 +234,9 @@ async def change_password(
     you did it in stays signed in and every other one does not.
     """
     if principal.person_id is None:
-        raise UnprocessableRequestError(
+        # 403, as `today` and `devices` answer the same caller: it is who is
+        # asking that is refused, not the request (CYLIST-146).
+        raise ForbiddenError(
             "The bootstrap session has no password of its own to change. "
             "Create an account under People first."
         )

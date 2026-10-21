@@ -128,6 +128,24 @@ async def test_a_card_on_another_project_cannot_be_picked(signed_in: AsyncClient
     assert refused.status_code == 422
 
 
+async def test_a_card_that_does_not_exist_reads_the_same(signed_in: AsyncClient) -> None:
+    """CYLIST-146: elsewhere and nowhere are one answer, so the refusal says
+    nothing about which cards exist on boards the caller cannot see."""
+    project = await make_project(signed_in)
+    elsewhere = await make_project(signed_in, "BRV")
+    card = await make_card(signed_in, elsewhere)
+
+    foreign = await signed_in.post(
+        f"/projects/{project}/today/picks", json={"task": card, "day": FRIDAY}
+    )
+    missing = await signed_in.post(
+        f"/projects/{project}/today/picks", json={"task": "ATL-999", "day": FRIDAY}
+    )
+
+    assert foreign.status_code == missing.status_code == 422
+    assert foreign.json()["error"]["message"] == missing.json()["error"]["message"]
+
+
 async def test_taking_a_card_off_the_day_takes_its_todos(signed_in: AsyncClient) -> None:
     project = await make_project(signed_in)
     card = await make_card(signed_in, project)

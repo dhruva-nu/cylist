@@ -559,7 +559,8 @@ class TestTheBootstrapLogin:
             json={"current_password": OWNER_PASSWORD, "new_password": INVITEE_PASSWORD},
         )
 
-        assert response.status_code == 422
+        # Refused for who is asking, so 403 — as `today` and `devices` say it.
+        assert response.status_code == 403
 
 
 class TestBootstrapEndsWithIt:

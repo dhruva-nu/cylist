@@ -22,7 +22,12 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    UnprocessableRequestError,
+    not_on_this_project,
+)
 from app.db import flush_or_refuse, lock_row
 from app.models.board import BoardColumn
 from app.models.project import Project
@@ -149,10 +154,7 @@ async def require_template(
         return None
     template = await session.get(TaskTemplate, template_id)
     if template is None or template.project_id != project_id:
-        raise UnprocessableRequestError(
-            "That template is not on this project.",
-            details={"template_id": str(template_id)},
-        )
+        raise not_on_this_project("template", template_id=template_id)
     return template
 
 
@@ -303,7 +305,7 @@ async def _write_stages(
     strange = [str(column_id) for column_id in named if column_id not in board]
     if strange:
         raise UnprocessableRequestError(
-            "A stage names a column that is not on this project's board.",
+            "A stage names a column that is not on this project.",
             details={"column_ids": strange},
         )
 
