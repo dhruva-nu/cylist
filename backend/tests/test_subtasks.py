@@ -151,8 +151,8 @@ class TestBoardSubtasks:
         board = {
             task["reference"]: task for task in (await signed_in.get("/projects/ATL/tasks")).json()
         }
-        assert board[first["reference"]]["position"] == 0
-        assert board[second["reference"]]["position"] == 1
+        assert board[first["reference"]]["position"] == first["position"]
+        assert board[second["reference"]]["position"] == second["position"]
 
     async def test_a_subtask_is_addressed_by_its_reference(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

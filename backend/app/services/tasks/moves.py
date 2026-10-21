@@ -27,7 +27,7 @@ from app.services.tasks.history import (
     stage_label,
 )
 from app.services.tasks.lookup import subtasks
-from app.services.tasks.stacking import renumber, restack
+from app.services.tasks.stacking import restack
 
 
 async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task, list[FieldChange]]:
@@ -109,7 +109,6 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task,
 
     changes: list[FieldChange] = []
     if changes_column:
-        await renumber(session, source_id)
         source = await columns.get(session, source_id)
         changes.append(field_change("column", "column", source.name, destination.name))
         stage_after = stage_label(task.sub_statuses, task.sub_status_index)

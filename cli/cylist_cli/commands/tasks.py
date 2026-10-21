@@ -452,7 +452,9 @@ def _move(args: argparse.Namespace, ctx: Context) -> None:
     if ctx.as_json:
         output.emit_json(moved)
         return
-    output.echo(f"Moved {moved['reference']} to {args.column} at position {moved['position']}.")
+    # Not the card's ``position`` back: that is a sort key with gaps in it, and
+    # a number like 98304 says nothing about where the card now sits.
+    output.echo(f"Moved {moved['reference']} to {args.column}.")
 
 
 def _finish(args: argparse.Namespace, ctx: Context) -> None:

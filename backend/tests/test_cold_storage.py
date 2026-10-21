@@ -281,7 +281,6 @@ class TestRestoring:
         body = restored.json()
         last = (await _columns(signed_in))[-1]
         assert body["column_id"] == last["id"]
-        assert body["position"] == 0
         assert body["archived_at"] is None
         assert body["finished_at"] is not None
         assert await _board_refs(signed_in) == [card["reference"], already_there["reference"]]
