@@ -293,7 +293,7 @@
           "tokens"
         ],
         "summary": "Issue an API token",
-        "description": "Mint a token and return its plaintext exactly once.\n\nGrant the narrowest useful set of scopes: an agent that only rearranges the\nboard needs ``read`` and ``write``, never ``vault:reveal``.\n\nThe token acts as whoever minted it. An agent moving a card writes that\nperson's name into the card's history, which is the answer everybody\nwants to \"who moved this?\" — \"an API token\" never was, and with several\npeople on one board it would be an answer that names nobody.",
+        "description": "Mint a token and return its plaintext exactly once.\n\nGrant the narrowest useful set of scopes: an agent that only rearranges the\nboard needs ``read`` and ``write``, never ``vault:reveal``.\n\nThe token acts as whoever minted it. An agent moving a card writes that\nperson's name into the card's history, which is the answer everybody\nwants to \"who moved this?\" — \"an API token\" never was, and with several\npeople on one board it would be an answer that names nobody.\n\nIts scopes must be ones the caller holds, and `permit` can only be\ngranted from a browser session.",
         "operationId": "create_token_api_v1_tokens_post",
         "requestBody": {
           "content": {
@@ -315,6 +315,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "A scope asked for is one the caller does not hold."
           },
           "422": {
             "description": "Validation Error",

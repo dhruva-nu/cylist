@@ -88,6 +88,58 @@ class TestScopeEnforcement:
         assert (await signed_in.get("/activity", headers=writer)).status_code == 403
 
 
+class TestNoTokenOutgrowsItsMinter:
+    """CYLIST-117: ``admin`` lets a caller mint, not mint anything at all."""
+
+    async def _bearer(self, client: AsyncClient, *scopes: str) -> dict[str, str]:
+        created = await client.post("/tokens", json={"name": "minter", "scopes": list(scopes)})
+        return {"Authorization": f"Bearer {created.json()['token']}"}
+
+    async def test_an_admin_token_cannot_mint_scopes_it_lacks(self, signed_in: AsyncClient) -> None:
+        admin_only = await self._bearer(signed_in, "admin")
+
+        response = await signed_in.post(
+            "/tokens",
+            json={"name": "wider", "scopes": ["admin", "vault:reveal", "write"]},
+            headers=admin_only,
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["missing_scopes"] == ["vault:reveal", "write"]
+
+    async def test_it_can_mint_what_it_holds(self, signed_in: AsyncClient) -> None:
+        minter = await self._bearer(signed_in, "admin", "read", "write")
+
+        response = await signed_in.post(
+            "/tokens", json={"name": "agent", "scopes": ["read", "write"]}, headers=minter
+        )
+
+        assert response.status_code == 201
+
+    async def test_no_api_token_can_grant_permit_even_holding_it(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """``permit`` answers an agent's permission prompt, and agents hold
+        bearer tokens — so no bearer token may be what hands it out."""
+        everything = await self._bearer(signed_in, "admin", "permit", "read")
+
+        response = await signed_in.post(
+            "/tokens", json={"name": "self-approver", "scopes": ["permit"]}, headers=everything
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["scope"] == "permit"
+
+    async def test_a_browser_session_still_can(self, signed_in: AsyncClient) -> None:
+        """How the phone app gets the scope: it signs in, then mints its own."""
+        response = await signed_in.post(
+            "/tokens", json={"name": "Pixel (Android)", "scopes": ["read", "write", "permit"]}
+        )
+
+        assert response.status_code == 201
+        assert "permit" in response.json()["scopes"]
+
+
 class TestRevocation:
     async def test_a_revoked_token_stops_working_immediately(self, signed_in: AsyncClient) -> None:
         created = await signed_in.post("/tokens", json={"name": "temp", "scopes": ["read"]})
