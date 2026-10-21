@@ -2426,8 +2426,8 @@ class TestRunningInProcess:
 
 # --- Somewhere for old activity to go (CYLIST-139) --------------------------
 
-BEFORE_THE_ARCHIVE = "0046"
-WITH_THE_ARCHIVE = "0047"
+BEFORE_THE_ARCHIVE = "0047"
+WITH_THE_ARCHIVE = "0048"
 
 
 class TestUndoingTheActivityArchive:
