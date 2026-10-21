@@ -15,14 +15,16 @@ from app.models.task import Task, TaskChecklistItem, TaskComment
 from app.schemas.agent_sessions import AgentPresence
 from app.schemas.people import PersonRead
 from app.schemas.tasks import (
+    COMMENTS_ON_A_CARD,
     ChecklistItemRead,
     ColumnDueDateRead,
     CommentRead,
     PrRef,
     TaskDetail,
-    TaskRead,
+    TaskSummary,
 )
 from app.services import agent_prompts, agent_sessions, columns, tasks
+from app.services.paging import PageRequest
 
 
 def comment_read(entry: TaskComment) -> CommentRead:
@@ -56,9 +58,9 @@ def _task_read(
     owners: list[Person],
     board: list[BoardColumn],
     presence: AgentPresence | None,
-) -> TaskRead:
+) -> TaskSummary:
     dates = tasks.board_dates(task, board)
-    return TaskRead(
+    return TaskSummary(
         id=task.id,
         project_id=task.project_id,
         reference=task.reference,
@@ -69,7 +71,6 @@ def _task_read(
         column_id=task.column_id,
         position=task.position,
         title=task.title,
-        description=task.description,
         type=task.type,
         priority=task.priority,
         sub_statuses=task.sub_statuses,
@@ -114,7 +115,7 @@ def _task_read(
     )
 
 
-async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]:
+async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskSummary]:
     """Render a set of cards, with the counts a card cannot answer alone.
 
     Comment counts, sub-task progress, sub-task owners and the boards the cards
@@ -147,8 +148,9 @@ async def read_tasks(session: AsyncSession, found: list[Task]) -> list[TaskRead]
 
 
 async def task_detail(session: AsyncSession, task: Task) -> TaskDetail:
-    """One card in full: itself, its timeline, its agents and its sub-tasks."""
-    timeline = await tasks.comments(session, task)
+    """One card in full: itself, its latest timeline, its agents and its sub-tasks."""
+    timeline = await tasks.comment_page(session, task, PageRequest(limit=COMMENTS_ON_A_CARD))
+    counts = await tasks.comment_counts(session, [task.id])
     splits = await tasks.subtask_counts(session, [task.id])
     owners = await tasks.subtask_owners(session, [task.id])
     board = await columns.list_for_project(session, task.project)
@@ -156,7 +158,7 @@ async def task_detail(session: AsyncSession, task: Task) -> TaskDetail:
     shown = await agent_prompts.shown_for(session, agents)
     card = _task_read(
         task,
-        comment_count=len(timeline),
+        comment_count=counts.get(task.id, 0),
         split=splits.get(task.id, tasks.NOT_SPLIT),
         owners=owners.get(task.id, []),
         board=board,
@@ -164,7 +166,10 @@ async def task_detail(session: AsyncSession, task: Task) -> TaskDetail:
     )
     return TaskDetail(
         **card.model_dump(),
-        comments=[comment_read(entry) for entry in timeline],
+        description=task.description,
+        # The page is newest first; a card reads its timeline the other way.
+        comments=[comment_read(entry) for entry in reversed(timeline.rows)],
+        comments_next=timeline.next,
         agent_sessions=[agent_sessions.read(row, shown.get(row.id)) for row in agents],
         subtasks=await read_tasks(session, await tasks.subtasks(session, task)),
     )

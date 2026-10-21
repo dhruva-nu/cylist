@@ -9,7 +9,7 @@ from mcp.types import CallToolResult
 from pydantic import Field
 
 from cylist_mcp import resolve
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.tools.common import ProjectRef, as_tool_result, check_choice
 
 LINK_SOURCES = ("sharepoint", "gdrive", "other")
@@ -39,10 +39,16 @@ def register(server: MCPServer, client: Api) -> None:
                 return {"folders": tree, "items": []}
             folder = await resolve.folder_id(client, project, path)
             listing = await client.get(f"/folders/{folder}/children")
+            # A folder's items come a page at a time; listing it means all of them.
+            items = list(listing.get("items", []))
+            if listing.get("next"):
+                items.extend(
+                    await every(client, f"/folders/{folder}/children", after=listing["next"])
+                )
             return {
                 "folder": listing.get("folder"),
                 "folders": listing.get("folders", []),
-                "items": listing.get("items", []),
+                "items": items,
             }
 
         return await as_tool_result(call)

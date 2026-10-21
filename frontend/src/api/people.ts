@@ -2,6 +2,7 @@
 
 import type { Identity, InviteIssued } from './auth'
 import { jsonBody, request } from './http'
+import { fetchAllPages } from './paging'
 
 export type PersonKind = 'team' | 'client'
 
@@ -70,7 +71,7 @@ export const peopleApi = {
     }),
   withdrawInvite: (id: string) =>
     request<{ ok: boolean }>(`/people/${id}/invite`, { method: 'DELETE' }),
-  listPeople: () => request<Person[]>('/people'),
+  listPeople: () => fetchAllPages<Person>('/people'),
   createPerson: (input: PersonInput) =>
     request<Person>('/people', { method: 'POST', body: jsonBody(input) }),
   updatePerson: (id: string, input: Partial<PersonInput>) =>

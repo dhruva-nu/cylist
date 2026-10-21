@@ -14,12 +14,14 @@ from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import Task
 from app.routers.files import file_item_read
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.routers.tasks.dependencies import WRITE_CARDS, WRITE_THIS_CARD, resolved_task
 from app.routers.tasks.recording import record_on_card
 from app.routers.tasks.views import read_tasks, task_detail
-from app.schemas.tasks import ColdStorageRun, TaskDetail, TaskRead
+from app.schemas.tasks import ColdStorageRun, TaskDetail, TaskSummaryPage
 from app.services import columns, permissions, tasks
+from app.services.paging import PageRequest
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["tasks"])
@@ -56,20 +58,27 @@ async def may_restore_this_card(
 
 @router.get(
     "/projects/{project_ref}/cold-storage",
-    response_model=list[TaskRead],
+    response_model=TaskSummaryPage,
     summary="List the cards in cold storage",
 )
 async def list_cold_storage(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[TaskRead]:
-    """Every card this board has put in cold storage, most recently stored first.
+    page: PageRequest = PageQuery,
+) -> TaskSummaryPage:
+    """The cards this board has put in cold storage, most recently finished
+    first, a page at a time.
+
+    By `finished_at` rather than `archived_at`: one run stores a whole column
+    at the same instant, so when each card's work finished is the order that
+    says something.
 
     These are the cards `GET /projects/{ref}/tasks` no longer lists. Each still
     opens by its reference, with its whole timeline, and carries `archived_at`.
     """
-    return await read_tasks(session, await tasks.list_stored(session, project))
+    window = await tasks.stored_page(session, project, page)
+    return TaskSummaryPage(items=await read_tasks(session, window.rows), next=window.next)
 
 
 @router.post(

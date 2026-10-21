@@ -96,7 +96,7 @@ def person_id(client: Client, name: str, *, project_ref: str | None = None) -> s
         return name
 
     if project_ref is None:
-        candidates = _people(client.get("/people"))
+        candidates = client.get_all("/people")
         where = "the people directory"
     else:
         candidates = _people(client.get(f"/projects/{project_ref}/members").get("members", []))
@@ -176,8 +176,8 @@ def file_item(client: Client, project_ref: str, path: str) -> JsonDict:
         )
 
     holder = folder(client, project_ref, "/".join(parent))
-    listing = client.get(f"/folders/{holder['id']}/children")
-    items = listing.get("items", []) if isinstance(listing, dict) else []
+    # Every page of the folder's items: the file asked for may be past the first.
+    items = client.get_all(f"/folders/{holder['id']}/children")
     return pick(items, name, kind="file", where="/".join(parent))
 
 
@@ -195,9 +195,9 @@ def vault_node(client: Client, project_ref: str, path: str) -> tuple[JsonDict, J
     if not segments:
         raise CylistError("Give a vault path, such as 'Logins/Billing/Stripe'.")
 
-    trees = client.get(f"/projects/{project_ref}/vault/trees")
+    trees = client.get_all(f"/projects/{project_ref}/vault/trees")
     tree_summary = pick(
-        trees if isinstance(trees, list) else [],
+        trees,
         segments[0],
         kind="vault tree",
         where=project_ref,

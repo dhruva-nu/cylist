@@ -9,8 +9,11 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
+from app.routers.columns import resolved_column
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.routers.tasks import acts
 from app.routers.tasks.dependencies import (
@@ -25,6 +28,8 @@ from app.routers.tasks.recording import record_on_card
 from app.routers.tasks.views import read_tasks, task_detail
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import (
+    BoardTasks,
+    ColumnTasks,
     SubStatusMove,
     SubtaskCreate,
     TaskCreate,
@@ -32,34 +37,85 @@ from app.schemas.tasks import (
     TaskFinish,
     TaskHistoryPage,
     TaskMove,
-    TaskRead,
     TaskStatusChange,
+    TaskSummaryPage,
     TaskUpdate,
 )
 from app.services import activity, columns, tasks
+from app.services.paging import DEFAULT_LIMIT, MAX_LIMIT, PageRequest
 
 router = APIRouter(tags=["tasks"])
 
 
 @router.get(
-    "/projects/{project_ref}/tasks", response_model=list[TaskRead], summary="List a board's tasks"
+    "/projects/{project_ref}/tasks",
+    response_model=BoardTasks,
+    summary="List a board's tasks, a page per column",
 )
 async def list_tasks(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[TaskRead]:
-    """Every card on the board, in the order they are stacked.
+    limit: int = Query(
+        default=DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=f"How many cards to return from the top of each column, at most {MAX_LIMIT}.",
+    ),
+) -> BoardTasks:
+    """The top of every column, left to right, and how many cards each holds.
 
-    Group by `column_id` to draw the board; the ordering already matches the
-    columns left to right and the cards top to bottom within each.
+    Each column's `items` are its cards top to bottom; where a column holds
+    more than `limit`, its `next` is the cursor for the rest, read with
+    `GET /columns/{column_id}/tasks?after=…`. A board is read this way rather
+    than whole because a column can hold thousands of cards and a screen shows
+    a few dozen (CYLIST-130).
+
+    The cards are summaries: everything but `description`, which is read with
+    `GET /tasks/{ref}`.
 
     Top-level cards only. A sub-task is not on the board — it comes back with
     the card it belongs to, from `GET /tasks/{ref}`. What a card says about its
     sub-tasks here is `subtask_count`, `open_subtask_count` and
     `subtask_assignees`: how many, how many are left, and who is on them.
     """
-    return await read_tasks(session, await tasks.list_for_project(session, project))
+    stacks = await tasks.board_pages(session, project, limit=limit)
+    drawn = iter(
+        await read_tasks(session, [task for stack in stacks for task in stack.window.rows])
+    )
+    return BoardTasks(
+        columns=[
+            ColumnTasks(
+                column_id=stack.column.id,
+                total=stack.total,
+                items=[next(drawn) for _ in stack.window.rows],
+                next=stack.window.next,
+            )
+            for stack in stacks
+        ]
+    )
+
+
+@router.get(
+    "/columns/{column_id}/tasks",
+    response_model=TaskSummaryPage,
+    summary="Read a column of the board, a page at a time",
+)
+async def list_column_tasks(
+    column: BoardColumn = Depends(resolved_column),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+    page: PageRequest = PageQuery,
+) -> TaskSummaryPage:
+    """One column's cards, top to bottom, continuing from a column's `next`.
+
+    `GET /projects/{ref}/tasks` returns the top of every column at once; this
+    is what reads further down one of them. A cursor whose card has since left
+    the column — moved, deleted, stored — is a 422, and the column is read
+    again from the top.
+    """
+    window = await tasks.column_page(session, column, page)
+    return TaskSummaryPage(items=await read_tasks(session, window.rows), next=window.next)
 
 
 @router.post(
@@ -351,20 +407,22 @@ async def change_status(
 
 @router.get(
     "/tasks/{task_ref}/subtasks",
-    response_model=list[TaskRead],
+    response_model=TaskSummaryPage,
     summary="List a task's sub-tasks",
 )
 async def list_subtasks(
     task: Task = Depends(resolved_task),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[TaskRead]:
-    """The sub-tasks split out of this one, in sub-number order.
+    page: PageRequest = PageQuery,
+) -> TaskSummaryPage:
+    """The sub-tasks split out of this one, in sub-number order, a page at a time.
 
     Only the sub-tasks with a reference of their own. The tick-box kind rides
     along on the task itself, as `checklist`.
     """
-    return await read_tasks(session, await tasks.subtasks(session, task))
+    window = await tasks.subtask_page(session, task, page)
+    return TaskSummaryPage(items=await read_tasks(session, window.rows), next=window.next)
 
 
 @router.post(

@@ -34,18 +34,20 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.template import TaskTemplate, TemplateStage
 from app.schemas.templates import StageInput, TemplateCreate, TemplateUpdate
+from app.services.paging import PageRequest, Window, keyset
 
 # --- Templates ---------------------------------------------------------------
 
 
-async def list_templates(session: AsyncSession, project: Project) -> list[TaskTemplate]:
-    """The project's templates, in name order."""
-    return list(
-        await session.scalars(
-            select(TaskTemplate)
-            .where(TaskTemplate.project_id == project.id)
-            .order_by(TaskTemplate.name)
-        )
+async def list_templates(
+    session: AsyncSession, project: Project, page: PageRequest
+) -> Window[TaskTemplate]:
+    """A page of the project's templates, in name order."""
+    return await keyset(
+        session,
+        select(TaskTemplate).where(TaskTemplate.project_id == project.id),
+        keys=(TaskTemplate.name, TaskTemplate.id),
+        page=page,
     )
 
 

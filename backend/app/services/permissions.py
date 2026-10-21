@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, delete, select
+from sqlalchemy import ColumnElement, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -419,6 +419,23 @@ def readable(level: str, allowed: frozenset[Sensitivity]) -> bool:
     filtered on something sensible instead of breaking the listing it is in.
     """
     return sensitivity.parse(level, DEFAULT_LEVEL) in allowed
+
+
+def readable_clause(
+    level: InstrumentedAttribute[str], allowed: frozenset[Sensitivity]
+) -> ColumnElement[bool]:
+    """:func:`readable`, as a ``WHERE`` clause.
+
+    For a listing read a page at a time: rows filtered after the query would
+    leave a page short, or empty with more to come, and a cursor could land on
+    a row the caller is not shown. An unrecognised stored level is read as the
+    default one, exactly as :func:`readable` reads it.
+    """
+    known = [str(member) for member in sensitivity.ORDER]
+    clause: ColumnElement[bool] = level.in_([str(member) for member in allowed])
+    if DEFAULT_LEVEL in allowed:
+        clause = or_(clause, level.not_in(known))
+    return clause
 
 
 async def visible_levels_for(

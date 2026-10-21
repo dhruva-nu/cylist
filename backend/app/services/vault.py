@@ -39,6 +39,7 @@ from app.schemas.vault import (
     VaultTreeUpdate,
 )
 from app.services import permissions
+from app.services.paging import PageRequest, Window, keyset
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,14 +83,16 @@ async def create_tree(session: AsyncSession, project: Project, data: VaultTreeCr
     return tree
 
 
-async def list_trees(session: AsyncSession, project: Project) -> list[VaultTree]:
-    """Return a project's trees in display order."""
-    statement = (
-        select(VaultTree)
-        .where(VaultTree.project_id == project.id)
-        .order_by(VaultTree.position, VaultTree.created_at)
+async def list_trees(
+    session: AsyncSession, project: Project, page: PageRequest
+) -> Window[VaultTree]:
+    """Return a page of a project's trees in display order."""
+    return await keyset(
+        session,
+        select(VaultTree).where(VaultTree.project_id == project.id),
+        keys=(VaultTree.position, VaultTree.created_at, VaultTree.id),
+        page=page,
     )
-    return list(await session.scalars(statement))
 
 
 async def get_tree(session: AsyncSession, tree_id: UUID) -> VaultTree:

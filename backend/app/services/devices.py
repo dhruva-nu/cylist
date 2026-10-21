@@ -19,6 +19,7 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.models.api_token import ApiToken
 from app.models.device import PushDevice
 from app.schemas.devices import DeviceRegister
+from app.services.paging import PageRequest, Window, keyset
 
 
 def _caller(principal: Principal) -> tuple[UUID, UUID]:
@@ -67,15 +68,18 @@ async def register(session: AsyncSession, principal: Principal, data: DeviceRegi
     return device
 
 
-async def list_for(session: AsyncSession, principal: Principal) -> list[PushDevice]:
-    """The caller's own devices, newest registration first."""
+async def list_for(
+    session: AsyncSession, principal: Principal, page: PageRequest
+) -> Window[PushDevice]:
+    """A page of the caller's own devices, newest registration first."""
     person_id, _ = _caller(principal)
-    devices = await session.scalars(
-        select(PushDevice)
-        .where(PushDevice.person_id == person_id)
-        .order_by(PushDevice.last_registered_at.desc())
+    return await keyset(
+        session,
+        select(PushDevice).where(PushDevice.person_id == person_id),
+        keys=(PushDevice.last_registered_at, PushDevice.id),
+        page=page,
+        descending=True,
     )
-    return list(devices)
 
 
 async def unregister(session: AsyncSession, principal: Principal, device_id: UUID) -> None:

@@ -4,6 +4,23 @@
   gap: 14px;
 }
 
+/* Above the oldest entry shown, the way to the ones before it. */
+.earlier {
+  align-self: center;
+  padding: 4px 10px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.earlier:hover:not(:disabled) {
+  color: var(--ink);
+}
+
 .quiet {
   margin: 0;
   padding: 14px 0;

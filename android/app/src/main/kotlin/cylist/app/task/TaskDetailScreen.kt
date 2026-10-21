@@ -86,7 +86,7 @@ import cylist.api.generated.models.CommentRead
 import cylist.api.generated.models.PrState
 import cylist.api.generated.models.TaskDetail
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TaskType
 import cylist.app.board.Avatar
@@ -156,7 +156,7 @@ class TaskDetailActions(
     val confirmMove: () -> Unit = {},
     val cancelMove: () -> Unit = {},
     val toggleItem: (ChecklistItemRead) -> Unit = {},
-    val toggleSubtask: (TaskRead) -> Unit = {},
+    val toggleSubtask: (TaskSummary) -> Unit = {},
     val setDraft: (String) -> Unit = {},
     val send: () -> Unit = {},
     val answer: (AgentPromptRead, AgentPromptAnswer) -> Unit = { _, _ -> },
@@ -671,7 +671,7 @@ private fun Stages(task: TaskDetail) {
 }
 
 @Composable
-private fun SubtaskRow(sub: TaskRead, it: TaskDetailState, actions: TaskDetailActions) {
+private fun SubtaskRow(sub: TaskSummary, it: TaskDetailState, actions: TaskDetailActions) {
     val cancelled = sub.status == TaskStatus.cancelled
     val done = sub.finishedAt != null
     TickRow(

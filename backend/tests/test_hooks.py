@@ -67,7 +67,7 @@ async def _project(client: AsyncClient) -> str:
 
 async def _agent(client: AsyncClient) -> str:
     """The agent's id. Every project has it on, so it can own an ATL card."""
-    people = (await client.get("/people")).json()
+    people = (await client.get("/people")).json()["items"]
     return str(next(person["id"] for person in people if person["is_agent"]))
 
 
@@ -188,7 +188,7 @@ class TestRules:
         assert created["secret"].startswith("whsec_")
         assert created["secret_hint"] == created["secret"][-4:]
 
-        listed = (await signed_in.get("/projects/ATL/hooks")).json()
+        listed = (await signed_in.get("/projects/ATL/hooks")).json()["items"]
         assert [hook["name"] for hook in listed] == ["Hook"]
         assert "secret" not in listed[0]
         assert listed[0]["last_delivery"] is None
@@ -642,10 +642,10 @@ class TestDelivery:
         assert await _deliver(signed_in, Receiver(200)) == 0
         assert await _deliver(signed_in, Receiver(200), after=timedelta(seconds=31)) == 1
 
-        log = (await signed_in.get(f"/projects/ATL/hooks/{hook['id']}/deliveries")).json()
+        log = (await signed_in.get(f"/projects/ATL/hooks/{hook['id']}/deliveries")).json()["items"]
         assert [entry["state"] for entry in log] == ["delivered"]
         assert [attempt["status_code"] for attempt in log[0]["attempts"]] == [503, 200]
-        listed = (await signed_in.get("/projects/ATL/hooks")).json()
+        listed = (await signed_in.get("/projects/ATL/hooks")).json()["items"]
         assert listed[0]["last_delivery"]["state"] == "delivered"
 
     async def test_a_network_error_is_retried_too(self, signed_in: AsyncClient) -> None:
@@ -827,7 +827,7 @@ class TestFiring:
             "message": "Release 1.4",
         }
 
-        listed = (await signed_in.get("/projects/ATL/hooks")).json()
+        listed = (await signed_in.get("/projects/ATL/hooks")).json()["items"]
         assert listed[0]["last_delivery"]["event"] == "hook.fired"
         async with _database(signed_in).session() as session:
             fired = await session.scalar(select(Activity).where(Activity.verb == "hook.fired"))

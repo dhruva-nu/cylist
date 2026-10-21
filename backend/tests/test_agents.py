@@ -146,7 +146,7 @@ class TestUploadingSkills:
         await upload(project, "triage.md", content_of("triage"))
         await upload(project, "archive.md", content_of("archive"))
 
-        listing = (await project.get("/projects/ATL/skills")).json()
+        listing = (await project.get("/projects/ATL/skills")).json()["items"]
 
         assert [skill["name"] for skill in listing] == ["archive.md", "triage.md"]
 
@@ -191,7 +191,7 @@ class TestUploadingSkills:
 
         assert response.status_code == 413
         assert not list((tmp_path / "blobs").rglob("*")), "a refused upload leaves nothing on disk"
-        assert (await capped.get("/projects/ATL/skills")).json() == []
+        assert (await capped.get("/projects/ATL/skills")).json()["items"] == []
 
 
 class TestReplacingASkill:
@@ -299,7 +299,7 @@ class TestSkillsShareContentWithFiles:
         self, project: AsyncClient, settings: Settings, session: AsyncSession
     ) -> None:
         shared = content_of("shared-with-a-file")
-        root = (await project.get("/projects/ATL/folders")).json()[0]["id"]
+        root = (await project.get("/projects/ATL/folders")).json()["items"][0]["id"]
         await project.post(
             f"/folders/{root}/upload",
             files={"file": ("brief.md", shared, "text/markdown")},
@@ -316,7 +316,7 @@ class TestSkillsShareContentWithFiles:
     ) -> None:
         """The regression the shared blob module exists to prevent."""
         shared = content_of("shared-with-a-skill")
-        root = (await project.get("/projects/ATL/folders")).json()[0]["id"]
+        root = (await project.get("/projects/ATL/folders")).json()["items"][0]["id"]
         item = (
             await project.post(
                 f"/folders/{root}/upload",
@@ -338,7 +338,7 @@ class TestRemovingSkills:
         assert (await project.delete(f"/skills/{skill['id']}")).status_code == 200
 
         assert (await project.get(f"/skills/{skill['id']}")).status_code == 404
-        assert (await project.get("/projects/ATL/skills")).json() == []
+        assert (await project.get("/projects/ATL/skills")).json()["items"] == []
 
     async def test_takes_its_content_with_it(
         self, project: AsyncClient, settings: Settings
@@ -442,9 +442,9 @@ class TestUploadingAFolder:
         assert skill["name"] == "cylist-kit.zip", "one skill, named after the folder"
         assert skill["mime"] == "application/zip"
         assert skill["description"] == "Set a machine up."
-        assert [one["name"] for one in (await project.get("/projects/ATL/skills")).json()] == [
-            "cylist-kit.zip"
-        ]
+        assert [
+            one["name"] for one in (await project.get("/projects/ATL/skills")).json()["items"]
+        ] == ["cylist-kit.zip"]
 
     async def test_gives_every_file_back_byte_for_byte(self, project: AsyncClient) -> None:
         _, skill = await upload_folder(project, "cylist-kit", folder_of("cylist-kit"))
@@ -538,7 +538,9 @@ class TestUploadingAFolder:
 
         assert response.status_code == 422
         assert "no SKILL.md at its root" in response.json()["error"]["message"]
-        assert (await project.get("/projects/ATL/skills")).json() == [], "and nothing was stored"
+        assert (await project.get("/projects/ATL/skills")).json()["items"] == [], (
+            "and nothing was stored"
+        )
 
     async def test_refuses_a_part_that_points_outside_the_folder(
         self, project: AsyncClient
@@ -566,7 +568,7 @@ class TestUploadingAFolder:
         )
 
         assert response.status_code == 413
-        assert (await capped.get("/projects/ATL/skills")).json() == []
+        assert (await capped.get("/projects/ATL/skills")).json()["items"] == []
 
 
 class TestASingleFileSkillIsUnchanged:

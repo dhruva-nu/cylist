@@ -72,6 +72,7 @@ from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
 from app.services import projects
+from app.services.paging import PageRequest, Window, keyset
 
 
 @dataclass(frozen=True)
@@ -444,11 +445,13 @@ class HookLabels:
     last_delivery: HookDelivery | None
 
 
-async def list_hooks(session: AsyncSession, project: Project) -> list[Hook]:
-    found = await session.scalars(
-        select(Hook).where(Hook.project_id == project.id).order_by(Hook.name)
+async def list_hooks(session: AsyncSession, project: Project, page: PageRequest) -> Window[Hook]:
+    return await keyset(
+        session,
+        select(Hook).where(Hook.project_id == project.id),
+        keys=(Hook.name, Hook.id),
+        page=page,
     )
-    return list(found)
 
 
 async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID, HookLabels]:
@@ -612,14 +615,14 @@ def secret_of(cipher: VaultCipher, hook: Hook) -> str:
     )
 
 
-async def deliveries(session: AsyncSession, hook: Hook, *, limit: int) -> list[HookDelivery]:
-    found = await session.scalars(
-        select(HookDelivery)
-        .where(HookDelivery.hook_id == hook.id)
-        .order_by(HookDelivery.created_at.desc(), HookDelivery.id.desc())
-        .limit(limit)
+async def deliveries(session: AsyncSession, hook: Hook, page: PageRequest) -> Window[HookDelivery]:
+    return await keyset(
+        session,
+        select(HookDelivery).where(HookDelivery.hook_id == hook.id),
+        keys=(HookDelivery.created_at, HookDelivery.id),
+        page=page,
+        descending=True,
     )
-    return list(found)
 
 
 async def delivery(session: AsyncSession, hook: Hook, delivery_id: UUID) -> HookDelivery:

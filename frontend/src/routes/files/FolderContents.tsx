@@ -63,6 +63,7 @@ export function FolderContents({
   onDeleteFolder,
   onRenameItem,
   onDeleteItem,
+  more,
 }: {
   crumbs: string[]
   folders: Folder[]
@@ -71,13 +72,16 @@ export function FolderContents({
   onDeleteFolder: ((folder: Folder) => void) | null
   onRenameItem: ((item: FileItem) => void) | null
   onDeleteItem: ((item: FileItem) => void) | null
+  /** The way to the folder's files past those shown; null once all are. */
+  more: { loading: boolean; onLoad: () => void } | null
 }) {
   return (
     <div className={styles.pane}>
       <div className={styles.paneHead}>
         <span className={styles.crumbs}>{crumbs.join(' / ')}</span>
         <span className={styles.tally}>
-          {folders.length} folders · {items.length} files
+          {folders.length} folders · {items.length}
+          {more ? '+' : ''} files
         </span>
       </div>
       <div className={styles.scroll}>
@@ -123,6 +127,13 @@ export function FolderContents({
             </tbody>
           </table>
         )}
+        {more ? (
+          <div className={styles.more}>
+            <Button small disabled={more.loading} onClick={more.onLoad}>
+              {more.loading ? 'Loading…' : 'Show more files'}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   )

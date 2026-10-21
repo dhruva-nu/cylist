@@ -14,7 +14,7 @@ from pydantic import Field, field_validator, model_validator
 
 from app.core.sensitivity import Sensitivity
 from app.models.vault import VaultNodeKind
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 
 class VaultTreeCreate(Schema):
@@ -202,3 +202,7 @@ class SecretRevealed(Schema):
     name: str
     value: str = Field(description="The decrypted secret. This request has been logged.")
     revealed_at: datetime
+
+
+class VaultTreePage(Page[VaultTreeRead]):
+    """A page of a project's vault trees, in display order."""

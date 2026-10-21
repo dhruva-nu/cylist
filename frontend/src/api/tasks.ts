@@ -3,6 +3,7 @@
 import type { AgentPresence, AgentSessionRead } from './agents'
 import type { FileItem } from './files'
 import { jsonBody, request } from './http'
+import { fetchPage, pagePath, type Page } from './paging'
 import type { Person } from './people'
 
 export type TaskType = 'feature' | 'bug' | 'chore'
@@ -98,6 +99,9 @@ export interface TaskHistoryEntry {
   changes: FieldChange[]
 }
 
+/** How many cards of each column the board reads at a time. */
+export const BOARD_PAGE = 50
+
 /** How many history entries a page holds. The server's default, said out loud
  * so the board can size its pager without a round trip to find out. */
 export const HISTORY_PER_PAGE = 10
@@ -114,6 +118,10 @@ export interface TaskHistoryPage {
   per_page: number
 }
 
+/**
+ * A card as a list draws it — everything but its description, which is the one
+ * unbounded field on a card and is read with the card itself, `TaskDetail`.
+ */
 export interface Task {
   id: string
   project_id: string
@@ -135,7 +143,6 @@ export interface Task {
   /** Where it sits in that column, from the top. Null on a sub-task and in cold storage. */
   position: number | null
   title: string
-  description: string
   type: TaskType
   priority: TaskPriority
   /** Up to 4 stage labels, left to right. Empty if the card doesn't use this. */
@@ -222,7 +229,13 @@ export interface Task {
 }
 
 export interface TaskDetail extends Task {
+  description: string
+  /** The newest entries of the timeline, oldest first — the last fifty at most.
+   * `comment_count` says how many there are in all. */
   comments: TaskComment[]
+  /** Pass to `listComments` for the entries before these. Null when `comments`
+   * is the whole timeline. */
+  comments_next: string | null
   /** Sub-tasks with a reference of their own, in sub-number order. */
   subtasks: Task[]
   /** Every harness session on this card still worth showing: the open ones
@@ -312,8 +325,35 @@ export interface ColdStorageRun {
   file: FileItem
 }
 
+/** The top of one column of the board, and how many cards it holds in all. */
+export interface ColumnTasks {
+  column_id: string
+  total: number
+  items: Task[]
+  /** Pass to `listColumnTasks` for the cards below these. Null when that is all. */
+  next: string | null
+}
+
+/** A board's cards, a page per column, left to right. */
+export interface BoardTasks {
+  columns: ColumnTasks[]
+}
+
+/** A page of a card's timeline, newest first, and how long the whole of it is. */
+export interface CommentPage extends Page<TaskComment> {
+  total: number
+}
+
 export const tasksApi = {
-  listTasks: (projectKey: string) => request<Task[]>(`/projects/${projectKey}/tasks`),
+  /** The top `limit` cards of every column. */
+  listTasks: (projectKey: string, limit = BOARD_PAGE) =>
+    request<BoardTasks>(`/projects/${projectKey}/tasks?limit=${limit}`),
+  /** The cards of one column after `after`, continuing from its `next`. */
+  listColumnTasks: (columnId: string, after: string, limit = BOARD_PAGE) =>
+    fetchPage<Task>(`/columns/${columnId}/tasks`, after, limit),
+  /** A page of a card's timeline, newest first, from `after` back. */
+  listComments: (taskRef: string, after: string | null) =>
+    request<CommentPage>(pagePath(`/tasks/${taskRef}/comments`, after, 50)),
   getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
   /**
    * One page of what has been done to a card — every edit, move and tick —
@@ -376,8 +416,9 @@ export const tasksApi = {
    */
   deleteComment: (commentId: string) =>
     request<void>(`/comments/${commentId}`, { method: 'DELETE' }),
-  /** The board's cards in cold storage, most recently stored first. */
-  listColdStorage: (projectKey: string) => request<Task[]>(`/projects/${projectKey}/cold-storage`),
+  /** A page of the board's cards in cold storage, most recently finished first. */
+  listColdStorage: (projectKey: string, after: string | null = null) =>
+    fetchPage<Task>(`/projects/${projectKey}/cold-storage`, after),
   /**
    * Take every card in the board's last column off the board, into a CSV in the
    * project's files. The cards are kept, not deleted, and each can be restored.

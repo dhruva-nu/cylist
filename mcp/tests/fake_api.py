@@ -134,8 +134,23 @@ TASK = {
     "subtask_assignees": [],
     "created_at": "2026-02-01T09:00:00Z",
     "comments": [],
+    "comments_next": None,
     "subtasks": [],
 }
+
+TIMELINE: list[dict[str, Any]] = [
+    {
+        "id": f"0192f3c4-0008-7000-8000-00000000000{number}",
+        "task_id": TASK_ID,
+        "author": ADITI,
+        "body": f"Note {number}.",
+        "kind": "comment",
+        "meta": {},
+        "created_at": f"2026-02-0{number}T09:00:00Z",
+    }
+    for number in (3, 2, 1)
+]
+"""``GET /tasks/{ref}/comments``: the timeline newest first, as the API pages it."""
 
 GOAL = {
     "id": GOAL_ID,
@@ -152,6 +167,7 @@ GOAL = {
     "progress": {"total": 2, "done": 1, "cancelled": 0, "open": 1, "blocked": 0, "on_hold": 0},
     "created_at": "2026-02-01T09:00:00Z",
     "tasks": [TASK],
+    "tasks_next": None,
 }
 
 SUBTASK = {
@@ -517,6 +533,46 @@ def build(
     return httpx.MockTransport(handler)
 
 
+def page(request: httpx.Request, rows: list[dict[str, Any]]) -> httpx.Response:
+    """One page of ``rows`` as the real API serves a list: ``{items, next}``.
+
+    Honours ``after`` and ``limit`` as the server does, so a test can prove a
+    lookup follows ``next`` to the end rather than stopping at the first page.
+    """
+    after = request.url.params.get("after")
+    limit = int(request.url.params.get("limit", "50"))
+    start = 0
+    if after:
+        start = next(index for index, row in enumerate(rows) if row["id"] == after) + 1
+    shown = rows[start : start + limit]
+    more = start + limit < len(rows)
+    return httpx.Response(200, json={"items": shown, "next": shown[-1]["id"] if more else None})
+
+
+def summary_of(task: dict[str, Any]) -> dict[str, Any]:
+    """A card as a list carries it: no description, and none of a card's detail."""
+    left_out = {"description", "comments", "comments_next", "subtasks"}
+    return {key: value for key, value in task.items() if key not in left_out}
+
+
+def _board(request: httpx.Request) -> httpx.Response:
+    """``GET /projects/{ref}/tasks``: the top of every column."""
+    limit = int(request.url.params.get("limit", "50"))
+    stacks = []
+    for column in cast(list[dict[str, Any]], COLUMNS["columns"]):
+        cards = [summary_of(TASK)] if column["id"] == TASK["column_id"] else []
+        shown = cards[:limit]
+        stacks.append(
+            {
+                "column_id": column["id"],
+                "total": len(cards),
+                "items": shown,
+                "next": shown[-1]["id"] if len(cards) > limit else None,
+            }
+        )
+    return httpx.Response(200, json={"columns": stacks})
+
+
 def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Response:
     method = request.method
 
@@ -524,7 +580,7 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         return httpx.Response(200, json=identity(scopes))
 
     if path == "/projects":
-        return httpx.Response(200, json=[PROJECT])
+        return page(request, [PROJECT])
     if path in {"/projects/ATL", f"/projects/{PROJECT_ID}"}:
         return httpx.Response(200, json=PROJECT)
     if path.endswith("/summary"):
@@ -535,15 +591,19 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         return httpx.Response(200, json={"members": [ADITI, LENA, LEO]})
 
     if path.endswith("/goals") and method == "GET":
-        return httpx.Response(200, json=[GOAL])
+        return page(request, [GOAL])
     if path.endswith("/goals") and method == "POST":
         body = json.loads(request.content)
-        return httpx.Response(201, json={**GOAL, "name": body["name"], "tasks": []})
+        return httpx.Response(
+            201, json={**GOAL, "name": body["name"], "tasks": [], "tasks_next": None}
+        )
     if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "GET":
         return httpx.Response(200, json=GOAL)
+    if path == "/goals/ATL-G1/tasks" and method == "GET":
+        return page(request, [summary_of(TASK)])
     if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "PATCH":
         body = json.loads(request.content)
-        return httpx.Response(200, json={**GOAL, **body, "tasks": []})
+        return httpx.Response(200, json={**GOAL, **body, "tasks": [], "tasks_next": None})
 
     if path == "/projects/ATL/docs" and method == "GET":
         return httpx.Response(200, json=DOC_TREE)
@@ -566,8 +626,11 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
     if path == "/projects/ATL/docs/place" and method == "POST":
         return httpx.Response(200, json=DOC_PLAN)
 
+    if path.startswith("/columns/") and path.endswith("/tasks") and method == "GET":
+        column_id = path.removeprefix("/columns/").removesuffix("/tasks")
+        return page(request, [summary_of(TASK)] if column_id == TASK["column_id"] else [])
     if path.endswith("/tasks") and method == "GET":
-        return httpx.Response(200, json=[TASK])
+        return _board(request)
     if path.endswith("/tasks") and method == "POST":
         body = json.loads(request.content)
         return httpx.Response(201, json={**TASK, "title": body["title"]})
@@ -593,7 +656,10 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         body = json.loads(request.content)
         return httpx.Response(201, json={**SUBTASK, "title": body["title"]})
     if path.endswith("/subtasks") and method == "GET":
-        return httpx.Response(200, json=[SUBTASK])
+        return page(request, [summary_of(SUBTASK)])
+    if path.endswith("/comments") and method == "GET":
+        listed = page(request, list(TIMELINE)).json()
+        return httpx.Response(200, json={**listed, "total": len(TIMELINE)})
     if path.endswith("/checklist") and method == "POST":
         body = json.loads(request.content)
         return httpx.Response(201, json={**CHECKLIST_ITEM, "title": body["title"]})
@@ -637,7 +703,7 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         people = [ADITI, LENA, LEO]
         if kind:
             people = [person for person in people if person["kind"] == kind]
-        return httpx.Response(200, json=people)
+        return page(request, people)
 
     if path.endswith("/tree"):
         return httpx.Response(200, json=FOLDER_TREE)
@@ -658,6 +724,7 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
                 ],
                 "folders": [],
                 "items": [ITEM],
+                "next": None,
             },
         )
     if path == f"/folders/{NESTED_ID}/links":
@@ -703,7 +770,7 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         )
 
     if path.endswith("/vault/trees"):
-        return httpx.Response(200, json=VAULT_TREES)
+        return page(request, VAULT_TREES)
     if path == f"/vault/trees/{TREE_ID}":
         return httpx.Response(200, json=VAULT_TREE_DETAIL)
     if path == f"/vault/nodes/{STRIPE_ID}/reveal":
@@ -718,7 +785,7 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         )
 
     if path == "/projects/ATL/skills":
-        return httpx.Response(200, json=SKILLS)
+        return page(request, SKILLS)
     if path == f"/skills/{TIDY_ID}/download":
         return httpx.Response(200, text=TIDY_TEXT)
     if path == f"/skills/{KIT_ID}/download":
@@ -727,7 +794,7 @@ def _route(request: httpx.Request, path: str, scopes: list[str]) -> httpx.Respon
         return httpx.Response(200, json=KIT_FOLDER)
 
     if path == "/activity":
-        return httpx.Response(200, json=ACTIVITY)
+        return page(request, ACTIVITY)
     if path == "/projects/ATL/reports/day":
         return httpx.Response(200, json=DAY_REPORT)
 

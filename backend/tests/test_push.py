@@ -620,7 +620,7 @@ class TestPushingAgentSessions:
         await _report(wired, agent, ref, "working")
         await pushing.drain(database, sender)
 
-        assert (await wired.get("/devices", headers=phone)).json() == []
+        assert (await wired.get("/devices", headers=phone)).json()["items"] == []
 
     async def test_with_no_key_configured_nothing_is_sent_and_nothing_breaks(
         self, wired: AsyncClient, pushing: Pusher, database: Database

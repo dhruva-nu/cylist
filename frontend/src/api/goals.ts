@@ -1,6 +1,7 @@
 /** Goals: the epics a board's cards are written under. */
 
 import { jsonBody, request } from './http'
+import { fetchAllPages, fetchPage } from './paging'
 import type { Person } from './people'
 import type { Task } from './tasks'
 
@@ -55,8 +56,11 @@ export interface Goal {
 }
 
 export interface GoalDetail extends Goal {
-  /** The cards on this goal, in board order. */
+  /** The first page of the cards on this goal, in board order; `progress.total`
+   * says how many there are in all. */
   tasks: Task[]
+  /** Pass to `listGoalTasks` for the cards after these. Null when that is all. */
+  tasks_next: string | null
 }
 
 export interface GoalInput {
@@ -71,8 +75,11 @@ export interface GoalInput {
 
 export const goalsApi = {
   listGoals: (projectKey: string, openOnly = false) =>
-    request<Goal[]>(`/projects/${projectKey}/goals${openOnly ? '?open_only=true' : ''}`),
+    fetchAllPages<Goal>(`/projects/${projectKey}/goals${openOnly ? '?open_only=true' : ''}`),
   getGoal: (goalRef: string) => request<GoalDetail>(`/goals/${goalRef}`),
+  /** The goal's cards after `after`, continuing from its `tasks_next`. */
+  listGoalTasks: (goalRef: string, after: string) =>
+    fetchPage<Task>(`/goals/${goalRef}/tasks`, after),
   createGoal: (projectKey: string, input: GoalInput) =>
     request<GoalDetail>(`/projects/${projectKey}/goals`, { method: 'POST', body: jsonBody(input) }),
   updateGoal: (goalRef: string, input: Partial<GoalInput>) =>

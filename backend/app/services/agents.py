@@ -36,6 +36,7 @@ from app.models.project import Project
 from app.schemas.agents import SkillUpdate
 from app.services import blobs, skill_folders
 from app.services.files import ensure_person_exists, filename_of
+from app.services.paging import PageRequest, Window, keyset
 from app.storage import BlobStore
 
 
@@ -56,18 +57,20 @@ async def get_skill(session: AsyncSession, skill_id: UUID) -> Skill:
     return skill
 
 
-async def list_skills(session: AsyncSession, project: Project) -> list[Skill]:
-    """Every skill on the project, by name.
+async def list_skills(session: AsyncSession, project: Project, page: PageRequest) -> Window[Skill]:
+    """A page of the skills on the project, by name.
 
     By name rather than by upload time: this is a list of what an agent can be
     given, and it is read to find one. Recency is the wrong order for a
     reference — it moves the entry you are looking for every time somebody
     uploads something else.
     """
-    rows = await session.scalars(
-        select(Skill).where(Skill.project_id == project.id).order_by(Skill.name)
+    return await keyset(
+        session,
+        select(Skill).where(Skill.project_id == project.id),
+        keys=(Skill.name, Skill.id),
+        page=page,
     )
-    return list(rows)
 
 
 async def upload_skill(

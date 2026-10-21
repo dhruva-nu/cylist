@@ -118,7 +118,7 @@ def _setup(args: argparse.Namespace, ctx: Context) -> None:
     key = str(summary["key"])
     columns = list(ctx.client.get(f"/projects/{key}/columns").get("columns", []))
     docs = dict(ctx.client.get(f"/projects/{key}/docs"))
-    skills = list(ctx.client.get(f"/projects/{key}/skills"))
+    skills = ctx.client.get_all(f"/projects/{key}/skills")
 
     block = _block(summary, columns, docs, skills)
     path = _destination(args.path)
@@ -181,7 +181,9 @@ def _project(ctx: Context, given: str) -> dict[str, Any]:
     except ApiError as exc:
         if exc.status_code != NOT_FOUND:
             raise
-        known = ", ".join(sorted(str(project["key"]) for project in ctx.client.get("/projects")))
+        known = ", ".join(
+            sorted(str(project["key"]) for project in ctx.client.get_all("/projects"))
+        )
         raise CylistError(
             f"No project {given!r} on this server, so nothing was written. "
             f"It has: {known or 'no projects at all'}.",

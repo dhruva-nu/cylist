@@ -33,7 +33,8 @@ from app.models.file import FileItem, Folder, ItemKind, ItemSource
 from app.models.person import Person
 from app.models.project import Project
 from app.schemas.files import FolderCreate, FolderUpdate, ItemUpdate, LinkCreate, clean_name
-from app.services import blobs
+from app.services import blobs, permissions
+from app.services.paging import PageRequest, Window, keyset
 from app.storage import BlobStore
 
 MAX_DEPTH = 32
@@ -178,8 +179,29 @@ async def list_folders(session: AsyncSession, project: Project) -> list[Folder]:
     )
 
 
-async def list_items(session: AsyncSession, project: Project) -> list[Filed]:
-    """Every file and link in the project, flat, each with where it is filed.
+async def folder_page(session: AsyncSession, project: Project, page: PageRequest) -> Window[Folder]:
+    """A page of the project's folders, alphabetically."""
+    return await keyset(
+        session,
+        select(Folder).where(Folder.project_id == project.id),
+        keys=(Folder.name, Folder.id),
+        page=page,
+    )
+
+
+async def list_items(
+    session: AsyncSession,
+    project: Project,
+    page: PageRequest,
+    *,
+    allowed: frozenset[Sensitivity],
+) -> tuple[list[Filed], UUID | None]:
+    """A page of the files and links in the project, flat, each with where it
+    is filed — and the cursor for the next page.
+
+    ``allowed`` is the levels the caller may read, applied in the query so that
+    a page is a full page of what the caller may see rather than a page with
+    the rest struck out of it.
 
     The tree flattened rather than walked: this answers "what files does this
     project have", which is the question a picker asks — the `>` tag in a
@@ -193,32 +215,55 @@ async def list_items(session: AsyncSession, project: Project) -> list[Filed]:
     """
     folders = await list_folders(session, project)
     paths = _paths_of(folders)
-    items = list(
-        await session.scalars(
-            select(FileItem)
-            .where(FileItem.folder_id.in_([folder.id for folder in folders]))
-            # Folded rather than left to the database's collation: this is a
-            # list somebody reads down looking for a name, and "Tax portal"
-            # belongs between "readme.md" and "vat.xlsx" wherever it runs.
-            .order_by(func.lower(FileItem.name), FileItem.name)
-        )
+    window = await keyset(
+        session,
+        select(FileItem).where(
+            FileItem.folder_id.in_([folder.id for folder in folders]),
+            permissions.readable_clause(FileItem.sensitivity, allowed),
+        ),
+        # Folded rather than left to the database's collation: this is a
+        # list somebody reads down looking for a name, and "Tax portal"
+        # belongs between "readme.md" and "vat.xlsx" wherever it runs.
+        keys=(func.lower(FileItem.name), FileItem.name, FileItem.id),
+        page=page,
     )
-    return [Filed(item=item, folder_path=paths.get(item.folder_id, "")) for item in items]
+    return [
+        Filed(item=item, folder_path=paths.get(item.folder_id, "")) for item in window.rows
+    ], window.next
 
 
-async def children(session: AsyncSession, folder: Folder) -> tuple[list[Folder], list[FileItem]]:
-    """The subfolders and items directly inside a folder, each alphabetical."""
-    subfolders = list(
+async def subfolders(session: AsyncSession, folder: Folder) -> list[Folder]:
+    """The folders directly inside a folder, alphabetical.
+
+    Whole rather than paged: folders are the tree's structure, which
+    :func:`list_folders` already hands out entire for the files screen's
+    left-hand pane.
+    """
+    return list(
         await session.scalars(
             select(Folder).where(Folder.parent_id == folder.id).order_by(Folder.name)
         )
     )
-    items = list(
-        await session.scalars(
-            select(FileItem).where(FileItem.folder_id == folder.id).order_by(FileItem.name)
-        )
+
+
+async def items_in(
+    session: AsyncSession,
+    folder: Folder,
+    page: PageRequest,
+    *,
+    allowed: frozenset[Sensitivity],
+) -> Window[FileItem]:
+    """A page of the items directly inside a folder that the caller may see,
+    alphabetical."""
+    return await keyset(
+        session,
+        select(FileItem).where(
+            FileItem.folder_id == folder.id,
+            permissions.readable_clause(FileItem.sensitivity, allowed),
+        ),
+        keys=(FileItem.name, FileItem.id),
+        page=page,
     )
-    return subfolders, items
 
 
 async def path_to(session: AsyncSession, folder: Folder) -> list[Folder]:

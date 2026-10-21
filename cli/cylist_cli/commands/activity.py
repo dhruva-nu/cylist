@@ -25,19 +25,29 @@ def register(subparsers: Any) -> None:
         "--project", metavar="PROJECT", help="Limit to one project, by key or id."
     )
     activity.add_argument("--entity", metavar="TYPE", help="e.g. task, project, vault_node.")
-    activity.add_argument("--limit", type=int, default=20, help="Default 20, maximum 200.")
+    activity.add_argument("--limit", type=int, default=20, help="Default 20, maximum 100.")
+    activity.add_argument(
+        "--after",
+        metavar="ID",
+        help="Continue from an earlier page: the id it printed to pass here.",
+    )
     activity.set_defaults(handler=_activity)
 
 
 def _activity(args: argparse.Namespace, ctx: Context) -> None:
-    entries = ctx.client.get(
-        "/activity", project=args.project, entity_type=args.entity, limit=args.limit
+    page = ctx.client.get(
+        "/activity",
+        project=args.project,
+        entity_type=args.entity,
+        limit=args.limit,
+        after=args.after,
     )
 
     if ctx.as_json:
-        output.emit_json(entries)
+        output.emit_json(page)
         return
 
+    entries = page.get("items", [])
     rows = [
         [
             str(entry.get("occurred_at", ""))[:19].replace("T", " "),
@@ -49,6 +59,8 @@ def _activity(args: argparse.Namespace, ctx: Context) -> None:
         for entry in entries
     ]
     output.table(["WHEN", "WHO", "VIA", "WHAT", "DETAIL"], rows, empty="Nothing recorded yet.")
+    if page.get("next"):
+        output.echo(f"Older entries: cylist activity --after {page['next']}")
 
 
 def _summarise(payload: dict[str, Any]) -> str:

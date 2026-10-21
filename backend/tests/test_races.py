@@ -158,7 +158,7 @@ class TestTwoAtOnce:
 
         assert [response.status_code for response in responses] == [200] * 4
         assert len({response.json()["id"] for response in responses}) == 1
-        assert len((await signed_in.get("/devices", headers=headers)).json()) == 1
+        assert len((await signed_in.get("/devices", headers=headers)).json()["items"]) == 1
 
     async def test_the_same_person_added_to_a_project_twice(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)

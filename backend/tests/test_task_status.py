@@ -15,7 +15,7 @@ from httpx import AsyncClient
 
 from app.config import Settings
 from app.db import Database
-from tests.conftest import INVITEE_PASSWORD, client_for, open_account, put_members
+from tests.conftest import INVITEE_PASSWORD, cards_of, client_for, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -206,7 +206,7 @@ class TestTheStatusChangeComment:
 
         await _set_status(signed_in, task_id, status="hold", reason=CREDENTIALS)
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
         assert entries[0]["verb"] == "task.status_changed"
         assert entries[0]["payload"]["to"] == "hold"
         assert entries[0]["payload"]["reason"] == CREDENTIALS
@@ -338,7 +338,7 @@ class TestWaitingOn:
             signed_in, task_id, status="hold", reason=CREDENTIALS, waiting_on=[members[1]]
         )
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
 
         assert board[0]["waiting_on"][0]["name"] == "Sanjay F"
 
@@ -417,7 +417,7 @@ class TestComments:
         await _set_status(signed_in, task_id, status="hold", reason=CREDENTIALS)
         await signed_in.post(f"/tasks/{task_id}/comments", json={"body": "Chased finance."})
 
-        timeline = (await signed_in.get(f"/tasks/{task_id}/comments")).json()
+        timeline = (await signed_in.get(f"/tasks/{task_id}/comments")).json()["items"]
 
         assert [entry["kind"] for entry in timeline] == [
             "comment",
@@ -430,7 +430,7 @@ class TestComments:
         await signed_in.post(f"/tasks/{task_id}/comments", json={"body": "One."})
         await _set_status(signed_in, task_id, status="hold", reason=CREDENTIALS)
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
 
         assert board[0]["comment_count"] == 2
 
@@ -446,7 +446,7 @@ class TestComments:
 
         await signed_in.post(f"/tasks/{task_id}/comments", json={"body": "Chased finance."})
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
         assert entries[0]["verb"] == "task.commented"
 
 
@@ -520,7 +520,7 @@ class TestDeletingAComment:
         response = await signed_in.delete(f"/comments/{entry['id']}")
 
         assert response.status_code == 200, response.text
-        assert (await signed_in.get(f"/tasks/{task_id}/comments")).json() == []
+        assert (await signed_in.get(f"/tasks/{task_id}/comments")).json()["items"] == []
 
     async def test_the_card_stops_counting_it(self, signed_in: AsyncClient) -> None:
         task_id, me = await _admins_board(signed_in)
@@ -532,19 +532,19 @@ class TestDeletingAComment:
 
         await signed_in.delete(f"/comments/{entry['id']}")
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
         assert board[0]["comment_count"] == 0
 
     async def test_a_status_change_is_history_and_stays(self, signed_in: AsyncClient) -> None:
         """The card's own record of why it stopped is not somebody's remark."""
         task_id, _ = await _admins_board(signed_in)
         await _set_status(signed_in, task_id, status="hold", reason=CREDENTIALS)
-        timeline = (await signed_in.get(f"/tasks/{task_id}/comments")).json()
+        timeline = (await signed_in.get(f"/tasks/{task_id}/comments")).json()["items"]
 
         response = await signed_in.delete(f"/comments/{timeline[0]['id']}")
 
         assert response.status_code == 422
-        assert len((await signed_in.get(f"/tasks/{task_id}/comments")).json()) == 1
+        assert len((await signed_in.get(f"/tasks/{task_id}/comments")).json()["items"]) == 1
 
     async def test_an_unknown_comment_is_a_clean_404(self, signed_in: AsyncClient) -> None:
         await _admins_board(signed_in)
@@ -563,7 +563,7 @@ class TestDeletingAComment:
 
         await signed_in.delete(f"/comments/{entry['id']}")
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
         deleted = next(line for line in entries if line["verb"] == "task.comment_deleted")
         assert deleted["payload"]["comment"] == "Chased finance."
         assert deleted["payload"]["comment_id"] == entry["id"]
@@ -583,7 +583,7 @@ class TestDeletingAComment:
             response = await hers.delete(f"/comments/{mine['id']}")
 
         assert response.status_code == 403
-        assert len((await signed_in.get(f"/tasks/{task_id}/comments")).json()) == 1
+        assert len((await signed_in.get(f"/tasks/{task_id}/comments")).json()["items"]) == 1
 
     async def test_a_member_may_delete_their_own(
         self, signed_in: AsyncClient, settings: Settings, database: Database
@@ -600,7 +600,7 @@ class TestDeletingAComment:
             response = await hers.delete(f"/comments/{entry['id']}")
 
         assert response.status_code == 200, response.text
-        assert (await signed_in.get(f"/tasks/{task_id}/comments")).json() == []
+        assert (await signed_in.get(f"/tasks/{task_id}/comments")).json()["items"] == []
 
     async def test_a_role_that_may_not_comment_may_not_take_one_back(
         self, signed_in: AsyncClient, settings: Settings, database: Database

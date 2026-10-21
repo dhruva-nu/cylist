@@ -23,7 +23,18 @@ def register(subparsers: Any) -> None:
     ls.add_argument("project", metavar="PROJECT", help="Project key or id, e.g. ATL.")
     ls.add_argument("--status", choices=STATUSES, help="Only tasks in this status.")
     ls.add_argument("--assignee", metavar="NAME", help="Only tasks assigned to this person.")
-    ls.add_argument("--column", metavar="NAME", help="Only tasks in this column.")
+    ls.add_argument(
+        "--column",
+        metavar="NAME",
+        help="Only tasks in this column — all of them, however long the column is.",
+    )
+    ls.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="Without --column, how many cards to read from the top of each column (at most "
+        "100; the server's default otherwise).",
+    )
     ls.set_defaults(handler=_list)
 
     task = subparsers.add_parser("task", help="Work with one task.")
@@ -137,23 +148,38 @@ def register(subparsers: Any) -> None:
 
 
 def _list(args: argparse.Namespace, ctx: Context) -> None:
-    tasks = ctx.client.get(f"/projects/{args.project}/tasks")
     columns = {
         str(column["id"]): str(column["name"])
         for column in ctx.client.get(f"/projects/{args.project}/columns").get("columns", [])
     }
 
+    # The board comes a page per column. One column is read whole, since
+    # asking for it by name is asking for all of it; the whole board is read
+    # as the top of each column, and what that leaves out is said under the
+    # table rather than silently dropped.
+    unread: list[str] = []
+    if args.column:
+        wanted_column = resolve.column_id(ctx.client, args.project, args.column)
+        tasks = ctx.client.get_all(f"/columns/{wanted_column}/tasks")
+    else:
+        board = ctx.client.get(f"/projects/{args.project}/tasks", limit=args.limit)
+        tasks = []
+        for stack in board.get("columns", []):
+            shown = list(stack.get("items", []))
+            tasks.extend(shown)
+            more = int(stack.get("total", 0)) - len(shown)
+            if more > 0:
+                name = columns.get(str(stack["column_id"]), "?")
+                unread.append(f"{more} more in {name}")
+
     # Filtering happens here rather than in a query parameter because the API
-    # has none: a board is a few hundred cards at most, so it returns all of
-    # them in one request and the client narrows. See the README.
+    # has none: it narrows what was read, which the note below says is not
+    # always the whole board.
     if args.status:
         tasks = [task for task in tasks if task.get("status") == args.status]
     if args.assignee:
         wanted = resolve.person_id(ctx.client, args.assignee, project_ref=args.project)
         tasks = [task for task in tasks if str((task.get("assignee") or {}).get("id")) == wanted]
-    if args.column:
-        wanted = resolve.column_id(ctx.client, args.project, args.column)
-        tasks = [task for task in tasks if str(task.get("column_id")) == wanted]
 
     if ctx.as_json:
         output.emit_json(tasks)
@@ -176,6 +202,8 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         rows,
         empty="No tasks match.",
     )
+    if unread:
+        output.echo(f"Not read: {', '.join(unread)}. Pass --column NAME to list a whole column.")
 
 
 def _show(args: argparse.Namespace, ctx: Context) -> None:
@@ -185,6 +213,9 @@ def _show(args: argparse.Namespace, ctx: Context) -> None:
         return
     _render_task(task, ctx)
     _render_timeline(task.get("comments", []), _tagged_names(task, ctx))
+    earlier = int(task.get("comment_count") or 0) - len(task.get("comments", []))
+    if task.get("comments_next") and earlier > 0:
+        output.echo(f"{earlier} earlier timeline entries are not shown.")
 
 
 def _tagged_names(task: dict[str, Any], ctx: Context) -> dict[str, str]:
@@ -196,7 +227,7 @@ def _tagged_names(task: dict[str, Any], ctx: Context) -> dict[str, str]:
     """
     if not any((entry.get("meta") or {}).get("tagged") for entry in task.get("comments", [])):
         return {}
-    return {str(person["id"]): str(person["name"]) for person in ctx.client.get("/people")}
+    return {str(person["id"]): str(person["name"]) for person in ctx.client.get_all("/people")}
 
 
 def _project_of(task: dict[str, Any]) -> str:

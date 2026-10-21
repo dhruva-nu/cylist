@@ -381,6 +381,29 @@
   height: 10px;
 }
 
+/* The row under a long column's cards that reads the next page of it. Quiet,
+   like the foot below it: it is a way to more of the same, not an action. */
+.loadMore {
+  margin: 2px 6px 0;
+  padding: 6px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.loadMore:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+.loadMore:disabled {
+  cursor: progress;
+}
+
 /* The line at the foot of a column that lets its on-hold cards out.
 
    Quiet on purpose: it is the last thing in the column and it is about work

@@ -53,10 +53,10 @@ from app.services.tasks.checklists import (
 )
 from app.services.tasks.cold_storage import (
     Stored,
-    list_stored,
     restore,
     store_finished,
     stored_outcome,
+    stored_page,
 )
 from app.services.tasks.counts import (
     NOT_SPLIT,
@@ -71,11 +71,15 @@ from app.services.tasks.editing import set_sub_status, update
 from app.services.tasks.history import FieldChange, field_change
 from app.services.tasks.lifecycle import create, delete
 from app.services.tasks.lookup import (
+    LISTED_WITHOUT,
+    ColumnStack,
     all_for_project,
+    board_pages,
+    column_page,
     get,
-    list_for_project,
     require_on_project,
     resolve,
+    subtask_page,
     subtasks,
 )
 from app.services.tasks.moves import move, set_finished
@@ -83,27 +87,31 @@ from app.services.tasks.status import change_status
 from app.services.tasks.timeline import (
     comment,
     comment_counts,
-    comments,
+    comment_page,
     delete_comment,
     get_comment,
 )
 
 __all__ = [
+    "LISTED_WITHOUT",
     "NOT_SPLIT",
     "BoardDates",
     "ColumnDue",
+    "ColumnStack",
     "FieldChange",
     "Split",
     "Stored",
     "add_checklist_item",
     "all_for_project",
     "board_dates",
+    "board_pages",
     "card_count",
     "change_status",
     "checklist",
+    "column_page",
     "comment",
     "comment_counts",
-    "comments",
+    "comment_page",
     "create",
     "delete",
     "delete_checklist_item",
@@ -112,8 +120,6 @@ __all__ = [
     "get",
     "get_checklist_item",
     "get_comment",
-    "list_for_project",
-    "list_stored",
     "move",
     "require_on_project",
     "resolve",
@@ -124,8 +130,10 @@ __all__ = [
     "status_counts",
     "store_finished",
     "stored_outcome",
+    "stored_page",
     "subtask_counts",
     "subtask_owners",
+    "subtask_page",
     "subtasks",
     "update",
     "update_checklist_item",

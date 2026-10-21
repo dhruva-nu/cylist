@@ -8,7 +8,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult
 from pydantic import Field
 
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.tools.common import ProjectRef, as_tool_result
 
 
@@ -28,7 +28,7 @@ def register(server: MCPServer, client: Api) -> None:
         ] = False,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            projects = await client.get("/projects", include_archived=include_archived or None)
+            projects = await every(client, "/projects", include_archived=include_archived or None)
             return {"projects": projects}
 
         return await as_tool_result(call)

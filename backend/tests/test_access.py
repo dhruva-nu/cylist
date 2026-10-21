@@ -431,7 +431,7 @@ class TestAThingYouCannotReadIsNotThere:
         await _link(signed_in, root, "Redundancy list", sensitivity="restricted")
         await _set_clearance(signed_in, "Reviewer", "internal")
 
-        listed = (await other_client.get("/projects/ATL/items")).json()
+        listed = (await other_client.get("/projects/ATL/items")).json()["items"]
 
         assert [item["name"] for item in listed] == []
 

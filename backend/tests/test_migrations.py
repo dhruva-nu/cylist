@@ -2401,6 +2401,67 @@ class TestColdStorage:
         }
 
 
+class TestColdStorageByFinish:
+    """Revision 0047: cold storage is paged by when its cards finished, so every
+    stored card has to say when that was."""
+
+    async def _stored(self, connection: AsyncConnection) -> None:
+        await seed_board_for_cold_storage(connection)
+        # Card 2 was stored before Cylist kept the moment it finished; card 3 says.
+        await connection.execute(
+            text(
+                "UPDATE task SET archived_at = '2026-10-01T09:00:00Z', column_id = NULL,"
+                " position = NULL, finished_at = CASE WHEN number = 3"
+                " THEN timestamptz '2026-09-30T12:00:00Z' END WHERE number IN (2, 3)"
+            )
+        )
+
+    async def test_a_stored_card_without_a_finish_takes_the_moment_it_was_stored(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0046")
+        await self._stored(connection)
+
+        await migrate("0047")
+
+        rows = await connection.execute(
+            text("SELECT number, finished_at FROM task ORDER BY number")
+        )
+        assert dict(rows.tuples().all()) == {
+            1: None,
+            2: datetime(2026, 10, 1, 9, tzinfo=UTC),
+            3: datetime(2026, 9, 30, 12, tzinfo=UTC),
+        }
+
+    async def test_then_a_stored_card_cannot_lose_it(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0046")
+        await self._stored(connection)
+        await migrate("0047")
+
+        with pytest.raises(IntegrityError, match="archived_only_when_finished"):
+            await connection.execute(text("UPDATE task SET finished_at = NULL WHERE number = 3"))
+
+    async def test_the_undo_lifts_the_rule(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0046")
+        await self._stored(connection)
+        await migrate("0047")
+
+        await rewind("0046")
+
+        await connection.execute(text("UPDATE task SET finished_at = NULL WHERE number = 3"))
+
+
 class TestRunningInProcess:
     """A migration run inside a process that has its own logging."""
 

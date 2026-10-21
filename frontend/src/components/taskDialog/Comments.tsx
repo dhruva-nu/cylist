@@ -1,5 +1,12 @@
+import { useMutation } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
-import type { FiledItem, Person, TaskComment, TaskDetail } from '../../api/client'
+import {
+  api,
+  type FiledItem,
+  type Person,
+  type TaskComment,
+  type TaskDetail,
+} from '../../api/client'
 import { Field } from '../Modal'
 import { MentionBox } from '../Mentions'
 import { Avatar, Button, ErrorNotice, Tagged } from '../ui'
@@ -38,7 +45,7 @@ export function Comments({
   return (
     <Field label="Comments">
       <Timeline
-        comments={task?.comments ?? []}
+        task={task}
         members={members}
         files={files}
         deleting={deleting}
@@ -154,18 +161,55 @@ export function CommentComposer({
 }
 
 /**
+ * A card's timeline as far back as the reader has asked for, oldest first.
+ *
+ * The card carries its newest entries (CYLIST-130); the ones before them are
+ * read a page at a time from `comments_next`, newest first, and put above.
+ * What has been read is let go of when the timeline itself changes — a
+ * comment posted or taken back — because the card's own window has then
+ * moved, and keeping the old pages would leave a gap or a ghost between them.
+ */
+function useEarlierComments(task: TaskDetail | null) {
+  const shown = `${task?.id}:${task?.comments_next}:${task?.comment_count}`
+  const [read, setRead] = useState({ shown, older: [] as TaskComment[], next: task?.comments_next })
+  // State that follows props, settled during render — React's own pattern.
+  if (read.shown !== shown) setRead({ shown, older: [], next: task?.comments_next })
+
+  const earlier = useMutation({
+    mutationFn: (after: string) => api.listComments(task?.reference ?? '', after),
+    onSuccess: (page) =>
+      setRead((current) => ({
+        ...current,
+        older: [...[...page.items].reverse(), ...current.older],
+        next: page.next,
+      })),
+  })
+
+  const comments = [...read.older, ...(task?.comments ?? [])]
+  const unread = (task?.comment_count ?? 0) - comments.length
+  const { next } = read
+  return {
+    comments,
+    more: next ? { unread, loading: earlier.isPending, onLoad: () => earlier.mutate(next) } : null,
+    error: earlier.error,
+  }
+}
+
+/**
  * The card's comments, oldest first, with whatever the reader may take back
- * offered a ✕ — the same list on the detail view and on the form.
+ * offered a ✕ — the same list on the detail view and on the form. A long one
+ * starts at its newest entries, with the way to the earlier ones above them.
  */
 export function Timeline({
-  comments,
+  task,
   members,
   files,
   deleting,
   emptyText,
   children,
 }: {
-  comments: TaskComment[]
+  /** Null while the card is being written, which is the empty timeline. */
+  task: TaskDetail | null
   members: Person[]
   files: readonly FiledItem[]
   deleting: CommentDeleting | null
@@ -174,10 +218,23 @@ export function Timeline({
   /** Drawn under the entries — the form's composer. */
   children?: ReactNode
 }) {
+  const { comments, more, error } = useEarlierComments(task)
   return (
     <>
-      <ErrorNotice error={deleting?.error} />
+      <ErrorNotice error={deleting?.error ?? error} />
       <div className={styles.timeline}>
+        {more ? (
+          <button
+            type="button"
+            className={styles.earlier}
+            disabled={more.loading}
+            onClick={more.onLoad}
+          >
+            {more.loading
+              ? 'Loading…'
+              : `Show earlier · ${more.unread} more ${more.unread === 1 ? 'entry' : 'entries'}`}
+          </button>
+        ) : null}
         {comments.length ? (
           comments.map((entry) => (
             <TimelineEntry

@@ -354,19 +354,60 @@
           "tokens"
         ],
         "summary": "List API tokens",
-        "description": "Return every live API token. Browser sessions are not listed.",
+        "description": "Return the live API tokens, newest first, a page at a time. Browser\nsessions are not listed.",
         "operationId": "list_tokens_api_v1_tokens_get",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TokenRead"
-                  },
-                  "type": "array",
-                  "title": "Response List Tokens Api V1 Tokens Get"
+                  "$ref": "#/components/schemas/TokenPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -381,14 +422,14 @@
         "description": "Mint a token and return its plaintext exactly once.\n\nGrant the narrowest useful set of scopes: an agent that only rearranges the\nboard needs ``read`` and ``write``, never ``vault:reveal``.\n\nThe token acts as whoever minted it. An agent moving a card writes that\nperson's name into the card's history, which is the answer everybody\nwants to \"who moved this?\" — \"an API token\" never was, and with several\npeople on one board it would be an answer that names nobody.\n\nIts scopes must be ones the caller holds, and `permit` can only be\ngranted from a browser session.",
         "operationId": "create_token_api_v1_tokens_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TokenCreate"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -467,19 +508,60 @@
           "devices"
         ],
         "summary": "List your push devices",
-        "description": "The devices registered to receive pushes for you, newest first.",
+        "description": "The devices registered to receive pushes for you, newest first, a page at a time.",
         "operationId": "list_devices_api_v1_devices_get",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/DeviceRead"
-                  },
-                  "type": "array",
-                  "title": "Response List Devices Api V1 Devices Get"
+                  "$ref": "#/components/schemas/DevicePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -494,14 +576,14 @@
         "description": "Register this device's FCM token for the caller, or refresh it.\n\nIdempotent: send it after every sign-in and whenever Firebase rotates the\ntoken. A token another person registered moves to the caller, since an\ninstall is used by whoever is signed in on it now.\n\nThe device is sent to while the credential that registered it stays live;\nrevoking that token stops its pushes.",
         "operationId": "register_device_api_v1_devices_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DeviceRegister"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -583,7 +665,7 @@
           "projects"
         ],
         "summary": "List projects",
-        "description": "Return the projects the caller is a member of, newest first — the home\nscreen's grid.",
+        "description": "Return the projects the caller is a member of, newest first, a page at a\ntime — the home screen's grid.",
         "operationId": "list_projects_api_v1_projects_get",
         "parameters": [
           {
@@ -595,6 +677,39 @@
               "default": false,
               "title": "Include Archived"
             }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -603,11 +718,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ProjectRead"
-                  },
-                  "title": "Response List Projects Api V1 Projects Get"
+                  "$ref": "#/components/schemas/ProjectPage"
                 }
               }
             }
@@ -982,7 +1093,7 @@
           "vault"
         ],
         "summary": "List a project's vault trees",
-        "description": "The trees down the left of the vault screen, with their headline counts.",
+        "description": "The trees down the left of the vault screen, with their headline counts,\na page at a time.",
         "operationId": "list_trees_api_v1_projects__project_ref__vault_trees_get",
         "parameters": [
           {
@@ -998,6 +1109,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -1006,11 +1150,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultTreeRead"
-                  },
-                  "title": "Response List Trees Api V1 Projects  Project Ref  Vault Trees Get"
+                  "$ref": "#/components/schemas/VaultTreePage"
                 }
               }
             }
@@ -1572,7 +1712,7 @@
           "roles"
         ],
         "summary": "List a project's roles",
-        "description": "Every role on the project, the admin role first, then by name.\n\nReadable by anyone who can read the project: a badge nobody can look up is\na badge nobody can read.",
+        "description": "The roles on the project, the admin role first, then by name, a page at a time.\n\nReadable by anyone who can read the project: a badge nobody can look up is\na badge nobody can read.",
         "operationId": "list_roles_api_v1_projects__project_ref__roles_get",
         "parameters": [
           {
@@ -1588,6 +1728,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -1596,11 +1769,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RoleSummary"
-                  },
-                  "title": "Response List Roles Api V1 Projects  Project Ref  Roles Get"
+                  "$ref": "#/components/schemas/RolePage"
                 }
               }
             }
@@ -2727,7 +2896,7 @@
           "people"
         ],
         "summary": "List people",
-        "description": "Return the directory, team first and alphabetical within each kind.",
+        "description": "Return the directory a page at a time, team first and alphabetical\nwithin each kind.",
         "operationId": "list_people_api_v1_people_get",
         "parameters": [
           {
@@ -2757,6 +2926,39 @@
               "default": false,
               "title": "Include Archived"
             }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -2765,11 +2967,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PersonRead"
-                  },
-                  "title": "Response List People Api V1 People Get"
+                  "$ref": "#/components/schemas/PersonPage"
                 }
               }
             }
@@ -3351,7 +3549,7 @@
           "templates"
         ],
         "summary": "List a project's task templates",
-        "description": "Every template on the project, in name order.\n\n`allowed_column_ids` is the answer a client needs before it offers a card\na column. **Empty means unrestricted** — this template has no stages yet,\nso its cards go anywhere on the board.",
+        "description": "The templates on the project, in name order, a page at a time.\n\n`allowed_column_ids` is the answer a client needs before it offers a card\na column. **Empty means unrestricted** — this template has no stages yet,\nso its cards go anywhere on the board.",
         "operationId": "list_templates_api_v1_projects__project_ref__templates_get",
         "parameters": [
           {
@@ -3367,6 +3565,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -3375,11 +3606,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TemplateRead"
-                  },
-                  "title": "Response List Templates Api V1 Projects  Project Ref  Templates Get"
+                  "$ref": "#/components/schemas/TemplatePage"
                 }
               }
             }
@@ -3576,6 +3803,7 @@
           "hooks"
         ],
         "summary": "List a project's hooks",
+        "description": "The project's hooks, by name, a page at a time.",
         "operationId": "list_hooks_api_v1_projects__project_ref__hooks_get",
         "parameters": [
           {
@@ -3591,6 +3819,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -3599,11 +3860,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/HookRead"
-                  },
-                  "title": "Response List Hooks Api V1 Projects  Project Ref  Hooks Get"
+                  "$ref": "#/components/schemas/HookPage"
                 }
               }
             }
@@ -4055,7 +4312,7 @@
           "hooks"
         ],
         "summary": "List a hook's recent deliveries",
-        "description": "Newest first, each with every attempt made at it. Finished ones are kept\nfor 30 days.",
+        "description": "Newest first, a page at a time, each with every attempt made at it.\nFinished ones are kept for 30 days.",
         "operationId": "list_deliveries_api_v1_projects__project_ref__hooks__hook_id__deliveries_get",
         "parameters": [
           {
@@ -4083,6 +4340,25 @@
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
           },
           {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -4090,9 +4366,11 @@
               "type": "integer",
               "maximum": 100,
               "minimum": 1,
-              "default": 25,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
               "title": "Limit"
-            }
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -4101,11 +4379,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/HookDeliveryRead"
-                  },
-                  "title": "Response List Deliveries Api V1 Projects  Project Ref  Hooks  Hook Id  Deliveries Get"
+                  "$ref": "#/components/schemas/HookDeliveryPage"
                 }
               }
             }
@@ -4196,8 +4470,8 @@
         "tags": [
           "tasks"
         ],
-        "summary": "List a board's tasks",
-        "description": "Every card on the board, in the order they are stacked.\n\nGroup by `column_id` to draw the board; the ordering already matches the\ncolumns left to right and the cards top to bottom within each.\n\nTop-level cards only. A sub-task is not on the board — it comes back with\nthe card it belongs to, from `GET /tasks/{ref}`. What a card says about its\nsub-tasks here is `subtask_count`, `open_subtask_count` and\n`subtask_assignees`: how many, how many are left, and who is on them.",
+        "summary": "List a board's tasks, a page per column",
+        "description": "The top of every column, left to right, and how many cards each holds.\n\nEach column's `items` are its cards top to bottom; where a column holds\nmore than `limit`, its `next` is the cursor for the rest, read with\n`GET /columns/{column_id}/tasks?after=…`. A board is read this way rather\nthan whole because a column can hold thousands of cards and a screen shows\na few dozen (CYLIST-130).\n\nThe cards are summaries: everything but `description`, which is read with\n`GET /tasks/{ref}`.\n\nTop-level cards only. A sub-task is not on the board — it comes back with\nthe card it belongs to, from `GET /tasks/{ref}`. What a card says about its\nsub-tasks here is `subtask_count`, `open_subtask_count` and\n`subtask_assignees`: how many, how many are left, and who is on them.",
         "operationId": "list_tasks_api_v1_projects__project_ref__tasks_get",
         "parameters": [
           {
@@ -4213,6 +4487,20 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many cards to return from the top of each column, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many cards to return from the top of each column, at most 100."
           }
         ],
         "responses": {
@@ -4221,11 +4509,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TaskRead"
-                  },
-                  "title": "Response List Tasks Api V1 Projects  Project Ref  Tasks Get"
+                  "$ref": "#/components/schemas/BoardTasks"
                 }
               }
             }
@@ -4288,6 +4572,83 @@
           },
           "422": {
             "description": "The assignee is not a member of this project — or none was named and the caller is not one either."
+          }
+        }
+      }
+    },
+    "/api/v1/columns/{column_id}/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Read a column of the board, a page at a time",
+        "description": "One column's cards, top to bottom, continuing from a column's `next`.\n\n`GET /projects/{ref}/tasks` returns the top of every column at once; this\nis what reads further down one of them. A cursor whose card has since left\nthe column — moved, deleted, stored — is a 422, and the column is read\nagain from the top.",
+        "operationId": "list_column_tasks_api_v1_columns__column_id__tasks_get",
+        "parameters": [
+          {
+            "name": "column_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Column Id"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSummaryPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -4720,7 +5081,7 @@
           "tasks"
         ],
         "summary": "List a task's sub-tasks",
-        "description": "The sub-tasks split out of this one, in sub-number order.\n\nOnly the sub-tasks with a reference of their own. The tick-box kind rides\nalong on the task itself, as `checklist`.",
+        "description": "The sub-tasks split out of this one, in sub-number order, a page at a time.\n\nOnly the sub-tasks with a reference of their own. The tick-box kind rides\nalong on the task itself, as `checklist`.",
         "operationId": "list_subtasks_api_v1_tasks__task_ref__subtasks_get",
         "parameters": [
           {
@@ -4736,6 +5097,39 @@
               "title": "Task Ref"
             },
             "description": "The task's id, or its reference such as `ATL-41` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -4744,11 +5138,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TaskRead"
-                  },
-                  "title": "Response List Subtasks Api V1 Tasks  Task Ref  Subtasks Get"
+                  "$ref": "#/components/schemas/TaskSummaryPage"
                 }
               }
             }
@@ -4975,7 +5365,7 @@
           "tasks"
         ],
         "summary": "Read the timeline",
-        "description": "Comments and status changes together, oldest first.",
+        "description": "Comments and status changes together, newest first, a page at a time.\n\nRead like `/history`: the newest page first, then further back. `GET\n/tasks/{ref}` already carries the newest entries, and its `comments_next`\nis where this continues from to read the ones before them.",
         "operationId": "list_comments_api_v1_tasks__task_ref__comments_get",
         "parameters": [
           {
@@ -4991,6 +5381,39 @@
               "title": "Task Ref"
             },
             "description": "The task's id, or its reference such as `ATL-41` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -4999,11 +5422,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CommentRead"
-                  },
-                  "title": "Response List Comments Api V1 Tasks  Task Ref  Comments Get"
+                  "$ref": "#/components/schemas/CommentPage"
                 }
               }
             }
@@ -5120,7 +5539,7 @@
           "tasks"
         ],
         "summary": "List the cards in cold storage",
-        "description": "Every card this board has put in cold storage, most recently stored first.\n\nThese are the cards `GET /projects/{ref}/tasks` no longer lists. Each still\nopens by its reference, with its whole timeline, and carries `archived_at`.",
+        "description": "The cards this board has put in cold storage, most recently finished\nfirst, a page at a time.\n\nBy `finished_at` rather than `archived_at`: one run stores a whole column\nat the same instant, so when each card's work finished is the order that\nsays something.\n\nThese are the cards `GET /projects/{ref}/tasks` no longer lists. Each still\nopens by its reference, with its whole timeline, and carries `archived_at`.",
         "operationId": "list_cold_storage_api_v1_projects__project_ref__cold_storage_get",
         "parameters": [
           {
@@ -5136,6 +5555,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -5144,11 +5596,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TaskRead"
-                  },
-                  "title": "Response List Cold Storage Api V1 Projects  Project Ref  Cold Storage Get"
+                  "$ref": "#/components/schemas/TaskSummaryPage"
                 }
               }
             }
@@ -5252,7 +5700,7 @@
           "goals"
         ],
         "summary": "List a project's goals",
-        "description": "Every goal on the project: open ones first, then those that are settled.\n\nWithin each half the dated ones come first in date order, then the undated\nby name — a list you can plan from rather than one in alphabetical order.\n\nEach carries its own `progress`, counted from the cards linked to it, so a\ngoals page draws itself from this one request.",
+        "description": "The project's goals, a page at a time: open ones first, then those that are settled.\n\nWithin each half the dated ones come first in date order, then the undated\nby name — a list you can plan from rather than one in alphabetical order.\n\nEach carries its own `progress`, counted from the cards linked to it, so a\ngoals page draws itself from this one request.",
         "operationId": "list_goals_api_v1_projects__project_ref__goals_get",
         "parameters": [
           {
@@ -5280,6 +5728,39 @@
               "title": "Open Only"
             },
             "description": "Leave out goals that are achieved or dropped — what a picker wants, which should not offer work that has stopped."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -5288,11 +5769,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/GoalRead"
-                  },
-                  "title": "Response List Goals Api V1 Projects  Project Ref  Goals Get"
+                  "$ref": "#/components/schemas/GoalPage"
                 }
               }
             }
@@ -5368,7 +5845,7 @@
           "goals"
         ],
         "summary": "Get a goal",
-        "description": "One goal, its progress, and the cards linked to it in board order.",
+        "description": "One goal, its progress, and the first page of the cards linked to it in\nboard order. `GET /goals/{ref}/tasks` reads the rest.",
         "operationId": "get_goal_api_v1_goals__goal_ref__get",
         "parameters": [
           {
@@ -5508,6 +5985,87 @@
         }
       }
     },
+    "/api/v1/goals/{goal_ref}/tasks": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Read a goal's cards, a page at a time",
+        "description": "The cards linked to this goal, in the order `GET /goals/{ref}` lists them,\ncontinuing from its `tasks_next`.",
+        "operationId": "list_goal_tasks_api_v1_goals__goal_ref__tasks_get",
+        "parameters": [
+          {
+            "name": "goal_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The goal's id, or its reference such as `ATL-G1` (case-insensitive).",
+              "examples": [
+                "ATL-G1"
+              ],
+              "title": "Goal Ref"
+            },
+            "description": "The goal's id, or its reference such as `ATL-G1` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSummaryPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/{task_ref}/agent-sessions/{client_session_id}": {
       "put": {
         "tags": [
@@ -5588,7 +6146,7 @@
           "agent sessions"
         ],
         "summary": "List the agent sessions on a task",
-        "description": "Every session still worth showing: the open ones first, then the\nfinished ones nobody has dismissed. Dismissed sessions are left out.\nEach carries the prompt it shows — see `AgentSessionRead.prompt`.",
+        "description": "The sessions still worth showing, a page at a time: the open ones first,\nthen the finished ones nobody has dismissed. Dismissed sessions are left\nout. Each carries the prompt it shows — see `AgentSessionRead.prompt`.",
         "operationId": "list_agent_sessions_api_v1_tasks__task_ref__agent_sessions_get",
         "parameters": [
           {
@@ -5604,6 +6162,39 @@
               "title": "Task Ref"
             },
             "description": "The task's id, or its reference such as `ATL-41` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -5612,11 +6203,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AgentSessionRead"
-                  },
-                  "title": "Response List Agent Sessions Api V1 Tasks  Task Ref  Agent Sessions Get"
+                  "$ref": "#/components/schemas/AgentSessionPage"
                 }
               }
             }
@@ -5640,7 +6227,7 @@
           "agent sessions"
         ],
         "summary": "Read what the agents on a task have been reading, editing, running and saying",
-        "description": "The card's agent feed, newest first, across every session that was on it.\n\nWritten by each session's presence daemon, which follows the Claude Code\ntranscript and sends the agent's text and tool calls — redacted on the\nagent's machine before they leave it. Each session keeps its newest 200\nlines. A board socket says `agent.feed` with this card's id when it grows.",
+        "description": "The card's agent feed, newest first, across every session that was on\nit, a page at a time.\n\nWritten by each session's presence daemon, which follows the Claude Code\ntranscript and sends the agent's text and tool calls — redacted on the\nagent's machine before they leave it. Each session keeps its newest 200\nlines. A board socket says `agent.feed` with this card's id when it grows.",
         "operationId": "list_agent_feed_api_v1_tasks__task_ref__agent_feed_get",
         "parameters": [
           {
@@ -5658,16 +6245,37 @@
             "description": "The task's id, or its reference such as `ATL-41` (case-insensitive)."
           },
           {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 200,
+              "maximum": 100,
               "minimum": 1,
-              "default": 100,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
               "title": "Limit"
-            }
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -5676,11 +6284,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AgentFeedEntryRead"
-                  },
-                  "title": "Response List Agent Feed Api V1 Tasks  Task Ref  Agent Feed Get"
+                  "$ref": "#/components/schemas/AgentFeedPage"
                 }
               }
             }
@@ -5807,7 +6411,7 @@
           "agent sessions"
         ],
         "summary": "List what the agents on a task have asked, newest first",
-        "description": "Questions and permissions alike, open or not, with what came of each.",
+        "description": "Questions and permissions alike, open or not, with what came of each,\na page at a time.",
         "operationId": "list_agent_prompts_api_v1_tasks__task_ref__agent_prompts_get",
         "parameters": [
           {
@@ -5825,6 +6429,25 @@
             "description": "The task's id, or its reference such as `ATL-41` (case-insensitive)."
           },
           {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -5832,9 +6455,11 @@
               "type": "integer",
               "maximum": 100,
               "minimum": 1,
-              "default": 20,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
               "title": "Limit"
-            }
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -5843,11 +6468,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AgentPromptRead"
-                  },
-                  "title": "Response List Agent Prompts Api V1 Tasks  Task Ref  Agent Prompts Get"
+                  "$ref": "#/components/schemas/AgentPromptPage"
                 }
               }
             }
@@ -6097,7 +6718,7 @@
           "files"
         ],
         "summary": "List a project's folders",
-        "description": "Every folder in the project, flat and alphabetical.\n\nUse `/tree` for the same folders arranged as a tree.",
+        "description": "The folders in the project, flat and alphabetical, a page at a time.\n\nUse `/tree` for the same folders arranged as a tree.",
         "operationId": "list_folders_api_v1_projects__project_ref__folders_get",
         "parameters": [
           {
@@ -6113,6 +6734,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -6121,11 +6775,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/FolderRead"
-                  },
-                  "title": "Response List Folders Api V1 Projects  Project Ref  Folders Get"
+                  "$ref": "#/components/schemas/FolderPage"
                 }
               }
             }
@@ -6256,7 +6906,7 @@
           "files"
         ],
         "summary": "List what a folder holds",
-        "description": "The subfolders and items directly inside a folder, plus its breadcrumb.\n\nItems classified above the caller's clearance are left out rather than\nlisted and refused — see :func:`app.services.permissions.enforce_visible`.\nSubfolders are structure and are always listed: a tree with holes in it is\nharder to trust than one with locked drawers.",
+        "description": "The subfolders and a page of the items directly inside a folder, plus\nits breadcrumb.\n\nThe items are paged — `after` and `limit` — and the subfolders are not:\nthey are the tree's structure, which `/tree` already returns whole.\n\nItems classified above the caller's clearance are left out rather than\nlisted and refused — see :func:`app.services.permissions.enforce_visible`.\nSubfolders are structure and are always listed: a tree with holes in it is\nharder to trust than one with locked drawers.",
         "operationId": "get_children_api_v1_folders__folder_id__children_get",
         "parameters": [
           {
@@ -6268,6 +6918,39 @@
               "format": "uuid",
               "title": "Folder Id"
             }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -6502,7 +7185,7 @@
           "files"
         ],
         "summary": "List every file and link in a project",
-        "description": "Every item in the project, flat and alphabetical, each with its path.\n\nThe tree without the tree, for the places that want a project's files as a\nlist of names: the `>` tag in a description or a comment is completed from\nthis, and so is anything else that has to recognise a file by name rather\nthan find it by walking. Use `/folders/{folder_id}/children` to browse.",
+        "description": "The items in the project, flat and alphabetical, each with its path, a\npage at a time.\n\nThe tree without the tree, for the places that want a project's files as a\nlist of names: the `>` tag in a description or a comment is completed from\nthis, and so is anything else that has to recognise a file by name rather\nthan find it by walking. Use `/folders/{folder_id}/children` to browse.",
         "operationId": "list_project_items_api_v1_projects__project_ref__items_get",
         "parameters": [
           {
@@ -6518,6 +7201,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -6526,11 +7242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/FiledItem"
-                  },
-                  "title": "Response List Project Items Api V1 Projects  Project Ref  Items Get"
+                  "$ref": "#/components/schemas/FiledItemPage"
                 }
               }
             }
@@ -7407,7 +8119,7 @@
           "agents"
         ],
         "summary": "List a project's skills",
-        "description": "Every skill uploaded to this project, alphabetical.\n\nA skill is a packaged job an agent can be handed. Download one with\n`/skills/{skill_id}/download`, or as the folder Claude Code loads it from\nwith `/skills/{skill_id}/folder`.",
+        "description": "The skills uploaded to this project, alphabetical, a page at a time.\n\nA skill is a packaged job an agent can be handed. Download one with\n`/skills/{skill_id}/download`, or as the folder Claude Code loads it from\nwith `/skills/{skill_id}/folder`.",
         "operationId": "list_skills_api_v1_projects__project_ref__skills_get",
         "parameters": [
           {
@@ -7423,6 +8135,39 @@
               "title": "Project Ref"
             },
             "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -7431,11 +8176,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SkillRead"
-                  },
-                  "title": "Response List Skills Api V1 Projects  Project Ref  Skills Get"
+                  "$ref": "#/components/schemas/SkillPage"
                 }
               }
             }
@@ -7729,7 +8470,7 @@
           "activity"
         ],
         "summary": "Recent activity",
-        "description": "Return audit entries, newest first.\n\n``project`` takes a key as well as an id, matching every other\nproject-scoped path — otherwise each client has to spend a request\nresolving the key before it can ask this one question.\n\nOnly the projects the caller is a member of are in it. Entries on no\nproject at all — tokens, the people directory — are everybody's.",
+        "description": "Return audit entries, newest first, a page at a time.\n\n``project`` takes a key as well as an id, matching every other\nproject-scoped path — otherwise each client has to spend a request\nresolving the key before it can ask this one question.\n\nOnly the projects the caller is a member of are in it. Entries on no\nproject at all — tokens, the people directory — are everybody's.",
         "operationId": "list_activity_api_v1_activity_get",
         "parameters": [
           {
@@ -7772,16 +8513,37 @@
             "description": "e.g. 'task', 'token'."
           },
           {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page.",
+              "title": "After"
+            },
+            "description": "The `next` of the previous page: the id of the last row it held. Omit it for the first page."
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 200,
+              "maximum": 100,
               "minimum": 1,
+              "description": "How many rows a page holds, at most 100.",
               "default": 50,
               "title": "Limit"
-            }
+            },
+            "description": "How many rows a page holds, at most 100."
           }
         ],
         "responses": {
@@ -7790,11 +8552,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ActivityRead"
-                  },
-                  "title": "Response List Activity Api V1 Activity Get"
+                  "$ref": "#/components/schemas/ActivityPage"
                 }
               }
             }
@@ -7850,6 +8608,37 @@
         "type": "object",
         "title": "Acknowledged",
         "description": "Returned by endpoints whose only outcome is 'it worked'."
+      },
+      "ActivityPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "ActivityPage",
+        "description": "A page of the audit feed, newest first."
       },
       "ActivityRead": {
         "properties": {
@@ -7996,6 +8785,37 @@
         ],
         "title": "AgentFeedKind",
         "description": "What one line of a session's feed is."
+      },
+      "AgentFeedPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentFeedEntryRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "AgentFeedPage",
+        "description": "A page of a card's agent feed, newest first."
       },
       "AgentPresence": {
         "properties": {
@@ -8149,6 +8969,37 @@
         ],
         "title": "AgentPromptOption",
         "description": "One choice a prompt offers."
+      },
+      "AgentPromptPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentPromptRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "AgentPromptPage",
+        "description": "A page of what the agents on a card have asked, newest first."
       },
       "AgentPromptRead": {
         "properties": {
@@ -8424,6 +9275,37 @@
         ],
         "title": "AgentQuestionCreate",
         "description": "An agent asking the person it works for something, and holding its turn."
+      },
+      "AgentSessionPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSessionRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "AgentSessionPage",
+        "description": "A page of a card's agent sessions: the open ones first."
       },
       "AgentSessionPut": {
         "properties": {
@@ -8704,6 +9586,24 @@
         ],
         "title": "Board",
         "description": "A board's columns, left to right, with the limits that govern them."
+      },
+      "BoardTasks": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnTasks"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "One per column, left to right — empty columns included, so a client can draw the board from this alone."
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns"
+        ],
+        "title": "BoardTasks",
+        "description": "A board's cards, a page per column."
       },
       "Body_upload_file_api_v1_folders__folder_id__upload_post": {
         "properties": {
@@ -9220,6 +10120,50 @@
         "title": "ColumnRulesUpdate",
         "description": "Replaces a role's whole line across the board.\n\nThe whole board every time, for the reason a permission row is replaced\nwhole: the screen has the line in front of it, and a delta is how two\nadmins on two tabs end up with the union of what each of them meant.\nColumns left out of the list are left unrestricted."
       },
+      "ColumnTasks": {
+        "properties": {
+          "column_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Column Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Cards in the column in all, not only on this page."
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskSummary"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The column's cards, top to bottom."
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass as `after` to `GET /columns/{column_id}/tasks` for the cards below these. Null when the column is all here."
+          }
+        },
+        "type": "object",
+        "required": [
+          "column_id",
+          "total",
+          "items",
+          "next"
+        ],
+        "title": "ColumnTasks",
+        "description": "The first page of one column of the board, and how many it holds in all."
+      },
       "ColumnUpdate": {
         "properties": {
           "name": {
@@ -9305,6 +10249,43 @@
         ],
         "title": "CommentKind",
         "description": "Who wrote a timeline entry, in effect."
+      },
+      "CommentPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CommentRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "How many entries the whole timeline holds."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next",
+          "total"
+        ],
+        "title": "CommentPage",
+        "description": "A page of a card's timeline, newest first, and how long the whole timeline is."
       },
       "CommentRead": {
         "properties": {
@@ -9592,6 +10573,37 @@
           "last_status_code"
         ],
         "title": "DeliverySummary"
+      },
+      "DevicePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "DevicePage",
+        "description": "A page of the caller's push devices, newest registration first."
       },
       "DevicePlatform": {
         "type": "string",
@@ -10514,6 +11526,37 @@
         "title": "FiledItem",
         "description": "A row of the project-wide listing: an item, and where it is filed.\n\nThe path is for telling two files of the same name apart. It is a string\nrather than a list of crumbs because nothing navigates with it — a picker\nshows it beside the name, and the name is what a tag carries."
       },
+      "FiledItemPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FiledItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "FiledItemPage",
+        "description": "A page of a project's files and links, alphabetical, each with its path."
+      },
       "FolderChildren": {
         "properties": {
           "folder": {
@@ -10532,14 +11575,29 @@
               "$ref": "#/components/schemas/FolderRead"
             },
             "type": "array",
-            "title": "Folders"
+            "title": "Folders",
+            "description": "Every folder directly inside this one. Whole rather than paged: folders are the tree's structure, and `GET /projects/{ref}/tree` hands that out entire."
           },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ItemRead"
             },
             "type": "array",
-            "title": "Items"
+            "title": "Items",
+            "description": "A page of the files and links directly inside this one, alphabetical."
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass as `after` for the page of items after these. Null on the last page."
           }
         },
         "type": "object",
@@ -10547,7 +11605,8 @@
           "folder",
           "path",
           "folders",
-          "items"
+          "items",
+          "next"
         ],
         "title": "FolderChildren",
         "description": "What one folder holds — the right-hand pane of the files screen."
@@ -10655,6 +11714,37 @@
         ],
         "title": "FolderNode",
         "description": "One folder in the whole-tree response, with its subfolders inside it."
+      },
+      "FolderPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FolderRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "FolderPage",
+        "description": "A page of a project's folders, alphabetical."
       },
       "FolderRead": {
         "properties": {
@@ -10886,10 +11976,24 @@
           },
           "tasks": {
             "items": {
-              "$ref": "#/components/schemas/TaskRead"
+              "$ref": "#/components/schemas/TaskSummary"
             },
             "type": "array",
-            "title": "Tasks"
+            "title": "Tasks",
+            "description": "The first page of the goal's cards. `progress.total` says how many in all."
+          },
+          "tasks_next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tasks Next",
+            "description": "Pass as `after` to `GET /goals/{ref}/tasks` for the cards after these. Null when `tasks` is all of them."
           }
         },
         "type": "object",
@@ -10907,10 +12011,42 @@
           "owner",
           "progress",
           "created_at",
-          "tasks"
+          "tasks",
+          "tasks_next"
         ],
         "title": "GoalDetail",
-        "description": "One goal and the cards linked to it.\n\nThe cards come back in board order — left to right by column, top to\nbottom within one — so a goal's page can be read as the slice of the board\nthat belongs to it."
+        "description": "One goal and the first page of the cards linked to it.\n\nThe cards come back in board order — left to right by column, top to\nbottom within one — so a goal's page can be read as the slice of the board\nthat belongs to it. Its cards in cold storage follow, most recently\nfinished first."
+      },
+      "GoalPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GoalRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "GoalPage",
+        "description": "A page of a project's goals."
       },
       "GoalProgress": {
         "properties": {
@@ -11582,6 +12718,37 @@
         ],
         "title": "HookCreated"
       },
+      "HookDeliveryPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HookDeliveryRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "HookDeliveryPage",
+        "description": "A page of a hook's deliveries, newest first."
+      },
       "HookDeliveryRead": {
         "properties": {
           "id": {
@@ -11759,6 +12926,37 @@
         },
         "type": "object",
         "title": "HookFire"
+      },
+      "HookPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HookRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "HookPage",
+        "description": "A page of a project's hooks, by name."
       },
       "HookRead": {
         "properties": {
@@ -12808,6 +14006,37 @@
         "title": "PersonKind",
         "description": "Which side of the work someone is on."
       },
+      "PersonPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PersonRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "PersonPage",
+        "description": "A page of the people directory."
+      },
       "PersonRead": {
         "properties": {
           "id": {
@@ -13285,6 +14514,37 @@
         ],
         "title": "ProjectCreate"
       },
+      "ProjectPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "ProjectPage",
+        "description": "A page of the caller's projects, newest first."
+      },
       "ProjectPermissions": {
         "properties": {
           "catalogue": {
@@ -13699,6 +14959,37 @@
           "name"
         ],
         "title": "RoleCreate"
+      },
+      "RolePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoleSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "RolePage",
+        "description": "A page of a project's roles, the admin role first."
       },
       "RolePermissions": {
         "properties": {
@@ -14347,6 +15638,37 @@
         "title": "SkillFolderRead",
         "description": "A skill laid out as the folder Claude Code loads it from.\n\nWrite every file under `.claude/skills/<folder>/` in a repository, or\n`~/.claude/skills/<folder>/` for every session on the machine, and Claude\nCode finds it. `cylist skills pull` is what does that for you."
       },
+      "SkillPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "SkillPage",
+        "description": "A page of a project's skills, by name."
+      },
       "SkillRead": {
         "properties": {
           "id": {
@@ -14937,10 +16259,6 @@
             "type": "string",
             "title": "Title"
           },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
           "type": {
             "$ref": "#/components/schemas/TaskType"
           },
@@ -15204,12 +16522,30 @@
             "format": "date-time",
             "title": "Created At"
           },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
           "comments": {
             "items": {
               "$ref": "#/components/schemas/CommentRead"
             },
             "type": "array",
-            "title": "Comments"
+            "title": "Comments",
+            "description": "The newest entries of the timeline, oldest first — the last 50 at most. `comment_count` says how many there are in all."
+          },
+          "comments_next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comments Next",
+            "description": "Pass as `after` to `GET /tasks/{ref}/comments` for the entries before these. Null when `comments` is the whole timeline."
           },
           "agent_sessions": {
             "items": {
@@ -15221,7 +16557,7 @@
           },
           "subtasks": {
             "items": {
-              "$ref": "#/components/schemas/TaskRead"
+              "$ref": "#/components/schemas/TaskSummary"
             },
             "type": "array",
             "title": "Subtasks",
@@ -15240,7 +16576,6 @@
           "column_id",
           "position",
           "title",
-          "description",
           "type",
           "priority",
           "sub_statuses",
@@ -15268,11 +16603,13 @@
           "subtask_count",
           "subtask_assignees",
           "created_at",
+          "description",
           "comments",
+          "comments_next",
           "subtasks"
         ],
         "title": "TaskDetail",
-        "description": "One task with its timeline, its sub-tasks and its checklist."
+        "description": "One task with its description, its latest timeline, its sub-tasks and its checklist."
       },
       "TaskFinish": {
         "properties": {
@@ -15373,7 +16710,53 @@
         "title": "TaskPriority",
         "description": "How soon this needs attention, P0 (most) to P3 (least).\n\nNamed by level rather than by feeling: \"asap\" and \"this week\" are two\npeople's words for the same urgency, and a scale everybody already reads\nthe same way needs no glossary."
       },
-      "TaskRead": {
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "hold",
+          "blocked",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "description": "Whether the task is moving, and if not, why not."
+      },
+      "TaskStatusChange": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Required for `hold` and `blocked`. Optional when going back to `active`."
+          },
+          "waiting_on": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Waiting On",
+            "description": "Project members this is now waiting on. Ignored — and cleared — when the status goes back to `active`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "TaskStatusChange",
+        "description": "Moves a task between active, on hold and blocked."
+      },
+      "TaskSummary": {
         "properties": {
           "id": {
             "type": "string",
@@ -15467,10 +16850,6 @@
           "title": {
             "type": "string",
             "title": "Title"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
           },
           "type": {
             "$ref": "#/components/schemas/TaskType"
@@ -15748,7 +17127,6 @@
           "column_id",
           "position",
           "title",
-          "description",
           "type",
           "priority",
           "sub_statuses",
@@ -15777,53 +17155,39 @@
           "subtask_assignees",
           "created_at"
         ],
-        "title": "TaskRead"
+        "title": "TaskSummary",
+        "description": "A card as a list draws it: everything but its description.\n\nThe description is the one unbounded field on a card — up to 5000\ncharacters — and no list shows it, so no list carries it (CYLIST-130).\n`GET /tasks/{ref}` is where it is read, as part of :class:`TaskDetail`."
       },
-      "TaskStatus": {
-        "type": "string",
-        "enum": [
-          "active",
-          "hold",
-          "blocked",
-          "cancelled"
-        ],
-        "title": "TaskStatus",
-        "description": "Whether the task is moving, and if not, why not."
-      },
-      "TaskStatusChange": {
+      "TaskSummaryPage": {
         "properties": {
-          "status": {
-            "$ref": "#/components/schemas/TaskStatus"
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskSummary"
+            },
+            "type": "array",
+            "title": "Items"
           },
-          "reason": {
+          "next": {
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 2000
+                "format": "uuid"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Reason",
-            "description": "Required for `hold` and `blocked`. Optional when going back to `active`."
-          },
-          "waiting_on": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "title": "Waiting On",
-            "description": "Project members this is now waiting on. Ignored — and cleared — when the status goes back to `active`."
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
           }
         },
         "type": "object",
         "required": [
-          "status"
+          "items",
+          "next"
         ],
-        "title": "TaskStatusChange",
-        "description": "Moves a task between active, on hold and blocked."
+        "title": "TaskSummaryPage",
+        "description": "A page of cards: cold storage, a goal's cards, a column of the board."
       },
       "TaskType": {
         "type": "string",
@@ -16041,6 +17405,37 @@
           "name"
         ],
         "title": "TemplateCreate"
+      },
+      "TemplatePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "TemplatePage",
+        "description": "A page of a project's task templates, in name order."
       },
       "TemplateRead": {
         "properties": {
@@ -16465,6 +17860,37 @@
         ],
         "title": "TokenIssued",
         "description": "A freshly minted token, including the only copy of its plaintext."
+      },
+      "TokenPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TokenRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "TokenPage",
+        "description": "A page of the live API tokens, newest first."
       },
       "TokenRead": {
         "properties": {
@@ -16894,6 +18320,37 @@
         ],
         "title": "VaultTreeDetail",
         "description": "A tree with everything in it — and not one secret value."
+      },
+      "VaultTreePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VaultTreeRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "Pass this as `after` to read the next page. Null when this page is the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "VaultTreePage",
+        "description": "A page of a project's vault trees, in display order."
       },
       "VaultTreeRead": {
         "properties": {

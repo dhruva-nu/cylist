@@ -1,8 +1,16 @@
 /** Everything the board reads from the server, kept fresh by its socket. */
 
-import { useQuery } from '@tanstack/react-query'
-import { api, type Task } from '../../api/client'
-import { queryKeys, useBoard, useGoals, useMembers, useTemplates } from '../../api/queries'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { Task } from '../../api/client'
+import {
+  fetchBoardCards,
+  queryKeys,
+  useBoard,
+  useGoals,
+  useMembers,
+  useTemplates,
+  type BoardCards,
+} from '../../api/queries'
 import { hasLiveAgent } from '../agentState'
 import { useBoardSocket } from '../useBoardSocket'
 
@@ -26,10 +34,16 @@ export function useBoardData(projectKey: string) {
   const socket = useBoardSocket(projectKey)
   // Read here rather than through `useTasks`, because only the board polls:
   // the same key, with the fallback interval no other reader of it wants.
+  const queryClient = useQueryClient()
   const tasks = useQuery({
     queryKey: queryKeys.tasks(projectKey),
-    queryFn: () => api.listTasks(projectKey),
-    refetchInterval: (query) => fallbackPollInterval(socket.connected, query.state.data ?? []),
+    queryFn: () =>
+      fetchBoardCards(
+        projectKey,
+        queryClient.getQueryData<BoardCards>(queryKeys.tasks(projectKey)),
+      ),
+    refetchInterval: (query) =>
+      fallbackPollInterval(socket.connected, query.state.data?.tasks ?? []),
     refetchIntervalInBackground: false,
   })
   // Needed for `who:` search matches and its autocomplete, and for the `@`

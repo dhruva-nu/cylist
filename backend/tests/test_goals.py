@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
-from tests.conftest import put_members
+from tests.conftest import cards_of, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TEAM = {
@@ -137,7 +137,7 @@ class TestLinkingCards:
         assert task["goal_name"] == "Search revamp"
         assert task["goal_colour"] == "#3B6FC2"
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
         assert board[0]["goal_colour"] == "#3B6FC2"
 
     async def test_a_card_with_no_goal_says_so_in_nulls(self, signed_in: AsyncClient) -> None:
@@ -379,7 +379,9 @@ class TestListingGoals:
         settled = await _goal(signed_in, person, name="Already done")
         await signed_in.patch(f"/goals/{settled['reference']}", json={"status": "achieved"})
 
-        names = [goal["name"] for goal in (await signed_in.get("/projects/ATL/goals")).json()]
+        names = [
+            goal["name"] for goal in (await signed_in.get("/projects/ATL/goals")).json()["items"]
+        ]
         assert names == ["Sooner", "Later", "Undated work", "Already done"]
 
     async def test_open_only_leaves_out_settled_goals(self, signed_in: AsyncClient) -> None:
@@ -389,7 +391,9 @@ class TestListingGoals:
         dropped = await _goal(signed_in, person, name="Abandoned")
         await signed_in.patch(f"/goals/{dropped['reference']}", json={"status": "dropped"})
 
-        body = (await signed_in.get("/projects/ATL/goals", params={"open_only": True})).json()
+        body = (await signed_in.get("/projects/ATL/goals", params={"open_only": True})).json()[
+            "items"
+        ]
         assert [goal["name"] for goal in body] == ["Search revamp"]
 
     async def test_the_hub_counts_goals(self, signed_in: AsyncClient) -> None:

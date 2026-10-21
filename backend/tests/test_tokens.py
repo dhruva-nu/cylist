@@ -38,7 +38,7 @@ class TestIssuing:
 
         listed = await signed_in.get("/tokens")
         assert listed.status_code == 200
-        assert "token" not in listed.json()[0]
+        assert "token" not in listed.json()["items"][0]
 
     async def test_the_new_token_authenticates(self, signed_in: AsyncClient) -> None:
         created = await signed_in.post("/tokens", json={"name": "reader", "scopes": ["read"]})
@@ -156,7 +156,7 @@ class TestRevocation:
         created = await signed_in.post("/tokens", json={"name": "temp", "scopes": ["read"]})
         await signed_in.delete(f"/tokens/{created.json()['id']}")
 
-        assert (await signed_in.get("/tokens")).json() == []
+        assert (await signed_in.get("/tokens")).json()["items"] == []
 
     async def test_revoking_an_unknown_token_is_a_clean_404(self, signed_in: AsyncClient) -> None:
         response = await signed_in.delete("/tokens/00000000-0000-7000-8000-000000000000")
@@ -178,7 +178,7 @@ class TestRevokingYourself:
 
         assert response.status_code == 200
         assert (await signed_in.get("/me", headers=headers)).status_code == 401
-        assert (await signed_in.get("/tokens")).json() == []
+        assert (await signed_in.get("/tokens")).json()["items"] == []
 
     async def test_a_token_without_admin_cannot_revoke_another(
         self, signed_in: AsyncClient
@@ -191,5 +191,5 @@ class TestRevokingYourself:
 
         assert response.status_code == 403
         assert response.json()["error"]["details"]["missing_scopes"] == ["admin"]
-        listed = [token["name"] for token in (await signed_in.get("/tokens")).json()]
+        listed = [token["name"] for token in (await signed_in.get("/tokens")).json()["items"]]
         assert sorted(listed) == ["agent", "phone"]

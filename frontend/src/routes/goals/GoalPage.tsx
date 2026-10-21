@@ -16,10 +16,10 @@
  * first card below the fold on every visit.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { api, type Task } from '../../api/client'
+import { api, type GoalDetail, type Task } from '../../api/client'
 import { queryKeys, useBoard, useInvalidate, useMembers, useTemplates } from '../../api/queries'
 import { GoalStatusPill } from '../../components/GoalMarks'
 import { GoalDialog } from '../../components/GoalDialog'
@@ -44,6 +44,13 @@ import { COLD_STORAGE, Filters, GoalCardRow, placeOf } from './GoalCards'
 import styles from './GoalPage.module.css'
 import { LinkCardsDialog } from './LinkCardsDialog'
 
+/** One page of a goal's cards — the first carrying the goal itself. */
+interface GoalCardsPage {
+  detail: GoalDetail | null
+  items: Task[]
+  next: string | null
+}
+
 export function GoalPage() {
   const { projectKey, goalRef } = useParams({ from: '/p/$projectKey/goals/$goalRef' })
   const may = usePermissions(projectKey)
@@ -59,9 +66,21 @@ export function GoalPage() {
   const [searchText, setSearchText] = useState('')
   const [onlyColumn, setOnlyColumn] = useState<string | null>(null)
 
-  const goal = useQuery({
+  // The goal and the first page of its cards, then further pages of cards on
+  // request: a goal can be an epic of hundreds, and its page reads like the
+  // board, the top first.
+  const goal = useInfiniteQuery({
     queryKey: queryKeys.goal(goalRef),
-    queryFn: () => api.getGoal(goalRef),
+    queryFn: async ({ pageParam }): Promise<GoalCardsPage> => {
+      if (pageParam === null) {
+        const detail = await api.getGoal(goalRef)
+        return { detail, items: detail.tasks, next: detail.tasks_next }
+      }
+      const page = await api.listGoalTasks(goalRef, pageParam)
+      return { detail: null, ...page }
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next,
   })
   const board = useBoard(projectKey)
   /** For the `>` tags in the goal's description. */
@@ -110,7 +129,12 @@ export function GoalPage() {
   if (goal.error) return <ErrorBanner>{goal.error.message}</ErrorBanner>
   if (board.error) return <ErrorBanner>{board.error.message}</ErrorBanner>
 
-  const goalDetail = goal.data
+  const [first] = goal.data.pages
+  if (!first?.detail) return <EmptyState>Loading the goal…</EmptyState>
+  const goalDetail = {
+    ...first.detail,
+    tasks: goal.data.pages.flatMap((page) => page.items),
+  }
   const columns = board.data.columns
   const memberList = members.data?.members ?? []
   const closure = goalClosure(goalDetail)
@@ -256,6 +280,20 @@ export function GoalPage() {
               </ul>
             </section>
           ))}
+
+          {goal.hasNextPage ? (
+            <div className={styles.more}>
+              <Button
+                small
+                disabled={goal.isFetchingNextPage}
+                onClick={() => void goal.fetchNextPage()}
+              >
+                {goal.isFetchingNextPage
+                  ? 'Loading…'
+                  : `Show more cards · ${goalDetail.progress.total - goalDetail.tasks.length} not shown`}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
 

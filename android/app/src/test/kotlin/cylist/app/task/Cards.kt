@@ -15,7 +15,7 @@ import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.StageRead
 import cylist.api.generated.models.TaskDetail
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TaskType
 import cylist.api.generated.models.TemplateRead
@@ -44,10 +44,10 @@ val board: List<ColumnRead> = listOf(
     column("Done", 3, listOf("Done", "Cancelled", "In prod")),
 )
 
-fun subtask(ref: String, title: String = ref, finishedAt: String? = null, status: TaskStatus = TaskStatus.active) = TaskRead(
+fun subtask(ref: String, title: String = ref, finishedAt: String? = null, status: TaskStatus = TaskStatus.active) = TaskSummary(
     id = UUID.randomUUID(), projectId = projectId, reference = ref, number = 1,
     parentId = UUID.randomUUID(), parentReference = "ATL-1", subNumber = 1, columnId = null, position = null,
-    title = title, description = "", type = TaskType.feature, priority = TaskPriority.p3,
+    title = title, type = TaskType.feature, priority = TaskPriority.p3,
     subStatuses = emptyList(), subStatusIndex = null, dueDate = null, columnDueDates = emptyList(), nextDueDate = null,
     assignee = person("Aditi K"), status = status, templateId = null, templateName = null,
     goalId = null, goalReference = null, goalName = null, goalColour = null, jiraRef = null, prRefs = emptyList(),
@@ -63,7 +63,7 @@ fun item(title: String, state: ChecklistState = ChecklistState.`open`, position:
 
 fun detail(
     columnId: UUID? = board[1].id,
-    subtasks: List<TaskRead> = emptyList(),
+    subtasks: List<TaskSummary> = emptyList(),
     checklist: List<ChecklistItemRead> = emptyList(),
     templateId: UUID? = null,
     outcome: String? = null,
@@ -82,7 +82,7 @@ fun detail(
     goalId = null, goalReference = null, goalName = null, goalColour = null, jiraRef = null, prRefs = emptyList(),
     waitingOn = emptyList(), commentCount = 0, checklist = checklist, outcome = outcome, outcomeIndex = null,
     finishedAt = finishedAt, openSubtaskCount = subtasks.count { it.finishedAt == null }, subtaskCount = subtasks.size,
-    subtaskAssignees = emptyList(), createdAt = "2026-10-01T00:00:00Z", comments = emptyList(), subtasks = subtasks,
+    subtaskAssignees = emptyList(), createdAt = "2026-10-01T00:00:00Z", comments = emptyList(), commentsNext = null, subtasks = subtasks,
     archivedAt = archivedAt, agentSessions = sessions,
 )
 

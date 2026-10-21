@@ -18,12 +18,22 @@ from app.db import SessionDependency
 from app.models.goal import Goal
 from app.models.project import Project
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.routers.tasks import read_tasks
 from app.schemas.common import Acknowledged
-from app.schemas.goals import GoalCreate, GoalDetail, GoalProgress, GoalRead, GoalUpdate
+from app.schemas.goals import (
+    GoalCreate,
+    GoalDetail,
+    GoalPage,
+    GoalProgress,
+    GoalRead,
+    GoalUpdate,
+)
 from app.schemas.people import PersonRead
+from app.schemas.tasks import TaskSummaryPage
 from app.services import activity, goals, permissions, projects
+from app.services.paging import FIRST_PAGE, PageRequest
 
 router = APIRouter(tags=["goals"])
 
@@ -71,10 +81,11 @@ async def _counted_goal_read(session: AsyncSession, goal: Goal) -> GoalRead:
 
 
 async def _goal_detail(session: AsyncSession, goal: Goal) -> GoalDetail:
-    linked = await goals.tasks_for(session, goal)
+    linked = await goals.tasks_page(session, goal, FIRST_PAGE)
     return GoalDetail(
         **(await _counted_goal_read(session, goal)).model_dump(),
-        tasks=await read_tasks(session, linked),
+        tasks=await read_tasks(session, linked.rows),
+        tasks_next=linked.next,
     )
 
 
@@ -109,13 +120,14 @@ async def may_edit_this_goal(
 
 @router.get(
     "/projects/{project_ref}/goals",
-    response_model=list[GoalRead],
+    response_model=GoalPage,
     summary="List a project's goals",
 )
 async def list_goals(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
+    page: PageRequest = PageQuery,
     open_only: bool = Query(
         default=False,
         description=(
@@ -123,8 +135,8 @@ async def list_goals(
             "wants, which should not offer work that has stopped."
         ),
     ),
-) -> list[GoalRead]:
-    """Every goal on the project: open ones first, then those that are settled.
+) -> GoalPage:
+    """The project's goals, a page at a time: open ones first, then those that are settled.
 
     Within each half the dated ones come first in date order, then the undated
     by name — a list you can plan from rather than one in alphabetical order.
@@ -132,9 +144,11 @@ async def list_goals(
     Each carries its own `progress`, counted from the cards linked to it, so a
     goals page draws itself from this one request.
     """
-    found = await goals.list_for_project(session, project, include_settled=not open_only)
-    counted = await goals.progress(session, project.id, [goal.id for goal in found])
-    return [_goal_read(goal, counted[goal.id]) for goal in found]
+    found = await goals.page_for_project(session, project, page, include_settled=not open_only)
+    counted = await goals.progress(session, project.id, [goal.id for goal in found.rows])
+    return GoalPage(
+        items=[_goal_read(goal, counted[goal.id]) for goal in found.rows], next=found.next
+    )
 
 
 @router.post(
@@ -182,8 +196,26 @@ async def get_goal(
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
 ) -> GoalDetail:
-    """One goal, its progress, and the cards linked to it in board order."""
+    """One goal, its progress, and the first page of the cards linked to it in
+    board order. `GET /goals/{ref}/tasks` reads the rest."""
     return await _goal_detail(session, goal)
+
+
+@router.get(
+    "/goals/{goal_ref}/tasks",
+    response_model=TaskSummaryPage,
+    summary="Read a goal's cards, a page at a time",
+)
+async def list_goal_tasks(
+    goal: Goal = Depends(resolved_goal),
+    _: Principal = Depends(require(Scope.READ)),
+    session: AsyncSession = SessionDependency,
+    page: PageRequest = PageQuery,
+) -> TaskSummaryPage:
+    """The cards linked to this goal, in the order `GET /goals/{ref}` lists them,
+    continuing from its `tasks_next`."""
+    linked = await goals.tasks_page(session, goal, page)
+    return TaskSummaryPage(items=await read_tasks(session, linked.rows), next=linked.next)
 
 
 @router.patch(

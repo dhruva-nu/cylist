@@ -17,11 +17,12 @@ Two rules here are choices rather than mechanics:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import Numeric, Select, case, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.core.errors import (
     ConflictError,
@@ -31,12 +32,15 @@ from app.core.errors import (
 )
 from app.core.palette import GOAL_PALETTE, colour_for
 from app.db import flush_or_refuse
-from app.models.board import BoardColumn
+from app.models.board import MAX_COLUMNS, BoardColumn
 from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
 from app.services import columns, projects, references
+from app.services.paging import PageRequest, SortKey, Window, keyset
+
+_ANY_DATE = date(1970, 1, 1)
 
 _SETTLED_LAST = case((Goal.status == GoalStatus.OPEN, 0), else_=1)
 """Open goals first, whatever the alphabet says.
@@ -47,10 +51,10 @@ what is still being worked towards is what a goals page is for.
 """
 
 
-async def list_for_project(
-    session: AsyncSession, project: Project, *, include_settled: bool = True
-) -> list[Goal]:
-    """The project's goals: open ones first, then those that are settled.
+async def page_for_project(
+    session: AsyncSession, project: Project, page: PageRequest, *, include_settled: bool = True
+) -> Window[Goal]:
+    """One page of the project's goals: open ones first, then those that are settled.
 
     Within each half, the dated ones come first in date order, then the undated
     by name. A goal with a date is a goal with a deadline, and a list that
@@ -59,15 +63,20 @@ async def list_for_project(
     statement: Select[tuple[Goal]] = select(Goal).where(Goal.project_id == project.id)
     if not include_settled:
         statement = statement.where(Goal.status == GoalStatus.OPEN)
-    return list(
-        await session.scalars(
-            statement.order_by(
-                _SETTLED_LAST,
-                Goal.target_date.is_(None),
-                Goal.target_date,
-                Goal.name,
-            )
-        )
+    return await keyset(
+        session,
+        statement,
+        keys=(
+            _SETTLED_LAST,
+            Goal.target_date.is_(None),
+            # Any date will do for the undated: the key before this one has
+            # already put them after every dated goal. It only has to be one
+            # that is not NULL, which a page could not continue past.
+            func.coalesce(Goal.target_date, _ANY_DATE),
+            Goal.name,
+            Goal.id,
+        ),
+        page=page,
     )
 
 
@@ -240,6 +249,38 @@ async def tasks_for(session: AsyncSession, goal: Goal) -> list[Task]:
                 Task.archived_at.desc(),
             )
         )
+    )
+
+
+def _board_order() -> tuple[SortKey, ...]:
+    # The order :func:`tasks_for` reads in, said as keys a page can continue
+    # from: every one non-null and ascending. Cards in cold storage have no
+    # column, so they sort past the widest board; among themselves, most
+    # recently finished first, which is the epoch negated. A card on the board
+    # gets 0 there and is ordered by where it sits.
+    return (
+        func.coalesce(BoardColumn.position, MAX_COLUMNS),
+        func.coalesce(Task.position, 0),
+        case(
+            (Task.archived_at.is_(None), literal(0, Numeric())),
+            else_=-func.extract("epoch", Task.finished_at),
+        ),
+        Task.id,
+    )
+
+
+async def tasks_page(session: AsyncSession, goal: Goal, page: PageRequest) -> Window[Task]:
+    """One page of the cards linked to this goal: the board's slice of it,
+    left to right and top to bottom, then its cards in cold storage, most
+    recently finished first."""
+    return await keyset(
+        session,
+        select(Task)
+        .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
+        .where(Task.goal_id == goal.id, Task.parent_id.is_(None)),
+        keys=_board_order(),
+        page=page,
+        options=(defer(Task.description),),
     )
 
 

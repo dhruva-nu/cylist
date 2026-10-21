@@ -15,7 +15,7 @@ from typing import Any
 from httpx import AsyncClient
 
 from app.auth.permissions import Permission
-from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account, put_members
+from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, cards_of, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -76,7 +76,9 @@ async def _rows(client: AsyncClient, item_id: str) -> list[dict[str, str]]:
 
 
 async def _board_refs(client: AsyncClient) -> list[str]:
-    return [task["reference"] for task in (await client.get("/projects/ATL/tasks")).json()]
+    return [
+        task["reference"] for task in cards_of((await client.get("/projects/ATL/tasks")).json())
+    ]
 
 
 class TestStoring:
@@ -140,7 +142,7 @@ class TestStoring:
 
         assert first["file"]["folder_id"] == second["file"]["folder_id"]
         assert first["file"]["name"] != second["file"]["name"]
-        folders = (await signed_in.get("/projects/ATL/folders")).json()
+        folders = (await signed_in.get("/projects/ATL/folders")).json()["items"]
         assert [folder["name"] for folder in folders].count("Cold storage") == 1
 
     async def test_a_formula_in_a_title_is_written_as_text(self, signed_in: AsyncClient) -> None:
@@ -182,7 +184,7 @@ class TestStoring:
         await _finish(signed_in, second)
         await _store(signed_in)
 
-        stored = (await signed_in.get("/projects/ATL/cold-storage")).json()
+        stored = (await signed_in.get("/projects/ATL/cold-storage")).json()["items"]
 
         assert [task["reference"] for task in stored] == [
             second["reference"],
@@ -263,7 +265,7 @@ class TestAStoredCard:
         deleted = await signed_in.delete(f"/tasks/{card['reference']}")
 
         assert deleted.status_code == 200
-        assert (await signed_in.get("/projects/ATL/cold-storage")).json() == []
+        assert (await signed_in.get("/projects/ATL/cold-storage")).json()["items"] == []
 
 
 class TestRestoring:
@@ -285,7 +287,7 @@ class TestRestoring:
         assert body["archived_at"] is None
         assert body["finished_at"] is not None
         assert await _board_refs(signed_in) == [card["reference"], already_there["reference"]]
-        assert (await signed_in.get("/projects/ATL/cold-storage")).json() == []
+        assert (await signed_in.get("/projects/ATL/cold-storage")).json()["items"] == []
 
     async def test_it_keeps_the_outcome_it_ended_on(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -374,7 +376,7 @@ class TestWhoMay:
         listed = await other_client.get("/projects/ATL/cold-storage")
 
         assert listed.status_code == 200
-        assert len(listed.json()) == 1
+        assert len(listed.json()["items"]) == 1
 
 
 class TestWhatAStoredCardStillSays:
@@ -417,7 +419,7 @@ class TestWhatAStoredCardStillSays:
         await _finish(signed_in, card, outcome="In prod")
         await _store(signed_in)
 
-        listed = (await signed_in.get("/projects/ATL/cold-storage")).json()
+        listed = (await signed_in.get("/projects/ATL/cold-storage")).json()["items"]
         opened = (await signed_in.get(f"/tasks/{card['reference']}")).json()
 
         assert [task["outcome"] for task in listed] == ["In prod"]

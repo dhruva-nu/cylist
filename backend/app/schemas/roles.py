@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from app.models.role import NAME_MAX_LENGTH
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 _COLOUR_PATTERN = r"^#(?:[0-9a-fA-F]{6})$"
 
@@ -80,3 +80,7 @@ class MemberRoleUpdate(Schema):
             "role off and leaves them a member with none."
         ),
     )
+
+
+class RolePage(Page[RoleSummary]):
+    """A page of a project's roles, the admin role first."""

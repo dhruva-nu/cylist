@@ -17,16 +17,19 @@ from app.db import SessionDependency
 from app.models.project import Project
 from app.models.template import TaskTemplate
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.templates import (
     StageInput,
     StageRead,
     TemplateCreate,
+    TemplatePage,
     TemplateRead,
     TemplateUpdate,
 )
 from app.services import activity, permissions, projects, templates
+from app.services.paging import PageRequest
 
 router = APIRouter(tags=["templates"])
 
@@ -123,23 +126,27 @@ async def may_edit_template(
 
 @router.get(
     "/projects/{project_ref}/templates",
-    response_model=list[TemplateRead],
+    response_model=TemplatePage,
     summary="List a project's task templates",
 )
 async def list_templates(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[TemplateRead]:
-    """Every template on the project, in name order.
+    page: PageRequest = PageQuery,
+) -> TemplatePage:
+    """The templates on the project, in name order, a page at a time.
 
     `allowed_column_ids` is the answer a client needs before it offers a card
     a column. **Empty means unrestricted** — this template has no stages yet,
     so its cards go anywhere on the board.
     """
-    found = await templates.list_templates(session, project)
+    found = await templates.list_templates(session, project, page)
     counts = await templates.template_task_counts(session, project.id)
-    return [_template_read(template, counts.get(template.id, 0)) for template in found]
+    return TemplatePage(
+        items=[_template_read(template, counts.get(template.id, 0)) for template in found.rows],
+        next=found.next,
+    )
 
 
 @router.post(

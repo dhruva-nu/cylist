@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from app.models.device import DevicePlatform
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 
 class DeviceRegister(Schema):
@@ -38,3 +38,7 @@ class DeviceRead(Schema):
     token_id: UUID = Field(description="The API token the device registered with.")
     created_at: datetime
     last_registered_at: datetime
+
+
+class DevicePage(Page[DeviceRead]):
+    """A page of the caller's push devices, newest registration first."""
