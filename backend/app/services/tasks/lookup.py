@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, not_on_this_project
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
@@ -34,6 +34,28 @@ async def resolve(session: AsyncSession, reference: str) -> Task:
     task = await session.scalar(statement)
     if task is None:
         raise NotFoundError(f"No task matching {reference!r}.")
+    return task
+
+
+async def require_on_project(session: AsyncSession, project_id: UUID, reference: str) -> Task:
+    """A task a request body names, which has to be on this project.
+
+    The body's counterpart to ``resolved_task``, for a route whose path names
+    the project and whose body names the card. Nonexistent and elsewhere are
+    one answer, as for every reference that is not on the project
+    (CYLIST-146) — and so a card on a board the caller cannot see reads
+    exactly like one that does not exist.
+
+    Raises:
+        UnprocessableRequestError: from
+            :func:`app.core.errors.not_on_this_project`.
+    """
+    try:
+        task = await resolve(session, reference)
+    except NotFoundError:
+        raise not_on_this_project("task", task=reference) from None
+    if task.project_id != project_id:
+        raise not_on_this_project("task", task=reference)
     return task
 
 

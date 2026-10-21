@@ -293,7 +293,7 @@
           "tokens"
         ],
         "summary": "Issue an API token",
-        "description": "Mint a token and return its plaintext exactly once.\n\nGrant the narrowest useful set of scopes: an agent that only rearranges the\nboard needs ``read`` and ``write``, never ``vault:reveal``.\n\nThe token acts as whoever minted it. An agent moving a card writes that\nperson's name into the card's history, which is the answer everybody\nwants to \"who moved this?\" — \"an API token\" never was, and with several\npeople on one board it would be an answer that names nobody.",
+        "description": "Mint a token and return its plaintext exactly once.\n\nGrant the narrowest useful set of scopes: an agent that only rearranges the\nboard needs ``read`` and ``write``, never ``vault:reveal``.\n\nThe token acts as whoever minted it. An agent moving a card writes that\nperson's name into the card's history, which is the answer everybody\nwants to \"who moved this?\" — \"an API token\" never was, and with several\npeople on one board it would be an answer that names nobody.\n\nIts scopes must be ones the caller holds, and `permit` can only be\ngranted from a browser session.",
         "operationId": "create_token_api_v1_tokens_post",
         "requestBody": {
           "content": {
@@ -315,6 +315,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "A scope asked for is one the caller does not hold."
           },
           "422": {
             "description": "Validation Error",
@@ -839,7 +842,7 @@
           "projects"
         ],
         "summary": "Replace the member list",
-        "description": "Set the project's membership to exactly these people.\n\nThis replaces the list rather than adding to it: anyone not named is\nremoved from the project. They stay in the directory, and anything they are\nalready assigned keeps naming them.",
+        "description": "Set the project's membership to exactly these people.\n\nThis replaces the list rather than adding to it: anyone not named is\nremoved from the project. They stay in the directory, and anything they are\nalready assigned keeps naming them.\n\nTaking an admin off the project needs an admin (CYLIST-116). The `people`\npermission is the baseline's, so every member holds it; without this\nfence a member could drop the admin, inherit the vacancy and add them back\nwith no role. For the same reason the vacancy is only filled on an admin's\nsave — handing out the role is never a side effect of somebody else's.",
         "operationId": "set_members_api_v1_projects__project_ref__members_put",
         "parameters": [
           {
@@ -877,6 +880,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "This would remove an admin, and you are not an admin here."
           },
           "422": {
             "description": "An id is unknown, or names an archived person."
@@ -1172,7 +1178,7 @@
           "today"
         ],
         "summary": "Put a card on your day",
-        "description": "Pick a card up for a day. Picking one that is already on the day hands it back.",
+        "description": "Pick a card up for a day. Picking one that is already on the day hands it back.\n\nA card that is not on this project — on another board, or nowhere — is\none 422, whichever it is.",
         "operationId": "add_pick_api_v1_projects__project_ref__today_picks_post",
         "parameters": [
           {
@@ -2783,7 +2789,7 @@
           "people"
         ],
         "summary": "Update a person",
-        "description": "Change any subset of a person's details. Omitted fields are left alone.",
+        "description": "Change any subset of a person's details. Omitted fields are left alone.\n\nNames, titles, responsibilities and colours need `write`. Archiving or\nun-archiving somebody, and changing the email of anybody who has an\naccount or an invitation, need `admin` as well.",
         "operationId": "update_person_api_v1_people__person_id__patch",
         "parameters": [
           {
@@ -2818,15 +2824,11 @@
               }
             }
           },
+          "403": {
+            "description": "Archiving, or changing a sign-in email, needs `admin`."
+          },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "They are the last person who can sign in."
           }
         }
       },
@@ -2835,7 +2837,7 @@
           "people"
         ],
         "summary": "Archive a person",
-        "description": "Archive someone rather than deleting them.\n\nTasks they were assigned and files they uploaded keep naming them; they\nsimply stop appearing in pickers. Bring them back with\n`PATCH /people/{id}` and `{\"archived\": false}`.",
+        "description": "Archive someone rather than deleting them.\n\nTasks they were assigned and files they uploaded keep naming them; they\nsimply stop appearing in pickers. Bring them back with\n`PATCH /people/{id}` and `{\"archived\": false}`.\n\nNeeds `admin`, because archiving revokes every credential they hold — and\n`write` is the scope an agent carries. The last person who can sign in\ncannot be archived at all.",
         "operationId": "archive_person_api_v1_people__person_id__delete",
         "parameters": [
           {
@@ -2860,15 +2862,11 @@
               }
             }
           },
+          "403": {
+            "description": "Archiving somebody needs `admin`."
+          },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "They are the last person who can sign in."
           }
         }
       }
@@ -7368,7 +7366,7 @@
           "agents"
         ],
         "summary": "Upload a skill, as one file or as a folder",
-        "description": "Upload a skill as `multipart/form-data`.\n\n**A skill can be a whole folder.** A skill is usually a `SKILL.md` beside\nthe scripts and references it points an agent at, so send one `file` part\nper file, each named with its path inside the folder, and `folder` with\nthe folder's own name. The server lays it out, checks it the way it checks\nan uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,\nat most 200 files and 20 MB — and stores it as `<folder>.zip`, which\n`/skills/{skill_id}/folder` unpacks again file for file. A single part with\nno `folder` is stored exactly as it was sent, as it always was.\n\n**Uploading a name that already exists replaces it** and answers 200 rather\nthan 201 — the name is the skill, so sending `board-tidy.md` again means\nyou have a newer version of it, not that you have a conflict. This is the\none place Cylist's upload rules differ from the file tree's, where a\nduplicate name is refused.\n\nContent is addressed by its SHA-256 and shared with the file store, so\nuploading bytes the server already holds costs a row and no disk.",
+        "description": "Upload a skill as `multipart/form-data`.\n\n**A skill can be a whole folder.** A skill is usually a `SKILL.md` beside\nthe scripts and references it points an agent at, so send one `file` part\nper file, each named with its path inside the folder, and `folder` with\nthe folder's own name. The server lays it out, checks it the way it checks\nan uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,\nat most 200 files and 20 MB — and stores it as `<folder>.zip`, which\n`/skills/{skill_id}/folder` unpacks again file for file. A single part with\nno `folder` is stored exactly as it was sent, as it always was.\n\n**Uploading a name that already exists replaces it** and answers 200 rather\nthan 201 — the name is the skill, so sending `board-tidy.md` again means\nyou have a newer version of it, not that you have a conflict. This is the\none place Cylist's upload rules differ from the file tree's, where a\nduplicate name is refused.\n\nContent is addressed by its SHA-256 and shared with the file store, so\nuploading bytes the server already holds costs a row and no disk.\n\n**It is filed under whoever is uploading it** — the person behind the\nsession or token — and there is no field to say otherwise (CYLIST-142).\nAn agent's upload is its owner's, which is the person its token acts as.",
         "operationId": "upload_skill_api_v1_projects__project_ref__skills_post",
         "parameters": [
           {
@@ -8677,19 +8675,6 @@
             ],
             "title": "Description",
             "description": "One line on what the skill does."
-          },
-          "added_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Added By",
-            "description": "Which person is uploading it."
           }
         },
         "type": "object",

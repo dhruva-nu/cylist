@@ -21,7 +21,7 @@ from app.config import Settings
 from app.db import Database
 from app.main import create_app
 from app.models import VaultNode, VaultSecret, VaultTree
-from tests.conftest import OWNER_PASSWORD
+from tests.conftest import OWNER_EMAIL, OWNER_PASSWORD
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TWILIO_SECRET = "Tw!9xLp3#Qm"
@@ -1056,6 +1056,9 @@ class TestWithoutAVaultKey:
         without it — rather than coming back as an empty string."""
         tree_id = await _tree(signed_in)
         node = await _secret(signed_in, tree_id)
+        # An account exists now, so the bootstrap session that made `keyless`
+        # reaches nothing any more; sign it in as the person who does.
+        await keyless.post("/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD})
 
         response = await keyless.post(f"/vault/nodes/{node['id']}/reveal")
 

@@ -329,10 +329,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "project.archived": lambda p: "Archived the project.",
     "project.restored": lambda p: "Brought the project back out of the archive.",
     "project.deleted": lambda p: f"Deleted the project {p.get('name') or p.get('key')}.",
-    "project.members_changed": lambda p: (
-        f"Set the project's membership to {p.get('member_count', 0)} "
-        f"{'person' if p.get('member_count') == 1 else 'people'}."
-    ),
+    "project.members_changed": lambda p: _membership_sentence(p),
     # --- Roles, and who wears them ------------------------------------------
     "role.created": lambda p: f"Added the role {_quoted(p.get('name'))}.",
     "role.updated": lambda p: (
@@ -395,6 +392,7 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     "person.added": lambda p: f"Added {p.get('name')} as a {_worded(p.get('kind'))}.",
     "person.updated": lambda p: f"Changed a person's {_worded_fields(p)}.",
     "person.archived": lambda p: f"Archived {p.get('name')}.",
+    "person.restored": lambda p: f"Brought {p.get('name')} back out of the archive.",
     "token.issued": lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
     "token.revoked": lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
     "session.started": lambda p: "Signed in.",
@@ -437,3 +435,27 @@ def _worded_fields(payload: dict[str, Any]) -> str:
     fields = payload.get("fields") or []
     listed = _listed(str(field).replace("_", " ") for field in fields)
     return listed or "details"
+
+
+def _membership_sentence(payload: dict[str, Any]) -> str:
+    """Who a membership save added and took off, or its count for older rows.
+
+    Entries written before CYLIST-116 carry only ``member_count``, and still
+    read the way they always did. Names are what make a later one worth
+    reading: "took Ravi off" is the line somebody scanning the day for a lost
+    admin is looking for.
+    """
+    joined, left = payload.get("joined"), payload.get("left")
+    if joined is None and left is None:
+        count = payload.get("member_count", 0)
+        return f"Set the project's membership to {count} {'person' if count == 1 else 'people'}."
+
+    said = []
+    if joined:
+        said.append(f"added {_listed(joined)}")
+    if left:
+        said.append(f"took {_listed(left)} off")
+    if not said:
+        return "Saved the project's membership unchanged."
+    sentence = " and ".join(said)
+    return f"{sentence[0].upper()}{sentence[1:]}."

@@ -121,6 +121,24 @@ async def revoke_for_person(
     return len(revoked.all())
 
 
+async def revoke_personless(session: AsyncSession) -> int:
+    """Revoke every live credential that belongs to nobody, returning how many.
+
+    What opening the first account calls (CYLIST-119). A person-less
+    credential is the bootstrap session, or a token it minted, and both are
+    scaffolding: the moment somebody can sign in as themselves, a credential
+    tied to no person is a root key that no archive or password change would
+    ever touch.
+    """
+    revoked = await session.execute(
+        sql_update(ApiToken)
+        .where(ApiToken.person_id.is_(None), ApiToken.revoked_at.is_(None))
+        .values(revoked_at=now())
+        .returning(ApiToken.id)
+    )
+    return len(revoked.all())
+
+
 async def revoke_by_digest(session: AsyncSession, digest: str) -> None:
     """Revoke whichever credential has this digest, if it is still live.
 

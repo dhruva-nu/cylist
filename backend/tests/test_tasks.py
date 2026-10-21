@@ -944,15 +944,23 @@ class TestMoving:
 
         assert response.status_code == 422
 
-    async def test_an_unknown_column_is_a_clean_404(self, signed_in: AsyncClient) -> None:
+    async def test_an_unknown_column_reads_like_a_foreign_one(self, signed_in: AsyncClient) -> None:
+        """CYLIST-146: one answer for a column that is not on the project,
+        whether it is on another board or on none."""
         person = await _setup(signed_in)
         task = await _create(signed_in, person)
+        await signed_in.post("/projects", json=HERMES)
+        theirs = (await _columns(signed_in, "HRM"))[0]["id"]
 
-        response = await signed_in.post(
+        unknown = await signed_in.post(
             f"/tasks/{task['id']}/move", json={"column_id": UNKNOWN_ID, "position": 0}
         )
+        foreign = await signed_in.post(
+            f"/tasks/{task['id']}/move", json={"column_id": theirs, "position": 0}
+        )
 
-        assert response.status_code == 404
+        assert unknown.status_code == foreign.status_code == 422
+        assert unknown.json()["error"]["message"] == foreign.json()["error"]["message"]
 
     async def test_it_is_recorded_against_the_project(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

@@ -17,11 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.invites import INVITE_TTL, generate_invite, looks_like_invite
 from app.auth.passwords import hash_password, needs_rehash, verify_password
+from app.auth.principal import Principal
 from app.auth.tokens import hash_token
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
 from app.db import flush_or_refuse
+from app.models.activity import Channel
 from app.models.person import (
     AGENT_NAME,
     AGENT_RESPONSIBILITIES,
@@ -118,6 +120,10 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
 
     ``archived`` is translated to a timestamp here rather than exposing
     ``archived_at`` for a client to set to an arbitrary moment.
+
+    Raises:
+        UnprocessableRequestError: if this archives the last person who can
+            sign in.
     """
     person = await get(session, person_id)
 
@@ -138,6 +144,8 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
     for field, value in fields.items():
         setattr(person, field, value)
 
+    if data.archived and not person.is_archived:
+        await _require_another_way_in(session, person)
     if data.archived is not None:
         person.archived_at = now() if data.archived else None
     if data.archived:
@@ -150,12 +158,48 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
 
 
 async def archive(session: AsyncSession, person_id: UUID) -> Person:
-    """Hide someone from the pickers, keeping every reference to them intact."""
+    """Hide someone from the pickers, keeping every reference to them intact.
+
+    Raises:
+        UnprocessableRequestError: if they are the last person able to sign in.
+    """
     person = await get(session, person_id)
     if not person.is_archived:
+        await _require_another_way_in(session, person)
         person.archived_at = now()
     await _withdraw_access(session, person)
     return person
+
+
+async def _require_another_way_in(session: AsyncSession, person: Person) -> None:
+    """Refuse to archive the last person who can still sign in (CYLIST-118).
+
+    Archiving takes every credential somebody holds, and
+    :func:`has_any_account` counts archived accounts on purpose, so the
+    bootstrap password does not come back either. Archiving the last live
+    password would leave a deployment nobody can get into short of the
+    database — which is not a thing any caller means by "archive".
+
+    Raises:
+        UnprocessableRequestError: naming them, if nobody else could sign in.
+    """
+    if person.password_hash is None:
+        return
+    another = await session.scalar(
+        select(Person.id)
+        .where(
+            Person.password_hash.is_not(None),
+            Person.archived_at.is_(None),
+            Person.id != person.id,
+        )
+        .limit(1)
+    )
+    if another is None:
+        raise UnprocessableRequestError(
+            f"{person.name} is the last person who can sign in, and archiving them "
+            "would lock everybody out. Open an account for somebody else first.",
+            details={"person_id": str(person.id)},
+        )
 
 
 async def _withdraw_access(session: AsyncSession, person: Person) -> None:
@@ -214,6 +258,41 @@ async def has_any_account(session: AsyncSession) -> bool:
         select(Person.id).where(Person.password_hash.is_not(None)).limit(1)
     )
     return found is not None
+
+
+async def is_bootstrap(session: AsyncSession, principal: Principal) -> bool:
+    """Whether this caller is the bootstrap session, on a deployment still in need of it.
+
+    Three things, all of them required (CYLIST-119). Nobody behind it, or it
+    is a person. A browser session — ``Channel.WEB`` is what
+    :func:`~app.auth.dependencies.resolve_principal` gives a session token —
+    because the bootstrap password only ever buys one of those, and a
+    person-less API token is a leftover, not the deployment's owner. And no
+    account yet, because once one exists the bootstrap password no longer
+    works and nothing it opened should either.
+
+    Asked only where a caller has no person, so the query is not paid on the
+    ordinary path.
+    """
+    return (
+        principal.person_id is None
+        and principal.channel is Channel.WEB
+        and not await has_any_account(session)
+    )
+
+
+async def _close_the_bootstrap_door(session: AsyncSession) -> None:
+    """Revoke the bootstrap credentials as the first account opens.
+
+    :func:`has_any_account` already retires the bootstrap *password* the
+    moment a password exists. This retires what it left behind: its session,
+    which would otherwise last ``session_ttl_hours`` past that moment, and
+    any token minted from it before minting from a person-less caller was
+    refused. Checked before the password is written, since afterwards there
+    is always an account.
+    """
+    if not await has_any_account(session):
+        await tokens.revoke_personless(session)
 
 
 async def authenticate(session: AsyncSession, email: str, password: str) -> Person | None:
@@ -307,6 +386,7 @@ async def open_account(
     await _require_email_free(session, email, excluding=person.id)
 
     had_one = person.password_hash is not None
+    await _close_the_bootstrap_door(session)
     person.email = email
     person.password_hash = hash_password(password)
     # Any outstanding invitation is answered by this: the account it would have
@@ -348,6 +428,7 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
     if person is None or not person.invite_is_pending:
         raise UnprocessableRequestError("That invitation link is not valid, or it has expired.")
 
+    await _close_the_bootstrap_door(session)
     person.password_hash = hash_password(password)
     _clear_invitation(person)
     await session.flush()

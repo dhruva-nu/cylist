@@ -354,7 +354,7 @@ class TestWhereOnTheBoardARoleMayWork:
         )
 
         assert response.status_code == 422
-        assert "not on ATL's board" in response.json()["error"]["message"]
+        assert response.json()["error"]["message"] == "That column is not on this project."
 
     async def test_only_an_admin_may_set_the_line(
         self, signed_in: AsyncClient, other_client: AsyncClient

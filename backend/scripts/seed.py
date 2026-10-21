@@ -237,7 +237,10 @@ async def populate(
             ),
             creator_id=owner_id,
         )
-        await projects.set_members(session, project, [directory[h] for h in spec.members])
+        # The seed runs as the deployment's owner, who may hand out any role.
+        await projects.set_members(
+            session, project, [directory[h] for h in spec.members], fill_vacancy=True
+        )
 
         board = await _shape_board(session, project, spec, summary)
         # Before the cards, because a card names the goal it is written under.

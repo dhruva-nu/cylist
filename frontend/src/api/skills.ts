@@ -17,11 +17,11 @@ export interface Skill {
 
 export const skillsApi = {
   listSkills: (projectKey: string) => request<Skill[]>(`/projects/${projectKey}/skills`),
-  uploadSkill: (projectKey: string, file: File, description?: string, addedBy?: string | null) => {
+  /** Filed under whoever is signed in: the server takes the uploader from the session. */
+  uploadSkill: (projectKey: string, file: File, description?: string) => {
     const form = new FormData()
     form.append('file', file)
     if (description) form.append('description', description)
-    if (addedBy) form.append('added_by', addedBy)
     return request<Skill>(`/projects/${projectKey}/skills`, { method: 'POST', body: form })
   },
   /**

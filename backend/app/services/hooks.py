@@ -56,7 +56,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.clock import now
 from app.core.crypto import HOOK_SECRET_DOMAIN, KEY_VERSION, VaultCipher
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    UnprocessableRequestError,
+    not_on_this_project,
+)
 from app.core.ids import uuid7
 from app.db import flush_or_refuse
 from app.models.activity import Activity
@@ -781,19 +786,13 @@ def _refuse_rules_on_manual(hook: Hook) -> None:
 async def _own_column(session: AsyncSession, project: Project, column_id: UUID) -> None:
     column = await session.get(BoardColumn, column_id)
     if column is None or column.project_id != project.id:
-        raise UnprocessableRequestError(
-            f"That column is not on {project.key}'s board.",
-            details={"column_id": str(column_id)},
-        )
+        raise not_on_this_project("column", column_id=column_id)
 
 
 async def _own_template(session: AsyncSession, project: Project, template_id: UUID) -> None:
     template = await session.get(TaskTemplate, template_id)
     if template is None or template.project_id != project.id:
-        raise UnprocessableRequestError(
-            f"That template is not one of {project.key}'s.",
-            details={"template_id": str(template_id)},
-        )
+        raise not_on_this_project("template", template_id=template_id)
 
 
 async def _own_member(session: AsyncSession, project: Project, person_id: UUID) -> None:

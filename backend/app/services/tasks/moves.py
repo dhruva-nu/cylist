@@ -248,16 +248,10 @@ async def _destination_column(session: AsyncSession, task: Task, column_id: UUID
     """The column a card is being moved into, which must be on its own board.
 
     Raises:
-        NotFoundError: if there is no such column.
-        UnprocessableRequestError: if the column is on another project's board.
+        UnprocessableRequestError: if the column is on another project's
+            board, or on none.
     """
-    column = await columns.get(session, column_id)
-    if column.project_id != task.project_id:
-        raise UnprocessableRequestError(
-            "That column is on a different project's board.",
-            details={"column_id": str(column.id)},
-        )
-    return column
+    return await columns.require_column(session, task.project_id, column_id)
 
 
 async def _refuse_unfinished(

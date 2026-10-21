@@ -23,7 +23,7 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.models.person import PersonKind
+from app.models.person import Person, PersonKind
 from app.schemas.common import Acknowledged
 from app.schemas.people import (
     AccountSet,
@@ -83,30 +83,102 @@ async def get_person(
     return PersonRead.model_validate(await people.get(session, person_id))
 
 
-@router.patch("/{person_id}", response_model=PersonRead, summary="Update a person")
+_require_admin = require(Scope.ADMIN)
+
+
+def _holds_an_account(person: Person) -> bool:
+    """Whether this entry is somebody who signs in, or has been asked to.
+
+    Read off the columns rather than :attr:`Person.has_account`, which is
+    false for an archived account — and bringing one of those back is exactly
+    a change this has to catch.
+    """
+    return person.password_hash is not None or person.invite_token_hash is not None
+
+
+async def _may_change_access(principal: Principal, person: Person, body: PersonUpdate) -> None:
+    """Ask for ``admin`` where an edit reaches somebody's way in (CYLIST-118).
+
+    ``write`` is the scope every agent token carries, and the directory sits
+    outside roles, so this is the only fence there is. A display name or a
+    title is ``write``'s business. Archiving and un-archiving are not: one
+    revokes every credential the person holds, the other gives them back. Nor
+    is the email of an account, which is the name it signs in under. Those
+    sit behind ``admin``, with inviting somebody and setting their password.
+
+    Raises:
+        ForbiddenError: with ``details.missing_scopes``, via :func:`require`.
+    """
+    sent = body.model_dump(exclude_unset=True)
+    archives = "archived" in sent and body.archived != person.is_archived
+    readdresses = "email" in sent and body.email != person.email and _holds_an_account(person)
+    if archives or readdresses:
+        await _require_admin(principal)
+
+
+@router.patch(
+    "/{person_id}",
+    response_model=PersonRead,
+    summary="Update a person",
+    responses={
+        403: {"description": "Archiving, or changing a sign-in email, needs `admin`."},
+        422: {"description": "They are the last person who can sign in."},
+    },
+)
 async def update_person(
     person_id: UUID,
     body: PersonUpdate,
     principal: Principal = Depends(require(Scope.WRITE)),
     session: AsyncSession = SessionDependency,
 ) -> PersonRead:
-    """Change any subset of a person's details. Omitted fields are left alone."""
+    """Change any subset of a person's details. Omitted fields are left alone.
+
+    Names, titles, responsibilities and colours need `write`. Archiving or
+    un-archiving somebody, and changing the email of anybody who has an
+    account or an invitation, need `admin` as well.
+    """
+    await _may_change_access(principal, await people.get(session, person_id), body)
     person = await people.update(session, person_id, body)
-    await activity.record(
-        session,
-        principal,
-        "person.updated",
-        entity_type="person",
-        entity_id=person.id,
-        payload={"fields": sorted(body.model_dump(exclude_unset=True))},
+
+    # Archiving is written as itself, as `DELETE` writes it. "Changed a
+    # person's archived" is a line nobody scanning for who took somebody's
+    # access away would recognise.
+    described = sorted(
+        field for field in body.model_dump(exclude_unset=True) if field != "archived"
     )
+    if described:
+        await activity.record(
+            session,
+            principal,
+            "person.updated",
+            entity_type="person",
+            entity_id=person.id,
+            payload={"fields": described},
+        )
+    if body.archived is not None:
+        await activity.record(
+            session,
+            principal,
+            "person.archived" if body.archived else "person.restored",
+            entity_type="person",
+            entity_id=person.id,
+            payload={"name": person.name},
+        )
     return PersonRead.model_validate(person)
 
 
-@router.delete("/{person_id}", response_model=Acknowledged, summary="Archive a person")
+@router.delete(
+    "/{person_id}",
+    response_model=Acknowledged,
+    summary="Archive a person",
+    responses={
+        403: {"description": "Archiving somebody needs `admin`."},
+        422: {"description": "They are the last person who can sign in."},
+    },
+)
 async def archive_person(
     person_id: UUID,
-    principal: Principal = Depends(require(Scope.WRITE)),
+    principal: Principal = Depends(require(Scope.WRITE, Scope.ADMIN)),
     session: AsyncSession = SessionDependency,
 ) -> Acknowledged:
     """Archive someone rather than deleting them.
@@ -114,6 +186,10 @@ async def archive_person(
     Tasks they were assigned and files they uploaded keep naming them; they
     simply stop appearing in pickers. Bring them back with
     `PATCH /people/{id}` and `{"archived": false}`.
+
+    Needs `admin`, because archiving revokes every credential they hold — and
+    `write` is the scope an agent carries. The last person who can sign in
+    cannot be archived at all.
     """
     person = await people.archive(session, person_id)
     await activity.record(

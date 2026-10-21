@@ -14,7 +14,7 @@ from httpx import AsyncClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Person, Project, ProjectMember, ProjectRole
+from app.models import Activity, Person, Project, ProjectMember, ProjectRole
 from tests.conftest import INVITEE_PASSWORD, OWNER_NAME, open_account
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
@@ -389,6 +389,102 @@ class TestKeepingAnAdmin:
         await signed_in.put("/projects/ATL/members", json={"person_ids": [added]})
 
         assert await _roles_on_atlas(session) == {"Aditi K": "Reviewer"}
+
+
+class TestTakingOverByMembership:
+    """CYLIST-116: the member list is not a back door to the admin role.
+
+    ``PUT /members`` is fenced by ``people``, which the baseline grants every
+    member. Before this, one of them could drop the admin, inherit the vacancy
+    and add the admin back with no role.
+    """
+
+    async def _a_roleless_member(self, admin: AsyncClient, other: AsyncClient) -> tuple[str, str]:
+        await admin.post("/projects", json=ATLAS)
+        person = await _sign_in_as_a_second_person(admin, other)
+        owner = await _member_id(admin, OWNER_NAME)
+        await admin.put("/projects/ATL/members", json={"person_ids": [owner, person["id"]]})
+        return owner, str(person["id"])
+
+    async def test_a_roleless_member_cannot_remove_the_admin(
+        self, signed_in: AsyncClient, other_client: AsyncClient, session: AsyncSession
+    ) -> None:
+        owner, aditi = await self._a_roleless_member(signed_in, other_client)
+
+        response = await other_client.put("/projects/ATL/members", json={"person_ids": [aditi]})
+
+        assert response.status_code == 403
+        assert response.json()["error"]["details"]["admin_person_ids"] == [owner]
+        assert await _roles_on_atlas(session) == {OWNER_NAME: "Admin", "Aditi K": None}
+
+    async def test_but_can_still_say_who_else_is_on_it(
+        self, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        """The fence is around the admin, not the list: adding a colleague is
+        what the ``people`` permission is for."""
+        owner, aditi = await self._a_roleless_member(signed_in, other_client)
+        sanjay = (await signed_in.post("/people", json=SANJAY)).json()["id"]
+
+        response = await other_client.put(
+            "/projects/ATL/members", json={"person_ids": [owner, aditi, sanjay]}
+        )
+
+        assert response.status_code == 200
+
+    async def test_a_roleless_save_never_fills_a_vacancy(
+        self, signed_in: AsyncClient, other_client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Even where nobody holds the role — its holder archived, say — a
+        member's save is not how somebody comes to hold it.
+
+        A ``write`` token, because a browser session carries ``admin`` and so
+        is the deliberate way back into an admin-less project.
+        """
+        owner, aditi = await self._a_roleless_member(signed_in, other_client)
+        await session.execute(
+            update(ProjectMember)
+            .where(
+                ProjectMember.project_id
+                == select(Project.id).where(Project.key == "ATL").scalar_subquery()
+            )
+            .values(role_id=None)
+        )
+        await session.commit()
+        issued = (
+            await other_client.post("/tokens", json={"name": "agent", "scopes": ["read", "write"]})
+        ).json()
+
+        response = await other_client.put(
+            "/projects/ATL/members",
+            json={"person_ids": [owner, aditi]},
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+
+        assert response.status_code == 200
+        assert await _roles_on_atlas(session) == {OWNER_NAME: None, "Aditi K": None}
+
+    async def test_the_trail_names_who_came_and_went(self, signed_in: AsyncClient) -> None:
+        await _project_with(signed_in, ADITI)
+        owner = await _member_id(signed_in, OWNER_NAME)
+        sanjay = (await signed_in.post("/people", json=SANJAY)).json()["id"]
+
+        await signed_in.put("/projects/ATL/members", json={"person_ids": [owner, sanjay]})
+
+        assert "Added Sanjay F and took Aditi K off." in await _todays_sentences(signed_in)
+
+    async def test_a_promotion_is_logged_as_one(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Read off the rows: the caller has just left, and can no longer ask
+        the project for its day."""
+        await _project_with(signed_in, ADITI)
+        added = await _member_id(signed_in, "Aditi K")
+
+        await signed_in.put("/projects/ATL/members", json={"person_ids": [added]})
+
+        entry = await session.scalar(select(Activity).where(Activity.verb == "member.role_set"))
+        assert entry is not None
+        assert entry.payload == {"person": "Aditi K", "role": "Admin"}
 
 
 class TestMembershipKeepsRoles:

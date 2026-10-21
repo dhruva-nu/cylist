@@ -190,6 +190,35 @@ class TestTemplates:
 
         assert (await signed_in.patch(f"/templates/{UNKNOWN_ID}", json={})).status_code == 404
 
+    async def test_a_new_cards_template_must_be_this_projects(self, signed_in: AsyncClient) -> None:
+        """CYLIST-146: the guard that works out where a staged card lands asks
+        the same question the service does, so a template from another board
+        — or none — is the one 422 either way."""
+        person = await _project(signed_in)
+        await signed_in.post("/projects", json={"key": "HRM", "name": "Hermes"})
+        theirs = (
+            await signed_in.post(
+                "/projects/HRM/templates",
+                json={"name": "Hotfix", "description": "Theirs.", "stages": []},
+            )
+        ).json()["id"]
+        card = {
+            "title": "Stripe webhook idempotency",
+            "description": "Duplicate deliveries create double payments.",
+            "type": "bug",
+            "assignee_id": person,
+            "sub_statuses": ["Confirmed"],
+        }
+
+        foreign = await signed_in.post("/projects/ATL/tasks", json={**card, "template_id": theirs})
+        missing = await signed_in.post(
+            "/projects/ATL/tasks", json={**card, "template_id": UNKNOWN_ID}
+        )
+
+        assert foreign.status_code == missing.status_code == 422
+        assert foreign.json()["error"]["message"] == "That template is not on this project."
+        assert missing.json()["error"]["message"] == "That template is not on this project."
+
 
 class TestStages:
     async def test_a_template_is_a_list_of_stages(self, signed_in: AsyncClient) -> None:

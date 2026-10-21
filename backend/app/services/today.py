@@ -25,7 +25,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
-from app.core.errors import ForbiddenError, NotFoundError, UnprocessableRequestError
+from app.core.errors import (
+    ForbiddenError,
+    NotFoundError,
+    UnprocessableRequestError,
+    not_on_this_project,
+)
 from app.models.project import Project
 from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
 from app.models.today import DayPick, Todo, TodoState
@@ -80,7 +85,7 @@ async def pick(
             a card in cold storage. A day is planned around cards on the board.
     """
     if task.project_id != project.id:
-        raise UnprocessableRequestError(f"{task.reference} is not on {project.key}.")
+        raise not_on_this_project("task", task=task.reference)
     if task.parent_id is not None:
         raise UnprocessableRequestError(
             f"{task.reference} is a sub-task. Pick its card, {task.reference.rsplit('-', 1)[0]}, "

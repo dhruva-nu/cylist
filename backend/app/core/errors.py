@@ -40,7 +40,14 @@ class UnauthorizedError(AppError):
 
 
 class ForbiddenError(AppError):
-    """Valid credentials, but the principal lacks the required scope."""
+    """Valid credentials, but *who is asking* may not do this.
+
+    The rule (CYLIST-146): 403 is "not allowed by role" — a missing scope, a
+    role that does not carry the permission, not being the project's admin,
+    being nobody where a person is needed. Change the caller and the same
+    request would pass. A request that no caller could make, because it would
+    break an invariant, is :class:`UnprocessableRequestError` instead.
+    """
 
     status_code = status.HTTP_403_FORBIDDEN
     code = "forbidden"
@@ -68,10 +75,34 @@ class PayloadTooLargeError(AppError):
 
 
 class UnprocessableRequestError(AppError):
-    """Well-formed, but it breaks a business rule."""
+    """Well-formed, but it breaks a business rule.
+
+    Whoever sent it: leaving a project with no admin, archiving the last
+    person who can sign in, naming a column on another board. A refusal that
+    depends on the caller is :class:`ForbiddenError`.
+    """
 
     status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
     code = "unprocessable"
+
+
+def not_on_this_project(noun: str, **details: object) -> UnprocessableRequestError:
+    """The one refusal for a request that names something not on its project.
+
+    One status and one sentence, whether the thing is on another project or
+    does not exist at all (CYLIST-146). Clients branch on ``code``, so two
+    answers for one mistake meant every caller special-cased each endpoint;
+    and a refusal that told the two apart would say which ids exist on
+    projects the caller cannot see.
+
+    Args:
+        noun: What was named — ``column``, ``template``, ``goal``, ``task``.
+        details: The offending ids, stringified, under the field they came in.
+    """
+    return UnprocessableRequestError(
+        f"That {noun} is not on this project.",
+        details={field: str(value) for field, value in details.items()},
+    )
 
 
 def _error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
