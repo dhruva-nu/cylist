@@ -174,6 +174,19 @@ fun isAnswerable(prompt: AgentPromptRead?, now: Instant?): Boolean {
     return expires.isAfter(now)
 }
 
+/**
+ * Whether this viewer may answer (`mayAnswer`, CYLIST-141). A question is
+ * anyone's who may edit the card; a permission is a tool running on one
+ * person's machine, and only that person — the prompt's owner — may answer it.
+ */
+fun mayAnswer(prompt: AgentPromptRead, viewerId: UUID?): Boolean =
+    prompt.kind != AgentPromptKind.permission || (viewerId != null && prompt.ownerId == viewerId)
+
+/** What a permission says to everyone but its owner, in place of its buttons (`notYours`). */
+fun notYours(prompt: AgentPromptRead): String =
+    prompt.owner?.let { "Only $it can answer this: the tool runs on their machine." }
+        ?: "Only the person running this agent can answer it."
+
 /** "You" to whoever answered, their name to anyone else, "Answered" for an answer that is nobody's (`answeredBy`). */
 fun answeredBy(prompt: AgentPromptRead, viewerId: UUID?): String =
     if (viewerId != null && prompt.answeredById == viewerId) "You" else prompt.answeredBy ?: "Answered"

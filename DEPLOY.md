@@ -313,26 +313,32 @@ If sockets turn out not to get through, nothing breaks. The board keeps its
 ten-second poll as a fallback and the agent hooks keep reporting over HTTP;
 what is lost is the promptness, not the correctness.
 
-### Never add `--workers`
+### More than one worker
 
-One uvicorn process per environment, and this is now a constraint rather
-than a default. The registry of who is connected is a dictionary in that
-process, which is a complete and correct answer for one worker and a wrong
-one for two:
+Each environment runs one uvicorn process today, because one is plenty. It
+no longer has to (CYLIST-133): `--workers N`, or a second replica on the same
+database, is safe. What used to make it unsafe, and what replaced it:
 
-* Fan-out splits silently. An agent's change reaches the boards on its own
-  worker and no others, so most open boards freeze — intermittently, and
-  looking exactly like a frontend bug.
-* The startup sweep, which ends every open agent session because a
-  just-started process can hold no sockets, would end the sessions its peer
-  workers are actively holding. Whichever worker restarts last wipes the
-  board.
+* **Fan-out.** Who is connected is still a dictionary per process, but every
+  committed event now also goes out as a Postgres `NOTIFY` on the
+  `cylist_events` channel, and every process `LISTEN`s on a connection of its
+  own and tells its own boards, long-polls and agent sockets
+  (`backend/app/realtime/bus.py`). A board on one worker hears an agent on
+  another. Each process holds one extra database connection for it.
+* **Whether an agent session is alive.** That was a question about one
+  process's memory. The process holding an agent's socket now stamps
+  `agent_session.socket_seen_at` about once a minute, and any process's
+  reaper reads that.
+* **The startup sweep** ended every open session when a process started,
+  which would have ended the sessions a peer was holding. It is gone; a
+  session whose socket died with its process is reaped once it has been
+  quiet past `AGENT_QUIET_AFTER`. Every process runs the reaper, and a
+  Postgres advisory lock makes sure only one pass at a time does the work.
 
-If the day comes that one process is not enough, `Hub.publish` in
-`backend/app/realtime/hub.py` is the single fan-out entry point and takes a
-JSON-serialisable dict, so backing it with Postgres `LISTEN`/`NOTIFY` is a
-change to one method. Until somebody does that deliberately, do not add the
-flag.
+Two things stay per process and are worth knowing before adding workers:
+`GET /api/v1/health/realtime` counts the sockets *the process that answered*
+holds, not the deployment's; and the sign-in throttle (CYLIST-121) is
+in-process, so N workers let N times as many attempts through.
 
 ## Logs
 

@@ -74,6 +74,30 @@ timestamp.
 
 This is what the computed staleness used to do, moved from the read to a
 write: the board now reads a fact rather than a guess about the clock.
+
+It is also how a session whose socket's process died is ended, now that no
+sweep on startup does it (CYLIST-133): its socket stops vouching for it, and
+once it has been quiet this long it is unwitnessed and quiet like any other.
+A daemon that is still alive reconnects within seconds and is never asked.
+"""
+
+AGENT_SOCKET_STAMP_EVERY = timedelta(seconds=60)
+"""How often a socket writes down that it still holds its session.
+
+On connect, and then on the first frame after this has passed — the
+client's keepalive is sixty seconds, so a live socket stamps about once a
+minute. One indexed UPDATE per socket per minute is the price of any
+process being able to tell whether a session is witnessed.
+"""
+
+AGENT_SOCKET_WITNESSES_FOR = AGENT_SOCKET_IDLE_AFTER + AGENT_SOCKET_STAMP_EVERY
+"""How long a stamp vouches for a session.
+
+A live socket cannot go quieter than the idle window without being closed,
+and its latest stamp is never more than one stamp interval older than its
+latest frame; so a socket that is still open has always stamped within the
+two together. A stamp older than that
+belongs to a socket that is gone, whichever process held it.
 """
 
 REAP_EVERY = timedelta(seconds=60)

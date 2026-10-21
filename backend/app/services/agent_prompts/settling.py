@@ -17,6 +17,7 @@ from app.models.agent_session import (
     AgentSession,
     AgentSessionReason,
     AgentSessionState,
+    SessionKey,
 )
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut
@@ -32,7 +33,7 @@ terminal, a hosted request cut off mid-wait."""
 
 
 async def settle_for_report(
-    session: AsyncSession, task: Task, client_session_id: str, data: AgentSessionPut
+    session: AsyncSession, task: Task, key: SessionKey, data: AgentSessionPut
 ) -> AgentSessionPut:
     """What a session's own report means for the prompts it has open.
 
@@ -57,7 +58,7 @@ async def settle_for_report(
     """
     if data.state is AgentSessionState.DONE:
         return data
-    row = await agent_sessions.open_on_card(session, task, client_session_id)
+    row = await agent_sessions.open_on_card(session, task, key)
     if row is None:
         return data
 
@@ -95,7 +96,7 @@ async def settle_for_report(
         if prompt.status is AgentPromptStatus.OPEN:
             held = True
         else:
-            store.announce(session, task, prompt, client_session_id)
+            store.announce(session, task, prompt, row)
 
     if not held:
         return data
@@ -126,7 +127,7 @@ async def withdraw_for_sessions(
         )
         task = await session.get(Task, prompt.task_id)
         if task is not None:
-            store.announce(session, task, prompt, by_id[prompt.agent_session_id].client_session_id)
+            store.announce(session, task, prompt, by_id[prompt.agent_session_id])
         closed += 1
     return closed
 
@@ -163,6 +164,6 @@ async def sweep(session: AsyncSession) -> int:
             task = await session.get(Task, prompt.task_id)
             row = await session.get(AgentSession, prompt.agent_session_id)
             if task is not None:
-                store.announce(session, task, prompt, row.client_session_id if row else "")
+                store.announce(session, task, prompt, row)
             closed += 1
     return closed

@@ -12,7 +12,6 @@ class AgentSessionPickTest {
         id = UUID.randomUUID(),
         taskId = UUID.randomUUID(),
         actorLabel = "claude",
-        clientSessionId = "s-$changed",
         clientName = null,
         state = state,
         reason = null,

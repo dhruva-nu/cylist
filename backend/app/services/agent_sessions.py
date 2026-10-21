@@ -23,14 +23,19 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.core.errors import ForbiddenError
 from app.models.activity import Channel
-from app.models.agent_session import AgentSession, AgentSessionReason, AgentSessionState
+from app.models.agent_session import (
+    AgentSession,
+    AgentSessionReason,
+    AgentSessionState,
+    SessionKey,
+)
 from app.models.task import Task
 from app.schemas.agent_sessions import (
     AgentPresence,
@@ -84,6 +89,11 @@ async def upsert(
     person is not an agent whatever they type. Only a bearer token — the CLI,
     an MCP server, a hook — may say a session is working.
 
+    The session is the caller's: ``client_session_id`` names one of *their*
+    conversations, and a report never reaches a row another person owns,
+    whatever id it sends. Someone else's session under the same id is simply
+    a different row — see :class:`~app.models.agent_session.SessionKey`.
+
     A client session is on one card at a time. If this one has an open row on
     a *different* card, that row is ended with ``reason=moved`` first, so a
     ``/work`` on a second card, or a cylist write to one, walks the session
@@ -99,11 +109,12 @@ async def upsert(
         raise ForbiddenError(
             "Only an agent's API token can report a session on a card; the web UI cannot."
         )
+    key = key_for(principal, client_session_id)
 
     now = clock_now()
-    transitions, ended = await _walk_off_other_cards(session, client_session_id, task, now)
+    transitions, ended = await _walk_off_other_cards(session, key, task, now)
 
-    row, created = await _find_or_create_row(session, principal, task, client_session_id, data, now)
+    row, created = await _find_or_create_row(session, principal, task, key, data, now)
     state_before = None if created else row.state
     note_before = None if created else row.note
     was_open = row.ended_at is None
@@ -130,8 +141,29 @@ async def upsert(
     )
 
 
+def key_for(principal: Principal, client_session_id: str) -> SessionKey:
+    """The caller's conversation of this id.
+
+    Raises:
+        ForbiddenError: for a credential that is nobody's — the bootstrap
+            session, the one principal without a person, which is never an
+            agent's.
+    """
+    if principal.person_id is None:
+        raise ForbiddenError("A credential that is nobody's cannot hold an agent session.")
+    return SessionKey(principal.person_id, client_session_id)
+
+
+def _is(key: SessionKey) -> ColumnElement[bool]:
+    """The rows of one person's conversation, as a WHERE clause."""
+    return and_(
+        AgentSession.person_id == key.person_id,
+        AgentSession.client_session_id == key.client_session_id,
+    )
+
+
 async def _walk_off_other_cards(
-    session: AsyncSession, client_session_id: str, task: Task, now: datetime
+    session: AsyncSession, key: SessionKey, task: Task, now: datetime
 ) -> tuple[list[Transition], list[AgentSession]]:
     """End this client session's open rows on every card but ``task``.
 
@@ -143,7 +175,7 @@ async def _walk_off_other_cards(
     ended: list[AgentSession] = []
     elsewhere = await session.scalars(
         select(AgentSession).where(
-            AgentSession.client_session_id == client_session_id,
+            _is(key),
             AgentSession.task_id != task.id,
             AgentSession.ended_at.is_(None),
         )
@@ -168,25 +200,23 @@ async def _find_or_create_row(
     session: AsyncSession,
     principal: Principal,
     task: Task,
-    client_session_id: str,
+    key: SessionKey,
     data: AgentSessionPut,
     now: datetime,
 ) -> tuple[AgentSession, bool]:
-    """This client session's row on this card, and whether it was just made."""
+    """This conversation's row on this card, and whether it was just made."""
     row = await session.scalar(
-        select(AgentSession).where(
-            AgentSession.task_id == task.id,
-            AgentSession.client_session_id == client_session_id,
-        )
+        select(AgentSession).where(AgentSession.task_id == task.id, _is(key))
     )
     if row is not None:
         return row, False
 
     row = AgentSession(
         task_id=task.id,
+        person_id=key.person_id,
         token_id=principal.token_id,
         actor_label=principal.label,
-        client_session_id=client_session_id,
+        client_session_id=key.client_session_id,
         state=data.state,
         reason=None,
         started_at=now,
@@ -276,8 +306,9 @@ def _trail_verb(state: AgentSessionState, *, fresh: bool) -> str | None:
 def _trail_payload(
     row: AgentSession, *, moved_to: str | None = None, cause: str | None = None
 ) -> dict[str, Any]:
+    # Never the client's session id: the trail is read by everyone on the
+    # project, and that id is all it took to impersonate the session.
     payload: dict[str, Any] = {
-        "client_session_id": row.client_session_id,
         "client_name": row.client_name,
         "reason": row.reason.value if row.reason else None,
     }
@@ -288,38 +319,51 @@ def _trail_payload(
     return payload
 
 
-async def open_on_card(
-    session: AsyncSession, task: Task, client_session_id: str
-) -> AgentSession | None:
-    """This client session's open row on this card, if it has one.
+async def open_on_card(session: AsyncSession, task: Task, key: SessionKey) -> AgentSession | None:
+    """This conversation's open row on this card, if it has one.
 
     The question every message from a session's own socket starts with: a
     daemon names its conversation, and only a row that is still open on the
-    card it names is anything a feed line or a prompt can belong to.
+    card it names, and is the caller's own, is anything a feed line or a
+    prompt can belong to.
     """
     found: AgentSession | None = await session.scalar(
         select(AgentSession).where(
             AgentSession.task_id == task.id,
-            AgentSession.client_session_id == client_session_id,
+            _is(key),
             AgentSession.ended_at.is_(None),
         )
     )
     return found
 
 
-def acting_principal(row: AgentSession, person_id: UUID | None = None) -> Principal:
+async def stamp_socket(session: AsyncSession, key: SessionKey, moment: datetime) -> None:
+    """Write down that a socket still holds this conversation — CYLIST-133.
+
+    Every open row of it, wherever it is on the board: a session is on one
+    card at a time, but the socket is the conversation's, not the card's. One
+    UPDATE on an indexed few rows, about once a minute per socket.
+    """
+    await session.execute(
+        update(AgentSession)
+        .where(_is(key), AgentSession.ended_at.is_(None))
+        .values(socket_seen_at=moment)
+    )
+
+
+def acting_principal(row: AgentSession) -> Principal:
     """The agent a row belongs to, for a trail line nobody in particular caused.
 
     The trail reads "the agent's session ended" or "nobody answered it", and
     the actor it names should be the agent — under the label the row was
-    written with, which outlives the token that made it — acting for whoever's
-    token it was, when that is known. No scopes: nothing downstream of
+    written with, which outlives the token that made it — acting for the
+    person whose session it is. No scopes: nothing downstream of
     ``activity.record`` checks them, and inventing some would be claiming
     authority this has not been given.
     """
     return Principal(
         token_id=row.token_id,
-        person_id=person_id,
+        person_id=row.person_id,
         label=row.actor_label,
         scopes=frozenset(),
         channel=Channel.API,
@@ -433,7 +477,6 @@ def read(row: AgentSession, prompt: AgentPromptRead | None = None) -> AgentSessi
         id=row.id,
         task_id=row.task_id,
         actor_label=row.actor_label,
-        client_session_id=row.client_session_id,
         client_name=row.client_name,
         state=row.state,
         reason=row.reason,
@@ -467,8 +510,8 @@ def presence(
     pulsed forever. That made the border a function of ``now``: a card
     changed what it said with no event behind it, which is precisely why the
     board had to keep asking. Something ends those rows now — a socket
-    closing, the boot sweep, the reaper — so this is a pure function of
-    stored state, every change to it is an event, and an event can be pushed.
+    closing, or the reaper — so this is a pure function of stored state,
+    every change to it is an event, and an event can be pushed.
 
     The stale branch is not merely unused, it is unreachable: the
     ``done_has_ended_at`` constraint means every *open* row is working or

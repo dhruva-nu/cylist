@@ -20,8 +20,6 @@ export interface AgentSessionRead {
   task_id: string
   /** The name of the token the hook reports with. */
   actor_label: string
-  /** The harness's own id for the conversation. */
-  client_session_id: string
   /** The session's display name, if known. Usually the card's reference. */
   client_name: string | null
   state: AgentSessionState
@@ -85,6 +83,14 @@ export interface AgentPrompt {
   options: AgentPromptOption[]
   /** Whether a typed reply is accepted as well as a choice — a question's are. */
   allows_reply: boolean
+  /**
+   * Whose agent is asking, as a person id (CYLIST-141). A permission may be
+   * answered by this person alone — the tool runs on their machine; a
+   * question by anyone who may edit the card. Null for a session nobody owns.
+   */
+  owner_id: string | null
+  /** Whose agent is asking, by name. */
+  owner: string | null
   status: AgentPromptStatus
   /** What was answered: the chosen option's label, or the reply typed. */
   answer: string | null

@@ -16,6 +16,7 @@ from app.models.agent_session import (
     AgentSession,
     AgentSessionReason,
     AgentSessionState,
+    SessionKey,
 )
 from app.models.api_token import ApiToken, TokenKind
 from app.models.base import Base
@@ -91,6 +92,7 @@ __all__ = [
     "PushDevice",
     "RoleClearance",
     "RoleColumnRule",
+    "SessionKey",
     "Skill",
     "Task",
     "TaskChecklistItem",

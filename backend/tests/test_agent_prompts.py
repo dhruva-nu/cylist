@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
@@ -170,14 +170,14 @@ class TestAsking:
         self, signed_in: AsyncClient, agent: dict[str, str]
     ) -> None:
         ref = await a_card(signed_in)
-        await _report(signed_in, agent, ref, "working", SESSION_A)
-        await _report(signed_in, agent, ref, "working", SESSION_B)
+        await _report(signed_in, agent, ref, "working", SESSION_A, client_name="A")
+        await _report(signed_in, agent, ref, "working", SESSION_B, client_name="B")
 
         await _ask(signed_in, agent, ref)
 
-        by_id = {row["client_session_id"]: row for row in await _sessions(signed_in, ref)}
-        assert by_id[SESSION_B]["reason"] == "question"
-        assert by_id[SESSION_A]["state"] == "working"
+        by_name = {row["client_name"]: row for row in await _sessions(signed_in, ref)}
+        assert by_name["B"]["reason"] == "question"
+        assert by_name["A"]["state"] == "working"
 
 
 class TestAnswering:
@@ -759,9 +759,16 @@ class TestPermissionsOverTheSocket:
 
     async def _open_permission(self, session: AsyncSession, ref: str) -> str:
         task = await tasks.resolve(session, ref)
+        # The session the agent reported, whoever's token that was.
+        row = await session.scalar(
+            select(AgentSession).where(
+                AgentSession.task_id == task.id, AgentSession.client_session_id == SESSION_A
+            )
+        )
+        assert row is not None and row.key is not None
         prompt_id = uuid4()
         reply = await agent_prompts.open_permission(
-            session, task, SESSION_A, prompt_id, "Running ls", "Bash"
+            session, task, row.key, prompt_id, "Running ls", "Bash"
         )
         assert reply is None
         await session.commit()
@@ -810,6 +817,8 @@ class TestPresence:
             answer_key=None,
             answered_by=None,
             answered_by_id=None,
+            owner_id=None,
+            owner=None,
             answered_at=None,
             closed_reason=None,
             asked_at=asking.state_changed_at,

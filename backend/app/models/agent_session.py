@@ -7,10 +7,10 @@ task's ``status`` is about the work, not about who is at the keyboard; and
 this card this minute, and it has a question for you" — which is what a
 board is glanced at for while an agent runs.
 
-One row per (task, client session). The client session is the harness's own
-id for the conversation — Claude Code's ``session_id`` — so two terminals on
-the same card are two rows, and the card shows the one that needs a human
-first (see :func:`app.services.agent_sessions.presence`).
+One row per (task, person, client session). The client session is the
+harness's own id for the conversation — Claude Code's ``session_id`` — so two
+terminals on the same card are two rows, and the card shows the one that
+needs a human first (see :func:`app.services.agent_sessions.presence`).
 
 The rows are written by lifecycle hooks, not by the model: the harness
 reports working / waiting / done deterministically, and the agent itself has
@@ -21,17 +21,20 @@ untrue, and the read model papered over it: nothing ended the row of a
 process that had died, so a *stale* state was computed from how long it had
 been silent. It worked, and it cost the board the ability to ever be pushed
 to — a card changed what it said with no event behind it, so a client had to
-keep asking. Three things end a row now, and all of them are events: the
-agent's socket closing, the sweep on startup (a process holding no sockets
-has no live sessions, whatever the rows say), and the reaper, for the
-clients that hold no socket to close.
+keep asking. Two things end a row now, and both are events: the agent's
+socket closing, and the reaper — for the clients that hold no socket to
+close, and for the sessions whose socket's process went away without closing
+it (see ``socket_seen_at``). There used to be a third, a sweep on startup that
+ended every open row; it was only true while there was one process, and it
+withdrew every question a person was about to answer on each deploy
+(CYLIST-133, CYLIST-134).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from sqlalchemy import (
@@ -99,6 +102,19 @@ class AgentSessionReason(StrEnum):
     leaving. This one is the board noticing on its own."""
 
 
+class SessionKey(NamedTuple):
+    """One person's conversation: how every door names an agent session.
+
+    The client's id alone is not a name — it is chosen by the client and was
+    shown on every card — so it is only ever used with the person whose
+    credential is presenting it. Two people who send the same id are two
+    sessions, and neither can reach the other's.
+    """
+
+    person_id: UUID
+    client_session_id: str
+
+
 def _enum(python_type: type[StrEnum], name: str) -> Enum:
     """A VARCHAR of the values plus a CHECK, never a native PG enum — see
     ``models/task.py``.
@@ -121,11 +137,15 @@ def _enum(python_type: type[StrEnum], name: str) -> Enum:
 class AgentSession(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "agent_session"
     __table_args__ = (
-        # One row per conversation per card. A session that comes back to a
-        # card it left reopens its old row rather than starting a second one.
+        # One row per conversation per card per person. A session that comes
+        # back to a card it left reopens its old row rather than starting a
+        # second one. The person is part of the key so that nobody can claim
+        # someone else's conversation id on a card first and lock them out
+        # of it — see ``person_id``.
         Index(
-            "ix_agent_session_task_id_client_session_id",
+            "ix_agent_session_task_id_person_id_client_session_id",
             "task_id",
+            "person_id",
             "client_session_id",
             unique=True,
         ),
@@ -159,13 +179,45 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     rather than cascaded if the token is deleted: the record that an agent was
     here outlives the key it used."""
 
+    person_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("person.id", ondelete="SET NULL"),
+    )
+    """Whose session this is: the person whose token first reported it.
+
+    The ``client_session_id`` is chosen by the client and was, until
+    CYLIST-120, the only key — so anyone who could read a card could read the
+    id off it, and anyone with a write token could then report, end, or open a
+    socket as that session, and be handed its permission answers. Every door
+    that names a session by its client id now names it *for a person*, and a
+    session that is somebody else's is, to that door, a session that does not
+    exist.
+
+    A person rather than a token: the hook, the presence daemon and the MCP
+    server are often handed different tokens by the same person, and all of
+    them are that person's agent. Null only on rows from before revision 0046
+    whose token had already been deleted, which are owned by nobody and
+    reachable by nobody."""
+
+    socket_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """When a socket last vouched for this session — CYLIST-133.
+
+    Which process holds a socket is not something any *other* process can
+    see, so "is this session witnessed" used to be a question about one
+    process's memory, and a second worker could not answer it. The process
+    holding the socket now writes it here instead, on connect and then at
+    least every :data:`app.config.AGENT_SOCKET_STAMP_EVERY`; any process's
+    reaper reads it. Null for a session that has never held one."""
+
     actor_label: Mapped[str] = mapped_column(String(120), nullable=False)
     """The token's name when the row was first written, kept for the same
     reason ``Activity.actor_label`` is."""
 
     client_session_id: Mapped[str] = mapped_column(String(200), nullable=False)
     """The harness's own id for the conversation: Claude Code's
-    ``session_id``. Opaque here; only ever compared for equality."""
+    ``session_id``. Opaque here; only ever compared for equality, and only
+    ever together with ``person_id``. Never shown back: the session's owner
+    already knows it, and nobody else has any use for it but impersonation."""
 
     client_name: Mapped[str | None] = mapped_column(String(200))
     """The session's display name, when the hook knows it. Usually the task
@@ -209,6 +261,13 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     """When a finished session was cleared off the card, by the Dismiss button
     or by a person touching the card in the web UI. A dismissed row is history;
     the board no longer draws it."""
+
+    @property
+    def key(self) -> SessionKey | None:
+        """The conversation this row belongs to, or ``None`` for a row nobody owns."""
+        if self.person_id is None:
+            return None
+        return SessionKey(self.person_id, self.client_session_id)
 
 
 class AgentFeedKind(StrEnum):
