@@ -29,6 +29,10 @@ def clean_name(value: str) -> str:
         raise ValueError("must not contain a path")
     if any(character < " " or character == "\x7f" for character in stripped):
         raise ValueError("must not contain control characters")
+    # Checked here as well as by each schema's max_length, because an upload's
+    # filename never passes through a schema: it arrives on the multipart part.
+    if len(stripped) > NAME_MAX_LENGTH:
+        raise ValueError(f"must be at most {NAME_MAX_LENGTH} characters")
     return stripped
 
 

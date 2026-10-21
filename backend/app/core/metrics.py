@@ -63,6 +63,14 @@ class MetricsMiddleware:
                 status_code = message["status"]
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            # Nothing inside answered, so no status went past; the response
+            # the client will get is the 500 the request log sends outside.
+            # Counted here as that 500, or the requests most worth alerting on
+            # would be the only ones missing from the dashboard.
+            self.metrics.record(status_code or 500)
+            raise
         if status_code:
             self.metrics.record(status_code)

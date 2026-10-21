@@ -25,12 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import GOAL_PALETTE, colour_for
+from app.db import flush_or_refuse
 from app.models.board import BoardColumn
 from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
-from app.services import columns, projects
+from app.services import columns, projects, references
 
 _SETTLED_LAST = case((Goal.status == GoalStatus.OPEN, 0), else_=1)
 """Open goals first, whatever the alphabet says.
@@ -85,11 +86,8 @@ async def resolve(session: AsyncSession, reference: str) -> Goal:
     try:
         statement = select(Goal).where(Goal.id == UUID(reference))
     except ValueError:
-        # Upper-cased before splitting so ``atl-g1`` reads the same as
-        # ``ATL-G1``: a reference read out loud arrives in whatever case the
-        # reader typed it.
-        key, _, number = reference.upper().partition("-G")
-        if not key or not number.isdigit():
+        parsed = references.goal_reference(reference)
+        if parsed is None:
             raise NotFoundError(
                 f"No goal matching {reference!r}. A goal reference reads ATL-G1 — "
                 "the project's key, then G, then its number."
@@ -97,7 +95,7 @@ async def resolve(session: AsyncSession, reference: str) -> Goal:
         statement = (
             select(Goal)
             .join(Project, Project.id == Goal.project_id)
-            .where(Project.key == key, Goal.number == int(number))
+            .where(Project.key == parsed.key, Goal.number == parsed.number)
         )
 
     goal = await session.scalar(statement)
@@ -167,7 +165,7 @@ async def create(session: AsyncSession, project: Project, data: GoalCreate) -> G
         status=GoalStatus.OPEN,
     )
     session.add(goal)
-    await session.flush()
+    await flush_or_refuse(session, _duplicate(data.name))
     await session.refresh(goal, ["project", "owner"])
     return goal
 
@@ -201,7 +199,7 @@ async def update(session: AsyncSession, goal: Goal, data: GoalUpdate) -> Goal:
     if status is not None and status != goal.status:
         await _set_status(session, goal, status)
 
-    await session.flush()
+    await flush_or_refuse(session, _duplicate(name or goal.name))
     await session.refresh(goal, ["project", "owner"])
     return goal
 
@@ -360,6 +358,15 @@ async def _refuse_duplicate(session: AsyncSession, project_id: UUID, name: str) 
             f"This project already has a goal called {existing.name!r}.",
             details={"name": existing.name, "reference": existing.reference},
         )
+
+
+def _duplicate(name: str) -> ConflictError:
+    """What :func:`_refuse_duplicate` says, for the request that passed it and
+    then lost the race to the index — which knows the name but not the goal
+    that took it."""
+    return ConflictError(
+        f"This project already has a goal called {name!r}.", details={"name": name}
+    )
 
 
 async def _next_number(session: AsyncSession, project: Project) -> int:

@@ -14283,7 +14283,8 @@
           },
           "sub_stage_labels": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 60
             },
             "type": "array",
             "maxItems": 4,
@@ -14292,7 +14293,8 @@
           },
           "allowed_outcomes": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 40
             },
             "type": "array",
             "maxItems": 3,
@@ -14385,7 +14387,8 @@
           },
           "sub_statuses": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 60
             },
             "type": "array",
             "maxItems": 4,
@@ -14508,7 +14511,8 @@
           },
           "sub_statuses": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 60
             },
             "type": "array",
             "maxItems": 4,
@@ -15725,7 +15729,8 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 60
                 },
                 "type": "array",
                 "maxItems": 4

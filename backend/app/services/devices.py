@@ -9,7 +9,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
@@ -39,25 +40,30 @@ async def register(session: AsyncSession, principal: Principal, data: DeviceRegi
     """
     person_id, token_id = _caller(principal)
     moment = now()
-    device = await session.scalar(select(PushDevice).where(PushDevice.fcm_token == data.fcm_token))
-    if device is None:
-        device = PushDevice(
-            fcm_token=data.fcm_token,
-            person_id=person_id,
-            token_id=token_id,
-            platform=data.platform,
-            label=data.label,
-            last_registered_at=moment,
+    # One upsert rather than a lookup and then an insert: the app registers on
+    # every sign-in, and two of those racing for one phone both found no row
+    # and the second insert failed on the token's unique index.
+    claimed = {
+        "person_id": person_id,
+        "token_id": token_id,
+        "platform": data.platform,
+        "label": data.label,
+        "last_registered_at": moment,
+    }
+    statement = postgresql.insert(PushDevice).values(fcm_token=data.fcm_token, **claimed)
+    await session.execute(
+        statement.on_conflict_do_update(
+            index_elements=[PushDevice.fcm_token],
+            set_={**claimed, "updated_at": func.now()},
         )
-        session.add(device)
-    else:
-        device.person_id = person_id
-        device.token_id = token_id
-        device.platform = data.platform
-        device.label = data.label
-        device.last_registered_at = moment
-    await session.flush()
-    await session.refresh(device)
+    )
+    device = await session.scalar(
+        select(PushDevice)
+        .where(PushDevice.fcm_token == data.fcm_token)
+        .execution_options(populate_existing=True)
+    )
+    if device is None:  # pragma: no cover - the upsert either inserted or updated it
+        raise RuntimeError("No device row after registering one")
     return device
 
 

@@ -21,6 +21,7 @@ from uuid import UUID
 
 from fastapi import UploadFile
 from sqlalchemy import delete, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -78,7 +79,26 @@ async def store_upload(
             part-way rather than after all of it has arrived.
     """
     blob = await _store(session, store, chunks(source), max_bytes=max_bytes)
-    return blob, source.content_type or DEFAULT_MIME
+    return blob, declared_mime(source)
+
+
+MIME_MAX_LENGTH = 255
+"""The ``mime`` columns' width, on files and on skills alike."""
+
+
+def declared_mime(source: UploadFile) -> str:
+    """The type an upload declared, or the generic one if it declared nothing usable.
+
+    Whatever the client sent in the part's ``Content-Type``, which is not
+    checked against the bytes and is only ever a label. One longer than the
+    column is no real type — the longest registered ones are well under a
+    hundred characters — so it is treated as no type at all rather than as a
+    reason to refuse a file whose content is fine.
+    """
+    declared = source.content_type
+    if not declared or len(declared) > MIME_MAX_LENGTH:
+        return DEFAULT_MIME
+    return declared
 
 
 async def store_bytes(
@@ -113,12 +133,19 @@ async def _store(
             details={"max_bytes": max_bytes},
         ) from exc
 
+    # Insert-if-absent in one statement rather than a SELECT then an INSERT:
+    # two people uploading the same file for the first time both found no row,
+    # and the second INSERT failed on the digest's unique index as a 500. The
+    # loser's bytes went to the same content-addressed path, so there is
+    # nothing to undo — it just reuses the winner's row.
+    await session.execute(
+        postgresql.insert(Blob)
+        .values(sha256=stored.sha256, size=stored.size, path=stored.path)
+        .on_conflict_do_nothing(index_elements=[Blob.sha256])
+    )
     blob = await session.scalar(select(Blob).where(Blob.sha256 == stored.sha256))
-    if blob is None:
-        blob = Blob(sha256=stored.sha256, size=stored.size, path=stored.path)
-        session.add(blob)
-        await session.flush()
-
+    if blob is None:  # pragma: no cover - the row was inserted or already there
+        raise RuntimeError(f"No blob row for {stored.sha256} after inserting one")
     return blob
 
 

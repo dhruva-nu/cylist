@@ -58,6 +58,7 @@ from app.core.clock import now
 from app.core.crypto import HOOK_SECRET_DOMAIN, KEY_VERSION, VaultCipher
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.ids import uuid7
+from app.db import flush_or_refuse
 from app.models.activity import Activity
 from app.models.board import BoardColumn
 from app.models.hook import Hook, HookDelivery
@@ -548,6 +549,7 @@ async def create(
     _refuse_rules_on_manual(hook)
     plaintext = _seal(cipher, hook, secret)
     session.add(hook)
+    await flush_or_refuse(session, _taken_name(project, name))
     return hook, plaintext
 
 
@@ -563,6 +565,7 @@ async def update(
     if fields.name is not None and fields.name != hook.name:
         await _refuse_taken_name(session, project, fields.name)
         hook.name = fields.name
+        await flush_or_refuse(session, _taken_name(project, fields.name))
         changed.append("name")
     if fields.enabled is not None and fields.enabled != hook.enabled:
         hook.enabled = fields.enabled
@@ -808,10 +811,13 @@ async def _refuse_taken_name(session: AsyncSession, project: Project, name: str)
         select(Hook.id).where(Hook.project_id == project.id, Hook.name == name)
     )
     if taken is not None:
-        raise ConflictError(
-            f"{project.key} already has a hook called {name!r}.",
-            details={"name": name},
-        )
+        raise _taken_name(project, name)
+
+
+def _taken_name(project: Project, name: str) -> ConflictError:
+    return ConflictError(
+        f"{project.key} already has a hook called {name!r}.", details={"name": name}
+    )
 
 
 def _seal(cipher: VaultCipher, hook: Hook, secret: str | None) -> str:

@@ -17,6 +17,7 @@ from app.auth.principal import Principal
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
+from app.db import lock_row
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
@@ -294,6 +295,12 @@ async def set_members(
             someone who has been archived.
     """
     people = await _load_people(session, person_ids)
+
+    # Two saves of the list at the same moment would each diff against the
+    # rows from before the other, and both insert the person they both added —
+    # the second on the first's key, as a 500. Locking the project makes them
+    # take turns, so the second diffs against what the first wrote.
+    await lock_row(session, Project, project.id)
 
     wanted = set(person_ids)
     current = set(

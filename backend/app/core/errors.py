@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError, IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,39 @@ def _error_body(code: str, message: str, details: dict[str, Any] | None = None) 
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
 
+INTERNAL_ERROR_MESSAGE = "Something went wrong on our side. Quote the request id if you report it."
+
+
+def internal_error_response() -> JSONResponse:
+    """The 500 every unexpected exception becomes, in the usual envelope.
+
+    Built here and sent from two places: the ``Exception`` handler below, and
+    :class:`app.core.request_log.RequestLogMiddleware`, which is the only
+    layer that can still put the request id on it — Starlette runs an
+    ``Exception`` handler outside every user middleware, so a response sent
+    from there would leave without the header.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=_error_body("internal_error", INTERNAL_ERROR_MESSAGE),
+    )
+
+
+_SAFE_ERROR_KEYS = ("type", "loc", "msg")
+"""What of a Pydantic error reaches the client.
+
+Not ``input``: for a model-level validator that is the whole body, so a
+vault node refused for its kind would echo its plaintext secret back. Not
+``ctx`` either: it can carry the rejected value, or the exception object a
+custom validator raised, whose message may quote the input. ``url`` is
+Pydantic's documentation link and says nothing a client needs.
+"""
+
+
+def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    return [{key: error[key] for key in _SAFE_ERROR_KEYS if key in error} for error in exc.errors()]
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach handlers that render every failure in the same envelope."""
 
@@ -103,12 +137,60 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=_error_body(
                 "validation_failed",
                 "The request body or parameters are invalid.",
-                # jsonable_encoder is required, not decorative: for a custom
-                # field validator Pydantic puts the original exception object
-                # in ctx, which JSONResponse cannot serialise.
-                {"fields": jsonable_encoder(exc.errors())},
+                {"fields": jsonable_encoder(_safe_validation_errors(exc))},
             ),
         )
+
+    # The database's own refusals, for when a pre-check lost a race or a
+    # value slipped past the schema. Each of these is a Cylist bug to fix where
+    # it happened, so it is logged with its traceback; but the client still
+    # gets the status the request deserved rather than a 500. The driver's
+    # message is never echoed: it quotes the offending row's values.
+
+    @app.exception_handler(IntegrityError)
+    async def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
+        _log_unhandled(request, exc, "Integrity error reached the handler")
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=_error_body(
+                "conflict", "That clashes with a change made at the same moment. Try again."
+            ),
+        )
+
+    @app.exception_handler(DataError)
+    async def _data_error(request: Request, exc: DataError) -> JSONResponse:
+        _log_unhandled(request, exc, "Data error reached the handler")
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=_error_body("unprocessable", "A value is too long or out of range."),
+        )
+
+    @app.exception_handler(OSError)
+    async def _os_error(request: Request, exc: OSError) -> JSONResponse:
+        # The blob store's disk, or the database's socket: either way the
+        # request was fine and the server could not get at what it needed.
+        _log_unhandled(request, exc, "Storage unavailable")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error_body(
+                "service_unavailable", "Storage is unavailable right now. Try again shortly."
+            ),
+        )
+
+    @app.exception_handler(Exception)
+    async def _unexpected(_: Request, __: Exception) -> JSONResponse:
+        # A backstop only. RequestLogMiddleware catches, logs and answers
+        # everything raised inside it; this sees only what escapes the base
+        # path middleware outside it, so logging here would be a second line.
+        return internal_error_response()
+
+
+def _log_unhandled(request: Request, exc: Exception, message: str) -> None:
+    logger.error(
+        message,
+        exc_info=exc,
+        extra={"context": {"method": request.method, "path": request.url.path}},
+    )
 
 
 def _log_app_error(request: Request, exc: AppError) -> None:
