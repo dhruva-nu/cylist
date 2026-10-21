@@ -41,6 +41,19 @@ class RealtimeCounts(Schema):
     projects_watched: int
 
 
+class TableSize(Schema):
+    table: str
+    rows: int
+    """Live rows, as PostgreSQL's statistics count them: an estimate that
+    tracks every insert and delete, not a ``count(*)``."""
+    total_bytes: int
+    """The table with its indexes and TOAST, on disk."""
+
+
+class StorageCounts(Schema):
+    tables: list[TableSize]
+
+
 @router.get("/health", response_model=Health, summary="Service health")
 async def health(
     response: Response,
@@ -92,3 +105,38 @@ async def realtime_counts(request: Request) -> RealtimeCounts:
     only. No project, no session, no token, nothing about content.
     """
     return RealtimeCounts(**request.app.state.hub.stats())
+
+
+@router.get("/health/storage", response_model=StorageCounts, summary="Table sizes")
+async def storage_counts(session: AsyncSession = SessionDependency) -> StorageCounts:
+    """How many rows each table holds, and how much disk it takes.
+
+    For watching the tables that grow with use — ``activity``,
+    ``agent_session`` and its feed — between retention passes, and for
+    noticing when one starts growing faster than retention trims it
+    (CYLIST-139).
+
+    Read from the statistics PostgreSQL keeps anyway rather than counted, so
+    it costs the same on a table of ten rows as on one of ten million: an
+    unauthenticated endpoint must not be a way to make the database scan
+    everything. The counts are estimates that follow every write within
+    moments; exact enough to watch a trend, not to reconcile.
+
+    Unauthenticated for the reason the others are, and safe to be: table
+    names are the published schema's, and sizes say how much, never what.
+    """
+    rows = await session.execute(
+        text(
+            """
+            SELECT relname, n_live_tup, pg_total_relation_size(relid)
+            FROM pg_stat_user_tables
+            WHERE schemaname = current_schema()
+            ORDER BY relname
+            """
+        )
+    )
+    return StorageCounts(
+        tables=[
+            TableSize(table=name, rows=live, total_bytes=size) for name, live, size in rows.all()
+        ]
+    )

@@ -44,6 +44,7 @@ from app.services.hook_delivery import Courier
 from app.services.push import triggers as push_triggers
 from app.services.push.delivery import Pusher
 from app.services.push.fcm import sender_for
+from app.services.retention import Retention
 from app.spa import mount_spa
 
 API_PREFIX = "/api/v1"
@@ -231,7 +232,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # For the hub's reason too. The courier's loop starts in the lifespan; the
     # object exists here so a route can wake it. The transport is None — the
     # real network — except in a test, which answers in a receiver's place.
-    app.state.courier = Courier()
+    app.state.courier = Courier(Retention.of(settings))
     app.state.hook_transport = None
 
     # For the courier's reason: the publisher hands it pushes from the first

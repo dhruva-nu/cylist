@@ -2422,3 +2422,48 @@ class TestRunningInProcess:
         assert not existing.disabled
         assert root.handlers == handlers
         assert root.level == level
+
+
+# --- Somewhere for old activity to go (CYLIST-139) --------------------------
+
+BEFORE_THE_ARCHIVE = "0046"
+WITH_THE_ARCHIVE = "0047"
+
+
+class TestUndoingTheActivityArchive:
+    async def test_archived_rows_go_back_on_the_trail(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """The audit record survives a downgrade; a reference to something that
+        has gone since is nulled on the way, as the trail's own keys would."""
+        await migrate(WITH_THE_ARCHIVE)
+        await seed_a_card(connection)
+        await connection.execute(
+            text(
+                "INSERT INTO activity_archive (id, occurred_at, actor_token_id, actor_person_id,"
+                " actor_label, channel, verb, entity_type, entity_id, project_id, payload)"
+                " SELECT gen_random_uuid(), now() - interval '2 years', gen_random_uuid(),"
+                " person.id, 'claude', 'api', 'task.created', 'task', task.id, project.id,"
+                ' \'{"title": "Stripe webhook idempotency"}\'::jsonb'
+                " FROM project, task, person WHERE person.name = 'Aditi K'"
+            )
+        )
+
+        await rewind(BEFORE_THE_ARCHIVE)
+
+        rows = await connection.execute(
+            text(
+                "SELECT activity.verb, activity.actor_token_id IS NULL,"
+                " activity.actor_person_id = person.id, activity.project_id = project.id,"
+                " activity.payload ->> 'title'"
+                " FROM activity, person, project WHERE person.name = 'Aditi K'"
+            )
+        )
+        assert rows.tuples().all() == [
+            ("task.created", True, True, True, "Stripe webhook idempotency")
+        ]
+        archive = await connection.scalar(text("SELECT to_regclass('activity_archive')"))
+        assert archive is None

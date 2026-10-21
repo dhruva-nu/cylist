@@ -267,6 +267,33 @@ class Settings(BaseSettings):
     logs it was meant to prevent.
     """
 
+    # --- Retention --------------------------------------------------------
+    # How long the tables that only ever grow keep what they hold. Applied
+    # once an hour by the hook courier's prune pass — see
+    # app/services/retention.py. Zero means keep forever.
+    agent_session_retention_days: int = Field(default=30, ge=0)
+    """How long a *dismissed* agent session is kept, with its feed and its
+    prompts, counted from when it was dismissed.
+
+    Only a session that has finished and been cleared off its card is ever
+    taken: an open one — working, or waiting on a person — is never touched,
+    however old, and neither is a finished one still showing on its card.
+    Thirty days because a dismissed session is drawn nowhere; the month is for
+    whoever goes looking in the database after something went wrong. What the
+    agent *did* is on the activity trail, which this does not touch.
+    """
+
+    activity_retention_days: int = Field(default=365, ge=0)
+    """How long the activity trail keeps a row before moving it to
+    ``activity_archive``.
+
+    Moved, not deleted: the trail is the audit record, so an old row goes to a
+    cold table nothing reads in the ordinary course and stays there. What
+    stops showing is a card's history, the feed and day reports from further
+    back than this — a year, so the archive is for the cards nobody is
+    working any more.
+    """
+
     @field_validator("database_url")
     @classmethod
     def _require_async_driver(cls, value: str) -> str:
