@@ -150,7 +150,6 @@ async def upload_skill(
         ),
     ),
     description: str | None = Form(default=None, description="One line on what the skill does."),
-    added_by: UUID | None = Form(default=None, description="Which person is uploading it."),
 ) -> SkillRead:
     """Upload a skill as `multipart/form-data`.
 
@@ -171,6 +170,10 @@ async def upload_skill(
 
     Content is addressed by its SHA-256 and shared with the file store, so
     uploading bytes the server already holds costs a row and no disk.
+
+    **It is filed under whoever is uploading it** — the person behind the
+    session or token — and there is no field to say otherwise (CYLIST-142).
+    An agent's upload is its owner's, which is the person its token acts as.
     """
     skill, replaced = await agents.upload_skill(
         session,
@@ -181,7 +184,11 @@ async def upload_skill(
         folder=folder,
         executable=set(executable),
         max_bytes=settings.max_upload_bytes,
-        added_by=added_by,
+        # The credential's person, never the form's: "added by" is an audit
+        # fact, and one the caller could choose would name somebody who never
+        # touched it. Comment authorship is the deliberate exception — see
+        # the trust model in the auth doc.
+        added_by=principal.person_id,
     )
     if replaced:
         response.status_code = status.HTTP_200_OK

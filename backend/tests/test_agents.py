@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db import Database
 from app.models import Blob, Skill
-from tests.conftest import client_for, sign_in
+from tests.conftest import OWNER_NAME, client_for, sign_in
 from tests.test_skill_folders import zipped
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
@@ -129,7 +129,7 @@ class TestUploadingSkills:
         assert body["description"] == "Move stale cards back to triage."
         assert body["size"] == len(content)
         assert body["mime"] == "text/markdown"
-        assert body["added_by"] is None
+        assert body["added_by"]["name"] == OWNER_NAME
 
     async def test_writes_the_bytes_where_they_can_be_downloaded(
         self, project: AsyncClient, settings: Settings
@@ -150,23 +150,27 @@ class TestUploadingSkills:
 
         assert [skill["name"] for skill in listing] == ["archive.md", "triage.md"]
 
-    async def test_records_who_uploaded_it(self, project: AsyncClient) -> None:
+    async def test_files_it_under_whoever_uploads_it(self, project: AsyncClient) -> None:
+        """CYLIST-142: the uploader is the credential's person, and a form
+        field naming somebody else is not listened to."""
         person = (await project.post("/people", json=UPLOADER)).json()["id"]
 
         skill = await upload(project, "triage.md", content_of("uploader"), added_by=person)
 
-        assert skill["added_by"]["name"] == "Aditi K"
+        assert skill["added_by"]["name"] == OWNER_NAME
 
-    async def test_refuses_an_uploader_who_is_not_in_the_directory(
-        self, project: AsyncClient
-    ) -> None:
+    async def test_an_agents_upload_is_its_owners(self, project: AsyncClient) -> None:
+        issued = (
+            await project.post("/tokens", json={"name": "agent", "scopes": ["read", "write"]})
+        ).json()
+
         response = await project.post(
             "/projects/ATL/skills",
-            files={"file": ("triage.md", content_of("nobody"), "text/markdown")},
-            data={"added_by": UNKNOWN_ID},
+            files={"file": ("triage.md", content_of("agent"), "text/markdown")},
+            headers={"Authorization": f"Bearer {issued['token']}"},
         )
 
-        assert response.status_code == 422
+        assert response.json()["added_by"]["name"] == OWNER_NAME
 
     async def test_refuses_an_upload_with_no_usable_filename(self, project: AsyncClient) -> None:
         response = await project.post(

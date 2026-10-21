@@ -7366,7 +7366,7 @@
           "agents"
         ],
         "summary": "Upload a skill, as one file or as a folder",
-        "description": "Upload a skill as `multipart/form-data`.\n\n**A skill can be a whole folder.** A skill is usually a `SKILL.md` beside\nthe scripts and references it points an agent at, so send one `file` part\nper file, each named with its path inside the folder, and `folder` with\nthe folder's own name. The server lays it out, checks it the way it checks\nan uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,\nat most 200 files and 20 MB — and stores it as `<folder>.zip`, which\n`/skills/{skill_id}/folder` unpacks again file for file. A single part with\nno `folder` is stored exactly as it was sent, as it always was.\n\n**Uploading a name that already exists replaces it** and answers 200 rather\nthan 201 — the name is the skill, so sending `board-tidy.md` again means\nyou have a newer version of it, not that you have a conflict. This is the\none place Cylist's upload rules differ from the file tree's, where a\nduplicate name is refused.\n\nContent is addressed by its SHA-256 and shared with the file store, so\nuploading bytes the server already holds costs a row and no disk.",
+        "description": "Upload a skill as `multipart/form-data`.\n\n**A skill can be a whole folder.** A skill is usually a `SKILL.md` beside\nthe scripts and references it points an agent at, so send one `file` part\nper file, each named with its path inside the folder, and `folder` with\nthe folder's own name. The server lays it out, checks it the way it checks\nan uploaded zip — a root `SKILL.md`, nothing pointing outside the folder,\nat most 200 files and 20 MB — and stores it as `<folder>.zip`, which\n`/skills/{skill_id}/folder` unpacks again file for file. A single part with\nno `folder` is stored exactly as it was sent, as it always was.\n\n**Uploading a name that already exists replaces it** and answers 200 rather\nthan 201 — the name is the skill, so sending `board-tidy.md` again means\nyou have a newer version of it, not that you have a conflict. This is the\none place Cylist's upload rules differ from the file tree's, where a\nduplicate name is refused.\n\nContent is addressed by its SHA-256 and shared with the file store, so\nuploading bytes the server already holds costs a row and no disk.\n\n**It is filed under whoever is uploading it** — the person behind the\nsession or token — and there is no field to say otherwise (CYLIST-142).\nAn agent's upload is its owner's, which is the person its token acts as.",
         "operationId": "upload_skill_api_v1_projects__project_ref__skills_post",
         "parameters": [
           {
@@ -8675,19 +8675,6 @@
             ],
             "title": "Description",
             "description": "One line on what the skill does."
-          },
-          "added_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Added By",
-            "description": "Which person is uploading it."
           }
         },
         "type": "object",
