@@ -19,6 +19,23 @@ import {
 } from '../api/client'
 import { silentFor, withPromptAnswered } from '../routes/agentState'
 
+/**
+ * Whether this viewer may answer (CYLIST-141). A question is anyone's who may
+ * edit the card; a permission is a tool running on one person's machine, and
+ * only that person — the prompt's owner — may answer it. The server refuses
+ * anyone else, so their buttons would only ever fail.
+ */
+export function mayAnswer(prompt: AgentPrompt, viewerId: string | null): boolean {
+  return prompt.kind !== 'permission' || (viewerId !== null && prompt.owner_id === viewerId)
+}
+
+/** What a permission says to everyone but its owner, in place of its buttons. */
+export function notYours(prompt: AgentPrompt): string {
+  return prompt.owner
+    ? `Only ${prompt.owner} can answer this: the tool runs on their machine.`
+    : 'Only the person running this agent can answer it.'
+}
+
 /** "Question from the agent · 5m ago", "Permission asked · 1m ago". */
 export function promptHeading(prompt: AgentPrompt, now: Date): string {
   const what = prompt.kind === 'question' ? 'Question from the agent' : 'Permission asked'

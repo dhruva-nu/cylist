@@ -21,7 +21,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.throttle import SignInThrottle
-from app.config import AGENT_QUIET_AFTER, REAP_EVERY, Settings, get_settings
+from app.config import (
+    AGENT_QUIET_AFTER,
+    AGENT_SOCKET_WITNESSES_FOR,
+    REAP_EVERY,
+    Settings,
+    get_settings,
+)
 from app.core.base_path import BasePathMiddleware
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
@@ -29,6 +35,7 @@ from app.core.metrics import Metrics, MetricsMiddleware
 from app.core.request_log import RequestLogMiddleware
 from app.db import Database
 from app.mcp import mount_mcp
+from app.realtime.bus import Bus
 from app.realtime.hub import Hub
 from app.routers import api_router
 from app.services import agent_prompts, agent_reports, hooks
@@ -81,7 +88,6 @@ def build_lifespan(settings: Settings) -> Lifespan:
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
         app.state.database.publish_to(_publisher(app))
-        # Before the sweep below, whose endings are pushes too.
         pusher = asyncio.create_task(
             app.state.pusher.run(
                 app.state.database,
@@ -89,13 +95,14 @@ def build_lifespan(settings: Settings) -> Lifespan:
             ),
             name="cylist-pusher",
         )
+        # The line to every other process of this deployment, if there are
+        # any; harmless if there are not.
+        bus = asyncio.create_task(app.state.bus.run(settings.database_url), name="cylist-bus")
 
-        # One process, just started, holding no sockets: whatever the rows
-        # say, nothing is running. Without this a card left mid-turn by a
-        # restart pulses forever, since nothing computes staleness on read.
-        async with app.state.database.session() as session:
-            await agent_reports.end_open_sessions(session)
-
+        # No sweep of open sessions here, though there was one. A process that
+        # has just started holds no sockets, but another process may, and a
+        # daemon whose socket went down with the last one is reconnecting as
+        # this runs. Sessions nobody reconnects to are the reaper's.
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
         courier = asyncio.create_task(
             app.state.courier.run(app.state.database, settings.vault_key, app.state.hook_transport),
@@ -107,7 +114,7 @@ def build_lifespan(settings: Settings) -> Lifespan:
             async with app.state.mcp.run():
                 yield
         finally:
-            for task in (reaper, courier, pusher):
+            for task in (reaper, courier, pusher, bus):
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
@@ -122,8 +129,12 @@ def build_lifespan(settings: Settings) -> Lifespan:
 def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
     """Where a committed transaction's news goes: hook deliveries to the
     courier, agent-session pushes to the pusher, everything else to the
-    boards."""
-    hub: Hub = app.state.hub
+    boards — this process's and every other's.
+
+    The courier and the pusher are told only here, in the process that
+    committed: a hook delivery is a row any process's courier may claim, and
+    a push is sent once, by whoever made it news."""
+    bus: Bus = app.state.bus
     courier: Courier = app.state.courier
     pusher: Pusher = app.state.pusher
 
@@ -134,7 +145,7 @@ def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
         elif kind == push_triggers.QUEUED:
             pusher.notify(event)
         else:
-            hub.publish(event)
+            bus.publish(event)
 
     return publish
 
@@ -145,11 +156,16 @@ async def _reap_forever(app: FastAPI) -> None:
     Also closes the prompts nothing else will — see
     :func:`app.services.agent_prompts.sweep`.
 
-    The backstop for a client that reports over HTTP and then dies: a socket
-    closing says so at once, a PUT that stops coming says nothing. A session
-    holding a socket is witnessed however long it has been silent, so only the
-    unwitnessed are considered — see
+    The backstop for a client that reports over HTTP and then dies, and for a
+    session whose socket went down with its process: a socket closing says so
+    at once, a PUT that stops coming says nothing. A session a socket has
+    vouched for lately is witnessed however long it has been silent, so only
+    the unwitnessed are considered — see
     :func:`app.services.agent_reports.reap_unwitnessed`.
+
+    Every process runs one, and one pass at a time does the work: the pass
+    that takes the lease reaps, and the rest find it held and wait for the
+    next — see :data:`app.services.agent_reports.REAPER_LEASE`.
 
     Never allowed to die of one bad pass: a sweep that raises is logged and
     the loop carries on, because the alternative is a task that quietly stops
@@ -159,10 +175,12 @@ async def _reap_forever(app: FastAPI) -> None:
         await asyncio.sleep(REAP_EVERY.total_seconds())
         try:
             async with app.state.database.session() as session:
+                if not await agent_reports.take_reaper_lease(session):
+                    continue
                 await agent_reports.reap_unwitnessed(
                     session,
-                    app.state.hub.live_session_ids(),
                     quiet_after=AGENT_QUIET_AFTER,
+                    witnessed_for=AGENT_SOCKET_WITNESSES_FOR,
                 )
                 # Questions and permissions whose time ran out with nobody
                 # looking, and questions whose tool is no longer polling.
@@ -206,6 +224,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # reachable from a route whether or not startup ran. The background work
     # that uses it does live in the lifespan, where it belongs.
     app.state.hub = Hub()
+    # The hub's reach beyond this process. Built here for the hub's reason;
+    # its line to the others opens in the lifespan.
+    app.state.bus = Bus(app.state.hub)
 
     # For the hub's reason too. The courier's loop starts in the lifespan; the
     # object exists here so a route can wake it. The transport is None — the

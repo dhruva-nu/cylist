@@ -191,7 +191,8 @@ async def get_agent_prompt(
         ge=0,
         le=agent_prompts.POLL_WAIT_MAX,
         description="Seconds to wait for it to stop being `open` before answering. "
-        "An agent's own poll with `wait` also tells the server it is still waiting.",
+        "The asking agent's own poll with `wait` also tells the server it is still "
+        "waiting, and keeps its session from being taken for gone.",
     ),
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
@@ -202,9 +203,9 @@ async def get_agent_prompt(
     The database connection is let go while it waits, so a hundred agents
     waiting on their people hold no more of the pool than none do."""
     hub: Hub = request.app.state.hub
-    polled = wait > 0 and principal.channel is Channel.API
+    poller = principal if wait > 0 and principal.channel is Channel.API else None
     with hub.prompt_waiter(prompt_id) as changed:
-        current = await agent_prompts.wait_state(session, task, prompt_id, polled=polled)
+        current = await agent_prompts.wait_state(session, task, prompt_id, poller=poller)
         if wait == 0 or current.status is not AgentPromptStatus.OPEN:
             return current
         await session.commit()
@@ -215,14 +216,17 @@ async def get_agent_prompt(
                 await changed.wait()
         except TimeoutError:
             pass
-    return await agent_prompts.wait_state(session, task, prompt_id, polled=False)
+    return await agent_prompts.wait_state(session, task, prompt_id, poller=None)
 
 
 @router.post(
     "/tasks/{task_ref}/agent-prompts/{prompt_id}/answer",
     response_model=AgentPromptRead,
     summary="Answer what an agent on this task is waiting on",
-    responses={409: {"description": "Already answered, expired, withdrawn, or not an option."}},
+    responses={
+        403: {"description": "A permission, and the caller is not the person it is for."},
+        409: {"description": "Already answered, expired, withdrawn, or not an option."},
+    },
 )
 async def answer_agent_prompt(
     body: AgentPromptAnswer,
@@ -239,7 +243,9 @@ async def answer_agent_prompt(
     Code's decision.
 
     Answering directs the work on the card, so it needs the role's `tasks`
-    permission, like editing the card does."""
+    permission, like editing the card does. A `permission` asks more: it is
+    a tool running on one person's machine, so only that person — the
+    prompt's `owner` — may answer it, and anyone else is a 403 naming them."""
     return await agent_prompts.answer(session, principal, task, prompt_id, body)
 
 
@@ -247,7 +253,10 @@ async def answer_agent_prompt(
     "/tasks/{task_ref}/agent-prompts/{prompt_id}/withdraw",
     response_model=AgentPromptRead,
     summary="Stop waiting on a prompt before anybody answers it",
-    responses={403: {"description": "Not an API token, or one without `write`."}},
+    responses={
+        403: {"description": "Not an API token, or one without `write`."},
+        404: {"description": "No such prompt on the card, or it is not one of the caller's."},
+    },
 )
 async def withdraw_agent_prompt(
     body: AgentPromptWithdraw,
@@ -257,5 +266,7 @@ async def withdraw_agent_prompt(
     session: AsyncSession = SessionDependency,
 ) -> AgentPromptRead:
     """For the agent: its tool call was cancelled, or the terminal answered
-    first. A prompt already closed is returned as it is."""
+    first. A prompt already closed is returned as it is. Only the agents of
+    the person whose session asked may withdraw it; anyone else's prompt is
+    not found."""
     return await agent_prompts.withdraw(session, task, prompt_id, body.reason, principal=principal)

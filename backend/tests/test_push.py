@@ -31,7 +31,7 @@ from httpx import AsyncClient
 
 from app.db import Database
 from app.main import _publisher
-from app.models import AgentSessionReason, AgentSessionState
+from app.models import AgentSessionReason, AgentSessionState, Person, SessionKey
 from app.services.push import fcm
 from app.services.push.delivery import Pusher
 from app.services.push.fcm import (
@@ -515,7 +515,7 @@ class TestPushingAgentSessions:
         ]
 
     async def test_a_dropped_socket_ending_the_session_is_pushed(
-        self, wired: AsyncClient, pushing: Pusher, database: Database
+        self, wired: AsyncClient, pushing: Pusher, database: Database, owner: Person
     ) -> None:
         from app.services import agent_reports
 
@@ -527,13 +527,13 @@ class TestPushingAgentSessions:
         await pushing.drain(database, FakeSender())
 
         async with database.session() as session:
-            await agent_reports.end_session(session, SESSION)
+            await agent_reports.end_session(session, SessionKey(owner.id, SESSION))
         await pushing.drain(database, sender)
 
         assert sender.states() == [("done", "connection_lost")]
 
     async def test_a_change_that_rolls_back_is_never_pushed(
-        self, wired: AsyncClient, pushing: Pusher, database: Database
+        self, wired: AsyncClient, pushing: Pusher, database: Database, owner: Person
     ) -> None:
         from app.services import agent_reports
 
@@ -545,7 +545,7 @@ class TestPushingAgentSessions:
 
         with pytest.raises(RuntimeError):
             async with database.session() as session:
-                await agent_reports.end_session(session, SESSION)
+                await agent_reports.end_session(session, SessionKey(owner.id, SESSION))
                 await session.flush()
                 raise RuntimeError("the request failed after the flush")
 

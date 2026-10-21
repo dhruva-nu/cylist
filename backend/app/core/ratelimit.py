@@ -4,10 +4,11 @@ A bucket per key — a client address, an email — holds up to ``burst`` tokens
 and refills at ``per_minute``. Each attempt takes one; an empty bucket says how
 long until the next token, which is what ``Retry-After`` carries.
 
-In-process, on purpose. The server runs as one process (DEPLOY.md, "Never add
---workers"), so a dictionary here is the whole truth about who has been
-knocking. When workers arrive, this is the class to back with Redis or
-Postgres; its callers will not change.
+In-process. Each environment runs one process, so a dictionary here is the
+whole truth about who has been knocking. A deployment may run more (DEPLOY.md,
+"More than one worker"), and then each process counts only what it saw —
+N workers let N times as much through. This is the class to back with
+Postgres when that matters; its callers will not change.
 """
 
 from __future__ import annotations

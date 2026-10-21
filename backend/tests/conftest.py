@@ -46,6 +46,7 @@ from app.db import Database
 from app.main import create_app
 from app.models import Base
 from app.models.person import Person, PersonKind
+from app.realtime.bus import Bus
 from app.realtime.hub import Hub
 from app.services.doc_engine import engine_for
 from app.services.hook_delivery import Courier
@@ -191,6 +192,7 @@ async def session(database: Database) -> AsyncIterator[AsyncSession]:
 APP_STATE = {
     "settings",
     "hub",
+    "bus",
     "courier",
     "hook_transport",
     "pusher",
@@ -223,6 +225,7 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.settings = settings
     app.state.database = database
     app.state.hub = Hub()
+    app.state.bus = Bus(app.state.hub)
     app.state.courier = Courier()
     app.state.hook_transport = None
     app.state.pusher = Pusher()
@@ -261,7 +264,7 @@ async def client_on(app: FastAPI) -> AsyncIterator[AsyncClient]:
     # The lifespan would have done this; without it the shared pool has
     # nobody to tell about a commit. Rebound per test, so each app's sockets
     # hear only their own test's writes.
-    database.publish_to(app.state.hub.publish)
+    database.publish_to(app.state.bus.publish)
 
     transport = ASGITransport(app=app)
     try:

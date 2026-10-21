@@ -30,7 +30,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import publish_into
-from app.models.agent_session import AgentFeedEntry, AgentSession
+from app.models.agent_session import AgentFeedEntry, AgentSession, SessionKey
 from app.models.task import Task
 from app.realtime import protocol
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentFeedEntryRead
@@ -44,7 +44,7 @@ turn; few enough that a card's feed is never a thing to paginate."""
 async def append(
     session: AsyncSession,
     task: Task,
-    client_session_id: str,
+    key: SessionKey,
     entries: Sequence[AgentFeedEntryIn],
 ) -> int:
     """Keep what a session just did, and say so to whoever has the card open.
@@ -54,11 +54,13 @@ async def append(
     for a session that has not been put on the card yet, or that has just
     walked off it; either way there is nothing on this card for the lines to
     belong to, and they are dropped rather than starting a row the hook never
-    reported. Returns how many were kept.
+    reported. Lines for someone else's session under the same id find no
+    row of the sender's, and are dropped the same way. Returns how many were
+    kept.
     """
     if not entries:
         return 0
-    row = await agent_sessions.open_on_card(session, task, client_session_id)
+    row = await agent_sessions.open_on_card(session, task, key)
     if row is None:
         return 0
 

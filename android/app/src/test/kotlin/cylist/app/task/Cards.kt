@@ -103,6 +103,8 @@ fun prompt(
     answeredById: UUID? = null,
     answer: String? = null,
     closedReason: String? = null,
+    ownerId: UUID? = null,
+    owner: String? = null,
 ) = AgentPromptRead(
     id = UUID.randomUUID(), agentSessionId = UUID.randomUUID(), taskId = UUID.randomUUID(), kind = kind,
     text = if (kind == AgentPromptKind.question) "25 devices or 40?" else "rm -rf build/",
@@ -113,7 +115,7 @@ fun prompt(
         options.map { AgentPromptOption(it.lowercase(), it) }
     },
     allowsReply = allowsReply, status = status, answer = answer, answerKey = null, answeredBy = answeredBy,
-    answeredById = answeredById, answeredAt = null, closedReason = closedReason, askedAt = askedAt, expiresAt = expiresAt, closedAt = null,
+    answeredById = answeredById, ownerId = ownerId, owner = owner, answeredAt = null, closedReason = closedReason, askedAt = askedAt, expiresAt = expiresAt, closedAt = null,
 )
 
 fun session(
@@ -123,7 +125,7 @@ fun session(
     endedAt: String? = null,
     prompt: AgentPromptRead? = null,
 ) = AgentSessionRead(
-    id = UUID.randomUUID(), taskId = UUID.randomUUID(), actorLabel = "Dhruva N", clientSessionId = "s1", clientName = "Claude Code",
+    id = UUID.randomUUID(), taskId = UUID.randomUUID(), actorLabel = "Dhruva N", clientName = "Claude Code",
     state = state, reason = reason, note = note, startedAt = "2026-10-19T08:00:00Z", stateChangedAt = "2026-10-19T08:30:00Z",
     lastSeenAt = "2026-10-19T08:58:00Z", endedAt = endedAt, dismissedAt = null, prompt = prompt,
 )

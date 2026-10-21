@@ -186,14 +186,15 @@ async def resume_session(
 
 
 def announce(
-    session: AsyncSession, task: Task, prompt: AgentPrompt, client_session_id: str
+    session: AsyncSession, task: Task, prompt: AgentPrompt, row: AgentSession | None
 ) -> None:
     """Queue the ``agent.prompt`` event for a prompt that opened or closed.
 
     :meth:`app.realtime.hub.Hub.publish` turns it into the board's doorbell
     and a wake-up for any long-poll on the prompt. A closed permission also
-    carries its outcome, for the agent's socket; nothing else carries anything
-    but those two.
+    carries its outcome, for the agent's socket — addressed to the session
+    that asked, by owner and conversation, so that only that person's socket
+    can be handed it (CYLIST-120). Nothing else carries anything but those.
     """
     closed_permission = (
         prompt.kind is AgentPromptKind.PERMISSION and prompt.status is not AgentPromptStatus.OPEN
@@ -203,6 +204,7 @@ def announce(
         if closed_permission
         else None
     )
+    key = row.key if row is not None else None
     publish_into(
         session,
         {
@@ -210,7 +212,8 @@ def announce(
             "project_id": task.project_id,
             "task_id": task.id,
             "prompt_id": prompt.id,
-            "client_session_id": client_session_id,
+            "person_id": key.person_id if key else None,
+            "client_session_id": key.client_session_id if key else None,
             "deliver": deliver,
         },
     )

@@ -41,7 +41,7 @@ from app.services.agent_prompts.asking import (
     ask,
     open_permission,
 )
-from app.services.agent_prompts.reading import for_sessions, read, recent, shown_for
+from app.services.agent_prompts.reading import for_sessions, read_one, recent, shown_for
 from app.services.agent_prompts.settling import (
     ABANDONED_AFTER,
     settle_for_report,
@@ -60,7 +60,7 @@ __all__ = [
     "ask",
     "for_sessions",
     "open_permission",
-    "read",
+    "read_one",
     "recent",
     "settle_for_report",
     "shown_for",

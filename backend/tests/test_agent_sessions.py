@@ -92,7 +92,6 @@ class TestReporting:
 
         assert row["state"] == "working"
         assert row["reason"] is None
-        assert row["client_session_id"] == SESSION_A
         assert row["client_name"] == "ATL-1"
         assert row["actor_label"] == "claude"
         assert row["ended_at"] is None
@@ -224,11 +223,11 @@ class TestOneCardAtATime:
         agent = await _agent(signed_in)
         ref = await _card(signed_in, await _setup(signed_in))
 
-        await _put(signed_in, agent, ref, "working", SESSION_A)
-        await _put(signed_in, agent, ref, "working", SESSION_B)
+        await _put(signed_in, agent, ref, "working", SESSION_A, client_name="A")
+        await _put(signed_in, agent, ref, "working", SESSION_B, client_name="B")
 
         rows = (await signed_in.get(f"/tasks/{ref}/agent-sessions")).json()
-        assert sorted(row["client_session_id"] for row in rows) == [SESSION_A, SESSION_B]
+        assert sorted(row["client_name"] for row in rows) == ["A", "B"]
 
 
 class TestWhatTheCardSays:

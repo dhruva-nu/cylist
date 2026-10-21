@@ -19,14 +19,14 @@ from app.models.agent_session import (
     AgentSession,
     AgentSessionReason,
     AgentSessionState,
+    SessionKey,
 )
-from app.models.api_token import ApiToken
 from app.models.task import Task
 from app.realtime import protocol
 from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead, AgentQuestionCreate
 from app.services import activity, agent_sessions
 from app.services.agent_prompts import store
-from app.services.agent_prompts.reading import read
+from app.services.agent_prompts.reading import read_one
 
 PERMISSION_OPTIONS: tuple[AgentPromptOption, ...] = (
     AgentPromptOption(key="allow_once", label="Allow once"),
@@ -99,13 +99,12 @@ async def ask(
         entity_id=task.id,
         project_id=task.project_id,
         payload={
-            "client_session_id": row.client_session_id,
             "client_name": row.client_name,
             "reason": AgentSessionReason.QUESTION.value,
             "question": data.question,
         },
     )
-    return read(prompt)
+    return await read_one(session, prompt)
 
 
 async def _asking_session(
@@ -115,17 +114,14 @@ async def _asking_session(
     client_session_id: str | None,
 ) -> AgentSession:
     """The caller's open session on this card, or a refusal saying why there is none."""
-    callers_tokens = select(ApiToken.id).where(
-        ApiToken.person_id == principal.person_id
-        if principal.person_id is not None
-        else ApiToken.id == principal.token_id
-    )
+    if principal.person_id is None:
+        raise ForbiddenError("A credential that is nobody's has no session to ask from.")
     query = (
         select(AgentSession)
         .where(
             AgentSession.task_id == task.id,
             AgentSession.ended_at.is_(None),
-            AgentSession.token_id.in_(callers_tokens),
+            AgentSession.person_id == principal.person_id,
         )
         .order_by(AgentSession.last_seen_at.desc())
         .limit(1)
@@ -145,7 +141,7 @@ async def _asking_session(
 async def open_permission(
     session: AsyncSession,
     task: Task,
-    client_session_id: str,
+    key: SessionKey,
     prompt_id: UUID,
     text: str,
     tool: str | None,
@@ -162,9 +158,9 @@ async def open_permission(
     """
     existing = await store.locked(session, prompt_id)
     if existing is not None:
-        return await _resent(session, task, client_session_id, existing)
+        return await _resent(session, task, key, existing)
 
-    row = await agent_sessions.open_on_card(session, task, client_session_id)
+    row = await agent_sessions.open_on_card(session, task, key)
     if row is None:
         return protocol.answer(prompt_id, AgentPromptStatus.WITHDRAWN)
 
@@ -194,12 +190,12 @@ async def open_permission(
     row.note = store.clip(text)
     row.last_seen_at = now
     await session.flush()
-    store.announce(session, task, prompt, client_session_id)
+    store.announce(session, task, prompt, row)
     return None
 
 
 async def _resent(
-    session: AsyncSession, task: Task, client_session_id: str, existing: AgentPrompt
+    session: AsyncSession, task: Task, key: SessionKey, existing: AgentPrompt
 ) -> dict[str, object] | None:
     """The reply to a permission the daemon has sent before: its outcome, or
     ``None`` while it is still open."""
@@ -208,7 +204,7 @@ async def _resent(
         existing.task_id == task.id
         and existing.kind is AgentPromptKind.PERMISSION
         and asker is not None
-        and asker.client_session_id == client_session_id
+        and asker.key == key
     )
     if not is_this_sessions:
         # Not this session's to re-send: it hears nothing of another's.
