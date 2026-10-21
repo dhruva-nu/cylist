@@ -16,10 +16,10 @@
  * card that already reads the way it will after the save.
  */
 
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type TaskDetail, type TaskInput } from '../../api/client'
-import { useIdentity } from '../../api/queries'
+import { queryKeys, useIdentity } from '../../api/queries'
 import { DialogActions, Field, Modal, ModalBody } from '../Modal'
 import { Button, ErrorNotice } from '../ui'
 import { Comments } from './Comments'
@@ -183,10 +183,14 @@ export function TaskForm({
     },
   })
 
+  const queryClient = useQueryClient()
   const remove = useMutation({
     mutationFn: (existing: TaskDetail) => api.deleteTask(existing.id),
     onSuccess: async (_deleted, existing) => {
       announce(`${existing.reference} deleted.`)
+      // The dialog is still mounted on this card while the board refreshes, so
+      // its detail query would be refetched — a 404, retried three times.
+      queryClient.removeQueries({ queryKey: queryKeys.task(existing.id) })
       await onDone()
       onClose()
     },
