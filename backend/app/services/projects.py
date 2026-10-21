@@ -182,13 +182,17 @@ async def require_reachable(
 
     The bootstrap session is the one exception. It is nobody — the deployment
     owner signing in before any account exists — so it is on no project, and
-    it is what has to add the first person to one.
+    it is what has to add the first person to one. Any other credential with
+    nobody behind it reaches nothing (CYLIST-119): see
+    :func:`app.services.people.is_bootstrap`.
 
     Raises:
         NotFoundError: ``refusal``, if the caller may not see the project.
     """
     if principal.person_id is None:
-        return
+        if await people.is_bootstrap(session, principal):
+            return
+        raise refusal
     if not await is_member(session, project_id, principal.person_id):
         raise refusal
 
@@ -196,10 +200,11 @@ async def require_reachable(
 async def reachable_ids(session: AsyncSession, principal: Principal) -> list[UUID] | None:
     """The ids of every project this caller may see, or ``None`` for all of them.
 
-    ``None`` only for the bootstrap session — see :func:`require_reachable`.
+    ``None`` only for the bootstrap session — see :func:`require_reachable` —
+    and an empty list for any other credential with nobody behind it.
     """
     if principal.person_id is None:
-        return None
+        return None if await people.is_bootstrap(session, principal) else []
     return list(
         await session.scalars(
             select(ProjectMember.project_id).where(ProjectMember.person_id == principal.person_id)

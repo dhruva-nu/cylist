@@ -56,10 +56,21 @@ def _require_grantable(principal: Principal, scopes: list[Scope]) -> None:
     out, even a bearer token that carries it. The phone app is unaffected:
     it signs in with a session and mints its own token from there.
 
+    And a caller must be somebody (CYLIST-119). A token acts as whoever
+    minted it, so one minted by the bootstrap session would act as nobody —
+    a credential no archive or password change could reach. The bootstrap
+    session's job is to open the first account, and that needs no token.
+
     Raises:
         ForbiddenError: naming the scopes in ``details.missing_scopes``, or
-            ``details.scope`` for ``permit`` asked for over the API.
+            ``details.scope`` for ``permit`` asked for over the API, or when
+            the caller has no person.
     """
+    if principal.person_id is None:
+        raise ForbiddenError(
+            "A token acts as whoever mints it, and this credential is nobody's. "
+            "Open an account under People and mint it from there."
+        )
     missing = principal.missing(frozenset(scopes))
     if missing:
         raise ForbiddenError(

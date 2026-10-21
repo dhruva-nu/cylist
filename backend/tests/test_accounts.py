@@ -18,12 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import SESSION_COOKIE
 from app.auth.invites import INVITE_PREFIX
+from app.auth.scopes import Scope
 from app.config import Settings
 from app.core.clock import now
 from app.db import Database
 from app.models.activity import Activity
-from app.models.api_token import ApiToken
+from app.models.api_token import ApiToken, TokenKind
 from app.models.person import Person
+from app.services import tokens
 from tests.conftest import (
     INVITEE_PASSWORD,
     OWNER_EMAIL,
@@ -558,6 +560,86 @@ class TestTheBootstrapLogin:
         )
 
         assert response.status_code == 422
+
+
+class TestBootstrapEndsWithIt:
+    """CYLIST-119: nothing the bootstrap password opened outlives bootstrap."""
+
+    async def _leftover_token(self, session: AsyncSession) -> dict[str, str]:
+        """A person-less API token, as one minted before minting from nobody
+        was refused would be."""
+        _, plaintext = await tokens.issue(
+            session,
+            name="setup script",
+            kind=TokenKind.API,
+            scopes=[Scope.READ, Scope.WRITE, Scope.ADMIN],
+            person_id=None,
+            ttl=None,
+        )
+        await session.commit()
+        return {"Authorization": f"Bearer {plaintext}"}
+
+    async def test_accepting_the_first_invitation_revokes_the_bootstrap_session(
+        self, bootstrapped: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        _, token = await open_account(bootstrapped, ADITI, ADITI_EMAIL)
+
+        await _accept(other_client, token)
+
+        assert (await bootstrapped.get("/me")).status_code == 401
+        assert (await other_client.get("/me")).status_code == 200
+
+    async def test_setting_the_first_password_revokes_it_too(
+        self, bootstrapped: AsyncClient
+    ) -> None:
+        person = (await bootstrapped.post("/people", json=ADITI)).json()
+
+        opened = await bootstrapped.put(
+            f"/people/{person['id']}/account",
+            json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+        )
+
+        assert opened.status_code == 200
+        assert (await bootstrapped.get("/me")).status_code == 401
+
+    async def test_and_every_token_that_belongs_to_nobody(
+        self,
+        bootstrapped: AsyncClient,
+        other_client: AsyncClient,
+        client: AsyncClient,
+        session: AsyncSession,
+    ) -> None:
+        leftover = await self._leftover_token(session)
+        _, token = await open_account(bootstrapped, ADITI, ADITI_EMAIL)
+
+        await _accept(other_client, token)
+
+        assert (await other_client.get("/me", headers=leftover)).status_code == 401
+
+    async def test_the_bootstrap_session_cannot_mint_a_token(
+        self, bootstrapped: AsyncClient
+    ) -> None:
+        response = await bootstrapped.post("/tokens", json={"name": "setup", "scopes": ["read"]})
+
+        assert response.status_code == 403
+        assert "nobody's" in response.json()["error"]["message"]
+
+    async def test_a_personless_api_token_reaches_nothing(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Even one that somehow survived: being nobody is a pass only for the
+        bootstrap session, and only before any account exists."""
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+        leftover = await self._leftover_token(session)
+
+        listed = await signed_in.get("/projects", headers=leftover)
+        reached = await signed_in.get("/projects/ATL", headers=leftover)
+        administered = await signed_in.post(
+            "/projects/ATL/roles", json={"name": "Reviewer"}, headers=leftover
+        )
+
+        assert listed.json() == []
+        assert reached.status_code == administered.status_code == 404
 
 
 class TestArchivingWithdrawsAccess:
