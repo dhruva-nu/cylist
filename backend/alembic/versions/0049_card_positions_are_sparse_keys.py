@@ -16,8 +16,8 @@ deferrable so a statement that spreads a column out is checked as a whole.
 The downgrade numbers each column from zero again, which is what the code
 before this revision expects to find.
 
-Revision ID: 0047
-Revises: 0046
+Revision ID: 0049
+Revises: 0048
 Created: 2026-10-21
 """
 
@@ -27,8 +27,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0047"
-down_revision: str | None = "0046"
+revision: str = "0049"
+down_revision: str | None = "0048"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

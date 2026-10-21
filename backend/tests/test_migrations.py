@@ -2401,7 +2401,7 @@ class TestColdStorage:
         }
 
 
-SPARSE_POSITIONS = "0047"
+SPARSE_POSITIONS = "0049"
 
 
 class TestSparsePositions:
@@ -2426,7 +2426,7 @@ class TestSparsePositions:
         connection: AsyncConnection,
         migrate: Callable[[str], Awaitable[None]],
     ) -> None:
-        await migrate("0046")
+        await migrate("0048")
         await self._with_a_tie(connection)
 
         await migrate(SPARSE_POSITIONS)
@@ -2441,7 +2441,7 @@ class TestSparsePositions:
         connection: AsyncConnection,
         migrate: Callable[[str], Awaitable[None]],
     ) -> None:
-        await migrate("0046")
+        await migrate("0048")
         await self._with_a_tie(connection)
         await migrate(SPARSE_POSITIONS)
 
@@ -2459,7 +2459,7 @@ class TestSparsePositions:
         migrate: Callable[[str], Awaitable[None]],
         rewind: Callable[[str], Awaitable[None]],
     ) -> None:
-        await migrate("0046")
+        await migrate("0048")
         await seed_board_for_cold_storage(connection)
         await migrate(SPARSE_POSITIONS)
         # A card dropped between two others, as the service now does.
@@ -2471,7 +2471,7 @@ class TestSparsePositions:
             )
         )
 
-        await rewind("0046")
+        await rewind("0048")
 
         assert await placed_by_number(connection) == {
             1: ("Done", 1),
