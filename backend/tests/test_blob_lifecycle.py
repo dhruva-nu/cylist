@@ -79,7 +79,7 @@ def store(tmp_path: Path) -> LocalBlobStore:
 async def folder(signed_in: AsyncClient) -> UUID:
     """The root folder of a fresh project, for items made straight in the database."""
     await signed_in.post("/projects", json=ATLAS)
-    root = (await signed_in.get("/projects/ATL/folders")).json()[0]["id"]
+    root = (await signed_in.get("/projects/ATL/folders")).json()["items"][0]["id"]
     return UUID(root)
 
 

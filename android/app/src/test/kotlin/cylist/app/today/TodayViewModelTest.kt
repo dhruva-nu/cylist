@@ -69,9 +69,9 @@ class TodayViewModelTest {
 
     private fun answer(method: String, path: String, date: String?): MockResponse = when {
         path == "/api/v1/me" -> json("""{"token_id":"$TOKEN","label":"Pixel","channel":"api","scopes":["read","write"],"person":${personJson("Dhruva N", ME_ID)}}""")
-        path == "/api/v1/people" -> json("[${personJson("Dhruva N", ME_ID)},${personJson("Aditi K", "01a150aa-6ebd-70cf-bfe4-00f8fb3fae01")}]")
-        path.endsWith("/items") -> json("[]")
-        path.endsWith("/tasks") -> json("[]")
+        path == "/api/v1/people" -> json("""{"items":[${personJson("Dhruva N", ME_ID)},${personJson("Aditi K", "01a150aa-6ebd-70cf-bfe4-00f8fb3fae01")}],"next":null}""")
+        path.endsWith("/items") -> json("""{"items":[],"next":null}""")
+        path.endsWith("/tasks") -> json("""{"columns":[]}""")
         path.endsWith("/columns") -> json("""{"columns":[]}""")
         path.endsWith("/today") && method == "GET" -> json(planJson(date ?: "2026-10-16"))
         path.endsWith("/today/picks") -> json("""{"id":"$PICK","day":"2026-10-16","task":{"id":"$CARD","reference":"ATL-3","title":"Card","column":"In progress"},"todos":[]}""", 201)

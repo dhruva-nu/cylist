@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cylist.api.BoardEvent
 import cylist.api.BoardSocket
+import cylist.api.everyPage
 import cylist.api.serverMessage
 import cylist.api.generated.apis.AuthApi
 import cylist.api.generated.apis.BoardApi
@@ -15,7 +16,7 @@ import cylist.api.generated.models.ColumnRead
 import cylist.api.generated.models.FiledItem
 import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.PickCreate
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TodayPlan
 import cylist.api.generated.models.TodoCreate
 import cylist.api.generated.models.TodoState
@@ -51,7 +52,7 @@ data class TodayState(
     val plan: TodayPlan? = null,
     /** To-dos still open today, whichever day is on screen: the Today tab's count. */
     val todayOpen: Int = 0,
-    val tasks: List<TaskRead> = emptyList(),
+    val tasks: List<TaskSummary> = emptyList(),
     val columns: List<ColumnRead> = emptyList(),
     /** The people directory, for `@` tags; archived people are left out, as on the web. */
     val people: List<PersonRead> = emptyList(),
@@ -65,7 +66,7 @@ data class TodayState(
     val live: Boolean = false,
 ) {
     /** One of your cards that is late and not on today's plan, if any. */
-    val lateUnplanned: TaskRead?
+    val lateUnplanned: TaskSummary?
         get() = if (day != today || plan == null) {
             null
         } else {
@@ -103,7 +104,9 @@ class TodayViewModel(
             try {
                 val (me, people) = io {
                     client.api(::AuthApi).meApiV1MeGet().person to
-                        client.api(::PeopleApi).listPeopleApiV1PeopleGet().filter { it.archivedAt == null }
+                        everyPage { after ->
+                            client.api(::PeopleApi).listPeopleApiV1PeopleGet(after = after).let { it.items to it.next }
+                        }
                 }
                 _state.update { it.copy(me = me, people = people) }
             } catch (e: Exception) {
@@ -128,7 +131,9 @@ class TodayViewModel(
         if (started) socket?.start()
         viewModelScope.launch {
             try {
-                val files = io { client.api(::FilesApi).listProjectItemsApiV1ProjectsProjectRefItemsGet(key) }
+                val files = io { everyPage { after ->
+                        client.api(::FilesApi).listProjectItemsApiV1ProjectsProjectRefItemsGet(key, after = after).let { it.items to it.next }
+                    } }
                 if (_state.value.projectKey == key) _state.update { it.copy(files = files) }
             } catch (_: Exception) {
                 // A tag whose file has not arrived reads as the plain text it is.
@@ -159,7 +164,7 @@ class TodayViewModel(
     fun backToToday() = showDay(LocalDate.now(clock))
 
     /** Put a card on the day on screen. Picking one already there is harmless: the server answers with the same pick. */
-    fun pick(task: TaskRead, onDone: (String?) -> Unit = {}) = mutate(onDone) { key ->
+    fun pick(task: TaskSummary, onDone: (String?) -> Unit = {}) = mutate(onDone) { key ->
         client.api(::TodayApi).addPickApiV1ProjectsProjectRefTodayPicksPost(key, PickCreate(task.reference, _state.value.day.toString()))
     }
 
@@ -249,7 +254,12 @@ class TodayViewModel(
                 coroutineScope {
                     val plan = async { client.api(::TodayApi).getPlanApiV1ProjectsProjectRefTodayGet(key, day.toString(), zone) }
                     val todayPlan = if (day == today) null else async { client.api(::TodayApi).getPlanApiV1ProjectsProjectRefTodayGet(key, today.toString(), zone) }
-                    val tasks = async { client.api(::TasksApi).listTasksApiV1ProjectsProjectRefTasksGet(key) }
+                    // The top of each column, as deep as one request goes. What is due
+                    // today sits near the top of the columns it is in; a card buried
+                    // past the hundredth in its column is not what a day is planned from.
+                    val tasks = async {
+                        client.api(::TasksApi).listTasksApiV1ProjectsProjectRefTasksGet(key, limit = BOARD_DEPTH).columns.flatMap { it.items }
+                    }
                     val columns = async { client.api(::BoardApi).listColumnsApiV1ProjectsProjectRefColumnsGet(key).columns.sortedBy { it.position } }
                     Loaded(plan.await(), todayPlan?.await()?.openCount, tasks.await(), columns.await())
                 }
@@ -271,7 +281,7 @@ class TodayViewModel(
         }
     }
 
-    private class Loaded(val plan: TodayPlan, val todayOpen: Int?, val tasks: List<TaskRead>, val columns: List<ColumnRead>)
+    private class Loaded(val plan: TodayPlan, val todayOpen: Int?, val tasks: List<TaskSummary>, val columns: List<ColumnRead>)
 
     /** A change to the plan, then a fresh read of it; [onDone] gets the error to show, or null. */
     private fun mutate(onDone: (String?) -> Unit = {}, call: (key: String) -> Any) {
@@ -313,6 +323,9 @@ class TodayViewModel(
     }
 
     private companion object {
+        /** How far down each column the plan looks for cards: the most one request returns. */
+        const val BOARD_DEPTH = 100
+
         /** Collapse a burst of doorbells into one read, as the Board does. */
         const val DEBOUNCE_MS = 250L
 

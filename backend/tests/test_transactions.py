@@ -93,7 +93,7 @@ class TestCommitOrdering:
     ) -> None:
         created = await signed_in.post("/people", json=PERSON)
 
-        listed = (await signed_in.get("/people")).json()
+        listed = (await signed_in.get("/people")).json()["items"]
 
         assert created.status_code == 201
         assert created.json()["id"] in [person["id"] for person in listed]
@@ -105,5 +105,5 @@ class TestCommitOrdering:
 
         await signed_in.delete(f"/people/{created['id']}")
 
-        listed = (await signed_in.get("/people")).json()
+        listed = (await signed_in.get("/people")).json()["items"]
         assert created["id"] not in [person["id"] for person in listed]

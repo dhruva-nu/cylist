@@ -26,6 +26,21 @@ import { columnDragId, laneCellDropId } from './dropTargets'
 import { StoreIcon } from './icons'
 import styles from './Column.module.css'
 
+/**
+ * The cards of a column the board has not read yet, and the way to read them.
+ *
+ * A column arrives a page at a time (CYLIST-130), so a long one ends in a
+ * button rather than in its last card. Its own row under the cards, rather
+ * than infinite scroll: a column is also a drop target, and one that grew
+ * while a card was held over it would move the place the card is going.
+ */
+export interface ColumnMore {
+  /** How many cards of the column are still unread. */
+  unread: number
+  loading: boolean
+  onLoad: () => void
+}
+
 export interface ColumnProps {
   column: BoardColumn
   tasks: Task[]
@@ -67,6 +82,8 @@ export interface ColumnProps {
   hidingHold: boolean
   /** Open the column's foot, or shut it again. */
   onToggleHold: () => void
+  /** What is left to read of the column; null when every card is here. */
+  more: ColumnMore | null
   /**
    * Which half of a column this is drawing.
    *
@@ -96,6 +113,7 @@ export function Column({
   onColdStorage,
   hidingHold,
   onToggleHold,
+  more,
   part = 'all',
   laneKey,
 }: ColumnProps) {
@@ -207,6 +225,17 @@ export function Column({
               onToggleOutcome={onToggleOutcome}
             />
           )}
+
+          {part !== 'cards' && more ? (
+            <button
+              type="button"
+              className={styles.loadMore}
+              disabled={more.loading}
+              onClick={more.onLoad}
+            >
+              {more.loading ? 'Loading…' : `Show more · ${more.unread} not shown`}
+            </button>
+          ) : null}
 
           {/* The foot, under the cards and above the composer: the held work
               is the bottom of this column, so the line that lets it out is

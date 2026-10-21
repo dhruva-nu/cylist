@@ -1,6 +1,7 @@
 /** Skills: the packaged jobs an agent on a project can be handed. */
 
 import { API_BASE, request } from './http'
+import { fetchAllPages } from './paging'
 import type { Person } from './people'
 
 /** An uploaded skill: a packaged job an agent can be handed. */
@@ -16,7 +17,7 @@ export interface Skill {
 }
 
 export const skillsApi = {
-  listSkills: (projectKey: string) => request<Skill[]>(`/projects/${projectKey}/skills`),
+  listSkills: (projectKey: string) => fetchAllPages<Skill>(`/projects/${projectKey}/skills`),
   /** Filed under whoever is signed in: the server takes the uploader from the session. */
   uploadSkill: (projectKey: string, file: File, description?: string) => {
     const form = new FormData()

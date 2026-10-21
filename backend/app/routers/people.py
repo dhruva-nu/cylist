@@ -24,29 +24,36 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
+from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.people import (
     AccountSet,
     InviteIssued,
     PersonCreate,
+    PersonPage,
     PersonRead,
     PersonUpdate,
 )
 from app.services import activity, people, tokens
+from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/people", tags=["people"])
 
 
-@router.get("", response_model=list[PersonRead], summary="List people")
+@router.get("", response_model=PersonPage, summary="List people")
 async def list_people(
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     kind: PersonKind | None = Query(default=None, description="Filter to team or clients."),
     include_archived: bool = Query(default=False),
-) -> list[PersonRead]:
-    """Return the directory, team first and alphabetical within each kind."""
-    found = await people.list_people(session, kind=kind, include_archived=include_archived)
-    return [PersonRead.model_validate(person) for person in found]
+    page: PageRequest = PageQuery,
+) -> PersonPage:
+    """Return the directory a page at a time, team first and alphabetical
+    within each kind."""
+    found = await people.list_people(session, page, kind=kind, include_archived=include_archived)
+    return PersonPage(
+        items=[PersonRead.model_validate(person) for person in found.rows], next=found.next
+    )
 
 
 @router.post(

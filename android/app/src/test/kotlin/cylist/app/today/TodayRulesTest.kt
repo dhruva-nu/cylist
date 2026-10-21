@@ -1,7 +1,7 @@
 package cylist.app.today
 
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TodoRead
 import cylist.api.generated.models.TodoState
@@ -16,7 +16,7 @@ import java.time.LocalDate
 class TodayRulesTest {
     private val today = LocalDate.of(2026, 9, 8)
 
-    private fun refs(tasks: List<TaskRead>) = tasks.map { it.reference }
+    private fun refs(tasks: List<TaskSummary>) = tasks.map { it.reference }
 
     @Test
     fun todaysWorkIsWhatIsDueTodayOrLateAndNothingLater() {

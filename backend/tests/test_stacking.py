@@ -26,7 +26,7 @@ from app.db import Database
 from app.models.task import Task
 from app.schemas.tasks import TaskMove
 from app.services.tasks import lookup, moves, stacking
-from tests.conftest import put_members
+from tests.conftest import cards_of, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -64,7 +64,7 @@ async def _columns(client: AsyncClient) -> list[str]:
 
 
 async def _board(client: AsyncClient) -> list[dict[str, Any]]:
-    return list((await client.get("/projects/ATL/tasks")).json())
+    return list(cards_of((await client.get("/projects/ATL/tasks")).json()))
 
 
 async def _titles_in(client: AsyncClient, column_id: str) -> list[str]:

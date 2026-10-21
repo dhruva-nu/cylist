@@ -1285,3 +1285,93 @@ async def test_create_subtask_takes_several_pull_requests(
         {"url": "#44", "state": "approved"},
         {"url": "#48", "state": "raised"},
     ]
+
+
+# --- Paged lists -----------------------------------------------------------
+#
+# Every list the server serves comes a page at a time (CYLIST-130). A tool
+# either reads all of what it needs, or hands the model the cursor to go on.
+
+
+async def test_list_tasks_gives_each_column_its_cursor(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "list_tasks", project="ATL", limit=5)
+    assert not result.is_error
+    assert [task["reference"] for task in result.data["tasks"]] == ["ATL-2"]
+    # A summary: the description is get_task's to give.
+    assert "description" not in result.data["tasks"][0]
+    assert {column["name"]: column["next"] for column in result.data["columns"]} == {
+        "Backlog": None,
+        "In progress": None,
+    }
+    assert recorder.sent("GET", "/projects/ATL/tasks").url.params["limit"] == "5"
+
+
+async def test_list_tasks_continues_one_column_from_its_cursor(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server, "list_tasks", project="ATL", column="In progress", after=fake_api.TASK_ID
+    )
+    assert not result.is_error
+    sent = recorder.sent("GET", f"/columns/{fake_api.DOING_ID}/tasks")
+    assert sent.url.params["after"] == fake_api.TASK_ID
+    assert result.data["tasks"] == []
+    assert [column["name"] for column in result.data["columns"]] == ["In progress"]
+
+
+async def test_list_tasks_refuses_a_cursor_without_its_column(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(server, "list_tasks", project="ATL", after=fake_api.TASK_ID)
+    assert result.is_error
+    assert "'column'" in result.text
+    assert recorder.paths() == []
+
+
+async def test_get_task_reads_further_back_in_the_timeline(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    newest = fake_api.TIMELINE[0]["id"]
+    result = await call(server, "get_task", task="ATL-2", comments_after=newest)
+    assert not result.is_error
+    assert recorder.sent("GET", "/tasks/ATL-2/comments").url.params["after"] == newest
+    assert [entry["body"] for entry in result.data["comments"]] == ["Note 2.", "Note 1."]
+    assert result.data["total"] == 3
+
+
+async def test_get_goal_reads_more_cards_from_a_cursor(
+    server: MCPServer, recorder: fake_api.Recorder
+) -> None:
+    result = await call(
+        server, "get_goal", project="ATL", goal="ATL-G1", cards_after=fake_api.TASK_ID
+    )
+    assert not result.is_error
+    sent = recorder.sent("GET", "/goals/ATL-G1/tasks")
+    assert sent.url.params["after"] == fake_api.TASK_ID
+    assert result.data == {"tasks": [], "next": None}
+
+
+async def test_read_activity_hands_back_the_cursor_and_takes_it(
+    make_server: Callable[..., MCPServer], recorder: fake_api.Recorder
+) -> None:
+    older = httpx.Response(200, json={"items": fake_api.ACTIVITY, "next": "cursor-1"})
+    server = make_server(overrides={("GET", "/activity"): older})
+    result = await call(server, "read_activity", after="cursor-0")
+    assert not result.is_error
+    assert result.data["next"] == "cursor-1"
+    assert recorder.sent("GET", "/activity").url.params["after"] == "cursor-0"
+
+
+async def test_a_lookup_reads_every_page(
+    server: MCPServer, recorder: fake_api.Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A directory read a page at a time still lists the person on the last page."""
+    from cylist_mcp import client
+
+    monkeypatch.setattr(client, "PAGE_LIMIT", 1)
+    result = await call(server, "list_people")
+    assert not result.is_error
+    assert [person["name"] for person in result.data["people"]] == ["Aditi K", "Lena W", "Leo Wren"]
+    assert recorder.count("GET", "/people") == 3

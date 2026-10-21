@@ -171,7 +171,7 @@ def register(subparsers: Any) -> None:
 
 def _list(args: argparse.Namespace, ctx: Context) -> None:
     project = _project(args.project)
-    skills = ctx.client.get(f"/projects/{project}/skills")
+    skills = ctx.client.get_all(f"/projects/{project}/skills")
     if ctx.as_json:
         output.emit_json(skills)
         return
@@ -307,7 +307,7 @@ class Outcome:
 def _pull(args: argparse.Namespace, ctx: Context) -> None:
     project = _project(args.project)
     destination = _destination(args)
-    skills = ctx.client.get(f"/projects/{project}/skills")
+    skills = ctx.client.get_all(f"/projects/{project}/skills")
     chosen = _choose(skills, list(args.names), project)
     if not chosen:
         output.echo(f"{project} has no skills to pull.")

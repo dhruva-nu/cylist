@@ -87,7 +87,7 @@ def test_a_fresh_repository_gets_the_half_read_off_the_board(
 
 def test_the_block_says_a_pr_comes_before_dev(run: Runner, tmp_path: Path) -> None:
     """Sessions that never saw /work still get the rule, even with no skills listed."""
-    bare = {("GET", "/projects/ATL/skills"): httpx.Response(200, json=[])}
+    bare = {("GET", "/projects/ATL/skills"): httpx.Response(200, json={"items": [], "next": None})}
 
     result = run("repo", "setup", "ATL", "--path", str(tmp_path), overrides=bare)
 
@@ -177,7 +177,7 @@ def test_a_project_with_nothing_written_down_says_so(run: Runner, tmp_path: Path
         str(tmp_path),
         overrides={
             ("GET", "/projects/ATL/docs"): empty_tree,
-            ("GET", "/projects/ATL/skills"): httpx.Response(200, json=[]),
+            ("GET", "/projects/ATL/skills"): httpx.Response(200, json={"items": [], "next": None}),
         },
     )
 

@@ -18,7 +18,7 @@ from mcp.types import CallToolResult
 from pydantic import Field
 
 from cylist_mcp import resolve
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.errors import CylistError
 from cylist_mcp.tools.common import ProjectRef, as_tool_result, check_choice
 
@@ -49,10 +49,10 @@ def register(server: MCPServer, client: Api) -> None:
         tree: Annotated[str | None, Field(description="A tree's name, e.g. 'Logins'.")] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            trees = await client.get(f"/projects/{project}/vault/trees")
+            trees = await every(client, f"/projects/{project}/vault/trees")
             if not tree:
                 return {"trees": trees}
-            summary = resolve.pick(list(trees), tree, kind="vault tree", where=project)
+            summary = resolve.pick(trees, tree, kind="vault tree", where=project)
             return {"tree": await client.get(f"/vault/trees/{summary['id']}")}
 
         return await as_tool_result(call)

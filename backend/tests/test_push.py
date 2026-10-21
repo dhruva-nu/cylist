@@ -640,7 +640,7 @@ class TestPushingAgentSessions:
         await _report(wired, agent, ref, "working")
         await pushing.drain(database, sender)
 
-        assert (await wired.get("/devices", headers=phone)).json() == []
+        assert (await wired.get("/devices", headers=phone)).json()["items"] == []
 
     async def test_a_token_endpoint_answering_html_costs_one_phone_not_the_rest(
         self,

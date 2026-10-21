@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
@@ -25,15 +25,18 @@ from app.db import SessionDependency, database_of, flush_or_refuse, publish_into
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.project import Project
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.routers.vault import vault_cipher
 from app.schemas.hooks import (
     DeliverySummary,
     HookCreate,
     HookCreated,
+    HookDeliveryPage,
     HookDeliveryRead,
     HookEvent,
     HookFire,
+    HookPage,
     HookRead,
     HookSecret,
     HookSecretRotate,
@@ -41,6 +44,7 @@ from app.schemas.hooks import (
 )
 from app.services import activity, hook_delivery, hooks
 from app.services.hooks import HookFields, HookFilters
+from app.services.paging import PageRequest
 
 router = APIRouter(tags=["hooks"])
 
@@ -194,17 +198,21 @@ async def list_events(_: Principal = Depends(require(Scope.READ))) -> list[HookE
 
 @router.get(
     "/projects/{project_ref}/hooks",
-    response_model=list[HookRead],
+    response_model=HookPage,
     summary="List a project's hooks",
 )
 async def list_hooks(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(may_read_hooks),
     session: AsyncSession = SessionDependency,
-) -> list[HookRead]:
-    found = await hooks.list_hooks(session, project)
-    labels = await hooks.labels_for(session, found)
-    return [_hook_read(hook, labels[hook.id]) for hook in found]
+    page: PageRequest = PageQuery,
+) -> HookPage:
+    """The project's hooks, by name, a page at a time."""
+    found = await hooks.list_hooks(session, project, page)
+    labels = await hooks.labels_for(session, found.rows)
+    return HookPage(
+        items=[_hook_read(hook, labels[hook.id]) for hook in found.rows], next=found.next
+    )
 
 
 @router.post(
@@ -431,19 +439,22 @@ async def fire_hook(
 
 @router.get(
     "/projects/{project_ref}/hooks/{hook_id}/deliveries",
-    response_model=list[HookDeliveryRead],
+    response_model=HookDeliveryPage,
     summary="List a hook's recent deliveries",
 )
 async def list_deliveries(
     hook: Hook = Depends(resolved_hook),
     _: Principal = Depends(may_read_hooks),
     session: AsyncSession = SessionDependency,
-    limit: int = Query(default=25, ge=1, le=100),
-) -> list[HookDeliveryRead]:
-    """Newest first, each with every attempt made at it. Finished ones are kept
-    for 30 days."""
-    found = await hooks.deliveries(session, hook, limit=limit)
-    return [HookDeliveryRead.model_validate(delivery) for delivery in found]
+    page: PageRequest = PageQuery,
+) -> HookDeliveryPage:
+    """Newest first, a page at a time, each with every attempt made at it.
+    Finished ones are kept for 30 days."""
+    found = await hooks.deliveries(session, hook, page)
+    return HookDeliveryPage(
+        items=[HookDeliveryRead.model_validate(delivery) for delivery in found.rows],
+        next=found.next,
+    )
 
 
 @router.post(

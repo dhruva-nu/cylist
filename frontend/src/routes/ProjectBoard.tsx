@@ -21,7 +21,7 @@ import { closestCenter, DndContext, DragOverlay } from '@dnd-kit/core'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMemo, useRef, useState } from 'react'
 import type { Board, BoardColumn, Goal, Person, Task, Template } from '../api/client'
-import { useIdentity } from '../api/queries'
+import { useIdentity, useLoadMoreCards, type ColumnCards } from '../api/queries'
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
 import { EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../components/ui'
@@ -33,6 +33,7 @@ import { peopleFromSearch, rememberedPeopleKey, searchFromPeople } from './board
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
 import { CardActionsContext, type CardActions } from './board/cardActions'
 import { ColdStorageDialog } from './board/ColdStorageDialog'
+import type { ColumnMore } from './board/Column'
 import { ColumnDialog } from './board/ColumnDialog'
 import { SCREEN_READER_INSTRUCTIONS } from './board/keyboardDrag'
 import { lanesFor, narrowBoard, tasksByColumn, type Lane } from './board/narrowBoard'
@@ -70,7 +71,8 @@ export function ProjectBoard() {
       who={who}
       meId={identity.data?.person?.id ?? null}
       board={board.data}
-      tasks={tasks.data}
+      tasks={tasks.data.tasks}
+      columnCards={tasks.data.columns}
       members={members.data?.members ?? EMPTY}
       templates={templates.data ?? EMPTY}
       goals={goals.data ?? EMPTY}
@@ -101,6 +103,7 @@ function LoadedBoard({
   meId,
   board,
   tasks,
+  columnCards,
   members,
   templates,
   goals,
@@ -118,7 +121,10 @@ function LoadedBoard({
   /** The person signed in, where the session is one. */
   meId: string | null
   board: Board
+  /** Every card read so far — a column arrives a page at a time. */
   tasks: Task[]
+  /** How far down each column has been read, and how many cards each holds. */
+  columnCards: ColumnCards[]
   members: Person[]
   templates: Template[]
   goals: Goal[]
@@ -132,6 +138,7 @@ function LoadedBoard({
     goals,
     members,
   )
+  const loadMore = useLoadMoreCards(projectKey)
   const boardRef = useRef<HTMLDivElement>(null)
   const [dialog, setDialog] = useState<BoardDialog | null>(null)
   /**
@@ -271,7 +278,20 @@ function LoadedBoard({
       filters.agent !== 'all',
     ),
     onToggleHold: () => view.toggleHold(column.id),
+    more: moreOf(column),
   })
+
+  /** What is left to read of a column, and the way to read it — null once it is all here. */
+  function moreOf(column: BoardColumn): ColumnMore | null {
+    const read = columnCards.find((cards) => cards.column_id === column.id)
+    if (!read?.next) return null
+    const loaded = tasks.filter((task) => task.column_id === column.id).length
+    return {
+      unread: Math.max(read.total - loaded, 0),
+      loading: loadMore.isPending && loadMore.variables === column.id,
+      onLoad: () => loadMore.mutate(column.id),
+    }
+  }
 
   const lanesLayout: LanesLayout | null = inLanes
     ? {
@@ -410,7 +430,10 @@ function LoadedBoard({
           column={doneColumn}
           // Every card in the column, not the ones the filters leave drawn:
           // storing takes the whole column, whatever the board is showing.
-          cardCount={tasks.filter((task) => task.column_id === doneColumn.id).length}
+          cardCount={
+            columnCards.find((cards) => cards.column_id === doneColumn.id)?.total ??
+            tasks.filter((task) => task.column_id === doneColumn.id).length
+          }
           mayStore={mayWriteCards && may('files')}
           mayRestore={mayWriteCards}
           announce={announce}

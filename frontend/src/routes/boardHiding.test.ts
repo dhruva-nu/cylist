@@ -42,7 +42,6 @@ function task(title: string, status: TaskStatus): Task {
     column_id: 'column-1',
     position: 0,
     title,
-    description: '',
     type: 'feature',
     priority: 'p3',
     sub_statuses: [],

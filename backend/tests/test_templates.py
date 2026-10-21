@@ -87,7 +87,7 @@ class TestTemplates:
         """Templates are opt-in: a board works without ever naming one."""
         await _project(signed_in)
 
-        assert (await signed_in.get("/projects/ATL/templates")).json() == []
+        assert (await signed_in.get("/projects/ATL/templates")).json()["items"] == []
 
     async def test_a_template_is_created_with_its_description(self, signed_in: AsyncClient) -> None:
         await _project(signed_in)
@@ -123,7 +123,7 @@ class TestTemplates:
         await _project(signed_in)
         await _template(signed_in)
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
 
         assert listed[0]["allowed_column_ids"] == []
         assert listed[0]["stages"] == []
@@ -163,7 +163,7 @@ class TestTemplates:
         template = await _template(signed_in)
 
         assert (await signed_in.delete(f"/templates/{template}")).status_code == 200
-        assert (await signed_in.get("/projects/ATL/templates")).json() == []
+        assert (await signed_in.get("/projects/ATL/templates")).json()["items"] == []
 
     async def test_a_template_a_card_uses_is_not_deleted(self, signed_in: AsyncClient) -> None:
         """Deleting it would quietly free the card and drop what it still owes."""
@@ -181,7 +181,7 @@ class TestTemplates:
         template = await _template(signed_in)
         await _task(signed_in, person, template_id=template)
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
 
         assert listed[0]["task_count"] == 1
 
@@ -234,7 +234,7 @@ class TestStages:
             ],
         )
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()[0]
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"][0]
         assert listed["id"] == template
         assert listed["allowed_column_ids"] == [columns["To do"], columns["Done"]]
         by_column = {stage["column_id"]: stage["sub_stage_labels"] for stage in listed["stages"]}
@@ -255,7 +255,7 @@ class TestStages:
             ],
         )
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()[0]
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"][0]
         assert listed["allowed_column_ids"] == [columns["To do"], columns["Done"]]
 
     async def test_a_template_may_start_with_no_stages(self, signed_in: AsyncClient) -> None:
@@ -263,7 +263,7 @@ class TestStages:
 
         template = await _template(signed_in, "Hotfix", [])
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
         assert listed[0]["id"] == template
         assert listed[0]["stages"] == []
 
@@ -378,7 +378,7 @@ class TestStages:
             json={"stages": [{"column_id": UNKNOWN_ID, "sub_stage_labels": []}]},
         )
 
-        kept = (await signed_in.get("/projects/ATL/templates")).json()[0]
+        kept = (await signed_in.get("/projects/ATL/templates")).json()["items"][0]
         assert kept["allowed_column_ids"] == [columns["To do"]]
 
     async def test_deleting_a_column_takes_it_out_of_every_template(
@@ -400,7 +400,7 @@ class TestStages:
 
         assert (await signed_in.delete(f"/columns/{review}")).status_code == 200
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
         assert listed[0]["allowed_column_ids"] == [columns["To do"]]
 
 
@@ -858,7 +858,9 @@ class TestWhatTheTrailSays:
             signed_in, "Hotfix", [{"column_id": columns["To do"], "sub_stage_labels": []}]
         )
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "template"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "template"})).json()[
+            "items"
+        ]
 
         assert entries[0]["verb"] == "template.created"
 

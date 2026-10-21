@@ -26,20 +26,27 @@ from app.core.errors import ForbiddenError
 from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import TokenKind
+from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
-from app.schemas.tokens import TokenCreate, TokenIssued, TokenRead
+from app.schemas.tokens import TokenCreate, TokenIssued, TokenPage, TokenRead
 from app.services import activity, tokens
+from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/tokens", tags=["tokens"])
 
 
-@router.get("", response_model=list[TokenRead], summary="List API tokens")
+@router.get("", response_model=TokenPage, summary="List API tokens")
 async def list_tokens(
     _: Principal = Depends(require(Scope.ADMIN)),
     session: AsyncSession = SessionDependency,
-) -> list[TokenRead]:
-    """Return every live API token. Browser sessions are not listed."""
-    return [TokenRead.model_validate(token) for token in await tokens.list_api_tokens(session)]
+    page: PageRequest = PageQuery,
+) -> TokenPage:
+    """Return the live API tokens, newest first, a page at a time. Browser
+    sessions are not listed."""
+    found = await tokens.list_api_tokens(session, page)
+    return TokenPage(
+        items=[TokenRead.model_validate(token) for token in found.rows], next=found.next
+    )
 
 
 def _require_grantable(principal: Principal, scopes: list[Scope]) -> None:

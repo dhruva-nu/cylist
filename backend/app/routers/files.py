@@ -30,14 +30,17 @@ from app.db import SessionDependency
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.files import (
     FiledItem,
+    FiledItemPage,
     FolderChildren,
     FolderCreate,
     FolderCrumb,
     FolderNode,
+    FolderPage,
     FolderRead,
     FolderUpdate,
     ItemRead,
@@ -46,6 +49,7 @@ from app.schemas.files import (
 )
 from app.schemas.people import PersonRead
 from app.services import activity, blobs, files, permissions, projects
+from app.services.paging import PageRequest
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["files"])
@@ -171,19 +175,21 @@ WRITE_THIS_ITEM = guards.for_entity(Permission.FILES, visible_item, locate=files
 
 @router.get(
     "/projects/{project_ref}/folders",
-    response_model=list[FolderRead],
+    response_model=FolderPage,
     summary="List a project's folders",
 )
 async def list_folders(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[FolderRead]:
-    """Every folder in the project, flat and alphabetical.
+    page: PageRequest = PageQuery,
+) -> FolderPage:
+    """The folders in the project, flat and alphabetical, a page at a time.
 
     Use `/tree` for the same folders arranged as a tree.
     """
-    return [_folder_read(folder) for folder in await files.list_folders(session, project)]
+    found = await files.folder_page(session, project, page)
+    return FolderPage(items=[_folder_read(folder) for folder in found.rows], next=found.next)
 
 
 @router.post(
@@ -258,26 +264,28 @@ async def get_children(
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
+    page: PageRequest = PageQuery,
 ) -> FolderChildren:
-    """The subfolders and items directly inside a folder, plus its breadcrumb.
+    """The subfolders and a page of the items directly inside a folder, plus
+    its breadcrumb.
+
+    The items are paged — `after` and `limit` — and the subfolders are not:
+    they are the tree's structure, which `/tree` already returns whole.
 
     Items classified above the caller's clearance are left out rather than
     listed and refused — see :func:`app.services.permissions.enforce_visible`.
     Subfolders are structure and are always listed: a tree with holes in it is
     harder to trust than one with locked drawers.
     """
-    subfolders, items = await files.children(session, folder)
-    path = await files.path_to(session, folder)
     allowed = await permissions.visible_levels_for(session, folder.project_id, principal)
+    items = await files.items_in(session, folder, page, allowed=allowed)
+    path = await files.path_to(session, folder)
     return FolderChildren(
         folder=_folder_read(folder),
         path=[FolderCrumb(id=crumb.id, name=crumb.name) for crumb in path],
-        folders=[_folder_read(subfolder) for subfolder in subfolders],
-        items=[
-            file_item_read(item)
-            for item in items
-            if permissions.readable(item.sensitivity, allowed)
-        ],
+        folders=[_folder_read(subfolder) for subfolder in await files.subfolders(session, folder)],
+        items=[file_item_read(item) for item in items.rows],
+        next=items.next,
     )
 
 
@@ -449,15 +457,17 @@ async def add_link(
 
 @router.get(
     "/projects/{project_ref}/items",
-    response_model=list[FiledItem],
+    response_model=FiledItemPage,
     summary="List every file and link in a project",
 )
 async def list_project_items(
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[FiledItem]:
-    """Every item in the project, flat and alphabetical, each with its path.
+    page: PageRequest = PageQuery,
+) -> FiledItemPage:
+    """The items in the project, flat and alphabetical, each with its path, a
+    page at a time.
 
     The tree without the tree, for the places that want a project's files as a
     list of names: the `>` tag in a description or a comment is completed from
@@ -465,11 +475,8 @@ async def list_project_items(
     than find it by walking. Use `/folders/{folder_id}/children` to browse.
     """
     allowed = await permissions.readable_levels(session, project, principal)
-    return [
-        _filed_item(filed)
-        for filed in await files.list_items(session, project)
-        if permissions.readable(filed.item.sensitivity, allowed)
-    ]
+    found, after = await files.list_items(session, project, page, allowed=allowed)
+    return FiledItemPage(items=[_filed_item(filed) for filed in found], next=after)
 
 
 @router.get("/items/{item_id}", response_model=ItemRead, summary="Get a file or link")

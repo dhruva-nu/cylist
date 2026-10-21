@@ -29,6 +29,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from argon2 import PasswordHasher, profiles
@@ -426,3 +427,13 @@ async def put_members(client: AsyncClient, project: str, person_ids: list[str]) 
     me = (await client.get("/me")).json().get("person")
     keep = [me["id"]] if me is not None and me["id"] not in person_ids else []
     return await client.put(f"/projects/{project}/members", json={"person_ids": keep + person_ids})
+
+
+def cards_of(board: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every card on a page of ``GET /projects/{ref}/tasks``, left to right and
+    top to bottom — the flat list a test about the cards themselves reads.
+
+    Only what the page holds: a test that wants a column past its first page
+    reads ``GET /columns/{id}/tasks`` itself.
+    """
+    return [card for column in board["columns"] for card in column["items"]]

@@ -28,16 +28,19 @@ from app.db import SessionDependency
 from app.models.agent import Skill
 from app.models.project import Project
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.schemas.agents import (
     SkillFolderFile,
     SkillFolderRead,
+    SkillPage,
     SkillRead,
     SkillUpdate,
 )
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.services import activity, agents, blobs, projects, skill_folders
+from app.services.paging import PageRequest
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["agents"])
@@ -97,21 +100,23 @@ WRITE_THIS_SKILL = guards.for_entity(Permission.AGENTS, resolved_skill)
 
 @router.get(
     "/projects/{project_ref}/skills",
-    response_model=list[SkillRead],
+    response_model=SkillPage,
     summary="List a project's skills",
 )
 async def list_skills(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[SkillRead]:
-    """Every skill uploaded to this project, alphabetical.
+    page: PageRequest = PageQuery,
+) -> SkillPage:
+    """The skills uploaded to this project, alphabetical, a page at a time.
 
     A skill is a packaged job an agent can be handed. Download one with
     `/skills/{skill_id}/download`, or as the folder Claude Code loads it from
     with `/skills/{skill_id}/folder`.
     """
-    return [_skill_read(skill) for skill in await agents.list_skills(session, project)]
+    found = await agents.list_skills(session, project, page)
+    return SkillPage(items=[_skill_read(skill) for skill in found.rows], next=found.next)
 
 
 @router.post(

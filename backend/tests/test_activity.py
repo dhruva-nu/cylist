@@ -8,7 +8,7 @@ from tests.conftest import OWNER_NAME
 
 
 async def test_signing_in_is_recorded(signed_in: AsyncClient) -> None:
-    entries = (await signed_in.get("/activity")).json()
+    entries = (await signed_in.get("/activity")).json()["items"]
 
     assert [entry["verb"] for entry in entries] == ["session.started"]
     assert entries[0]["channel"] == "web"
@@ -21,7 +21,7 @@ async def test_records_who_issued_a_token_and_through_which_door(
 
     issued = next(
         entry
-        for entry in (await signed_in.get("/activity")).json()
+        for entry in (await signed_in.get("/activity")).json()["items"]
         if entry["verb"] == "token.issued"
     )
 
@@ -43,7 +43,7 @@ async def test_never_stores_the_token_plaintext(signed_in: AsyncClient) -> None:
 async def test_can_be_filtered_by_entity_type(signed_in: AsyncClient) -> None:
     await signed_in.post("/tokens", json={"name": "agent", "scopes": ["read"]})
 
-    entries = (await signed_in.get("/activity", params={"entity_type": "token"})).json()
+    entries = (await signed_in.get("/activity", params={"entity_type": "token"})).json()["items"]
 
     assert [entry["entity_type"] for entry in entries] == ["token"]
 
@@ -55,7 +55,7 @@ async def test_an_agents_action_is_attributed_to_the_api_channel(
     created = await signed_in.post("/tokens", json={"name": "agent", "scopes": ["read"]})
     agent = {"Authorization": f"Bearer {created.json()['token']}"}
 
-    entries = (await signed_in.get("/activity", headers=agent)).json()
+    entries = (await signed_in.get("/activity", headers=agent)).json()["items"]
 
     assert {entry["channel"] for entry in entries} == {"web"}
 
@@ -64,7 +64,7 @@ async def test_the_feed_can_be_filtered_by_project_key(signed_in: AsyncClient) -
     """A key, not just an id — otherwise every client resolves it first."""
     await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
 
-    by_key = (await signed_in.get("/activity", params={"project": "atl"})).json()
+    by_key = (await signed_in.get("/activity", params={"project": "atl"})).json()["items"]
 
     assert [entry["verb"] for entry in by_key] == ["project.created"]
 

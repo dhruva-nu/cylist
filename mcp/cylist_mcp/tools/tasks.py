@@ -104,12 +104,19 @@ def register(server: MCPServer, client: Api) -> None:
         description=(
             "List the cards on a project's board, in board order. Returns each "
             "task's reference (like 'ATL-41'), title, type, status, column, "
-            "assignee, due date and who it is waiting on, plus the board's "
-            "columns so you can tell which card is where. 'agent_session' says "
-            "who is working on a card right now, if an agent is: 'working', "
-            "'waiting' (it needs a human), or 'done' — which includes a session "
-            "whose connection was lost, distinguished by its 'reason'. "
-            "Optionally filter by status or assignee."
+            "assignee, due date and who it is waiting on — not its description, "
+            "which get_task reads — plus the board's columns so you can tell "
+            "which card is where. 'agent_session' says who is working on a card "
+            "right now, if an agent is: 'working', 'waiting' (it needs a human), "
+            "or 'done' — which includes a session whose connection was lost, "
+            "distinguished by its 'reason'.\n\n"
+            "A board is read a page per column: the top 'limit' cards of each. "
+            "Each column says its 'task_count' in all and carries 'next', a "
+            "cursor for the cards below the ones returned — null when the column "
+            "is all here. To read further down one column, call again with "
+            "'column' and 'after' set to that cursor. The status and assignee "
+            "filters narrow the cards this call returned, not the whole board, "
+            "so a long column may hold matches further down."
         ),
     )
     async def list_tasks(
@@ -121,14 +128,55 @@ def register(server: MCPServer, client: Api) -> None:
         assignee: Annotated[
             str | None, Field(description="Only tasks assigned to this person, by name or id.")
         ] = None,
+        column: Annotated[
+            str | None,
+            Field(description="Only this column, by name or id. Needed with 'after'."),
+        ] = None,
+        after: Annotated[
+            str | None,
+            Field(description="A column's 'next' from an earlier call: read the cards below it."),
+        ] = None,
+        limit: Annotated[
+            int | None,
+            Field(description="Cards per column, at most 100. Default 50.", ge=1, le=100),
+        ] = None,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
             # Checked before anything is fetched: a bad status is the model's
             # mistake to fix, and two board-sized reads should not precede it.
             if status is not None:
                 check_status(status)
-            tasks = await client.get(f"/projects/{project}/tasks")
+            if after is not None and column is None:
+                raise CylistError(
+                    "'after' continues one column, so name it with 'column' as well.",
+                    code="validation_failed",
+                    details={"field": "column"},
+                )
             board = await client.get(f"/projects/{project}/columns")
+            columns: list[dict[str, Any]] = list(board.get("columns", []))
+
+            tasks: list[dict[str, Any]]
+            if column is not None:
+                wanted_column = await resolve.column_id(client, project, column)
+                page = await client.get(f"/columns/{wanted_column}/tasks", after=after, limit=limit)
+                tasks = list(page.get("items", []))
+                columns = [
+                    {**entry, "next": page.get("next")}
+                    for entry in columns
+                    if str(entry.get("id")) == wanted_column
+                ]
+            else:
+                stacks = await client.get(f"/projects/{project}/tasks", limit=limit)
+                cursors = {
+                    str(stack.get("column_id")): stack.get("next")
+                    for stack in stacks.get("columns", [])
+                }
+                tasks = [
+                    task for stack in stacks.get("columns", []) for task in stack.get("items", [])
+                ]
+                columns = [
+                    {**entry, "next": cursors.get(str(entry.get("id")))} for entry in columns
+                ]
 
             if status is not None:
                 tasks = [task for task in tasks if task.get("status") == status]
@@ -137,16 +185,21 @@ def register(server: MCPServer, client: Api) -> None:
                 tasks = [
                     task for task in tasks if str((task.get("assignee") or {}).get("id")) == wanted
                 ]
-            return {"tasks": tasks, "columns": board.get("columns", [])}
+            return {"tasks": tasks, "columns": columns}
 
         return await as_tool_result(call)
 
     @server.tool(
         name="get_task",
         description=(
-            "Get one task with its whole timeline. Returns the task's fields and "
-            "every comment and status change on it, oldest first — a status "
-            "change carries the reason it was given and who it was waiting on. "
+            "Get one task with its timeline. Returns the task's fields, its "
+            "description, and its latest comments and status changes, oldest "
+            "first — a status change carries the reason it was given and who it "
+            "was waiting on. A long timeline is cut to its newest entries: "
+            "'comment_count' says how many there are in all, and when "
+            "'comments_next' is not null, calling again with comments_after set "
+            "to it returns the entries before those, newest first, a page at a "
+            "time. "
             "'agent_session' says whether an agent is on this card right now, and "
             "'agent_sessions' lists each harness session on it with what became "
             "of it — worth reading before you start, so two of you are not on "
@@ -154,8 +207,24 @@ def register(server: MCPServer, client: Api) -> None:
             "the project's docs with ask_docs before reading the code."
         ),
     )
-    async def get_task(task: TaskRef) -> CallToolResult:
+    async def get_task(
+        task: TaskRef,
+        comments_after: Annotated[
+            str | None,
+            Field(
+                description="The 'comments_next' or 'next' of an earlier call, for the "
+                "timeline entries before it."
+            ),
+        ] = None,
+    ) -> CallToolResult:
         async def call() -> dict[str, Any]:
+            if comments_after:
+                page = await client.get(f"/tasks/{task}/comments", after=comments_after)
+                return {
+                    "comments": page.get("items", []),
+                    "next": page.get("next"),
+                    "total": page.get("total"),
+                }
             return {"task": await client.get(f"/tasks/{task}")}
 
         return await as_tool_result(call)

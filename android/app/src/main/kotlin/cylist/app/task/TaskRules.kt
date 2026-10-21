@@ -12,7 +12,7 @@ import cylist.api.generated.models.ChecklistState
 import cylist.api.generated.models.ColumnRead
 import cylist.api.generated.models.HistoryEntry
 import cylist.api.generated.models.TaskDetail
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TemplateRead
 import java.net.URI
@@ -238,7 +238,7 @@ sealed interface MovePlan {
 }
 
 /** A sub-task stops holding its parent back once finished or cancelled (`Task.is_settled`). */
-fun isSettled(subtask: TaskRead): Boolean = subtask.status == TaskStatus.cancelled || subtask.finishedAt != null
+fun isSettled(subtask: TaskSummary): Boolean = subtask.status == TaskStatus.cancelled || subtask.finishedAt != null
 
 /** What is still open under a card: its sub-tasks by reference, then its checklist items by title (`open_work`). */
 fun outstandingWork(task: TaskDetail): List<String> =

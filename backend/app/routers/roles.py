@@ -25,15 +25,18 @@ from app.models.person import Person
 from app.models.project import Project
 from app.models.role import ProjectRole
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.schemas.roles import (
     MemberRoleUpdate,
     RoleCreate,
+    RolePage,
     RoleRead,
     RoleSummary,
     RoleUpdate,
 )
 from app.services import activity, people, roles
+from app.services.paging import PageRequest
 
 router = APIRouter(tags=["roles"])
 
@@ -100,22 +103,26 @@ def _role_summary(role: ProjectRole, member_count: int) -> RoleSummary:
 
 @router.get(
     "/projects/{project_ref}/roles",
-    response_model=list[RoleSummary],
+    response_model=RolePage,
     summary="List a project's roles",
 )
 async def list_roles(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[RoleSummary]:
-    """Every role on the project, the admin role first, then by name.
+    page: PageRequest = PageQuery,
+) -> RolePage:
+    """The roles on the project, the admin role first, then by name, a page at a time.
 
     Readable by anyone who can read the project: a badge nobody can look up is
     a badge nobody can read.
     """
-    found = await roles.list_roles(session, project)
+    found = await roles.page_of_roles(session, project, page)
     counts = await roles.holder_counts(session, project)
-    return [_role_summary(role, counts.get(role.id, 0)) for role in found]
+    return RolePage(
+        items=[_role_summary(role, counts.get(role.id, 0)) for role in found.rows],
+        next=found.next,
+    )
 
 
 @router.post(

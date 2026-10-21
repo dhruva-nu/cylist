@@ -9,9 +9,9 @@
  * spelled here, once, along with the hook that reads each.
  */
 
-import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query'
 import { useCallback } from 'react'
-import { ApiError, api } from './client'
+import { ApiError, api, type Task } from './client'
 
 export const queryKeys = {
   identity: ['me'],
@@ -119,10 +119,113 @@ export function useTemplates(projectKey: string) {
   })
 }
 
+/** How far down one column of the board has been read. */
+export interface ColumnCards {
+  column_id: string
+  /** Cards in the column in all, read or not. */
+  total: number
+  /** The cursor for the cards below the ones read. Null once all are. */
+  next: string | null
+  /** How many pages of it have been read — what a refetch reads again. */
+  pages: number
+}
+
+/**
+ * The board's cards as far as they have been read.
+ *
+ * A column arrives a page at a time (CYLIST-130): the board reads the top of
+ * every column, and the reader asks for more of one. `tasks` is every card
+ * read so far, left to right and top to bottom, which is the shape everything
+ * that draws or searches the board already took.
+ */
+export interface BoardCards {
+  tasks: Task[]
+  columns: ColumnCards[]
+}
+
+/**
+ * Read the board, as deep into each column as `previous` had read it.
+ *
+ * A refetch — the socket ringing, a write landing — reads the board again,
+ * and one that went back to the first page of every column would take away
+ * the cards the reader had asked for. A cursor whose card has since left the
+ * column is refused, and the column then stops where it got to.
+ */
+export async function fetchBoardCards(
+  projectKey: string,
+  previous?: BoardCards,
+): Promise<BoardCards> {
+  const board = await api.listTasks(projectKey)
+  const tasks: Task[] = []
+  const columns: ColumnCards[] = []
+  for (const column of board.columns) {
+    const wanted = previous?.columns.find((read) => read.column_id === column.column_id)?.pages ?? 1
+    let { next } = column
+    let pages = 1
+    tasks.push(...column.items)
+    while (next && pages < wanted) {
+      try {
+        const page = await api.listColumnTasks(column.column_id, next)
+        tasks.push(...page.items)
+        next = page.next
+        pages += 1
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'unprocessable') break
+        throw error
+      }
+    }
+    columns.push({ column_id: column.column_id, total: column.total, next, pages })
+  }
+  return { tasks, columns }
+}
+
+/** The board's cards, as far as each column has been read — see `BoardCards`. */
 export function useTasks(projectKey: string) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: queryKeys.tasks(projectKey),
-    queryFn: () => api.listTasks(projectKey),
+    queryFn: () =>
+      fetchBoardCards(
+        projectKey,
+        queryClient.getQueryData<BoardCards>(queryKeys.tasks(projectKey)),
+      ),
+  })
+}
+
+/**
+ * Read the next page of one column into the board's cards.
+ *
+ * Appended to what is in hand rather than refetched, so the cards above stay
+ * where the reader left them; a card that has since moved into the page is
+ * not drawn twice.
+ */
+export function useLoadMoreCards(projectKey: string) {
+  const queryClient = useQueryClient()
+  const key = queryKeys.tasks(projectKey)
+  return useMutation({
+    mutationFn: async (columnId: string) => {
+      const cursor = queryClient
+        .getQueryData<BoardCards>(key)
+        ?.columns.find((column) => column.column_id === columnId)?.next
+      return cursor ? { columnId, page: await api.listColumnTasks(columnId, cursor) } : null
+    },
+    onSuccess: (loaded) => {
+      if (!loaded) return
+      queryClient.setQueryData<BoardCards>(key, (current) => {
+        if (!current) return current
+        const known = new Set(current.tasks.map((task) => task.id))
+        return {
+          tasks: [...current.tasks, ...loaded.page.items.filter((task) => !known.has(task.id))],
+          columns: current.columns.map((column) =>
+            column.column_id === loaded.columnId
+              ? { ...column, next: loaded.page.next, pages: column.pages + 1 }
+              : column,
+          ),
+        }
+      })
+    },
+    // The cursor's card left the column; read the board again from the top.
+    onError: () => queryClient.invalidateQueries({ queryKey: key }),
   })
 }
 

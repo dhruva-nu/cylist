@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from tests import fake_api
@@ -706,3 +707,106 @@ def test_task_new_without_a_pull_request_says_nothing_about_one(
     )
     assert result.code == 0
     assert "pr_refs" not in recorder.body("POST", "/tasks")
+
+
+# --- Paged lists -----------------------------------------------------------
+#
+# Every list the server serves comes a page at a time (CYLIST-130). These
+# prove each command either reads what it needs of it, or says what it left.
+
+
+def _long_column(cards: int) -> httpx.Response:
+    """A board whose Backlog holds more than the page of it that came back."""
+    shown = fake_api.summary_of(fake_api.TASK_ONE)
+    return httpx.Response(
+        200,
+        json={
+            "columns": [
+                {
+                    "column_id": fake_api.BACKLOG_ID,
+                    "total": cards,
+                    "items": [shown],
+                    "next": shown["id"],
+                },
+                {"column_id": fake_api.DOING_ID, "total": 0, "items": [], "next": None},
+                {"column_id": fake_api.DONE_ID, "total": 0, "items": [], "next": None},
+            ]
+        },
+    )
+
+
+def test_board_says_how_many_cards_a_column_holds_past_its_first_page(run: Runner) -> None:
+    result = run("board", "ATL", overrides={("GET", "/projects/ATL/tasks"): _long_column(41)})
+    assert result.code == 0
+    assert "… 40 more" in result.out
+
+
+def test_board_passes_its_limit_per_column(run: Runner, recorder: fake_api.Recorder) -> None:
+    assert run("board", "ATL", "--limit", "5").code == 0
+    assert recorder.sent("GET", "/projects/ATL/tasks").url.params["limit"] == "5"
+
+
+def test_tasks_ls_says_what_it_did_not_read(run: Runner) -> None:
+    result = run("tasks", "ls", "ATL", overrides={("GET", "/projects/ATL/tasks"): _long_column(41)})
+    assert result.code == 0
+    assert "40 more in Backlog" in result.out
+
+
+def test_tasks_ls_reads_a_named_column_whole(run: Runner, recorder: fake_api.Recorder) -> None:
+    result = run("tasks", "ls", "ATL", "--column", "In progress")
+    assert result.code == 0
+    assert recorder.count("GET", f"/columns/{fake_api.DOING_ID}/tasks") == 1
+    assert "ATL-2" in result.out
+    assert "ATL-1" not in result.out
+
+
+def test_task_show_says_earlier_entries_are_not_shown(run: Runner) -> None:
+    detail = {
+        **fake_api.TASK_TWO,
+        "comments": fake_api.TIMELINE,
+        "comments_next": fake_api.TIMELINE[0]["id"],
+        "comment_count": 60,
+        "subtasks": [],
+    }
+    result = run(
+        "task",
+        "show",
+        "ATL-2",
+        overrides={("GET", "/tasks/ATL-2"): httpx.Response(200, json=detail)},
+    )
+    assert result.code == 0
+    assert "58 earlier timeline entries are not shown." in result.out
+
+
+def test_goals_show_reads_the_cards_past_the_first_page(
+    run: Runner, recorder: fake_api.Recorder
+) -> None:
+    result = run("goals", "show", "ATL-G1")
+    assert result.code == 0
+    assert recorder.sent("GET", "/goals/ATL-G1/tasks").url.params["after"] == fake_api.TASK_ONE_ID
+    assert "ATL-2" in result.out
+
+
+def test_activity_offers_the_cursor_for_older_entries(run: Runner) -> None:
+    older = httpx.Response(200, json={"items": fake_api.ACTIVITY, "next": "0192f3c4-0009"})
+    result = run("activity", overrides={("GET", "/activity"): older})
+    assert result.code == 0
+    assert "cylist activity --after 0192f3c4-0009" in result.out
+
+
+def test_activity_passes_the_cursor_on(run: Runner, recorder: fake_api.Recorder) -> None:
+    assert run("activity", "--after", fake_api.ACTIVITY[0]["id"]).code == 0
+    assert recorder.sent("GET", "/activity").url.params["after"] == fake_api.ACTIVITY[0]["id"]
+
+
+def test_a_person_past_the_first_page_still_resolves(
+    run: Runner, recorder: fake_api.Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lookup reads every page, or the hundred-and-first person does not exist."""
+    from cylist_cli import client
+
+    monkeypatch.setattr(client, "PAGE_LIMIT", 1)
+    result = run("project", "members", "ATL", "--add", "Leo Wren")
+    assert result.code == 0
+    assert recorder.count("GET", "/people") == 4
+    assert fake_api.LEO_ID in recorder.body("PUT", "/members")["person_ids"]

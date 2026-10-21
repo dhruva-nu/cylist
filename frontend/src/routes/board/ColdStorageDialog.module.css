@@ -47,6 +47,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Under the list, the way to the cards finished before these. */
+.more {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
 .list {
   display: flex;
   flex-direction: column;

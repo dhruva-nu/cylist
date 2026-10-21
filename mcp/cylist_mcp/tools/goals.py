@@ -9,7 +9,7 @@ from mcp.types import CallToolResult
 from pydantic import Field
 
 from cylist_mcp import resolve
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.tools.common import ProjectRef, TaskRef, as_tool_result, check_choice, project_of
 
 GOAL_STATUSES = ("open", "achieved", "dropped")
@@ -38,8 +38,8 @@ def register(server: MCPServer, client: Api) -> None:
         ] = False,
     ) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            goals = await client.get(
-                f"/projects/{project}/goals", open_only=True if open_only else None
+            goals = await every(
+                client, f"/projects/{project}/goals", open_only=True if open_only else None
             )
             return {"goals": goals}
 
@@ -48,17 +48,29 @@ def register(server: MCPServer, client: Api) -> None:
     @server.tool(
         name="get_goal",
         description=(
-            "One goal, its progress, and every card linked to it in board "
+            "One goal, its progress, and the cards linked to it in board "
             "order. The goal may be named ('Search revamp'), referenced "
             "('ATL-G1') or given as an id. Use this to answer what is left on "
             "an epic: the cards come back with their columns, owners and "
             "statuses, so you can say which are done and which are stuck "
-            "without listing the whole board."
+            "without listing the whole board. The cards come a page at a time: "
+            "when 'tasks_next' is not null there are more, and calling again "
+            "with cards_after set to it returns the next page of them."
         ),
     )
-    async def get_goal(project: ProjectRef, goal: GoalRef) -> CallToolResult:
+    async def get_goal(
+        project: ProjectRef,
+        goal: GoalRef,
+        cards_after: Annotated[
+            str | None,
+            Field(description="The 'tasks_next' or 'next' of an earlier call, for more cards."),
+        ] = None,
+    ) -> CallToolResult:
         async def call() -> dict[str, Any]:
             reference = await resolve.goal_ref(client, project, goal)
+            if cards_after:
+                page = await client.get(f"/goals/{reference}/tasks", after=cards_after)
+                return {"tasks": page.get("items", []), "next": page.get("next")}
             return {"goal": await client.get(f"/goals/{reference}")}
 
         return await as_tool_result(call)

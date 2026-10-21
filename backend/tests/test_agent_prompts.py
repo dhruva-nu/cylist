@@ -28,6 +28,7 @@ from app.schemas.agent_sessions import AgentPromptAnswer, AgentPromptOption, Age
 from app.services import agent_prompts, tasks
 from app.services.agent_sessions import presence
 from tests import ws
+from tests.conftest import cards_of
 from tests.test_agent_reports import SESSION_A, SESSION_B, a_card
 
 SOCKET = f"/api/v1/agent-sessions/{SESSION_A}/ws"
@@ -76,16 +77,16 @@ async def _answer(client: AsyncClient, ref: str, prompt_id: str, **body: Any) ->
 
 
 async def _card(client: AsyncClient, ref: str) -> dict[str, Any]:
-    board = (await client.get("/projects/ATL/tasks")).json()
+    board = cards_of((await client.get("/projects/ATL/tasks")).json())
     return next(task for task in board if task["reference"] == ref)
 
 
 async def _sessions(client: AsyncClient, ref: str) -> list[dict[str, Any]]:
-    return list((await client.get(f"/tasks/{ref}/agent-sessions")).json())
+    return list((await client.get(f"/tasks/{ref}/agent-sessions")).json()["items"])
 
 
 async def _verbs(client: AsyncClient) -> list[str]:
-    feed = (await client.get("/activity")).json()
+    feed = (await client.get("/activity")).json()["items"]
     return [entry["verb"] for entry in feed if entry["verb"].startswith("agent_session.")]
 
 
@@ -422,7 +423,7 @@ class TestReportsWhileAsking:
         row = await _report(signed_in, agent, ref, "working")
 
         assert row["state"] == "working"
-        prompts = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()
+        prompts = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()["items"]
         assert (prompts[0]["status"], prompts[0]["closed_reason"]) == ("withdrawn", "abandoned")
 
     async def test_a_session_ending_withdraws_what_it_asked(
@@ -465,7 +466,7 @@ class TestTheTaskPanel:
         asked = await _ask(signed_in, agent, ref)
 
         detail = (await signed_in.get(f"/tasks/{ref}")).json()
-        listed = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()
+        listed = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()["items"]
 
         assert detail["agent_session"]["prompt"]["id"] == asked["id"]
         assert detail["agent_sessions"][0]["prompt"]["id"] == asked["id"]

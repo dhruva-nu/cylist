@@ -60,7 +60,7 @@ class TestCreating:
         await signed_in.post("/projects", json=ATLAS)
         await signed_in.post("/projects", json={**ATLAS, "name": "Something else"})
 
-        assert len((await signed_in.get("/projects")).json()) == 1
+        assert len((await signed_in.get("/projects")).json()["items"]) == 1
 
     async def test_rejects_a_key_that_is_too_long(self, signed_in: AsyncClient) -> None:
         assert (
@@ -140,9 +140,14 @@ class TestArchiving:
 
         assert (await signed_in.patch("/projects/ATL", json={"archived": True})).status_code == 200
 
-        assert (await signed_in.get("/projects")).json() == []
+        assert (await signed_in.get("/projects")).json()["items"] == []
         assert (
-            len((await signed_in.get("/projects", params={"include_archived": True})).json()) == 1
+            len(
+                (await signed_in.get("/projects", params={"include_archived": True})).json()[
+                    "items"
+                ]
+            )
+            == 1
         )
 
     async def test_an_archived_project_is_still_addressable(self, signed_in: AsyncClient) -> None:
@@ -159,7 +164,7 @@ class TestArchiving:
         restored = (await signed_in.patch("/projects/ATL", json={"archived": False})).json()
 
         assert restored["archived_at"] is None
-        assert len((await signed_in.get("/projects")).json()) == 1
+        assert len((await signed_in.get("/projects")).json()["items"]) == 1
 
     async def test_archiving_is_logged_as_itself_not_as_a_field_that_changed(
         self, signed_in: AsyncClient
@@ -168,7 +173,9 @@ class TestArchiving:
         await signed_in.patch("/projects/ATL", json={"archived": True})
         await signed_in.patch("/projects/ATL", json={"archived": False})
 
-        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()[
+            "items"
+        ]
         verbs = [entry["verb"] for entry in entries]
 
         assert "project.archived" in verbs
@@ -182,7 +189,9 @@ class TestArchiving:
 
         await signed_in.patch("/projects/ATL", json={"archived": True, "name": "Atlas, parked"})
 
-        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()[
+            "items"
+        ]
         updated = next(entry for entry in entries if entry["verb"] == "project.updated")
 
         assert updated["payload"]["fields"] == ["name"]
@@ -199,7 +208,9 @@ class TestDeleting:
 
         assert response.status_code == 200
         assert (await signed_in.get("/projects/ATL")).status_code == 404
-        assert (await signed_in.get("/projects", params={"include_archived": True})).json() == []
+        assert (await signed_in.get("/projects", params={"include_archived": True})).json()[
+            "items"
+        ] == []
 
     async def test_refuses_without_the_key(self, signed_in: AsyncClient) -> None:
         """A caller written against the old meaning of DELETE is told, not obeyed."""
@@ -256,7 +267,7 @@ class TestDeleting:
         await signed_in.post("/projects", json=ATLAS)
         await signed_in.delete("/projects/ATL", params={"confirm": "ATL"})
 
-        entries = (await signed_in.get("/activity")).json()
+        entries = (await signed_in.get("/activity")).json()["items"]
         deleted = next(entry for entry in entries if entry["verb"] == "project.deleted")
 
         assert deleted["payload"]["key"] == "ATL"
@@ -316,7 +327,9 @@ class TestAuditTrail:
     ) -> None:
         created = (await signed_in.post("/projects", json=ATLAS)).json()
 
-        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()[
+            "items"
+        ]
 
         assert [entry["verb"] for entry in entries] == ["project.created"]
         assert entries[0]["payload"] == {"key": "ATL", "name": ATLAS["name"]}
@@ -357,7 +370,9 @@ class TestTheCreatorJoinsTheirProject:
         await signed_in.post("/projects", json=HERMES)
 
         agents = [
-            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+            person
+            for person in (await signed_in.get("/people")).json()["items"]
+            if person["is_agent"]
         ]
 
         assert len(agents) == 1
@@ -417,4 +432,4 @@ class TestTheCreatorJoinsTheirProject:
 
         assert response.json() == {"members": []}
         assert (await signed_in.get(f"/projects/{project['key']}")).status_code == 404
-        assert (await signed_in.get("/projects")).json() == []
+        assert (await signed_in.get("/projects")).json()["items"] == []

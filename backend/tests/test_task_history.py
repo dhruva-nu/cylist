@@ -206,7 +206,7 @@ class TestWhatChanged:
         assert [entry["verb"] for entry in await _history(signed_in, task["reference"])] == [
             "task.created"
         ]
-        feed = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        feed = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
         assert feed[0]["verb"] == "task.updated"
 
     async def test_names_the_assignee_rather_than_their_id(self, signed_in: AsyncClient) -> None:

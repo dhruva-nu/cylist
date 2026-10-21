@@ -29,7 +29,7 @@ from httpx import AsyncClient, Response
 
 from app.services import goals
 from app.services.tasks import moves, parentage
-from tests.conftest import put_members
+from tests.conftest import cards_of, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -276,7 +276,7 @@ class TestOnAnAchievedGoal:
         )
 
         _refused_by(response, "goal", "ATL-G1")
-        assert (await signed_in.get("/projects/ATL/tasks")).json() == []
+        assert cards_of((await signed_in.get("/projects/ATL/tasks")).json()) == []
 
     async def test_an_open_card_cannot_be_put_on_it(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

@@ -306,7 +306,9 @@ class TestHandingSomebodyAnAccount:
         """It is a machine: it carries a token, not a password."""
         await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
         agent = next(
-            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+            person
+            for person in (await signed_in.get("/people")).json()["items"]
+            if person["is_agent"]
         )
 
         response = await signed_in.put(
@@ -639,7 +641,7 @@ class TestBootstrapEndsWithIt:
             "/projects/ATL/roles", json={"name": "Reviewer"}, headers=leftover
         )
 
-        assert listed.json() == []
+        assert listed.json()["items"] == []
         assert reached.status_code == administered.status_code == 404
 
 
@@ -887,7 +889,7 @@ class TestAttribution:
             # Or the feed would leave Hermes out: it shows the projects you are on.
             await put_members(theirs, "HRM", [str(owner.id)])
 
-        feed = (await signed_in.get("/activity")).json()
+        feed = (await signed_in.get("/activity")).json()["items"]
         started = {
             entry["payload"].get("name"): entry["actor_label"]
             for entry in feed

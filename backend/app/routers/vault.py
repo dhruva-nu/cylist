@@ -37,6 +37,7 @@ from app.db import SessionDependency
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.vault import (
@@ -48,10 +49,12 @@ from app.schemas.vault import (
     VaultNodeUpdate,
     VaultTreeCreate,
     VaultTreeDetail,
+    VaultTreePage,
     VaultTreeRead,
     VaultTreeUpdate,
 )
 from app.services import activity, permissions, projects, vault
+from app.services.paging import PageRequest
 
 READ = require(Scope.VAULT_READ)
 WRITE = require(Scope.WRITE, Scope.VAULT_READ)
@@ -164,7 +167,7 @@ async def may_add_node(
 
 @project_router.get(
     "/{project_ref}/vault/trees",
-    response_model=list[VaultTreeRead],
+    response_model=VaultTreePage,
     tags=["vault"],
     summary="List a project's vault trees",
 )
@@ -172,11 +175,15 @@ async def list_trees(
     _: Principal = Depends(READ),
     project: Project = Depends(resolved_project),
     session: AsyncSession = SessionDependency,
-) -> list[VaultTreeRead]:
-    """The trees down the left of the vault screen, with their headline counts."""
-    trees = await vault.list_trees(session, project)
-    sizes = await vault.tree_sizes(session, [tree.id for tree in trees])
-    return [_tree_read(tree, sizes[tree.id]) for tree in trees]
+    page: PageRequest = PageQuery,
+) -> VaultTreePage:
+    """The trees down the left of the vault screen, with their headline counts,
+    a page at a time."""
+    trees = await vault.list_trees(session, project, page)
+    sizes = await vault.tree_sizes(session, [tree.id for tree in trees.rows])
+    return VaultTreePage(
+        items=[_tree_read(tree, sizes[tree.id]) for tree in trees.rows], next=trees.next
+    )
 
 
 @project_router.post(

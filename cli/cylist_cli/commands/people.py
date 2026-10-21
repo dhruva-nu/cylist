@@ -46,7 +46,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
         if args.kind:
             people = [person for person in people if person.get("kind") == args.kind]
     else:
-        people = ctx.client.get(
+        people = ctx.client.get_all(
             "/people",
             kind=args.kind,
             include_archived=True if args.all else None,

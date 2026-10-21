@@ -99,7 +99,7 @@ class TestListing:
         await signed_in.post("/people", json=SANJAY)
         await signed_in.post("/people", json=ADITI)
 
-        listed = (await signed_in.get("/people")).json()
+        listed = (await signed_in.get("/people")).json()["items"]
 
         # Two team members — Aditi and whoever the session belongs to — then
         # the client. Ordering is the assertion; the count is incidental.
@@ -109,7 +109,7 @@ class TestListing:
         await signed_in.post("/people", json=ADITI)
         await signed_in.post("/people", json=SANJAY)
 
-        listed = (await signed_in.get("/people", params={"kind": "client"})).json()
+        listed = (await signed_in.get("/people", params={"kind": "client"})).json()["items"]
 
         assert [person["name"] for person in listed] == ["Sanjay F"]
 
@@ -143,8 +143,10 @@ class TestArchiving:
 
         assert (await signed_in.delete(f"/people/{person['id']}")).status_code == 200
 
-        listed = [entry["name"] for entry in (await signed_in.get("/people")).json()]
-        with_archived = (await signed_in.get("/people", params={"include_archived": True})).json()
+        listed = [entry["name"] for entry in (await signed_in.get("/people")).json()["items"]]
+        with_archived = (await signed_in.get("/people", params={"include_archived": True})).json()[
+            "items"
+        ]
 
         assert ADITI["name"] not in listed
         assert ADITI["name"] in [entry["name"] for entry in with_archived]
@@ -158,7 +160,9 @@ class TestArchiving:
         ).json()
 
         assert restored["archived_at"] is None
-        assert ADITI["name"] in [entry["name"] for entry in (await signed_in.get("/people")).json()]
+        assert ADITI["name"] in [
+            entry["name"] for entry in (await signed_in.get("/people")).json()["items"]
+        ]
 
     async def test_archiving_twice_keeps_the_original_timestamp(
         self, signed_in: AsyncClient
@@ -237,7 +241,7 @@ class TestWhoIsAsking:
         depending on who asked is the thing this design is avoiding, and it
         would be easy to add back by accident.
         """
-        listed = (await signed_in.get("/people")).json()
+        listed = (await signed_in.get("/people")).json()["items"]
 
         assert all("is_me" not in entry for entry in listed)
 
@@ -267,7 +271,9 @@ class TestTheAgent:
         await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
 
         agents = [
-            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+            person
+            for person in (await signed_in.get("/people")).json()["items"]
+            if person["is_agent"]
         ]
 
         assert [person["name"] for person in agents] == ["Agent"]
@@ -284,7 +290,9 @@ class TestTheAgent:
         """A machine does not sign in; it carries a token somebody minted."""
         await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
         agent = next(
-            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+            person
+            for person in (await signed_in.get("/people")).json()["items"]
+            if person["is_agent"]
         )
 
         response = await signed_in.post(f"/people/{agent['id']}/invite")

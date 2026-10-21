@@ -82,7 +82,7 @@ async def _report(
 
 
 async def _rows(client: AsyncClient, ref: str) -> list[dict[str, Any]]:
-    return list((await client.get(f"/tasks/{ref}/agent-sessions")).json())
+    return list((await client.get(f"/tasks/{ref}/agent-sessions")).json()["items"])
 
 
 async def _open_permission(session: AsyncSession, ref: str, owner: Person) -> str:

@@ -27,6 +27,7 @@ from app.core.ids import uuid7
 from app.db import publish_into
 from app.models.activity import Activity
 from app.services import agent_sessions, hooks
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def record(
@@ -177,13 +178,13 @@ async def between(
 
 async def recent(
     session: AsyncSession,
+    page: PageRequest,
     *,
-    limit: int,
     project_id: UUID | None = None,
     within: list[UUID] | None = None,
     entity_type: str | None = None,
-) -> list[Activity]:
-    """The newest entries on the whole trail, optionally narrowed.
+) -> Window[Activity]:
+    """A page of the trail, newest first, optionally narrowed.
 
     ``within`` keeps the entries on those projects and the ones on no project
     at all, which is how a reader is shown only the boards they are on.
@@ -192,7 +193,7 @@ async def recent(
     it is the feed that answers "who touched what", and a request somebody
     made is part of that answer whether or not it altered the work.
     """
-    statement = select(Activity).order_by(Activity.occurred_at.desc()).limit(limit)
+    statement = select(Activity)
     if project_id is not None:
         statement = statement.where(Activity.project_id == project_id)
     if within is not None:
@@ -201,4 +202,6 @@ async def recent(
         )
     if entity_type is not None:
         statement = statement.where(Activity.entity_type == entity_type)
-    return list(await session.scalars(statement))
+    return await keyset(
+        session, statement, keys=(Activity.occurred_at, Activity.id), page=page, descending=True
+    )

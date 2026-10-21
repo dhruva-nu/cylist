@@ -10,7 +10,7 @@ from pydantic import Field, field_validator
 
 from app.models.hook import NAME_MAX_LENGTH, URL_MAX_LENGTH, DeliveryState
 from app.models.task import TaskType
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 MESSAGE_MAX_LENGTH = 2000
 
@@ -199,3 +199,11 @@ class HookDeliveryRead(Schema):
     attempts: list[DeliveryAttempt]
     payload: dict[str, Any] = Field(description="Exactly the body sent.")
     created_at: datetime
+
+
+class HookPage(Page[HookRead]):
+    """A page of a project's hooks, by name."""
+
+
+class HookDeliveryPage(Page[HookDeliveryRead]):
+    """A page of a hook's deliveries, newest first."""

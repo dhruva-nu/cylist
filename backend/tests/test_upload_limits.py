@@ -231,7 +231,7 @@ class TestABodyOverItsLimit:
 
         assert response.status_code == 413
         assert response.json()["error"]["details"] == {"max_bytes": 64 * 1024}
-        assert [p["key"] for p in (await capped.get("/projects")).json()] == ["ATL"]
+        assert [p["key"] for p in (await capped.get("/projects")).json()["items"]] == ["ATL"]
 
     async def test_a_streamed_json_body_is_a_413_not_a_400(self, capped: AsyncClient) -> None:
         """FastAPI reports a failure while reading a JSON body as a 400. The
@@ -294,7 +294,7 @@ class TestAStreamedSkill:
             response, _ = await post_watched(http, "/projects/ATL/skills", body)
 
             assert response.status_code == 422
-            assert (await http.get("/projects/ATL/skills")).json() == []
+            assert (await http.get("/projects/ATL/skills")).json()["items"] == []
 
     async def test_fields_after_the_file_still_count(self, capped: AsyncClient) -> None:
         """A browser sends the file first. The description after it is read."""

@@ -8,9 +8,9 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from app.models.goal import NAME_MAX_LENGTH, GoalStatus
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 from app.schemas.people import PersonRead
-from app.schemas.tasks import TaskRead
+from app.schemas.tasks import TaskSummary
 
 _COLOUR_PATTERN = r"^#(?:[0-9a-fA-F]{6})$"
 
@@ -138,11 +138,22 @@ class GoalRead(Schema):
 
 
 class GoalDetail(GoalRead):
-    """One goal and the cards linked to it.
+    """One goal and the first page of the cards linked to it.
 
     The cards come back in board order — left to right by column, top to
     bottom within one — so a goal's page can be read as the slice of the board
-    that belongs to it.
+    that belongs to it. Its cards in cold storage follow, most recently
+    finished first.
     """
 
-    tasks: list[TaskRead]
+    tasks: list[TaskSummary] = Field(
+        description="The first page of the goal's cards. `progress.total` says how many in all."
+    )
+    tasks_next: UUID | None = Field(
+        description="Pass as `after` to `GET /goals/{ref}/tasks` for the cards after these. "
+        "Null when `tasks` is all of them."
+    )
+
+
+class GoalPage(Page[GoalRead]):
+    """A page of a project's goals."""

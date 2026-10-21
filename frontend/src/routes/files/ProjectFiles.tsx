@@ -12,7 +12,7 @@
  * because there is no such state to be in.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type FileItem, type Sensitivity } from '../../api/client'
@@ -61,11 +61,24 @@ export function ProjectFiles() {
   const folderTree = useFolderTree(tree.data ?? null)
   const { selectedId, selectFolder } = folderTree
 
-  const contents = useQuery({
+  // The subfolders whole and the files a page at a time: a folder of
+  // thousands of exports should open on its first hundred, not hang.
+  const pages = useInfiniteQuery({
     queryKey: ['folder-children', selectedId],
-    queryFn: () => api.getFolderChildren(selectedId as string),
+    queryFn: ({ pageParam }) => api.getFolderChildren(selectedId as string, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next,
     enabled: selectedId !== null,
   })
+  const contents = {
+    error: pages.error,
+    data: pages.data?.pages[0]
+      ? {
+          ...pages.data.pages[0],
+          items: pages.data.pages.flatMap((page) => page.items),
+        }
+      : undefined,
+  }
 
   async function refresh() {
     await invalidate(
@@ -180,6 +193,11 @@ export function ProjectFiles() {
           crumbs={crumbs}
           folders={contents.data?.folders ?? []}
           items={contents.data?.items ?? []}
+          more={
+            pages.hasNextPage
+              ? { loading: pages.isFetchingNextPage, onLoad: () => void pages.fetchNextPage() }
+              : null
+          }
           onOpenFolder={selectFolder}
           onDeleteFolder={
             mayChangeFiles

@@ -23,6 +23,7 @@ from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
 from app.services import blobs, columns, files, people, permissions, roles
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -212,16 +213,22 @@ async def reachable_ids(session: AsyncSession, principal: Principal) -> list[UUI
 
 
 async def list_projects(
-    session: AsyncSession, principal: Principal, *, include_archived: bool = False
-) -> list[Project]:
-    """Return the projects this caller is on, newest first."""
-    statement = select(Project).order_by(Project.created_at.desc())
+    session: AsyncSession,
+    principal: Principal,
+    page: PageRequest,
+    *,
+    include_archived: bool = False,
+) -> Window[Project]:
+    """Return a page of the projects this caller is on, newest first."""
+    statement = select(Project)
     reachable = await reachable_ids(session, principal)
     if reachable is not None:
         statement = statement.where(Project.id.in_(reachable))
     if not include_archived:
         statement = statement.where(Project.archived_at.is_(None))
-    return list(await session.scalars(statement))
+    return await keyset(
+        session, statement, keys=(Project.created_at, Project.id), page=page, descending=True
+    )
 
 
 async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -> Project:

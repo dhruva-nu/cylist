@@ -44,6 +44,7 @@ from app.schemas.agent_sessions import (
     AgentSessionRead,
     PresenceState,
 )
+from app.services.paging import PageRequest, Window, keyset
 
 # For its side effect: every change to an agent session below — and in the
 # modules that import this one — queues a push to the phones it is news to.
@@ -436,6 +437,23 @@ async def touch_from_activity(
 
 
 # --- Reading ---------------------------------------------------------------
+
+
+async def page_for_task(
+    session: AsyncSession, task: Task, page: PageRequest
+) -> Window[AgentSession]:
+    """A page of :func:`list_for_task`: open first, then finished-undismissed,
+    the latest heard from first within each."""
+    return await keyset(
+        session,
+        select(AgentSession).where(
+            AgentSession.task_id == task.id, AgentSession.dismissed_at.is_(None)
+        ),
+        # Descending throughout, so "still open" is the key that is true.
+        keys=(AgentSession.ended_at.is_(None), AgentSession.last_seen_at, AgentSession.id),
+        page=page,
+        descending=True,
+    )
 
 
 async def list_for_task(session: AsyncSession, task: Task) -> list[AgentSession]:

@@ -257,7 +257,7 @@ class TestTheFeed:
             with pytest.raises(TimeoutError):
                 await socket.receive_json()
 
-        lines = (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()
+        lines = (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()["items"]
         assert [(entry["kind"], entry["text"]) for entry in lines] == [
             ("run", "pytest test_pr_states.py"),
             ("read", "backend/app/models/task.py"),
@@ -295,7 +295,7 @@ class TestTheFeed:
             await socket.send_json(working(ref))
             assert (await socket.receive_json())["type"] == "ack"
 
-        assert (await signed_in.get(f"/tasks/{ref}/agent-feed")).json() == []
+        assert (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()["items"] == []
 
     async def test_a_line_of_an_unknown_kind_is_not_a_frame(
         self, signed_in: AsyncClient, token: str
@@ -321,7 +321,7 @@ class TestTheFeed:
             await socket.send_json(feed(ref, *(line(f"step {n}") for n in range(5))))
             await asyncio.sleep(0.05)
 
-        lines = (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()
+        lines = (await signed_in.get(f"/tasks/{ref}/agent-feed")).json()["items"]
         assert [entry["text"] for entry in lines] == ["step 4", "step 3", "step 2"]
 
     async def test_a_board_watching_the_card_hears_of_it_by_card(
@@ -358,4 +358,4 @@ class TestTheFeed:
         response = await signed_in.get(f"/tasks/{ref}/agent-feed", headers=headers)
 
         assert response.status_code == 200
-        assert response.json() == []
+        assert response.json()["items"] == []

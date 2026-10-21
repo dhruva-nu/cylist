@@ -84,7 +84,9 @@ class TestStarterColumns:
         """The columns are part of creating the project, not a second action."""
         await signed_in.post("/projects", json=ATLAS)
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "column"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "column"})).json()[
+            "items"
+        ]
 
         assert entries == []
 
@@ -151,7 +153,9 @@ class TestAdding:
         created = (await signed_in.post("/projects", json=ATLAS)).json()
         await _add_column(signed_in, "Review")
 
-        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()[
+            "items"
+        ]
 
         assert entries[0]["verb"] == "column.created"
         assert entries[0]["payload"] == {"name": "Review", "position": 2}
@@ -234,7 +238,9 @@ class TestDeleting:
 
         await signed_in.delete(f"/columns/{extra['id']}")
 
-        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()
+        entries = (await signed_in.get("/activity", params={"project": created["id"]})).json()[
+            "items"
+        ]
         assert entries[0]["verb"] == "column.deleted"
         assert entries[0]["payload"] == {"name": "Review"}
 

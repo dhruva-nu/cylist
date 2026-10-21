@@ -341,7 +341,7 @@ class TestEveryItemInAProject:
             json={"name": "Tax portal", "url": "https://tax.example/atlas", "source": "other"},
         )
 
-        body = (await project.get("/projects/ATL/items")).json()
+        body = (await project.get("/projects/ATL/items")).json()["items"]
 
         assert [(item["name"], item["folder_path"]) for item in body] == [
             ("readme.md", ""),
@@ -353,7 +353,7 @@ class TestEveryItemInAProject:
         """The root is the project, so naming it would say nothing."""
         await upload(project, await root_id(project), "brief.pdf", BRIEF)
 
-        body = (await project.get("/projects/ATL/items")).json()
+        body = (await project.get("/projects/ATL/items")).json()["items"]
 
         assert body[0]["folder_path"] == ""
 
@@ -363,7 +363,7 @@ class TestEveryItemInAProject:
         folder = await make_folder(project, "Briefs")
         await upload(project, folder, "brief.pdf", BRIEF, added_by=person)
 
-        item = (await project.get("/projects/ATL/items")).json()[0]
+        item = (await project.get("/projects/ATL/items")).json()["items"][0]
 
         assert item["kind"] == "file"
         assert item["source"] == "upload"
@@ -378,12 +378,12 @@ class TestEveryItemInAProject:
         await upload(project, hermes_root, "hermes.md", content_of("hermes"))
         await upload(project, await root_id(project), "atlas.md", content_of("atlas"))
 
-        body = (await project.get("/projects/ATL/items")).json()
+        body = (await project.get("/projects/ATL/items")).json()["items"]
 
         assert [item["name"] for item in body] == ["atlas.md"]
 
     async def test_an_empty_project_lists_nothing(self, project: AsyncClient) -> None:
-        assert (await project.get("/projects/ATL/items")).json() == []
+        assert (await project.get("/projects/ATL/items")).json()["items"] == []
 
     async def test_an_unknown_project_is_a_clean_404(self, project: AsyncClient) -> None:
         response = await project.get("/projects/NOPE/items")
@@ -919,7 +919,7 @@ class TestAuditTrail:
         await project.delete(f"/folders/{folder}")
 
         project_id = (await project.get("/projects/ATL")).json()["id"]
-        entries = (await project.get("/activity", params={"project": project_id})).json()
+        entries = (await project.get("/activity", params={"project": project_id})).json()["items"]
 
         assert {entry["verb"] for entry in entries} == {
             "project.created",
@@ -938,7 +938,7 @@ class TestAuditTrail:
         await project.get("/projects/ATL/tree")
 
         project_id = (await project.get("/projects/ATL")).json()["id"]
-        entries = (await project.get("/activity", params={"project": project_id})).json()
+        entries = (await project.get("/activity", params={"project": project_id})).json()["items"]
         assert [entry["verb"] for entry in entries] == ["folder.created", "project.created"]
 
 

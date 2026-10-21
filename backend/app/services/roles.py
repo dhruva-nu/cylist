@@ -42,6 +42,7 @@ from app.models.project import Project, ProjectMember
 from app.models.role import ADMIN_ROLE_NAME, ProjectRole
 from app.schemas.roles import RoleCreate, RoleUpdate
 from app.services import people
+from app.services.paging import PageRequest, Window, keyset
 
 _ORDER = (ProjectRole.is_admin.desc(), ProjectRole.name)
 """Admin first, then alphabetical. The one role with authority attached is the
@@ -74,6 +75,20 @@ async def list_roles(session: AsyncSession, project: Project) -> list[ProjectRol
         await session.scalars(
             select(ProjectRole).where(ProjectRole.project_id == project.id).order_by(*_ORDER)
         )
+    )
+
+
+async def page_of_roles(
+    session: AsyncSession, project: Project, page: PageRequest
+) -> Window[ProjectRole]:
+    """A page of :func:`list_roles`, admin first."""
+    return await keyset(
+        session,
+        select(ProjectRole).where(ProjectRole.project_id == project.id),
+        # Ascending throughout, so the admin role's key is the one that is
+        # false: "is not the admin role" sorts it to the top.
+        keys=(ProjectRole.is_admin.is_(False), ProjectRole.name, ProjectRole.id),
+        page=page,
     )
 
 

@@ -15,7 +15,7 @@ from app.models.template import (
     SUB_STAGE_LABEL_MAX_LENGTH,
     SUB_STAGE_MAX_COUNT,
 )
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 SubStageLabel = Annotated[
     str, StringConstraints(strip_whitespace=True, max_length=SUB_STAGE_LABEL_MAX_LENGTH)
@@ -164,3 +164,7 @@ class TemplateRead(Schema):
     )
     task_count: int = Field(description="How many cards were created from this template.")
     created_at: datetime
+
+
+class TemplatePage(Page[TemplateRead]):
+    """A page of a project's task templates, in name order."""

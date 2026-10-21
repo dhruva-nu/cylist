@@ -17,22 +17,26 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
-from app.schemas.devices import DeviceRead, DeviceRegister
+from app.schemas.devices import DevicePage, DeviceRead, DeviceRegister
 from app.services import devices
+from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 
-@router.get("", response_model=list[DeviceRead], summary="List your push devices")
+@router.get("", response_model=DevicePage, summary="List your push devices")
 async def list_devices(
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[DeviceRead]:
-    """The devices registered to receive pushes for you, newest first."""
-    return [
-        DeviceRead.model_validate(device) for device in await devices.list_for(session, principal)
-    ]
+    page: PageRequest = PageQuery,
+) -> DevicePage:
+    """The devices registered to receive pushes for you, newest first, a page at a time."""
+    found = await devices.list_for(session, principal, page)
+    return DevicePage(
+        items=[DeviceRead.model_validate(device) for device in found.rows], next=found.next
+    )
 
 
 @router.post(

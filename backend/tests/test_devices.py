@@ -64,7 +64,7 @@ class TestRegistering:
         assert again["id"] == first["id"]
         assert again["label"] == "Pixel 9"
         assert again["last_registered_at"] >= first["last_registered_at"]
-        listed = (await signed_in.get("/devices", headers=phone["headers"])).json()
+        listed = (await signed_in.get("/devices", headers=phone["headers"])).json()["items"]
         assert [device["id"] for device in listed] == [first["id"]]
 
     async def test_a_new_sign_in_on_the_phone_moves_the_device_to_its_token(
@@ -94,7 +94,7 @@ class TestRegistering:
         taken = await _register(other_client, theirs["headers"])
 
         assert taken["person_id"] == person["id"]
-        assert (await signed_in.get("/devices", headers=mine["headers"])).json() == []
+        assert (await signed_in.get("/devices", headers=mine["headers"])).json()["items"] == []
 
     async def test_a_read_only_token_cannot_register(self, signed_in: AsyncClient) -> None:
         reader = await _token(signed_in, "read")
@@ -130,7 +130,7 @@ class TestUnregistering:
         response = await signed_in.delete(f"/devices/{device['id']}", headers=phone["headers"])
 
         assert response.status_code == 200
-        assert (await signed_in.get("/devices", headers=phone["headers"])).json() == []
+        assert (await signed_in.get("/devices", headers=phone["headers"])).json()["items"] == []
         again = await signed_in.delete(f"/devices/{device['id']}", headers=phone["headers"])
         assert again.status_code == 404
 
@@ -148,7 +148,7 @@ class TestUnregistering:
         response = await other_client.delete(f"/devices/{device['id']}", headers=theirs["headers"])
 
         assert response.status_code == 404
-        assert len((await signed_in.get("/devices", headers=mine["headers"])).json()) == 1
+        assert len((await signed_in.get("/devices", headers=mine["headers"])).json()["items"]) == 1
 
 
 class TestRecipients:
