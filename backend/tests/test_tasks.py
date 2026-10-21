@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BoardColumn, Person, Project, Task
-from tests.conftest import OWNER_NAME, put_members
+from tests.conftest import OWNER_NAME, cards_of, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 HERMES = {"key": "HRM", "name": "Hermes Notifications"}
@@ -179,7 +179,7 @@ class TestCreating:
         first = await _create(signed_in, person)
         second = await _create(signed_in, person, title="Back-fill invoices")
 
-        assert [first["position"], second["position"]] == [0, 1]
+        assert first["position"] < second["position"]
 
     async def test_refuses_an_assignee_who_is_not_on_the_project(
         self, signed_in: AsyncClient
@@ -284,7 +284,7 @@ class TestCreating:
         person = await _setup(signed_in)
         task = await _create(signed_in, person)
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
 
         assert entries[0]["verb"] == "task.created"
         assert entries[0]["payload"]["reference"] == task["reference"]
@@ -695,17 +695,20 @@ class TestDeleting:
         assert (await signed_in.delete(f"/tasks/{task['id']}")).status_code == 200
         assert (await signed_in.get(f"/tasks/{task['id']}")).status_code == 404
 
-    async def test_closes_the_gap_it_leaves(self, signed_in: AsyncClient) -> None:
+    async def test_its_neighbours_keep_their_places(self, signed_in: AsyncClient) -> None:
+        """The hole it leaves is left: positions are sort keys, not a count."""
         person = await _setup(signed_in)
         first = await _create(signed_in, person)
-        await _create(signed_in, person, title="Second")
+        second = await _create(signed_in, person, title="Second")
         third = await _create(signed_in, person, title="Third")
 
         await signed_in.delete(f"/tasks/{first['id']}")
 
-        remaining = (await signed_in.get("/projects/ATL/tasks")).json()
-        assert [task["position"] for task in remaining] == [0, 1]
-        assert remaining[1]["id"] == third["id"]
+        remaining = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
+        assert [(task["id"], task["position"]) for task in remaining] == [
+            (second["id"], second["position"]),
+            (third["id"], third["position"]),
+        ]
 
     async def test_it_is_recorded_against_the_project(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -713,7 +716,7 @@ class TestDeleting:
 
         await signed_in.delete(f"/tasks/{task['id']}")
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
         assert entries[0]["verb"] == "task.deleted"
         assert entries[0]["payload"] == {"reference": "ATL-1"}
 
@@ -897,40 +900,39 @@ class TestMoving:
 
         await signed_in.post(f"/tasks/{second['id']}/move", json={"column_id": todo, "position": 0})
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
         assert [task["id"] for task in board] == [second["id"], first["id"]]
-        assert [task["position"] for task in board] == [0, 1]
+        assert board[0]["position"] < board[1]["position"]
 
     async def test_a_position_past_the_end_lands_at_the_bottom(
         self, signed_in: AsyncClient
     ) -> None:
         """So "drop at the end" needs no length lookup first."""
         person = await _setup(signed_in)
-        await _create(signed_in, person, title="First")
-        second = await _create(signed_in, person, title="Second")
-        todo = (await _columns(signed_in))[0]["id"]
-
-        moved = (
-            await signed_in.post(
-                f"/tasks/{second['id']}/move", json={"column_id": todo, "position": 99}
-            )
-        ).json()
-
-        assert moved["position"] == 1
-
-    async def test_the_source_column_closes_its_gap(self, signed_in: AsyncClient) -> None:
-        person = await _setup(signed_in)
         first = await _create(signed_in, person, title="First")
         await _create(signed_in, person, title="Second")
-        done = (await _columns(signed_in))[1]["id"]
+        todo = (await _columns(signed_in))[0]["id"]
+
+        await signed_in.post(f"/tasks/{first['id']}/move", json={"column_id": todo, "position": 99})
+
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
+        assert [task["title"] for task in board] == ["Second", "First"]
+
+    async def test_the_source_column_is_left_as_it_was(self, signed_in: AsyncClient) -> None:
+        """Leaving a column writes nothing there: the hole is harmless."""
+        person = await _setup(signed_in)
+        first = await _create(signed_in, person, title="First")
+        second = await _create(signed_in, person, title="Second")
+        todo, done = (column["id"] for column in await _columns(signed_in))
 
         await signed_in.post(f"/tasks/{first['id']}/move", json={"column_id": done, "position": 0})
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
-        assert [(task["title"], task["position"]) for task in board] == [
-            ("Second", 0),
-            ("First", 0),
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
+        assert [(task["title"], task["column_id"]) for task in board] == [
+            ("Second", todo),
+            ("First", done),
         ]
+        assert board[0]["position"] == second["position"]
 
     async def test_refuses_a_column_on_another_board(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -944,15 +946,23 @@ class TestMoving:
 
         assert response.status_code == 422
 
-    async def test_an_unknown_column_is_a_clean_404(self, signed_in: AsyncClient) -> None:
+    async def test_an_unknown_column_reads_like_a_foreign_one(self, signed_in: AsyncClient) -> None:
+        """CYLIST-146: one answer for a column that is not on the project,
+        whether it is on another board or on none."""
         person = await _setup(signed_in)
         task = await _create(signed_in, person)
+        await signed_in.post("/projects", json=HERMES)
+        theirs = (await _columns(signed_in, "HRM"))[0]["id"]
 
-        response = await signed_in.post(
+        unknown = await signed_in.post(
             f"/tasks/{task['id']}/move", json={"column_id": UNKNOWN_ID, "position": 0}
         )
+        foreign = await signed_in.post(
+            f"/tasks/{task['id']}/move", json={"column_id": theirs, "position": 0}
+        )
 
-        assert response.status_code == 404
+        assert unknown.status_code == foreign.status_code == 422
+        assert unknown.json()["error"]["message"] == foreign.json()["error"]["message"]
 
     async def test_it_is_recorded_against_the_project(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -961,7 +971,7 @@ class TestMoving:
 
         await signed_in.post(f"/tasks/{task['id']}/move", json={"column_id": done, "position": 0})
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "task"})).json()["items"]
         assert entries[0]["verb"] == "task.moved"
         assert entries[0]["payload"]["column_id"] == done
 
@@ -975,7 +985,7 @@ class TestListing:
         done = (await _columns(signed_in))[1]["id"]
         await signed_in.post(f"/tasks/{first['id']}/move", json={"column_id": done, "position": 0})
 
-        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        board = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
 
         assert [task["title"] for task in board] == ["Second", "First"]
 
@@ -986,12 +996,12 @@ class TestListing:
         await put_members(signed_in, "HRM", [person])
         await signed_in.post("/projects/HRM/tasks", json=_task(person, title="Elsewhere"))
 
-        assert len((await signed_in.get("/projects/ATL/tasks")).json()) == 1
+        assert len(cards_of((await signed_in.get("/projects/ATL/tasks")).json())) == 1
 
     async def test_an_empty_board_lists_nothing(self, signed_in: AsyncClient) -> None:
         await _setup(signed_in)
 
-        assert (await signed_in.get("/projects/ATL/tasks")).json() == []
+        assert cards_of((await signed_in.get("/projects/ATL/tasks")).json()) == []
 
 
 class TestColumnDueDates:
@@ -1469,7 +1479,7 @@ class TestThePullRequestsOnACard:
         person = await _setup(signed_in)
         await _create(signed_in, person, pr_refs=[_pr("#212", "merged"), _pr("#219")])
 
-        listed = (await signed_in.get("/projects/ATL/tasks")).json()
+        listed = cards_of((await signed_in.get("/projects/ATL/tasks")).json())
 
         assert [task["pr_refs"] for task in listed] == [[_pr("#212", "merged"), _pr("#219")]]
 

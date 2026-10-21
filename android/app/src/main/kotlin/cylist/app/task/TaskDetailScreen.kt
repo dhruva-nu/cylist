@@ -86,7 +86,7 @@ import cylist.api.generated.models.CommentRead
 import cylist.api.generated.models.PrState
 import cylist.api.generated.models.TaskDetail
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TaskType
 import cylist.app.board.Avatar
@@ -156,7 +156,7 @@ class TaskDetailActions(
     val confirmMove: () -> Unit = {},
     val cancelMove: () -> Unit = {},
     val toggleItem: (ChecklistItemRead) -> Unit = {},
-    val toggleSubtask: (TaskRead) -> Unit = {},
+    val toggleSubtask: (TaskSummary) -> Unit = {},
     val setDraft: (String) -> Unit = {},
     val send: () -> Unit = {},
     val answer: (AgentPromptRead, AgentPromptAnswer) -> Unit = { _, _ -> },
@@ -422,7 +422,9 @@ private fun SessionBox(session: AgentSessionRead, state: TaskDetailState, now: I
             }
         }
         when {
-            answerable && prompt != null -> PromptAnswer(prompt, busy = prompt.id in state.busy, now = now, answer = actions.answer)
+            answerable && prompt != null -> PromptAnswer(
+                prompt, busy = prompt.id in state.busy, now = now, mine = mayAnswer(prompt, state.me?.id), answer = actions.answer,
+            )
             prompt != null -> ClosedPrompt(prompt, state, working = session.state == AgentSessionState.working && session.endedAt == null)
         }
     }
@@ -430,7 +432,7 @@ private fun SessionBox(session: AgentSessionRead, state: TaskDetailState, now: I
 
 /** A question or a permission, its choices as buttons, and for a question a reply in your own words (`AgentPromptAnswer.tsx`). */
 @Composable
-private fun PromptAnswer(prompt: AgentPromptRead, busy: Boolean, now: Instant, answer: (AgentPromptRead, AgentPromptAnswer) -> Unit) {
+private fun PromptAnswer(prompt: AgentPromptRead, busy: Boolean, now: Instant, mine: Boolean, answer: (AgentPromptRead, AgentPromptAnswer) -> Unit) {
     val colors = CylistTheme.colors
     var reply by rememberSaveable(prompt.id.toString()) { mutableStateOf("") }
     Column(
@@ -446,6 +448,11 @@ private fun PromptAnswer(prompt: AgentPromptRead, busy: Boolean, now: Instant, a
             )
         } else {
             Text(prompt.text, color = colors.ink, fontSize = 14.5.sp, fontFamily = Figtree, lineHeight = 21.sp)
+        }
+        if (!mine) {
+            // Asked of someone else: say whose it is rather than offer buttons that can only fail.
+            Quiet(notYours(prompt))
+            return@Column
         }
         if (prompt.options.isNotEmpty()) {
             val inRow = prompt.kind == AgentPromptKind.permission
@@ -664,7 +671,7 @@ private fun Stages(task: TaskDetail) {
 }
 
 @Composable
-private fun SubtaskRow(sub: TaskRead, it: TaskDetailState, actions: TaskDetailActions) {
+private fun SubtaskRow(sub: TaskSummary, it: TaskDetailState, actions: TaskDetailActions) {
     val cancelled = sub.status == TaskStatus.cancelled
     val done = sub.finishedAt != null
     TickRow(

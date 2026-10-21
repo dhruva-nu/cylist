@@ -34,16 +34,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.config import AGENT_SOCKET_IDLE_AFTER, Settings
+from app.config import AGENT_SOCKET_IDLE_AFTER, AGENT_SOCKET_STAMP_EVERY, Settings
 from app.core.clock import now
-from app.core.errors import NotFoundError, UnauthorizedError
+from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.logging import bind_request_id, new_request_id, reset_request_id
 from app.db import Database
-from app.models.agent_session import AgentPromptStatus, AgentSessionReason
+from app.models.agent_session import AgentPromptStatus, AgentSessionReason, SessionKey
 from app.models.task import Task
 from app.realtime import auth, protocol
+from app.realtime.bus import Bus
 from app.realtime.hub import AgentLink, Hub, Watcher
-from app.services import agent_feed, agent_prompts, agent_reports, projects, tasks
+from app.services import agent_feed, agent_prompts, agent_reports, agent_sessions, projects, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +163,16 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
     open *is* the report that the session is alive, so the only messages that
     cost anything are the ones that change something.
 
-    The session id is in the path — it is the registry key, it appears in the
-    log line, and it is what lets a reconnection displace the socket it left.
-    The *card* is in each message, because a session walks the board.
+    The session id is in the path — with the token's person it is the
+    registry key, it appears in the log line, and it is what lets a
+    reconnection displace the socket it left. Only ever *the caller's*
+    session of that id: someone else's is a different session, and nothing
+    sent here reaches it (CYLIST-120). The *card* is in each message, because
+    a session walks the board.
+
+    While it is open the socket vouches for its session in the database —
+    ``agent_session.socket_seen_at`` — so that any process, not only this
+    one, can tell the session is held (CYLIST-133).
 
     Closing is the point. However this ends, the row ends with it: cleanly on
     a `bye`, as `connection_lost` on anything else. That is the thing HTTP
@@ -173,6 +181,7 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
     """
     settings: Settings = websocket.app.state.settings
     hub: Hub = websocket.app.state.hub
+    bus: Bus = websocket.app.state.bus
     database: Database = websocket.app.state.database
 
     if not auth.origin_allowed(websocket, settings):
@@ -187,18 +196,30 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
     link: AgentLink | None = None
     try:
         async with database.session() as session:
-            outcome = await _admit_agent(websocket, session)
+            outcome = await _admit_agent(websocket, session, client_session_id)
         if isinstance(outcome, Refusal):
             code = outcome.code
             await _refuse(websocket, outcome)
             return
-        principal = outcome
+        principal, key = outcome
 
-        await websocket.send_json(protocol.ready(client_session_id, principal.label))
-        link = AgentLink(client_session_id=client_session_id)
+        link = AgentLink(key=key)
         hub.register_agent(link)
+        # Any other process holding an older socket for this session lets go.
+        bus.publish(
+            {
+                "type": protocol.AGENT_CONNECTED,
+                "person_id": key.person_id,
+                "client_session_id": key.client_session_id,
+                "link_id": link.id,
+            }
+        )
+        # Before `ready`, so that by the time the agent hears it, this socket
+        # already holds the session and vouches for it to every process.
+        await _stamp(database, link)
+        await websocket.send_json(protocol.ready(client_session_id, principal.label))
 
-        code, cause = await _serve_agent(websocket, database, principal, client_session_id, link)
+        code, cause = await _serve_agent(websocket, database, principal, link)
     except WebSocketDisconnect as exc:
         code = exc.code
     except asyncio.CancelledError:
@@ -211,7 +232,7 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
             # connection holds the session now, and ending it here would take
             # a live agent off the board.
             if not link.displaced.is_set():
-                await _end_row(database, client_session_id, cause)
+                await _end_row(database, link.key, cause)
         logger.info(
             "Agent socket closed",
             extra={
@@ -230,7 +251,6 @@ async def _serve_agent(
     websocket: WebSocket,
     database: Database,
     principal: Principal,
-    client_session_id: str,
     link: AgentLink,
 ) -> tuple[int, str]:
     """Read reports until the session ends. Returns its close code and cause.
@@ -268,9 +288,10 @@ async def _serve_agent(
                 if link.displaced.is_set():
                     return auth.DISPLACED, "displaced"
 
-                ending = await _handle_frame(websocket, database, principal, client_session_id, raw)
+                ending = await _handle_frame(websocket, database, principal, link.key, raw)
                 if ending is not None:
                     return ending
+                await _stamp(database, link)
     except TimeoutError:
         await websocket.close(code=auth.IDLE)
         return auth.IDLE, "idle"
@@ -279,11 +300,29 @@ async def _serve_agent(
         outgoing.cancel()
 
 
+async def _stamp(database: Database, link: AgentLink) -> None:
+    """Vouch for this socket's session, if it has not lately.
+
+    On connect, and then on the first frame each
+    :data:`~app.config.AGENT_SOCKET_STAMP_EVERY`. A frame that ends the
+    socket stamps nothing, since nothing is left to vouch for.
+    """
+    loop_now = asyncio.get_running_loop().time()
+    due = link.stamped_at is None or (
+        loop_now - link.stamped_at >= AGENT_SOCKET_STAMP_EVERY.total_seconds()
+    )
+    if not due:
+        return
+    async with database.session() as session:
+        await agent_sessions.stamp_socket(session, link.key, now())
+    link.stamped_at = loop_now
+
+
 async def _handle_frame(
     websocket: WebSocket,
     database: Database,
     principal: Principal,
-    client_session_id: str,
+    key: SessionKey,
     raw: str,
 ) -> tuple[int, str] | None:
     """Act on one frame from the agent. Returns a close code and cause to end on.
@@ -307,27 +346,27 @@ async def _handle_frame(
     if message.type == "feed":
         # Unacknowledged, and never a reason to close: see the protocol's note
         # on `feed`.
-        await _record_feed(database, principal, client_session_id, message)
+        await _record_feed(database, principal, key, message)
         return None
     if message.type == "prompt":
-        reply = await _open_prompt(database, principal, client_session_id, message)
+        reply = await _open_prompt(database, principal, key, message)
         if reply is not None:
             await websocket.send_json(reply)
         return None
     if message.type == "withdraw":
-        await _withdraw_prompt(database, principal, client_session_id, message)
+        await _withdraw_prompt(database, principal, key, message)
         return None
     if message.type == "bye":
         await _end_row(
             database,
-            client_session_id,
+            key,
             "bye",
             reason=message.reason or AgentSessionReason.SESSION_ENDED,
         )
         await websocket.close(code=1000)
         return 1000, "bye"
 
-    refusal = await _record_report(websocket, database, principal, client_session_id, message)
+    refusal = await _record_report(websocket, database, principal, key, message)
     if refusal is not None:
         await _refuse(websocket, refusal)
         return refusal.code, "refused"
@@ -354,7 +393,7 @@ async def _reachable_task(session: AsyncSession, principal: Principal, reference
 async def _open_prompt(
     database: Database,
     principal: Principal,
-    client_session_id: str,
+    key: SessionKey,
     message: protocol.PromptMessage,
 ) -> dict[str, object] | None:
     """Put a permission on the card. Returns a frame to send at once, if any.
@@ -370,7 +409,7 @@ async def _open_prompt(
         return await agent_prompts.open_permission(
             session,
             task,
-            client_session_id,
+            key,
             message.prompt.id,
             message.prompt.text,
             message.prompt.tool,
@@ -380,7 +419,7 @@ async def _open_prompt(
 async def _withdraw_prompt(
     database: Database,
     principal: Principal,
-    client_session_id: str,
+    key: SessionKey,
     message: protocol.WithdrawMessage,
 ) -> None:
     """The daemon stopped waiting. Unacknowledged: there is nothing to say back."""
@@ -392,7 +431,7 @@ async def _withdraw_prompt(
                 task,
                 message.prompt_id,
                 message.reason,
-                client_session_id=client_session_id,
+                key=key,
             )
         except NotFoundError:
             # A prompt this server never kept, a card since deleted, or
@@ -404,7 +443,7 @@ async def _record_report(
     websocket: WebSocket,
     database: Database,
     principal: Principal,
-    client_session_id: str,
+    key: SessionKey,
     message: protocol.StateMessage,
 ) -> Refusal | None:
     """Record one report and acknowledge it.
@@ -418,7 +457,7 @@ async def _record_report(
         except NotFoundError as exc:
             return Refusal(auth.NOT_FOUND, "not_found", str(exc))
         applied = await agent_reports.report(
-            session, principal, task, client_session_id, message.report
+            session, principal, task, key.client_session_id, message.report
         )
     await websocket.send_json(protocol.ack(applied))
     return None
@@ -427,7 +466,7 @@ async def _record_report(
 async def _record_feed(
     database: Database,
     principal: Principal,
-    client_session_id: str,
+    key: SessionKey,
     message: protocol.FeedMessage,
 ) -> None:
     """Keep the lines a session sent. A card that cannot be found keeps none."""
@@ -436,12 +475,12 @@ async def _record_feed(
             task = await _reachable_task(session, principal, message.task)
         except NotFoundError:
             return
-        await agent_feed.append(session, task, client_session_id, message.entries)
+        await agent_feed.append(session, task, key, message.entries)
 
 
 async def _end_row(
     database: Database,
-    client_session_id: str,
+    key: SessionKey,
     cause: str,
     reason: AgentSessionReason = AgentSessionReason.CONNECTION_LOST,
 ) -> None:
@@ -452,17 +491,25 @@ async def _end_row(
     """
     try:
         async with database.session() as session:
-            await agent_reports.end_session(session, client_session_id, reason=reason, cause=cause)
+            await agent_reports.end_session(session, key, reason=reason, cause=cause)
     except Exception:  # pragma: no cover - defensive
         logger.exception("Failed to end the row for a closed agent socket")
 
 
-async def _admit_agent(websocket: WebSocket, session: AsyncSession) -> Refusal | Principal:
-    """Authorise an agent socket, touching only the database."""
+async def _admit_agent(
+    websocket: WebSocket, session: AsyncSession, client_session_id: str
+) -> Refusal | tuple[Principal, SessionKey]:
+    """Authorise an agent socket, touching only the database.
+
+    Returns the caller and the session it is: the path's id, as the caller's.
+    """
     try:
-        return await auth.admit(websocket, session, scope=Scope.WRITE, api_only=True)
+        principal = await auth.admit(websocket, session, scope=Scope.WRITE, api_only=True)
+        return principal, agent_sessions.key_for(principal, client_session_id)
     except (UnauthorizedError, auth.SocketForbiddenError) as exc:
         return _refusal_for(exc)
+    except ForbiddenError as exc:
+        return Refusal(auth.FORBIDDEN, "forbidden", str(exc))
 
 
 async def _handshake(

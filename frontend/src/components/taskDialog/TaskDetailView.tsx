@@ -199,7 +199,7 @@ export function TaskDetailView({
 
         <ReadField label="Timeline">
           <Timeline
-            comments={task.comments}
+            task={task}
             members={members}
             files={files}
             deleting={deleting}

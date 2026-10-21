@@ -8,29 +8,35 @@ what fires and :mod:`app.services.hook_delivery` for how it is sent.
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.crypto import VaultCipher
-from app.db import SessionDependency, publish_into
-from app.models.hook import Hook, HookDelivery
+from app.core.errors import NotFoundError
+from app.core.ids import uuid7
+from app.db import SessionDependency, database_of, flush_or_refuse, publish_into
+from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.project import Project
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.routers.vault import vault_cipher
 from app.schemas.hooks import (
     DeliverySummary,
     HookCreate,
     HookCreated,
+    HookDeliveryPage,
     HookDeliveryRead,
     HookEvent,
     HookFire,
+    HookPage,
     HookRead,
     HookSecret,
     HookSecretRotate,
@@ -38,6 +44,7 @@ from app.schemas.hooks import (
 )
 from app.services import activity, hook_delivery, hooks
 from app.services.hooks import HookFields, HookFilters
+from app.services.paging import PageRequest
 
 router = APIRouter(tags=["hooks"])
 
@@ -118,6 +125,57 @@ def _client(request: Request) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=request.app.state.hook_transport)
 
 
+def _unsent(hook: Hook, event: str, payload: dict[str, Any]) -> HookDelivery:
+    """A delivery about to be sent from the request, not yet in any session.
+
+    Its defaults are filled in here rather than at a flush, because it is sent
+    — and the attempt written onto it — before it is ever added to one.
+    """
+    return HookDelivery(
+        id=uuid7(),
+        hook_id=hook.id,
+        event=event,
+        payload=payload,
+        state=DeliveryState.PENDING,
+        attempt_count=0,
+        attempts=[],
+    )
+
+
+async def _send_released(
+    request: Request, session: AsyncSession, hook: Hook, delivery: HookDelivery
+) -> None:
+    """Send ``delivery`` now, holding no database connection while the receiver answers.
+
+    A receiver has :data:`~app.services.hook_delivery.TIMEOUT` to answer, and a
+    request that held its connection for that long, a few at a time, used to
+    starve the pool (CYLIST-131). So the request's work so far — only reads,
+    and the credential's bookkeeping — is committed first, and the delivery
+    joins the session only once the attempt is written on it, to be kept in a
+    short transaction of its own.
+    """
+    await database_of(request).release(session)
+    async with _client(request) as client:
+        await hook_delivery.send_now(
+            session, client, request.app.state.settings.vault_keyring, hook, delivery
+        )
+
+
+async def _keep(session: AsyncSession, hook: Hook, delivery: HookDelivery) -> None:
+    """Put a sent delivery in the log.
+
+    The hook may have been deleted while the receiver was answering, now that
+    no row of its was held over the send; that is a 404, not a foreign-key 500.
+    """
+    session.add(delivery)
+    await flush_or_refuse(
+        session,
+        NotFoundError(
+            "That hook was deleted while it was being sent.", details={"hook_id": str(hook.id)}
+        ),
+    )
+
+
 @router.get(
     "/hooks/events",
     response_model=list[HookEvent],
@@ -140,17 +198,21 @@ async def list_events(_: Principal = Depends(require(Scope.READ))) -> list[HookE
 
 @router.get(
     "/projects/{project_ref}/hooks",
-    response_model=list[HookRead],
+    response_model=HookPage,
     summary="List a project's hooks",
 )
 async def list_hooks(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(may_read_hooks),
     session: AsyncSession = SessionDependency,
-) -> list[HookRead]:
-    found = await hooks.list_hooks(session, project)
-    labels = await hooks.labels_for(session, found)
-    return [_hook_read(hook, labels[hook.id]) for hook in found]
+    page: PageRequest = PageQuery,
+) -> HookPage:
+    """The project's hooks, by name, a page at a time."""
+    found = await hooks.list_hooks(session, project, page)
+    labels = await hooks.labels_for(session, found.rows)
+    return HookPage(
+        items=[_hook_read(hook, labels[hook.id]) for hook in found.rows], next=found.next
+    )
 
 
 @router.post(
@@ -326,17 +388,9 @@ async def test_hook(
     is listening is the point of switching one on. Kept in the delivery log
     like any other, and not retried.
     """
-    delivery = HookDelivery(
-        hook_id=hook.id,
-        event=hook_delivery.TEST_EVENT,
-        payload=hooks.sample_body(project, hook, principal),
-    )
-    session.add(delivery)
-    async with _client(request) as client:
-        await hook_delivery.send_now(
-            session, client, request.app.state.settings.vault_key, hook, delivery
-        )
-    await session.flush()
+    delivery = _unsent(hook, hook_delivery.TEST_EVENT, hooks.sample_body(project, hook, principal))
+    await _send_released(request, session, hook, delivery)
+    await _keep(session, hook, delivery)
     await session.refresh(delivery)
     return HookDeliveryRead.model_validate(delivery)
 
@@ -363,6 +417,12 @@ async def fire_hook(
     """
     hooks.refuse_unless_fireable(project, hook)
     message = body.message if body is not None else None
+    delivery = _unsent(
+        hook, hook_delivery.FIRED_EVENT, hooks.fired_body(project, hook, principal, message)
+    )
+    await _send_released(request, session, hook, delivery)
+    # Recorded once the receiver has answered, in the transaction that keeps
+    # the delivery, so a firing is on the trail exactly when it is in the log.
     await activity.record(
         session,
         principal,
@@ -372,36 +432,29 @@ async def fire_hook(
         project_id=project.id,
         payload={"name": hook.name, "message": message},
     )
-    delivery = HookDelivery(
-        hook_id=hook.id,
-        event=hook_delivery.FIRED_EVENT,
-        payload=hooks.fired_body(project, hook, principal, message),
-    )
-    session.add(delivery)
-    async with _client(request) as client:
-        await hook_delivery.send_now(
-            session, client, request.app.state.settings.vault_key, hook, delivery
-        )
-    await session.flush()
+    await _keep(session, hook, delivery)
     await session.refresh(delivery)
     return HookDeliveryRead.model_validate(delivery)
 
 
 @router.get(
     "/projects/{project_ref}/hooks/{hook_id}/deliveries",
-    response_model=list[HookDeliveryRead],
+    response_model=HookDeliveryPage,
     summary="List a hook's recent deliveries",
 )
 async def list_deliveries(
     hook: Hook = Depends(resolved_hook),
     _: Principal = Depends(may_read_hooks),
     session: AsyncSession = SessionDependency,
-    limit: int = Query(default=25, ge=1, le=100),
-) -> list[HookDeliveryRead]:
-    """Newest first, each with every attempt made at it. Finished ones are kept
-    for 30 days."""
-    found = await hooks.deliveries(session, hook, limit=limit)
-    return [HookDeliveryRead.model_validate(delivery) for delivery in found]
+    page: PageRequest = PageQuery,
+) -> HookDeliveryPage:
+    """Newest first, a page at a time, each with every attempt made at it.
+    Finished ones are kept for 30 days."""
+    found = await hooks.deliveries(session, hook, page)
+    return HookDeliveryPage(
+        items=[HookDeliveryRead.model_validate(delivery) for delivery in found.rows],
+        next=found.next,
+    )
 
 
 @router.post(

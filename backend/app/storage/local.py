@@ -18,14 +18,17 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import tempfile
+import time
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from typing import IO
 
 from anyio import to_thread
 
-from app.storage.base import BlobStore, BlobTooLargeError, StoredBlob
+from app.storage.base import BlobStore, BlobTooLargeError, StagedBlob, StoredBlob
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +47,7 @@ class LocalBlobStore(BlobStore):
     def __init__(self, root: Path) -> None:
         self._root = root
 
-    async def write(self, chunks: AsyncIterator[bytes], *, max_bytes: int) -> StoredBlob:
+    async def stage(self, chunks: AsyncIterator[bytes], *, max_bytes: int) -> StagedBlob:
         incoming = await to_thread.run_sync(self._begin)
         digest = hashlib.sha256()
         size = 0
@@ -58,6 +61,10 @@ class LocalBlobStore(BlobStore):
                     raise BlobTooLargeError(max_bytes)
                 digest.update(chunk)
                 await to_thread.run_sync(incoming.write, chunk)
+            # Durable before it is staged, not when it is published: publishing
+            # happens with the digest's lock held, and an fsync of a large file
+            # is not something to do while other uploads wait on that lock.
+            await to_thread.run_sync(self._seal, incoming)
         except BaseException as error:
             await to_thread.run_sync(self._abandon, incoming)
             # The one place that knows an upload was abandoned part-way. The
@@ -73,8 +80,12 @@ class LocalBlobStore(BlobStore):
             raise
 
         sha256 = digest.hexdigest()
-        path = _relative_path(sha256)
-        deduplicated = await to_thread.run_sync(self._commit, incoming, path)
+        return StagedBlob(
+            sha256=sha256, size=size, path=_relative_path(sha256), handle=incoming.name
+        )
+
+    async def publish(self, staged: StagedBlob) -> StoredBlob:
+        deduplicated = await to_thread.run_sync(self._commit, Path(staged.handle), staged.path)
         # DEBUG, not INFO: the file row that results is already in the
         # activity trail, where it is queryable. What this adds is the
         # disk-side detail — the digest to find it under, and whether any
@@ -82,14 +93,23 @@ class LocalBlobStore(BlobStore):
         # debugging storage, not while reading the log day to day.
         logger.debug(
             "Stored blob %s (%d bytes)%s",
-            sha256[:12],
-            size,
+            staged.sha256[:12],
+            staged.size,
             " — already held" if deduplicated else "",
             extra={
-                "context": {"sha256": sha256, "bytes": size, "deduplicated": deduplicated},
+                "context": {
+                    "sha256": staged.sha256,
+                    "bytes": staged.size,
+                    "deduplicated": deduplicated,
+                },
             },
         )
-        return StoredBlob(sha256=sha256, size=size, path=path, deduplicated=deduplicated)
+        return StoredBlob(
+            sha256=staged.sha256, size=staged.size, path=staged.path, deduplicated=deduplicated
+        )
+
+    async def discard(self, staged: StagedBlob) -> None:
+        await to_thread.run_sync(self._unlink, Path(staged.handle))
 
     def locate(self, path: str) -> Path:
         """The file under the root that ``path`` names.
@@ -118,6 +138,19 @@ class LocalBlobStore(BlobStore):
         # it, this line is the only evidence of when that happened.
         logger.info("Removed blob", extra={"context": {"path": path}})
 
+    async def held(self, *, idle_for: timedelta) -> dict[str, str]:
+        return await to_thread.run_sync(self._held, time.time() - idle_for.total_seconds())
+
+    async def clear_incoming(self, *, idle_for: timedelta) -> int:
+        cleared = await to_thread.run_sync(
+            self._clear_incoming, time.time() - idle_for.total_seconds()
+        )
+        if cleared:
+            logger.info(
+                "Cleared %d abandoned upload(s)", cleared, extra={"context": {"count": cleared}}
+            )
+        return cleared
+
     # --- Everything below runs in a worker thread --------------------------
 
     def _begin(self) -> IO[bytes]:
@@ -132,18 +165,20 @@ class LocalBlobStore(BlobStore):
         # either commits or abandons it, both of which close and clean up.
         return tempfile.NamedTemporaryFile(dir=self._root, prefix=TEMP_PREFIX, delete=False)
 
-    def _commit(self, incoming: IO[bytes], path: str) -> bool:
-        """Publish the finished temporary file at its digest path.
+    @staticmethod
+    def _seal(incoming: IO[bytes]) -> None:
+        """Make a finished temporary file durable, and let go of it."""
+        incoming.flush()
+        os.fsync(incoming.fileno())
+        incoming.close()
+
+    def _commit(self, source: Path, path: str) -> bool:
+        """Publish a sealed temporary file at its digest path.
 
         Returns:
             True if the store already held these bytes, in which case the
             incoming copy is discarded rather than rewritten.
         """
-        incoming.flush()
-        os.fsync(incoming.fileno())
-        incoming.close()
-
-        source = Path(incoming.name)
         destination = self.locate(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -159,9 +194,63 @@ class LocalBlobStore(BlobStore):
         incoming.close()
         self._unlink(Path(incoming.name))
 
+    def _held(self, cutoff: float) -> dict[str, str]:
+        """Walk the two fan-out levels for digests last modified before ``cutoff``.
+
+        Only names that look like a digest in the bucket a digest would be in:
+        anything else under the root was not put there by :meth:`publish`, and
+        a sweep has no business deciding what it is.
+        """
+        found: dict[str, str] = {}
+        if not self._root.is_dir():
+            return found
+        for first in self._root.iterdir():
+            if not _is_bucket(first):
+                continue
+            for second in first.iterdir():
+                if not _is_bucket(second):
+                    continue
+                for entry in second.iterdir():
+                    name = entry.name
+                    if (
+                        _DIGEST.fullmatch(name)
+                        and name[0:2] == first.name
+                        and name[2:4] == second.name
+                        and entry.is_file()
+                        and entry.stat().st_mtime < cutoff
+                    ):
+                        found[name] = _relative_path(name)
+        return found
+
+    def _clear_incoming(self, cutoff: float) -> int:
+        cleared = 0
+        if not self._root.is_dir():
+            return cleared
+        for entry in self._root.glob(f"{TEMP_PREFIX}*"):
+            try:
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+            except FileNotFoundError:
+                continue  # its upload finished, or failed, while we looked
+            self._unlink(entry)
+            cleared += 1
+        return cleared
+
     @staticmethod
     def _unlink(path: Path) -> None:
         path.unlink(missing_ok=True)
+
+
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+
+def _is_bucket(entry: Path) -> bool:
+    """A fan-out directory: two lowercase hex characters."""
+    return (
+        len(entry.name) == 2
+        and all(c in "0123456789abcdef" for c in entry.name)
+        and (entry.is_dir())
+    )
 
 
 def _relative_path(sha256: str) -> str:

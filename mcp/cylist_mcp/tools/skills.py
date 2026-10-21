@@ -8,7 +8,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult
 from pydantic import Field
 
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.errors import CylistError
 from cylist_mcp.tools.common import ProjectRef, as_tool_result
 
@@ -34,7 +34,7 @@ def register(server: MCPServer, client: Api) -> None:
     )
     async def list_skills(project: ProjectRef) -> CallToolResult:
         async def call() -> dict[str, Any]:
-            return {"skills": await client.get(f"/projects/{project}/skills")}
+            return {"skills": await every(client, f"/projects/{project}/skills")}
 
         return await as_tool_result(call)
 
@@ -119,7 +119,7 @@ def register(server: MCPServer, client: Api) -> None:
 
 async def find_skill(client: Api, project: str, name: str) -> dict[str, Any]:
     """The skill of that name on the project, or an error listing the ones it has."""
-    skills = await client.get(f"/projects/{project}/skills")
+    skills = await every(client, f"/projects/{project}/skills")
     for skill in skills:
         if skill.get("name") == name:
             return dict(skill)

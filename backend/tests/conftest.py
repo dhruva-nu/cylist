@@ -28,6 +28,8 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
+from typing import Any
 
 import pytest
 from argon2 import PasswordHasher, profiles
@@ -38,17 +40,22 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.auth import passwords
-from app.auth.passwords import hash_password
+from app.auth.passwords import hash_password_sync
+from app.auth.throttle import SignInThrottle
 from app.config import Settings
 from app.core.palette import colour_for
 from app.db import Database
 from app.main import create_app
 from app.models import Base
 from app.models.person import Person, PersonKind
+from app.realtime.bus import Bus
 from app.realtime.hub import Hub
+from app.services import blobs
 from app.services.doc_engine import engine_for
+from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
 from app.services.push.delivery import Pusher
+from app.storage import LocalBlobStore
 
 # Before anything below hashes a password. The deployed parameters cost ~70 ms
 # a hash or a check, and the suite does one or more of those in nearly every
@@ -65,13 +72,16 @@ INVITEE_PASSWORD = "sixteen-horses-and-one-stapler"
 OWNER_EMAIL = "dhruva@cylist.dev"
 OWNER_NAME = "Dhruva N"
 
-OWNER_PASSWORD_HASH = hash_password(OWNER_PASSWORD)
+OWNER_PASSWORD_HASH = hash_password_sync(OWNER_PASSWORD)
 """Hashed once for the whole run, rather than once per test that signs in."""
 
 VAULT_KEY = "dGVzdC12YXVsdC1rZXktMzItYnl0ZXMtZXhhY3RseSE="
 """A fixed 32-byte AES key, so a ciphertext written by one test is readable by
 the next. Never used anywhere but here; a real one comes from
 ``python -m app.cli generate-vault-key``."""
+
+VAULT_KEYS = ((1, VAULT_KEY),)
+"""The keyring :data:`VAULT_KEY` alone makes: version 1, as in every deployment."""
 
 TEST_DATABASE_NAME = "cylist_test"
 
@@ -155,7 +165,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory, database_url: str) -> Set
 @pytest.fixture(scope="session")
 async def database(settings: Settings) -> AsyncIterator[Database]:
     """Create the schema once, drop it at the end of the run."""
-    db = Database(settings.database_url)
+    db = Database.configured(settings)
     async with db.engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
@@ -190,13 +200,16 @@ async def session(database: Database) -> AsyncIterator[AsyncSession]:
 APP_STATE = {
     "settings",
     "hub",
+    "bus",
     "courier",
     "hook_transport",
     "pusher",
     "push_sender",
     "doc_engine",
+    "doc_corpora",
     "metrics",
     "mcp",
+    "sign_in_throttle",
 }
 """Everything ``create_app`` hangs on ``app.state``, which :func:`as_new` must
 know how to put back. Checked, so a new one cannot be added and quietly carry
@@ -221,11 +234,15 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.settings = settings
     app.state.database = database
     app.state.hub = Hub()
+    app.state.bus = Bus(app.state.hub)
     app.state.courier = Courier()
     app.state.hook_transport = None
     app.state.pusher = Pusher()
     app.state.push_sender = None
     app.state.doc_engine = engine_for(settings)
+    app.state.doc_corpora = CorpusCache()
+    # Fresh buckets, so one test's sign-in attempts are not another's.
+    app.state.sign_in_throttle = SignInThrottle()
     # In place, not replaced: MetricsMiddleware holds this object.
     app.state.metrics.__init__()
     return app
@@ -257,7 +274,7 @@ async def client_on(app: FastAPI) -> AsyncIterator[AsyncClient]:
     # The lifespan would have done this; without it the shared pool has
     # nobody to tell about a commit. Rebound per test, so each app's sockets
     # hear only their own test's writes.
-    database.publish_to(app.state.hub.publish)
+    database.publish_to(app.state.bus.publish)
 
     transport = ASGITransport(app=app)
     try:
@@ -316,6 +333,15 @@ async def sign_in(client: AsyncClient) -> AsyncClient:
     )
     assert response.status_code == 200, response.text
     return client
+
+
+async def sweep_blobs(database: Database, settings: Settings) -> blobs.Swept:
+    """Run the blob sweep now, with no idle margin.
+
+    A delete takes rows only; the bytes leave at the next sweep (CYLIST-129).
+    A test asking whether content left the disk has to run that sweep first.
+    """
+    return await blobs.sweep(database, LocalBlobStore(settings.blob_dir), idle_for=timedelta(0))
 
 
 async def bootstrap_sign_in(client: AsyncClient) -> AsyncClient:
@@ -401,3 +427,13 @@ async def put_members(client: AsyncClient, project: str, person_ids: list[str]) 
     me = (await client.get("/me")).json().get("person")
     keep = [me["id"]] if me is not None and me["id"] not in person_ids else []
     return await client.put(f"/projects/{project}/members", json={"person_ids": keep + person_ids})
+
+
+def cards_of(board: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every card on a page of ``GET /projects/{ref}/tasks``, left to right and
+    top to bottom — the flat list a test about the cards themselves reads.
+
+    Only what the page holds: a test that wants a column past its first page
+    reads ``GET /columns/{id}/tasks`` itself.
+    """
+    return [card for column in board["columns"] for card in column["items"]]

@@ -9,7 +9,7 @@ from pydantic import Field, field_validator
 
 from app.core.sensitivity import Sensitivity
 from app.models.file import NAME_MAX_LENGTH, ItemKind, ItemSource
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 from app.schemas.people import PersonRead
 
 _URL_PATTERN = r"^https?://\S+$"
@@ -29,6 +29,10 @@ def clean_name(value: str) -> str:
         raise ValueError("must not contain a path")
     if any(character < " " or character == "\x7f" for character in stripped):
         raise ValueError("must not contain control characters")
+    # Checked here as well as by each schema's max_length, because an upload's
+    # filename never passes through a schema: it arrives on the multipart part.
+    if len(stripped) > NAME_MAX_LENGTH:
+        raise ValueError(f"must be at most {NAME_MAX_LENGTH} characters")
     return stripped
 
 
@@ -158,8 +162,16 @@ class FolderChildren(Schema):
             " Always starts at the project's root."
         )
     )
-    folders: list[FolderRead]
-    items: list[ItemRead]
+    folders: list[FolderRead] = Field(
+        description="Every folder directly inside this one. Whole rather than paged: folders "
+        "are the tree's structure, and `GET /projects/{ref}/tree` hands that out entire."
+    )
+    items: list[ItemRead] = Field(
+        description="A page of the files and links directly inside this one, alphabetical."
+    )
+    next: UUID | None = Field(
+        description="Pass as `after` for the page of items after these. Null on the last page."
+    )
 
 
 class LinkCreate(Schema):
@@ -201,3 +213,11 @@ class ItemUpdate(Schema):
     @classmethod
     def _clean(cls, value: str | None) -> str | None:
         return clean_name(value) if value is not None else None
+
+
+class FolderPage(Page[FolderRead]):
+    """A page of a project's folders, alphabetical."""
+
+
+class FiledItemPage(Page[FiledItem]):
+    """A page of a project's files and links, alphabetical, each with its path."""

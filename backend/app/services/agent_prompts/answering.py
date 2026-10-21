@@ -17,12 +17,14 @@ from app.models.agent_session import (
     AgentPromptStatus,
     AgentSession,
     AgentSessionState,
+    SessionKey,
 )
+from app.models.person import Person
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentPromptAnswer, AgentPromptRead
 from app.services import activity
 from app.services.agent_prompts import store
-from app.services.agent_prompts.reading import options_of, read
+from app.services.agent_prompts.reading import options_of, read_one
 
 POLL_WAIT_MAX = 25
 """Longest a single long-poll on a prompt may block, in seconds. Under the
@@ -38,26 +40,35 @@ async def answer(
 ) -> AgentPromptRead:
     """A person's answer: close the prompt, free the agent, say so on the card.
 
-    A permission is answered by a person signed in, or with a token minted
-    with the ``permit`` scope for a person's own device (the phone app's).
-    Agents hold API tokens, and the agent asking holds one on the same disk as
-    the hook: one that could grant itself "Allow for this session" would be
-    walking past the very prompt Claude Code put in front of a person. An
-    agent's token is never minted with ``permit``.
+    **Who may answer** differs by kind, and the rule is written down in the
+    project's docs ("What agents get from Cylist"):
+
+    * A **question** is the agent asking the project something, and anyone
+      who may edit the card may answer it — the route's own fence.
+    * A **permission** is Claude Code asking whether a tool may run on one
+      person's machine, so only that person may answer it (CYLIST-141): the
+      owner of the session asking. A teammate approving ``git push`` on your
+      laptop is the thing this exists to prevent, however much they may edit
+      the card.
+
+    And a permission is answered by a person signed in, or with a token
+    minted with the ``permit`` scope for a person's own device (the phone
+    app's). Agents hold API tokens, and the agent asking holds one on the same
+    disk as the hook: one that could grant itself "Allow for this session"
+    would be walking past the very prompt Claude Code put in front of a
+    person. An agent's token is never minted with ``permit``.
 
     Raises:
         NotFoundError: if there is no such prompt on the card.
-        ForbiddenError: if a permission is answered with an API token that
-            lacks the ``permit`` scope.
+        ForbiddenError: if a permission is answered by anyone but its owner,
+            or with an API token that lacks the ``permit`` scope.
         ConflictError: if the prompt has already closed, or the answer is not
             one it accepts.
     """
     prompt = await store.prompt_on(session, task, prompt_id)
-    if prompt.kind is AgentPromptKind.PERMISSION and not _may_permit(principal):
-        raise ForbiddenError(
-            "A permission is answered by a person on the board or on their phone, "
-            "not with an agent's API token."
-        )
+    row = await session.get(AgentSession, prompt.agent_session_id)
+    if prompt.kind is AgentPromptKind.PERMISSION:
+        await _require_may_permit(session, principal, row)
     now = clock_now()
     await store.expire_if_due(session, prompt, now)
     if prompt.status is not AgentPromptStatus.OPEN:
@@ -70,7 +81,6 @@ async def answer(
     prompt.answered_by_id = principal.person_id
     prompt.answered_by_label = principal.label
 
-    row = await session.get(AgentSession, prompt.agent_session_id)
     if row is not None:
         await store.resume_session(session, row, now, state=AgentSessionState.WORKING)
     await session.flush()
@@ -90,14 +100,37 @@ async def answer(
             "client_name": row.client_name if row else None,
         },
     )
-    store.announce(session, task, prompt, row.client_session_id if row else "")
-    return read(prompt)
+    store.announce(session, task, prompt, row)
+    return await read_one(session, prompt)
 
 
-def _may_permit(principal: Principal) -> bool:
-    """Whether this credential may grant or refuse a tool call: a browser
-    session, or a token carrying ``permit``."""
-    return principal.channel is Channel.WEB or principal.has(Scope.PERMIT)
+async def _require_may_permit(
+    session: AsyncSession, principal: Principal, row: AgentSession | None
+) -> None:
+    """Refuse anyone who may not grant or refuse this tool call.
+
+    The owner first, because it is the answer a person most needs: being
+    told to use another credential when no credential of theirs would do is
+    a runaround. The 403 names the owner, so whoever reads it knows who to
+    go and ask.
+
+    Raises:
+        ForbiddenError: if the caller is not the session's owner, or is but
+            holds an API token without ``permit``.
+    """
+    if row is None or not _owns(principal, row):
+        owner_id = row.person_id if row is not None else None
+        owner = await session.get(Person, owner_id) if owner_id is not None else None
+        whose = f"{owner.name}'s" if owner is not None else "its owner's"
+        raise ForbiddenError(
+            f"This permission is for a tool on {whose} machine, and only "
+            f"{owner.name if owner is not None else 'they'} can answer it."
+        )
+    if not (principal.channel is Channel.WEB or principal.has(Scope.PERMIT)):
+        raise ForbiddenError(
+            "A permission is answered by a person on the board or on their phone, "
+            "not with an agent's API token."
+        )
 
 
 def _record_answer(prompt: AgentPrompt, data: AgentPromptAnswer) -> None:
@@ -128,7 +161,7 @@ async def withdraw(
     reason: str,
     *,
     principal: Principal | None = None,
-    client_session_id: str | None = None,
+    key: SessionKey | None = None,
 ) -> AgentPromptRead:
     """The agent stopped waiting before anybody here answered.
 
@@ -138,25 +171,32 @@ async def withdraw(
     the one that happened. ``expired`` is accepted as a reason and recorded
     as that status, for the daemon's own timeout.
 
-    ``principal``, when given, must be an agent: a person does not withdraw an
-    agent's question, they answer it.
+    ``principal``, when given — the HTTP route's caller — must be an agent of
+    the person whose session asked: a person does not withdraw an agent's
+    question, they answer it, and one person's agent does not take another's
+    prompt off the board (CYLIST-120). Any token of the owner's will do, since
+    the MCP server that asked and the hook are often handed different ones.
 
-    ``client_session_id``, when given — the agent socket's own — must be the
-    session that asked: one session does not get to take another's prompt
-    off the board. Any other is not found, as far as that socket can tell.
+    ``key``, when given — the agent socket's own — must be the very session
+    that asked: one session does not get to take another's prompt off the
+    board, even a sibling of the same person's.
+
+    Either way, a prompt that is not the caller's is not found, as far as the
+    caller can tell.
 
     Raises:
         ForbiddenError: if ``principal`` is not an agent.
         NotFoundError: if there is no such prompt on the card, or it is not
-            ``client_session_id``'s.
+            the caller's.
     """
     if principal is not None and principal.channel is not Channel.API:
         raise ForbiddenError("Only the agent that is waiting can withdraw a prompt.")
     prompt = await store.prompt_on(session, task, prompt_id)
-    if client_session_id is not None:
-        asker = await session.get(AgentSession, prompt.agent_session_id)
-        if asker is None or asker.client_session_id != client_session_id:
-            raise NotFoundError(f"No such prompt on {task.reference}.")
+    asker = await session.get(AgentSession, prompt.agent_session_id)
+    if principal is not None and (asker is None or not _owns(principal, asker)):
+        raise NotFoundError(f"No such prompt on {task.reference}.")
+    if key is not None and (asker is None or asker.key != key):
+        raise NotFoundError(f"No such prompt on {task.reference}.")
 
     if prompt.status is AgentPromptStatus.OPEN:
         status = (
@@ -166,26 +206,43 @@ async def withdraw(
         )
         row = await store.close(session, prompt, status, clock_now(), reason=reason)
         await session.flush()
-        store.announce(session, task, prompt, row.client_session_id if row else "")
-    return read(prompt)
+        store.announce(session, task, prompt, row)
+    return await read_one(session, prompt)
 
 
 async def wait_state(
-    session: AsyncSession, task: Task, prompt_id: UUID, *, polled: bool
+    session: AsyncSession, task: Task, prompt_id: UUID, *, poller: Principal | None
 ) -> AgentPromptRead:
     """A prompt as it stands, expiring it if it is due.
 
-    ``polled`` is the asking tool's own look, which is what keeps a question
-    from being taken for abandoned; anyone else reading it leaves that alone.
+    ``poller`` is the caller when it is long-polling with an API token. If it
+    is the asking session's owner, that is the asking tool's own look: it
+    keeps the question from being taken for abandoned, and it keeps the
+    session itself from being taken for gone (CYLIST-134). An ``ask_human``
+    that holds its turn open for half an hour is the agent's whole life in
+    that half hour, and a session that reports over HTTP says nothing else in
+    it — so without this the reaper ended it at ten minutes and withdrew the
+    question a person was about to answer. Anyone else reading the prompt,
+    and anyone else's agent polling it, leaves both alone.
     """
     prompt = await store.prompt_on(session, task, prompt_id)
     now = clock_now()
-    if polled and prompt.status is AgentPromptStatus.OPEN:
+    row = await session.get(AgentSession, prompt.agent_session_id)
+    owns = poller is not None and row is not None and _owns(poller, row)
+    if owns and prompt.status is AgentPromptStatus.OPEN:
         prompt.last_polled_at = now
+        if row is not None and row.ended_at is None:
+            row.last_seen_at = now
     if await store.expire_if_due(session, prompt, now) is not None:
-        store.announce(session, task, prompt, "")
+        store.announce(session, task, prompt, row)
     await session.flush()
-    return read(prompt)
+    return await read_one(session, prompt)
+
+
+def _owns(principal: Principal, row: AgentSession) -> bool:
+    """Whether this caller is the person whose session this is. Nobody owns a
+    row without an owner — not even a caller who is nobody either."""
+    return row.person_id is not None and row.person_id == principal.person_id
 
 
 def _already_closed(prompt: AgentPrompt) -> str:

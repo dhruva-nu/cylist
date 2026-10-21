@@ -60,7 +60,7 @@ async def test_a_tool_reads_the_board_as_the_token_holder(signed_in: AsyncClient
     assert "Wire up hosted MCP" in text
 
     # An agent's work, in the owner's name — as it is over plain HTTP.
-    feed = (await signed_in.get("/activity", params={"project": "ATL"})).json()
+    feed = (await signed_in.get("/activity", params={"project": "ATL"})).json()["items"]
     made = next(entry for entry in feed if entry["verb"] == "task.created")
     assert made["channel"] == "api"
 

@@ -14,20 +14,17 @@
 
 import { useId, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { queryKeys } from '../api/queries'
+import { queryKeys, type BoardCards } from '../api/queries'
 
-import {
-  api,
-  type AgentPrompt,
-  type AgentPromptAnswer,
-  type Task,
-  type TaskDetail,
-} from '../api/client'
+import { api, type AgentPrompt, type AgentPromptAnswer, type TaskDetail } from '../api/client'
 import { Button, ErrorBanner } from './ui'
+import { useViewerId } from '../routes/useViewerId'
 import {
   answerFailure,
   choiceTone,
   detailWithPromptAnswered,
+  mayAnswer,
+  notYours,
   promptClosedUnderUs,
   promptHeading,
   replyAnswer,
@@ -46,8 +43,8 @@ export function useAnswerPrompt(taskRef: string, onAnswered?: (answered: AgentPr
     mutationFn: ({ prompt, answer }: { prompt: AgentPrompt; answer: AgentPromptAnswer }) =>
       api.answerAgentPrompt(taskRef, prompt.id, answer),
     onSuccess: (answered) => {
-      queryClient.setQueriesData<Task[]>({ queryKey: ['tasks'] }, (old) =>
-        old ? tasksWithPromptAnswered(old, answered) : old,
+      queryClient.setQueriesData<BoardCards>({ queryKey: ['tasks'] }, (old) =>
+        old ? { ...old, tasks: tasksWithPromptAnswered(old.tasks, answered) } : old,
       )
       queryClient.setQueriesData<TaskDetail>({ queryKey: queryKeys.allTasks }, (old) =>
         old ? detailWithPromptAnswered(old, answered) : old,
@@ -86,6 +83,7 @@ export function AgentPromptAnswer({
   const replyId = useId()
   const typed = replyAnswer(prompt, reply)
   const busy = answer.isPending
+  const mine = mayAnswer(prompt, useViewerId())
 
   const send = (chosen: AgentPromptAnswer) => {
     if (!busy) answer.mutate({ prompt, answer: chosen })
@@ -114,7 +112,10 @@ export function AgentPromptAnswer({
         <p className={styles.question}>{prompt.text}</p>
       )}
 
-      {prompt.options.length ? (
+      {/* Asked of someone else: say whose it is rather than offer buttons that can only fail. */}
+      {!mine ? <p className={styles.notYours}>{notYours(prompt)}</p> : null}
+
+      {mine && prompt.options.length ? (
         <div
           className={prompt.kind === 'permission' ? styles.choicesRow : styles.choices}
           role="group"
@@ -138,7 +139,7 @@ export function AgentPromptAnswer({
         </div>
       ) : null}
 
-      {prompt.allows_reply ? (
+      {mine && prompt.allows_reply ? (
         <form className={styles.reply} onSubmit={onSubmit}>
           <label htmlFor={replyId} className="visually-hidden">
             Or write a reply

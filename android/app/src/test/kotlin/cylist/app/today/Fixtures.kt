@@ -10,7 +10,7 @@ import cylist.api.generated.models.PickRead
 import cylist.api.generated.models.PickedCard
 import cylist.api.generated.models.Sensitivity
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TaskType
 import cylist.api.generated.models.TodoRead
@@ -56,12 +56,12 @@ fun card(
     status: TaskStatus = TaskStatus.active,
     column: UUID? = TO_DO.id,
     assignee: PersonRead = ME,
-): TaskRead {
+): TaskSummary {
     counter += 1
-    return TaskRead(
+    return TaskSummary(
         id = UUID.nameUUIDFromBytes(reference.toByteArray()), projectId = UUID(0, 1), reference = reference, number = counter,
         parentId = null, parentReference = null, subNumber = null, columnId = column, position = 0,
-        title = reference, description = "", type = TaskType.feature, priority = priority,
+        title = reference, type = TaskType.feature, priority = priority,
         subStatuses = emptyList(), subStatusIndex = null, dueDate = due, columnDueDates = emptyList(), nextDueDate = due,
         assignee = assignee, status = status, templateId = null, templateName = null,
         goalId = null, goalReference = null, goalName = null, goalColour = null, jiraRef = null,

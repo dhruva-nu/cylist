@@ -149,6 +149,21 @@ class Hook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """The secret's last four characters, so a page can tell two secrets apart
     without decrypting either."""
 
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sql_text("0")
+    )
+    """Attempts in a row, across all of this hook's deliveries, that the
+    receiver refused or never answered. Back to nought on the first 2xx. Once
+    it reaches :data:`app.services.hook_delivery.BREAKER_THRESHOLD` the
+    courier stops sending to the hook for a while — see :attr:`paused_until`."""
+
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """Until when the courier leaves this hook's deliveries alone, because its
+    receiver kept failing: its circuit breaker is open. Waiting does not spend
+    a delivery's attempts. Afterwards one delivery goes alone as a probe, and
+    only its success lets the rest through. Null when the receiver is
+    answering."""
+
 
 class DeliveryState(StrEnum):
     """Where an event is on its way to a hook's URL."""

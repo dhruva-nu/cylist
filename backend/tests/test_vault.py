@@ -21,7 +21,7 @@ from app.config import Settings
 from app.db import Database
 from app.main import create_app
 from app.models import VaultNode, VaultSecret, VaultTree
-from tests.conftest import OWNER_PASSWORD
+from tests.conftest import OWNER_EMAIL, OWNER_PASSWORD
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 TWILIO_SECRET = "Tw!9xLp3#Qm"
@@ -70,7 +70,7 @@ class TestTrees:
     async def test_a_project_starts_with_no_trees(self, signed_in: AsyncClient) -> None:
         await signed_in.post("/projects", json=ATLAS)
 
-        assert (await signed_in.get("/projects/ATL/vault/trees")).json() == []
+        assert (await signed_in.get("/projects/ATL/vault/trees")).json()["items"] == []
 
     async def test_creates_a_tree(self, signed_in: AsyncClient) -> None:
         response = await signed_in.post("/projects", json=ATLAS)
@@ -92,7 +92,7 @@ class TestTrees:
         by_key = await signed_in.get("/projects/atl/vault/trees")
 
         assert by_key.status_code == 200
-        assert [tree["name"] for tree in by_key.json()] == ["Logins"]
+        assert [tree["name"] for tree in by_key.json()["items"]] == ["Logins"]
 
     async def test_refuses_two_trees_with_the_same_name(self, signed_in: AsyncClient) -> None:
         await _tree(signed_in)
@@ -109,7 +109,7 @@ class TestTrees:
         await signed_in.post("/projects/ATL/vault/trees", json={"name": "Links"})
         await signed_in.post("/projects/ATL/vault/trees", json={"name": "Certificates"})
 
-        listed = (await signed_in.get("/projects/ATL/vault/trees")).json()
+        listed = (await signed_in.get("/projects/ATL/vault/trees")).json()["items"]
 
         assert [tree["name"] for tree in listed] == ["Logins", "Links", "Certificates"]
         assert [tree["position"] for tree in listed] == [0, 1, 2]
@@ -515,6 +515,27 @@ class TestMoving:
 class TestSecretsNeverLeak:
     """The plaintext must appear in exactly one place: the reveal response."""
 
+    async def test_not_in_a_validation_failure(self, signed_in: AsyncClient) -> None:
+        """A model-level validator sees the whole body, so Pydantic's ``input``
+        for it is the body — secret and all — unless the handler strips it."""
+        tree_id = await _tree(signed_in)
+
+        response = await signed_in.post(
+            "/vault/nodes",
+            json={
+                "tree_id": tree_id,
+                "name": "Twilio",
+                "kind": "branch",
+                "secret": {"value": TWILIO_SECRET, "username": "ops@think41.com"},
+            },
+        )
+
+        assert response.status_code == 422
+        assert TWILIO_SECRET not in response.text
+        for field in response.json()["error"]["details"]["fields"]:
+            assert "input" not in field
+            assert "ctx" not in field
+
     async def test_not_in_the_create_response(self, signed_in: AsyncClient) -> None:
         tree_id = await _tree(signed_in)
 
@@ -678,7 +699,9 @@ class TestRevealing:
         await signed_in.post(f"/vault/nodes/{node['id']}/reveal")
         await signed_in.post(f"/vault/nodes/{node['id']}/reveal")
 
-        feed = (await signed_in.get("/activity", params={"entity_type": "vault_node"})).json()
+        feed = (await signed_in.get("/activity", params={"entity_type": "vault_node"})).json()[
+            "items"
+        ]
         reveals = [entry for entry in feed if entry["verb"] == "vault.secret_revealed"]
         assert len(reveals) == 2
         assert reveals[0]["payload"] == {"name": "Twilio console", "tree": "Logins"}
@@ -691,7 +714,7 @@ class TestRevealing:
 
         await signed_in.post(f"/vault/nodes/{node['id']}/reveal")
 
-        feed = (await signed_in.get("/activity", params={"project": project_id})).json()
+        feed = (await signed_in.get("/activity", params={"project": project_id})).json()["items"]
         assert "vault.secret_revealed" in [entry["verb"] for entry in feed]
 
 
@@ -754,7 +777,7 @@ class TestScopes:
 
         await signed_in.post(f"/vault/nodes/{node['id']}/reveal", headers=reader)
 
-        feed = (await signed_in.get("/activity")).json()
+        feed = (await signed_in.get("/activity")).json()["items"]
         assert "vault.secret_revealed" not in [entry["verb"] for entry in feed]
 
     async def test_a_reveal_token_gets_the_plaintext(self, signed_in: AsyncClient) -> None:
@@ -774,7 +797,9 @@ class TestScopes:
 
         await signed_in.post(f"/vault/nodes/{node['id']}/reveal", headers=revealer)
 
-        feed = (await signed_in.get("/activity", params={"entity_type": "vault_node"})).json()
+        feed = (await signed_in.get("/activity", params={"entity_type": "vault_node"})).json()[
+            "items"
+        ]
         reveal = next(entry for entry in feed if entry["verb"] == "vault.secret_revealed")
         assert reveal["actor_label"] == "agent"
         assert reveal["channel"] == "api"
@@ -956,7 +981,7 @@ class TestAuditTrail:
         await signed_in.patch(f"/vault/trees/{tree_id}", json={"name": "Accounts"})
         await signed_in.delete(f"/vault/trees/{tree_id}")
 
-        feed = (await signed_in.get("/activity")).json()
+        feed = (await signed_in.get("/activity")).json()["items"]
         verbs = [entry["verb"] for entry in feed if entry["verb"].startswith("vault.")]
 
         assert verbs == [
@@ -1035,6 +1060,9 @@ class TestWithoutAVaultKey:
         without it — rather than coming back as an empty string."""
         tree_id = await _tree(signed_in)
         node = await _secret(signed_in, tree_id)
+        # An account exists now, so the bootstrap session that made `keyless`
+        # reaches nothing any more; sign it in as the person who does.
+        await keyless.post("/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD})
 
         response = await keyless.post(f"/vault/nodes/{node['id']}/reveal")
 

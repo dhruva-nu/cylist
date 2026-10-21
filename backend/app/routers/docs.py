@@ -23,7 +23,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.core.errors import NotFoundError
-from app.db import SessionDependency
+from app.db import SessionDependency, database_of
 from app.models.doc import SECTION_ORDER, Doc, DocTopic
 from app.models.project import Project
 from app.routers import guards
@@ -54,6 +54,7 @@ from app.schemas.docs import (
 )
 from app.schemas.people import PersonRead
 from app.services import activity, docs, projects
+from app.services.doc_corpus import ProjectCorpus
 from app.services.doc_engine import DocEngine
 
 router = APIRouter(tags=["docs"])
@@ -91,6 +92,19 @@ def doc_engine(request: Request) -> DocEngine | None:
     """The app's jev-docs engine, or None when this deployment has no key."""
     engine: DocEngine | None = request.app.state.doc_engine
     return engine
+
+
+async def corpus_to_ask(request: Request, session: AsyncSession, project: Project) -> ProjectCorpus:
+    """The project's corpus, with the request's connection handed back.
+
+    What ``ask`` and ``place`` read before they call jev, which can take tens
+    of seconds to answer; the connection is released first so that wait holds
+    nothing the rest of the server needs (CYLIST-131). Neither writes, so
+    nothing is left to do on it afterwards.
+    """
+    filed = await docs.corpus_for(session, project, request.app.state.doc_corpora)
+    await database_of(request).release(session)
+    return filed
 
 
 WRITE_DOCS = guards.on_project(Permission.DOCS)
@@ -206,6 +220,7 @@ async def get_tree(
     summary="Ask the docs a question",
 )
 async def ask_docs(
+    request: Request,
     body: DocQuestion,
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
@@ -222,7 +237,8 @@ async def ask_docs(
     asked — means the answer is not in the docs yet: find it in the code, then
     `POST /projects/{ref}/docs/place` to learn where it belongs.
     """
-    answer = await docs.ask(session, project, body.question, engine)
+    filed = await corpus_to_ask(request, session, project)
+    answer = await docs.ask(filed, project, body.question, engine)
     return DocAnswer(
         question=body.question,
         status=answer.status,
@@ -267,6 +283,7 @@ def _rounded(probability: float | None) -> float | None:
     responses={422: {"description": "The project has no topics to file under."}},
 )
 async def place_doc(
+    request: Request,
     body: DocPlace,
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
@@ -281,7 +298,8 @@ async def place_doc(
     them with `POST /projects/{ref}/docs`, in the shape each doc is written in.
     `unavailable` means jev could not be asked; choose the topic yourself.
     """
-    placed = await docs.place(session, project, body, engine)
+    filed = await corpus_to_ask(request, session, project)
+    placed = await docs.place(filed, project, body, engine)
     return DocPlan(
         status=placed.status,
         reason=placed.reason,

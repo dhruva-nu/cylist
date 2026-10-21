@@ -44,6 +44,10 @@ to spend it.
 CONNECT_FAILURES = (httpx.ConnectError, httpx.ConnectTimeout)
 """The failures that mean "nothing was delivered", and so may be retried."""
 
+PAGE_LIMIT = 100
+"""The most rows the server puts on one page of a list, and so what
+:func:`every` asks for: the fewest round trips to read the lot."""
+
 
 class Api(Protocol):
     """What a tool needs of a client: the four calls, and nothing about where.
@@ -61,6 +65,30 @@ class Api(Protocol):
     async def post(self, path: str, body: dict[str, Any] | None = None) -> Any: ...
 
     async def patch(self, path: str, body: dict[str, Any]) -> Any: ...
+
+
+async def every(
+    client: Api, path: str, *, after: str | None = None, **params: Any
+) -> list[dict[str, Any]]:
+    """Every row of a paged list, following each page's ``next`` to the end.
+
+    Every list the server serves comes a page at a time (``{items, next}``).
+    That is right for a screen and wrong for a lookup: a name resolved against
+    the first hundred people misses the hundred-and-first, and tells the model
+    somebody who exists does not. So every name lookup reads every page.
+
+    A function over :class:`Api` rather than a fifth method on it, so the
+    hosted server's stand-in client gets it without growing one of its own.
+    ``after`` starts part-way down, for a list whose first page arrived inside
+    another response.
+    """
+    rows: list[dict[str, Any]] = []
+    while True:
+        page = await client.get(path, **params, after=after, limit=PAGE_LIMIT)
+        rows.extend(page.get("items", []))
+        after = page.get("next")
+        if not after:
+            return rows
 
 
 class ApiClient:

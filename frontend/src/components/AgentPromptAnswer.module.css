@@ -127,3 +127,10 @@
   color: var(--ink-3);
   font-size: var(--text-md);
 }
+
+/* A permission asked of someone else: who may answer, where the buttons would be. */
+.notYours {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-md);
+}

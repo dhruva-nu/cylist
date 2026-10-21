@@ -18,6 +18,8 @@ import {
   answerFailure,
   choiceTone,
   detailWithPromptAnswered,
+  mayAnswer,
+  notYours,
   promptClosedUnderUs,
   promptHeading,
   replyAnswer,
@@ -40,6 +42,8 @@ function prompt(overrides: Partial<AgentPrompt> = {}): AgentPrompt {
       { key: '2', label: 'None' },
     ],
     allows_reply: true,
+    owner_id: 'person-me',
+    owner: 'Dhruva N',
     status: 'open',
     answer: null,
     answer_key: null,
@@ -94,7 +98,6 @@ function session(overrides: Partial<AgentSessionRead> = {}): AgentSessionRead {
     id: 's1',
     task_id: 't1',
     actor_label: 'laptop',
-    client_session_id: 'abc',
     client_name: 'CYLIST-81',
     state: 'waiting',
     reason: 'question',
@@ -236,5 +239,26 @@ describe('detailWithPromptAnswered', () => {
   it("leaves another task's detail alone", () => {
     const detail = { ...task('t2', null), agent_sessions: [] } as unknown as TaskDetail
     expect(detailWithPromptAnswered(detail, answered)).toBe(detail)
+  })
+})
+
+describe('mayAnswer', () => {
+  it('lets only the owner answer a permission: the tool runs on their machine', () => {
+    expect(mayAnswer(permission, 'person-me')).toBe(true)
+    expect(mayAnswer(permission, 'person-aditi')).toBe(false)
+    expect(mayAnswer(permission, null)).toBe(false)
+  })
+
+  it('lets anyone who may edit the card answer a question', () => {
+    expect(mayAnswer(prompt(), 'person-aditi')).toBe(true)
+  })
+
+  it('says whose a permission is to everyone else', () => {
+    expect(notYours(permission)).toBe(
+      'Only Dhruva N can answer this: the tool runs on their machine.',
+    )
+    expect(notYours(prompt({ kind: 'permission', owner: null }))).toBe(
+      'Only the person running this agent can answer it.',
+    )
   })
 })

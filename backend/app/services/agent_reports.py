@@ -8,10 +8,18 @@ trail.
 
 * :func:`report` — a client said something. The PUT route and the agent
   socket both come through here, so the two transports cannot drift.
-* :func:`end_open_sessions` — the process restarted. Nothing can be holding a
-  socket, so nothing is running.
+* :func:`end_session` — a socket closed.
 * :func:`reap_unwitnessed` — a row has gone quiet and no socket is vouching
   for it.
+
+There used to be a fourth, ending every open row on startup, on the grounds
+that a process that has only just begun holds no sockets. That was true of
+one process and false of two — a worker starting up ended the sessions its
+peer was holding — and even with one it withdrew, on every deploy, every
+question a person was about to answer (CYLIST-133, CYLIST-134). A session
+whose socket died with the old process is now the reaper's, like any other
+that has stopped being vouched for; and a daemon that is still alive has
+reconnected, to whichever process, long before the reaper looks.
 
 It sits apart from ``agent_sessions`` for an import reason as much as a
 tidiness one: :mod:`app.services.activity` already imports that module, so
@@ -21,18 +29,17 @@ writing the trail from inside it would close a cycle.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.db import publish_into
-from app.models.agent_session import AgentSession, AgentSessionReason
-from app.models.api_token import ApiToken
+from app.models.agent_session import AgentSession, AgentSessionReason, SessionKey
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
 from app.services import activity, agent_prompts, agent_sessions
@@ -40,17 +47,23 @@ from app.services import activity, agent_prompts, agent_sessions
 logger = logging.getLogger(__name__)
 
 
-class OpenRow(NamedTuple):
-    """An open agent session, with the two facts closing it needs.
+REAPER_LEASE = 0x6379_6C69_7374_0001
+"""The advisory lock a reaper pass holds: ``cyli`` ``st`` and a serial.
 
-    Both are one join away from the session row and neither is on it, so they
-    are fetched with it rather than looked up per row: the project to publish
-    the change into, and the person whose token the agent is holding.
-    """
+Every process runs a reaper, and every pass would close the same rows and
+write the same trail lines twice over. Whichever process takes this lock for
+its pass is the one that reaps; the others find it taken and skip that pass.
+A transaction-scoped lock, so it is a lease that cannot outlive its holder: a
+process that dies mid-pass lets go of it with its connection.
+"""
+
+
+class OpenRow(NamedTuple):
+    """An open agent session, with the project closing it publishes into —
+    one join away, so fetched with it rather than looked up per row."""
 
     row: AgentSession
     project_id: UUID
-    person_id: UUID | None
 
 
 async def report(
@@ -73,7 +86,8 @@ async def report(
     # A question the agent is holding its turn open for outranks "working"
     # from the same turn; an open permission is over once the session says
     # anything else.
-    data = await agent_prompts.settle_for_report(session, task, client_session_id, data)
+    key = agent_sessions.key_for(principal, client_session_id)
+    data = await agent_prompts.settle_for_report(session, task, key, data)
     upserted = await agent_sessions.upsert(session, principal, task, client_session_id, data)
     await agent_prompts.withdraw_for_sessions(session, upserted.ended, agent_prompts.SESSION_ENDED)
     for transition in upserted.transitions:
@@ -101,96 +115,77 @@ async def report(
     return agent_sessions.read(upserted.row)
 
 
-async def end_open_sessions(
-    session: AsyncSession,
-    *,
-    cause: str = "restart",
-) -> int:
-    """End every session still open, and say how many there were.
-
-    Called once on startup. In a single-process deployment this is not a
-    guess: if this process has only just begun, no socket is held by anyone,
-    so no agent session is live — whatever the rows say. Without it a card
-    left mid-turn by a restart pulses forever, because nothing computes
-    staleness on read any more.
-
-    A count above zero after a *clean* shutdown is worth looking at, which is
-    why it is returned and logged rather than done quietly.
-    """
-    return await _end_each(session, await _open_rows(session), cause=cause)
-
-
 async def end_session(
     session: AsyncSession,
-    client_session_id: str,
+    key: SessionKey,
     *,
     reason: AgentSessionReason = AgentSessionReason.CONNECTION_LOST,
     cause: str = "dropped",
 ) -> int:
     """End whatever one client session still holds open, wherever it is.
 
-    Called when a socket closes. By client session and not by card, because
+    Called when a socket closes. By conversation and not by card, because
     the socket knows which conversation it was and the conversation knows
     which card — a session that walked the board mid-connection has exactly
     one open row, and this finds it without being told which.
     """
-    rows = await _open_rows(session, client_session_id=client_session_id)
-    return await _end_each(session, rows, cause=cause, reason=reason)
+    query = _open_query().where(
+        AgentSession.person_id == key.person_id,
+        AgentSession.client_session_id == key.client_session_id,
+    )
+    return await _end_each(session, await _fetch(session, query), cause=cause, reason=reason)
+
+
+async def take_reaper_lease(session: AsyncSession) -> bool:
+    """Whether this transaction is the one to reap, this pass — see
+    :data:`REAPER_LEASE`. Held until the transaction ends."""
+    taken = await session.scalar(select(func.pg_try_advisory_xact_lock(REAPER_LEASE)))
+    return bool(taken)
 
 
 async def reap_unwitnessed(
     session: AsyncSession,
-    live_session_ids: frozenset[str],
     *,
     quiet_after: timedelta,
+    witnessed_for: timedelta,
 ) -> int:
-    """End open rows that have gone quiet and hold no socket.
+    """End open rows that have gone quiet and that no socket is vouching for.
 
     The backstop for clients that report over HTTP and then die: a socket
-    ending tells us immediately, a PUT stopping tells us nothing at all. A
-    session in ``live_session_ids`` is witnessed however long it has been
-    silent — an agent can sit on one tool call for an hour — so only the
-    unwitnessed are considered.
+    ending tells us immediately, a PUT stopping tells us nothing at all. And,
+    since there is no sweep on startup, for the sessions whose socket went
+    down with a process that never got to close it.
+
+    A session whose socket stamped it within ``witnessed_for`` is witnessed
+    however long it has been silent — an agent can sit on one tool call for
+    an hour — so only the unwitnessed are considered. The stamp is in the
+    row, not in this process's memory (CYLIST-133): the socket may be held by
+    any process, and this may be any process's reaper.
     """
-    cutoff = clock_now() - quiet_after
-    rows = await _open_rows(session, quiet_before=cutoff)
-    forgotten = [entry for entry in rows if entry.row.client_session_id not in live_session_ids]
-    return await _end_each(session, forgotten, cause="unwitnessed")
+    moment = clock_now()
+    query = _open_query().where(
+        AgentSession.last_seen_at < moment - quiet_after,
+        or_(
+            AgentSession.socket_seen_at.is_(None),
+            AgentSession.socket_seen_at < moment - witnessed_for,
+        ),
+    )
+    return await _end_each(session, await _fetch(session, query), cause="unwitnessed")
 
 
-async def _open_rows(
-    session: AsyncSession,
-    *,
-    quiet_before: datetime | None = None,
-    client_session_id: str | None = None,
-) -> list[OpenRow]:
-    """Every open session, with the project its card belongs to and whose it is.
-
-    Narrowed to the ones quiet since ``quiet_before``, or to one client
-    session's, when asked — in the query rather than after it, because the
-    open rows of every board are read on every socket that closes.
-
-    The person comes along on an outer join rather than a lookup per row: the
-    trail entry this ends up writing has to name the same person every other
-    entry about this agent named, and a reaper that quietly attributed them to
-    nobody would leave a gap in one person's feed exactly where their agent
-    went quiet. Outer because the token may since have been revoked and
-    deleted, and a session whose owner cannot be named still has to be closed.
-    """
-    query = (
-        select(AgentSession, Task.project_id, ApiToken.person_id)
+def _open_query() -> Select[tuple[AgentSession, UUID]]:
+    """Every open session, with the project its card belongs to — to be
+    narrowed in the query rather than after it, because this is read on
+    every socket that closes and on every reaper pass."""
+    return (
+        select(AgentSession, Task.project_id)
         .join(Task, Task.id == AgentSession.task_id)
-        .outerjoin(ApiToken, ApiToken.id == AgentSession.token_id)
         .where(AgentSession.ended_at.is_(None))
     )
-    if quiet_before is not None:
-        query = query.where(AgentSession.last_seen_at < quiet_before)
-    if client_session_id is not None:
-        query = query.where(AgentSession.client_session_id == client_session_id)
-    return [
-        OpenRow(row, project_id, person_id)
-        for row, project_id, person_id in (await session.execute(query)).all()
-    ]
+
+
+async def _fetch(session: AsyncSession, query: Select[tuple[AgentSession, UUID]]) -> list[OpenRow]:
+    return [OpenRow(row, project_id) for row, project_id in (await session.execute(query)).all()]
 
 
 async def _end_each(
@@ -213,11 +208,11 @@ async def _end_each(
     await agent_prompts.withdraw_for_sessions(
         session, [entry.row for entry in rows], agent_prompts.SESSION_ENDED
     )
-    for row, project_id, person_id in rows:
+    for row, project_id in rows:
         transition = agent_sessions.close(row, reason, project_id, moment, cause=cause)
         await activity.record(
             session,
-            agent_sessions.acting_principal(row, person_id),
+            agent_sessions.acting_principal(row),
             transition.verb,
             entity_type="task",
             entity_id=transition.task_id,

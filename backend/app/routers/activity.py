@@ -12,13 +12,15 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.schemas.activity import ActivityRead
+from app.routers.paging import PageQuery
+from app.schemas.activity import ActivityPage, ActivityRead
 from app.services import activity, projects
+from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
 
-@router.get("", response_model=list[ActivityRead], summary="Recent activity")
+@router.get("", response_model=ActivityPage, summary="Recent activity")
 async def list_activity(
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
@@ -28,9 +30,9 @@ async def list_activity(
         examples=["ATL"],
     ),
     entity_type: str | None = Query(default=None, description="e.g. 'task', 'token'."),
-    limit: int = Query(default=50, ge=1, le=200),
-) -> list[ActivityRead]:
-    """Return audit entries, newest first.
+    page: PageRequest = PageQuery,
+) -> ActivityPage:
+    """Return audit entries, newest first, a page at a time.
 
     ``project`` takes a key as well as an id, matching every other
     project-scoped path — otherwise each client has to spend a request
@@ -42,13 +44,15 @@ async def list_activity(
     if project is not None:
         project_id = (await projects.resolve_reachable(session, project, principal)).id
         entries = await activity.recent(
-            session, limit=limit, project_id=project_id, entity_type=entity_type
+            session, page, project_id=project_id, entity_type=entity_type
         )
     else:
         entries = await activity.recent(
             session,
-            limit=limit,
+            page,
             within=await projects.reachable_ids(session, principal),
             entity_type=entity_type,
         )
-    return [ActivityRead.model_validate(entry) for entry in entries]
+    return ActivityPage(
+        items=[ActivityRead.model_validate(entry) for entry in entries.rows], next=entries.next
+    )

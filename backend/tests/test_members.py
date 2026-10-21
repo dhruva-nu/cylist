@@ -86,7 +86,7 @@ class TestSettingMembership:
 
         # The two this test added, the person it is signed in as, and the
         # agent the project it created brought into the directory.
-        assert len((await signed_in.get("/people")).json()) == 4
+        assert len((await signed_in.get("/people")).json()["items"]) == 4
 
     async def test_duplicate_ids_are_collapsed(self, signed_in: AsyncClient) -> None:
         """A double-submitted form must not violate the composite primary key."""
@@ -143,7 +143,7 @@ class TestCounts:
         team, client_person = await _project_and_people(signed_in)
         await put_members(signed_in, "ATL", [team, client_person])
 
-        listed = (await signed_in.get("/projects")).json()
+        listed = (await signed_in.get("/projects")).json()["items"]
 
         # The two added, and whoever is looking — they are on it, or they
         # would not see it on the grid at all.

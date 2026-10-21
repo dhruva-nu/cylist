@@ -50,14 +50,21 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now
-from app.core.crypto import HOOK_SECRET_DOMAIN, KEY_VERSION, VaultCipher
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.crypto import HOOK_SECRET_DOMAIN, VaultCipher
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    UnprocessableRequestError,
+    not_on_this_project,
+)
 from app.core.ids import uuid7
+from app.db import flush_or_refuse
 from app.models.activity import Activity
 from app.models.board import BoardColumn
 from app.models.hook import Hook, HookDelivery
@@ -66,6 +73,7 @@ from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
 from app.services import projects
+from app.services.paging import PageRequest, Window, keyset
 
 
 @dataclass(frozen=True)
@@ -438,11 +446,13 @@ class HookLabels:
     last_delivery: HookDelivery | None
 
 
-async def list_hooks(session: AsyncSession, project: Project) -> list[Hook]:
-    found = await session.scalars(
-        select(Hook).where(Hook.project_id == project.id).order_by(Hook.name)
+async def list_hooks(session: AsyncSession, project: Project, page: PageRequest) -> Window[Hook]:
+    return await keyset(
+        session,
+        select(Hook).where(Hook.project_id == project.id),
+        keys=(Hook.name, Hook.id),
+        page=page,
     )
-    return list(found)
 
 
 async def labels_for(session: AsyncSession, hooks: Sequence[Hook]) -> dict[UUID, HookLabels]:
@@ -548,6 +558,7 @@ async def create(
     _refuse_rules_on_manual(hook)
     plaintext = _seal(cipher, hook, secret)
     session.add(hook)
+    await flush_or_refuse(session, _taken_name(project, name))
     return hook, plaintext
 
 
@@ -563,6 +574,7 @@ async def update(
     if fields.name is not None and fields.name != hook.name:
         await _refuse_taken_name(session, project, fields.name)
         hook.name = fields.name
+        await flush_or_refuse(session, _taken_name(project, fields.name))
         changed.append("name")
     if fields.enabled is not None and fields.enabled != hook.enabled:
         hook.enabled = fields.enabled
@@ -579,6 +591,10 @@ async def update(
         url = checked_url(fields.url)
         if url != hook.url:
             hook.url = url
+            # Somewhere new has earned a fresh start: whatever the old address
+            # kept failing to do says nothing about this one.
+            hook.consecutive_failures = 0
+            hook.paused_until = None
             changed.append("url")
     changed += await _apply_filters(session, project, hook, filters)
     _refuse_rules_on_manual(hook)
@@ -604,14 +620,14 @@ def secret_of(cipher: VaultCipher, hook: Hook) -> str:
     )
 
 
-async def deliveries(session: AsyncSession, hook: Hook, *, limit: int) -> list[HookDelivery]:
-    found = await session.scalars(
-        select(HookDelivery)
-        .where(HookDelivery.hook_id == hook.id)
-        .order_by(HookDelivery.created_at.desc(), HookDelivery.id.desc())
-        .limit(limit)
+async def deliveries(session: AsyncSession, hook: Hook, page: PageRequest) -> Window[HookDelivery]:
+    return await keyset(
+        session,
+        select(HookDelivery).where(HookDelivery.hook_id == hook.id),
+        keys=(HookDelivery.created_at, HookDelivery.id),
+        page=page,
+        descending=True,
     )
-    return list(found)
 
 
 async def delivery(session: AsyncSession, hook: Hook, delivery_id: UUID) -> HookDelivery:
@@ -694,14 +710,26 @@ def refuse_unless_fireable(project: Project, hook: Hook) -> None:
 
 
 def checked_url(url: str) -> str:
-    """An absolute ``http``/``https`` URL, or a 422 saying what is wrong with it."""
+    """An absolute ``http``/``https`` URL, or a 422 saying what is wrong with it.
+
+    Read twice: once by ``urlsplit`` for its shape, and once by the client the
+    courier sends with, which is stricter — a port that is not a number, say.
+    A URL only the second refuses would otherwise be saved, and then fail
+    every delivery at the moment it was sent rather than here, where the
+    person typing it can see why.
+    """
     url = url.strip()
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
-        raise UnprocessableRequestError(
-            "A hook's URL must be an absolute http:// or https:// address.",
-            details={"url": url},
-        )
+    refused = UnprocessableRequestError(
+        "A hook's URL must be an absolute http:// or https:// address.",
+        details={"url": url},
+    )
+    try:
+        parts = urlsplit(url)
+        parsed = httpx.URL(url)
+    except (ValueError, httpx.InvalidURL) as exc:
+        raise refused from exc
+    if parts.scheme not in ("http", "https") or not parts.netloc or not parsed.host:
+        raise refused
     return url
 
 
@@ -778,19 +806,13 @@ def _refuse_rules_on_manual(hook: Hook) -> None:
 async def _own_column(session: AsyncSession, project: Project, column_id: UUID) -> None:
     column = await session.get(BoardColumn, column_id)
     if column is None or column.project_id != project.id:
-        raise UnprocessableRequestError(
-            f"That column is not on {project.key}'s board.",
-            details={"column_id": str(column_id)},
-        )
+        raise not_on_this_project("column", column_id=column_id)
 
 
 async def _own_template(session: AsyncSession, project: Project, template_id: UUID) -> None:
     template = await session.get(TaskTemplate, template_id)
     if template is None or template.project_id != project.id:
-        raise UnprocessableRequestError(
-            f"That template is not one of {project.key}'s.",
-            details={"template_id": str(template_id)},
-        )
+        raise not_on_this_project("template", template_id=template_id)
 
 
 async def _own_member(session: AsyncSession, project: Project, person_id: UUID) -> None:
@@ -808,10 +830,13 @@ async def _refuse_taken_name(session: AsyncSession, project: Project, name: str)
         select(Hook.id).where(Hook.project_id == project.id, Hook.name == name)
     )
     if taken is not None:
-        raise ConflictError(
-            f"{project.key} already has a hook called {name!r}.",
-            details={"name": name},
-        )
+        raise _taken_name(project, name)
+
+
+def _taken_name(project: Project, name: str) -> ConflictError:
+    return ConflictError(
+        f"{project.key} already has a hook called {name!r}.", details={"name": name}
+    )
 
 
 def _seal(cipher: VaultCipher, hook: Hook, secret: str | None) -> str:
@@ -822,6 +847,6 @@ def _seal(cipher: VaultCipher, hook: Hook, secret: str | None) -> str:
             "or left out to have one generated.",
         )
     hook.secret_ciphertext = cipher.seal(plaintext, node_id=hook.id, domain=HOOK_SECRET_DOMAIN)
-    hook.key_version = KEY_VERSION
+    hook.key_version = cipher.version
     hook.secret_hint = plaintext[-4:]
     return plaintext

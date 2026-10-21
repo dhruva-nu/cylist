@@ -59,7 +59,6 @@ function task(
     column_id: COLUMN.id,
     position: 0,
     title,
-    description: '',
     type: 'feature',
     priority: 'p3',
     sub_statuses: [],

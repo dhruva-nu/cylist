@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.errors import CylistError
 
 JsonDict = dict[str, Any]
@@ -90,7 +90,7 @@ async def goal_ref(client: Api, project_ref: str, name: str) -> str:
     if is_uuid(name):
         return name
 
-    goals: list[JsonDict] = list(await client.get(f"/projects/{project_ref}/goals"))
+    goals = await every(client, f"/projects/{project_ref}/goals")
     wanted = name.strip().casefold()
     for goal in goals:
         if str(goal.get("reference", "")).casefold() == wanted:
@@ -140,8 +140,8 @@ async def vault_node(client: Api, project_ref: str, path: str) -> tuple[JsonDict
             code="not_found",
         )
 
-    trees = await client.get(f"/projects/{project_ref}/vault/trees")
-    summary = pick(list(trees), segments[0], kind="vault tree", where=project_ref)
+    trees = await every(client, f"/projects/{project_ref}/vault/trees")
+    summary = pick(trees, segments[0], kind="vault tree", where=project_ref)
     tree = await client.get(f"/vault/trees/{summary['id']}")
 
     level: list[JsonDict] = list(tree.get("nodes", []))
@@ -190,7 +190,7 @@ async def vault_tree_exactly(client: Api, project_ref: str, name: str) -> JsonDi
     people choose in the Vault tab, so a tree that does not exist is an error
     naming the ones that do rather than a new tree.
     """
-    trees = list(await client.get(f"/projects/{project_ref}/vault/trees"))
+    trees = await every(client, f"/projects/{project_ref}/vault/trees")
     summary = named_exactly(trees, name)
     if summary is None:
         known = [str(tree.get("name", "")) for tree in trees]

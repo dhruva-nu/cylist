@@ -1,6 +1,7 @@
 /** The agents working on a card: their sessions, what they ask, and what they do. */
 
 import { jsonBody, request } from './http'
+import { MAX_PAGE, fetchPage } from './paging'
 
 export type AgentSessionState = 'working' | 'waiting' | 'done'
 export type AgentSessionReason =
@@ -20,8 +21,6 @@ export interface AgentSessionRead {
   task_id: string
   /** The name of the token the hook reports with. */
   actor_label: string
-  /** The harness's own id for the conversation. */
-  client_session_id: string
   /** The session's display name, if known. Usually the card's reference. */
   client_name: string | null
   state: AgentSessionState
@@ -85,6 +84,14 @@ export interface AgentPrompt {
   options: AgentPromptOption[]
   /** Whether a typed reply is accepted as well as a choice — a question's are. */
   allows_reply: boolean
+  /**
+   * Whose agent is asking, as a person id (CYLIST-141). A permission may be
+   * answered by this person alone — the tool runs on their machine; a
+   * question by anyone who may edit the card. Null for a session nobody owns.
+   */
+  owner_id: string | null
+  /** Whose agent is asking, by name. */
+  owner: string | null
   status: AgentPromptStatus
   /** What was answered: the chosen option's label, or the reply typed. */
   answer: string | null
@@ -163,11 +170,11 @@ export interface AgentPresence {
 
 export const agentsApi = {
   /** What the agents on a card have been doing, newest first. */
-  getAgentFeed: (taskRef: string, limit = 100) =>
-    request<AgentFeedEntry[]>(`/tasks/${taskRef}/agent-feed?limit=${limit}`),
+  getAgentFeed: async (taskRef: string, limit = MAX_PAGE) =>
+    (await fetchPage<AgentFeedEntry>(`/tasks/${taskRef}/agent-feed`, null, limit)).items,
   /** What the agents on a card have asked, open or not, newest first. */
-  listAgentPrompts: (taskRef: string, limit = 20) =>
-    request<AgentPrompt[]>(`/tasks/${taskRef}/agent-prompts?limit=${limit}`),
+  listAgentPrompts: async (taskRef: string, limit = 20) =>
+    (await fetchPage<AgentPrompt>(`/tasks/${taskRef}/agent-prompts`, null, limit)).items,
   /**
    * Answer what an agent on a card is waiting on. The first answer wins: one
    * already answered, expired or withdrawn comes back as a `conflict` error

@@ -12,16 +12,22 @@ from app.core.errors import NotFoundError, UnprocessableRequestError
 from app.models.task import CommentKind, Task, TaskComment
 from app.schemas.tasks import CommentCreate
 from app.services import projects
+from app.services.paging import PageRequest, Window, keyset
 
 
-async def comments(session: AsyncSession, task: Task) -> list[TaskComment]:
-    """The task's timeline, oldest first — typed comments and status changes."""
-    return list(
-        await session.scalars(
-            select(TaskComment)
-            .where(TaskComment.task_id == task.id)
-            .order_by(TaskComment.created_at, TaskComment.id)
-        )
+async def comment_page(session: AsyncSession, task: Task, page: PageRequest) -> Window[TaskComment]:
+    """One page of the task's timeline, newest first — typed comments and
+    status changes together.
+
+    Newest first, as a card's history is, because the end of a timeline is
+    where it has got to; reading further back is turning pages.
+    """
+    return await keyset(
+        session,
+        select(TaskComment).where(TaskComment.task_id == task.id),
+        keys=(TaskComment.created_at, TaskComment.id),
+        page=page,
+        descending=True,
     )
 
 

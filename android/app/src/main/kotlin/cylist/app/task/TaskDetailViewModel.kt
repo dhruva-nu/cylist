@@ -13,7 +13,7 @@ import cylist.api.generated.models.ColumnRead
 import cylist.api.generated.models.MemberRead
 import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.TaskDetail
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TemplateRead
 import kotlinx.coroutines.CoroutineDispatcher
@@ -221,7 +221,7 @@ class TaskDetailViewModel(
     }
 
     /** Finish a sub-task, or open it again. A cancelled one is settled already. */
-    fun toggle(subtask: TaskRead) {
+    fun toggle(subtask: TaskSummary) {
         if (subtask.status == TaskStatus.cancelled) return
         change(subtask.id) { source.finishSubtask(subtask.reference, finished = subtask.finishedAt == null) }
     }

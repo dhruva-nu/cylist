@@ -12,7 +12,10 @@ cannot:
   guessing at a timestamp;
 * times the request and logs its outcome once, at a level graded by status —
   which is what makes ``grep -c WARNING`` a meaningful question to ask of the
-  log.
+  log;
+* works out who is really calling (CYLIST-122) and leaves the answer on
+  ``request.state.client_ip`` for the sign-in log and the rate limiter — see
+  :func:`client_address`.
 
 Pure ASGI rather than ``BaseHTTPMiddleware``, for the reason
 :mod:`app.core.metrics` gives: it runs on every request including each static
@@ -23,13 +26,19 @@ body being written, which is the number that matters for a slow download.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import time
+from collections.abc import Sequence
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from typing import Final
 
+from starlette.datastructures import Headers
+from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.base_path import route_path
+from app.core.errors import internal_error_response
 from app.core.logging import (
     REQUEST_ID_HEADER,
     bind_request_id,
@@ -53,14 +62,36 @@ A health check that starts *failing* still shows up, because a failure is a
 """
 
 
+IPNetwork = IPv4Network | IPv6Network
+
+CLIENT_IP_STATE: Final = "client_ip"
+"""The key under ``scope["state"]`` — ``request.state.client_ip`` to a handler
+— where the resolved client address is left for whatever runs inside."""
+
+_CF_CONNECTING_IP: Final = "cf-connecting-ip"
+_X_FORWARDED_FOR: Final = "x-forwarded-for"
+
+
 class RequestLogMiddleware:
     """Correlate, time and record every HTTP request."""
 
-    def __init__(self, app: ASGIApp, *, api_prefix: str) -> None:
+    def __init__(
+        self, app: ASGIApp, *, api_prefix: str, trusted_proxies: Sequence[IPNetwork] = ()
+    ) -> None:
         self.app = app
         self._api_prefix = api_prefix
+        self._trusted_proxies = tuple(trusted_proxies)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        # Before the early return below: a socket is not logged here, but the
+        # handler behind it has the same reason to know who is really calling.
+        scope.setdefault("state", {})[CLIENT_IP_STATE] = resolve_client(
+            scope, self._trusted_proxies
+        )
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -88,16 +119,22 @@ class RequestLogMiddleware:
         except Exception:
             # Logged here rather than in an exception handler because this is
             # the only place that still has the request's timing and id in
-            # hand. Re-raised untouched: turning the failure into a response
-            # is Starlette's job, and swallowing it here would hand the client
-            # a 200 with no body.
+            # hand.
             logger.exception(
                 "%s %s failed",
                 _method(scope),
                 _path(scope),
                 extra={"context": self._context(scope, 500, started)},
             )
-            raise
+            if status_code:
+                # Too late for an envelope: the status line is already out.
+                # Re-raised so the server drops the connection rather than
+                # leave the client waiting on a body that will never finish.
+                raise
+            # Answered here rather than left to Starlette, whose exception
+            # handler runs outside this middleware: the 500 it sent would carry
+            # no request id, which is the one thing a report of it needs.
+            await internal_error_response()(scope, receive, send_wrapper)
         else:
             self._log_response(scope, status_code, started)
         finally:
@@ -145,9 +182,14 @@ class RequestLogMiddleware:
             "status": status_code,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         }
-        client = _client(scope)
+        client = scope.get("state", {}).get(CLIENT_IP_STATE)
         if client:
             context["client"] = client
+        peer = _peer(scope)
+        if peer and peer != client:
+            # Both, when they differ: the line then says which proxy the
+            # request came through as well as who sent it.
+            context["peer"] = peer
         return context
 
 
@@ -175,22 +217,79 @@ def _path(scope: Scope) -> str:
     return path
 
 
-def _client(scope: Scope) -> str | None:
-    """The peer's address, which in a deployment is the proxy's.
+def _peer(scope: Scope) -> str | None:
+    """The address at the other end of the socket.
 
-    Production sits behind ``tailscale serve`` on loopback, so this is
-    ``127.0.0.1`` there and says nothing about who called. It is kept anyway
-    because in development it is the real client, and because a line with
-    ``client=127.0.0.1`` is itself the evidence that a request arrived through
-    the proxy rather than around it.
-
-    ``X-Forwarded-For`` is not read: it is a header, so it is whatever the
-    caller says it is, and trusting one without a proxy configured to
-    overwrite it turns the log into a place anyone can write their own IP
-    address.
+    In a deployment that is the proxy's: production sits behind
+    ``cloudflared`` reaching the container over Docker's bridge, so every
+    request arrives from the bridge gateway and the peer says nothing about
+    who called. In development it is the real client.
     """
     client = scope.get("client")
     if not client:
         return None
     host, _port = client
     return str(host)
+
+
+def resolve_client(scope: Scope, trusted_proxies: Sequence[IPNetwork]) -> str | None:
+    """Who is really calling: the peer, unless the peer is a proxy we trust.
+
+    A forwarded header is whatever the caller says it is, so it is believed
+    only when the socket's other end is inside ``CYLIST_TRUSTED_PROXY_CIDRS``
+    — a proxy configured to overwrite it. From a trusted proxy the answer is,
+    in order:
+
+    1. ``CF-Connecting-IP``, which Cloudflare sets to the one address it
+       accepted the connection from and never appends to;
+    2. the last hop in ``X-Forwarded-For`` that is not itself a trusted
+       proxy, walking from the right — the end our proxy wrote — so a
+       client that sent a header of its own cannot pick its address;
+    3. the peer, when neither says anything usable.
+
+    From anywhere else the headers are ignored and the peer is the client,
+    which keeps a request that came around the proxy from writing its own
+    address into the log.
+    """
+    peer = _peer(scope)
+    if peer is None or not trusted_proxies or not _within(peer, trusted_proxies):
+        return peer
+
+    headers = Headers(scope=scope)
+    connecting = _address(headers.get(_CF_CONNECTING_IP, ""))
+    if connecting is not None:
+        return str(connecting)
+
+    hops = [hop.strip() for hop in ",".join(headers.getlist(_X_FORWARDED_FOR)).split(",")]
+    for hop in reversed([hop for hop in hops if hop]):
+        address = _address(hop)
+        if address is None:
+            # Garbage where an address should be: nothing to the left of it
+            # was written by anything we trust either.
+            break
+        if not _within(address, trusted_proxies):
+            return str(address)
+    return peer
+
+
+def client_address(connection: HTTPConnection) -> str | None:
+    """The resolved client address for a handler, or the peer without the
+    middleware in front — a test driving a router directly, say."""
+    resolved: str | None = connection.scope.get("state", {}).get(CLIENT_IP_STATE)
+    if resolved is not None:
+        return resolved
+    return _peer(connection.scope)
+
+
+def _address(value: str) -> IPv4Address | IPv6Address | None:
+    try:
+        return ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+
+
+def _within(host: str | IPv4Address | IPv6Address, networks: Sequence[IPNetwork]) -> bool:
+    address = _address(host) if isinstance(host, str) else host
+    if address is None:
+        return False
+    return any(address in network for network in networks)

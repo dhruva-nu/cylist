@@ -55,18 +55,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import io
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import timedelta
 from uuid import UUID
 
-from fastapi import UploadFile
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.datastructures import Headers
 
 from app.config import Settings, get_settings
 from app.core.crypto import VaultCipher, cipher_for
@@ -92,7 +90,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
 )
 from app.schemas.vault import SecretCreate, VaultNodeCreate, VaultTreeCreate
-from app.services import columns, files, goals, people, projects, tasks, vault
+from app.services import blobs, columns, files, goals, people, projects, tasks, vault
 from app.storage import BlobStore, LocalBlobStore
 from scripts.seed_sample import (
     DIRECTORY,
@@ -188,28 +186,25 @@ async def survey(session: AsyncSession) -> Inventory:
     )
 
 
-async def wipe(session: AsyncSession) -> list[str]:
-    """Delete every project and person, and return the orphaned blob paths.
+async def wipe(session: AsyncSession) -> None:
+    """Delete every project and person, and the blob rows that leaves orphaned.
 
     Not touched: ``api_token``, because deleting it would sign the operator out
     of the application they are seeding, and ``activity``, whose ``project_id``
     is ``SET NULL`` rather than ``CASCADE`` precisely so the record of what
     happened outlives the thing it happened to.
 
-    The bytes on disk are returned rather than removed, so the caller can
-    unlink them only once the transaction that dropped the rows has committed.
+    The bytes on disk are not touched: the caller sweeps once this has
+    committed, and the sweep keeps whatever the reseed has pointed a row at
+    again — which, the sample being the same, is most of it.
     """
     await session.execute(delete(Project))
     await session.execute(delete(Person))
     await session.flush()
 
     still_used = select(FileItem.blob_id).where(FileItem.blob_id.is_not(None))
-    orphaned = list(await session.scalars(select(Blob).where(Blob.id.not_in(still_used))))
-    paths = [blob.path for blob in orphaned]
-    if orphaned:
-        await session.execute(delete(Blob).where(Blob.id.in_([blob.id for blob in orphaned])))
-        await session.flush()
-    return paths
+    await session.execute(delete(Blob).where(Blob.id.not_in(still_used)))
+    await session.flush()
 
 
 async def populate(
@@ -237,12 +232,17 @@ async def populate(
             ),
             creator_id=owner_id,
         )
-        await projects.set_members(session, project, [directory[h] for h in spec.members])
+        # The seed runs as the deployment's owner, who may hand out any role.
+        await projects.set_members(
+            session, project, [directory[h] for h in spec.members], fill_vacancy=True
+        )
 
         board = await _shape_board(session, project, spec, summary)
-        # Before the cards, because a card names the goal it is written under.
+        # Before the cards, because a card names the goal it is written under;
+        # settled after them, because an achieved goal takes no open card on.
         goal_ids = await _write_goals(session, project, spec, directory, summary)
         await _write_tasks(session, project, spec, board, directory, goal_ids, summary)
+        await _settle_goals(session, spec, goal_ids)
         await _write_files(
             session,
             project,
@@ -315,11 +315,12 @@ async def _write_goals(
     directory: dict[str, UUID],
     summary: Summary,
 ) -> dict[str, UUID]:
-    """Write the project's goals, and hand back their ids by name.
+    """Write the project's goals, open, and hand back their ids by name.
 
-    A goal's status is set in a second pass rather than at creation, because
-    creating one achieved is not a thing the API allows — a goal is reached,
-    which is a thing that happens to it after its cards are done.
+    A goal's status is set in a second pass — :func:`_settle_goals`, once the
+    cards are written and placed — because creating one achieved is not a
+    thing the API allows: a goal is reached, which is a thing that happens to
+    it after its cards are done, and an achieved goal takes no open card on.
     """
     written: dict[str, UUID] = {}
     for goal_spec in spec.goals:
@@ -334,11 +335,19 @@ async def _write_goals(
                 owner_id=directory[goal_spec.owner],
             ),
         )
-        if goal_spec.status is not GoalStatus.OPEN:
-            await goals.update(session, goal, GoalUpdate(status=goal_spec.status))
         written[goal_spec.name] = goal.id
         summary.goals += 1
     return written
+
+
+async def _settle_goals(
+    session: AsyncSession, spec: ProjectSpec, goal_ids: dict[str, UUID]
+) -> None:
+    """Achieve or drop the goals the mock has settled, now their cards are placed."""
+    for goal_spec in spec.goals:
+        if goal_spec.status is not GoalStatus.OPEN:
+            goal = await goals.get(session, goal_ids[goal_spec.name])
+            await goals.update(session, goal, GoalUpdate(status=goal_spec.status))
 
 
 async def _write_tasks(
@@ -362,6 +371,14 @@ async def _write_tasks(
             session, project, task_spec, directory, goal_ids, summary
         )
 
+    # Before the cards are placed: a sub-task cannot be written under a card
+    # already in the last column, and a card cannot reach that column over a
+    # sub-task still open, so the parts are settled before the whole is moved.
+    for task_spec in spec.tasks:
+        await _write_subtasks(
+            session, project, created[task_spec.number], task_spec, directory, summary
+        )
+
     filled: dict[int, int] = {}
     for task_spec in spec.tasks:  # the mock's order is the board's order
         position = filled.get(task_spec.column, 0)
@@ -371,13 +388,6 @@ async def _write_tasks(
             TaskMove(column_id=board[task_spec.column], position=position),
         )
         filled[task_spec.column] = position + 1
-
-    # After the parents are placed, so a sub-task never lands on top of the
-    # card it belongs to.
-    for task_spec in spec.tasks:
-        await _write_subtasks(
-            session, project, created[task_spec.number], task_spec, directory, summary
-        )
 
 
 async def _write_task(
@@ -531,15 +541,15 @@ async def _write_item(
             LinkCreate(name=spec.name, url=spec.url, source=spec.source, added_by=added_by),
         )
     else:
-        content = spec.placeholder
-        upload = UploadFile(
-            file=io.BytesIO(content),
-            size=len(content),
-            filename=spec.name,
-            headers=Headers({"content-type": spec.mime}),
-        )
-        await files.upload(
-            session, store, folder, upload, max_bytes=max_upload_bytes, added_by=added_by
+        await files.store_generated(
+            session,
+            store,
+            folder,
+            name=spec.name,
+            data=spec.placeholder,
+            mime=spec.mime,
+            max_bytes=max_upload_bytes,
+            added_by=added_by,
         )
     summary.items += 1
 
@@ -659,7 +669,7 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
         )
         return 1
 
-    if not settings.vault_key:
+    if not settings.vault_keyring:
         print(
             "\nCYLIST_VAULT_KEY is not set, and the sample data includes vault secrets, "
             "which are encrypted before they are stored.\n"
@@ -667,10 +677,9 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
             file=sys.stderr,
         )
         return 1
-    cipher = cipher_for(settings.vault_key)
+    cipher = cipher_for(settings.vault_keyring)
     store = LocalBlobStore(settings.blob_dir)
 
-    removable: list[str] = []
     database = Database(url)
     try:
         async with database.session() as session:
@@ -679,7 +688,7 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
             if not inventory.is_empty:
                 if not _cleared_to_wipe(inventory, name, force=force, assume_yes=assume_yes):
                     return 1
-                removable = await wipe(session)
+                await wipe(session)
 
             summary = await populate(
                 session,
@@ -687,13 +696,13 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
                 store=store,
                 max_upload_bytes=settings.max_upload_bytes,
             )
+        # Bytes after rows, and only once the rows are committed: an
+        # unreferenced file on disk is harmless, a row pointing at content
+        # that is gone is not. No idle margin, since nothing else is uploading
+        # into a deployment being seeded.
+        await blobs.sweep(database, store, idle_for=timedelta(0))
     finally:
         await database.dispose()
-
-    # Bytes after rows, and only once the rows are committed: an unreferenced
-    # file on disk is harmless, a row pointing at content that is gone is not.
-    for path in removable:
-        await store.remove(path)
 
     print(f"\nSeeded {summary.render()}.")
     return 0

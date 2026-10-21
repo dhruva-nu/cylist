@@ -2,15 +2,49 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_session import AgentPrompt, AgentPromptKind, AgentSession
+from app.models.person import Person
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead
+from app.services.paging import PageRequest, keyset
+
+
+@dataclass(frozen=True)
+class Owner:
+    """The person whose agent is asking — who a permission is put to."""
+
+    id: UUID
+    name: str
+
+
+async def owners_of(session: AsyncSession, session_ids: Iterable[UUID]) -> dict[UUID, Owner]:
+    """Whose each of these agent sessions is, by session id. One query.
+
+    A session owned by nobody — a row from before owners were kept, whose
+    token had already gone — is missing from the answer.
+    """
+    ids = set(session_ids)
+    if not ids:
+        return {}
+    found = await session.execute(
+        select(AgentSession.id, Person.id, Person.name)
+        .join(Person, Person.id == AgentSession.person_id)
+        .where(AgentSession.id.in_(ids))
+    )
+    return {row_id: Owner(person_id, name) for row_id, person_id, name in found.all()}
+
+
+async def read_one(session: AsyncSession, prompt: AgentPrompt) -> AgentPromptRead:
+    """One prompt as the API shows it, with whose it is looked up."""
+    owners = await owners_of(session, [prompt.agent_session_id])
+    return read(prompt, owners.get(prompt.agent_session_id))
 
 
 async def for_sessions(
@@ -50,22 +84,30 @@ async def shown_for(
 ) -> dict[UUID, AgentPromptRead]:
     """:func:`for_sessions`, read: what each of these sessions' cards shows."""
     shown = await for_sessions(session, rows)
-    return {row_id: read(prompt) for row_id, prompt in shown.items()}
+    owners = await owners_of(session, shown)
+    return {row_id: read(prompt, owners.get(row_id)) for row_id, prompt in shown.items()}
 
 
-async def recent(session: AsyncSession, task: Task, *, limit: int) -> list[AgentPromptRead]:
-    """A card's prompts, newest first — what was asked of whom, and what came of it."""
-    found = await session.scalars(
-        select(AgentPrompt)
-        .where(AgentPrompt.task_id == task.id)
-        .order_by(AgentPrompt.asked_at.desc())
-        .limit(limit)
+async def recent(
+    session: AsyncSession, task: Task, page: PageRequest
+) -> tuple[list[AgentPromptRead], UUID | None]:
+    """A page of a card's prompts, newest first — what was asked of whom, and
+    what came of it — and the cursor for the page before them."""
+    window = await keyset(
+        session,
+        select(AgentPrompt).where(AgentPrompt.task_id == task.id),
+        keys=(AgentPrompt.asked_at, AgentPrompt.id),
+        page=page,
+        descending=True,
     )
-    return [read(prompt) for prompt in found]
+    owners = await owners_of(session, (prompt.agent_session_id for prompt in window.rows))
+    return [read(prompt, owners.get(prompt.agent_session_id)) for prompt in window.rows], (
+        window.next
+    )
 
 
-def read(prompt: AgentPrompt) -> AgentPromptRead:
-    """A prompt as the API shows it."""
+def read(prompt: AgentPrompt, owner: Owner | None) -> AgentPromptRead:
+    """A prompt as the API shows it, given whose it is."""
     return AgentPromptRead(
         id=prompt.id,
         agent_session_id=prompt.agent_session_id,
@@ -74,6 +116,8 @@ def read(prompt: AgentPrompt) -> AgentPromptRead:
         text=prompt.text,
         tool=prompt.tool,
         options=options_of(prompt),
+        owner_id=owner.id if owner else None,
+        owner=owner.name if owner else None,
         allows_reply=prompt.kind is AgentPromptKind.QUESTION,
         status=prompt.status,
         answer=prompt.answer,

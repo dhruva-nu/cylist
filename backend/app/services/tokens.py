@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.auth.tokens import generate_token
 from app.core.clock import now
 from app.core.errors import NotFoundError
 from app.models.api_token import ApiToken, TokenKind
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def issue(
@@ -60,8 +61,8 @@ async def get(session: AsyncSession, token_id: UUID) -> ApiToken:
     return token
 
 
-async def list_api_tokens(session: AsyncSession) -> list[ApiToken]:
-    """Return every non-revoked API token, newest first.
+async def list_api_tokens(session: AsyncSession, page: PageRequest) -> Window[ApiToken]:
+    """Return a page of the non-revoked API tokens, newest first.
 
     Session cookies are excluded: they are an implementation detail of being
     logged in, not something to manage on a settings page.
@@ -71,12 +72,13 @@ async def list_api_tokens(session: AsyncSession) -> list[ApiToken]:
     admin who cannot do the job the scope exists for. Which person each one
     acts as is on the row.
     """
-    tokens = await session.scalars(
-        select(ApiToken)
-        .where(ApiToken.kind == TokenKind.API, ApiToken.revoked_at.is_(None))
-        .order_by(ApiToken.created_at.desc())
+    return await keyset(
+        session,
+        select(ApiToken).where(ApiToken.kind == TokenKind.API, ApiToken.revoked_at.is_(None)),
+        keys=(ApiToken.created_at, ApiToken.id),
+        page=page,
+        descending=True,
     )
-    return list(tokens)
 
 
 async def revoke(session: AsyncSession, token_id: UUID) -> ApiToken:
@@ -121,11 +123,111 @@ async def revoke_for_person(
     return len(revoked.all())
 
 
-async def revoke_by_digest(session: AsyncSession, digest: str) -> None:
+async def revoke_personless(session: AsyncSession) -> int:
+    """Revoke every live credential that belongs to nobody, returning how many.
+
+    What opening the first account calls (CYLIST-119). A person-less
+    credential is the bootstrap session, or a token it minted, and both are
+    scaffolding: the moment somebody can sign in as themselves, a credential
+    tied to no person is a root key that no archive or password change would
+    ever touch.
+    """
+    revoked = await session.execute(
+        sql_update(ApiToken)
+        .where(ApiToken.person_id.is_(None), ApiToken.revoked_at.is_(None))
+        .values(revoked_at=now())
+        .returning(ApiToken.id)
+    )
+    return len(revoked.all())
+
+
+async def revoke_by_digest(
+    session: AsyncSession, digest: str, *, kind: TokenKind | None = None
+) -> bool:
     """Revoke whichever credential has this digest, if it is still live.
 
-    Used by logout, which holds the cookie value rather than the token id.
+    Used by logout, which holds the cookie value rather than the token id,
+    and by login, which retires the session a browser is replacing. Returns
+    whether anything was revoked.
+
+    Args:
+        kind: Only a credential of this kind. Login passes ``SESSION`` so an
+            API token somebody pasted into the cookie is left alone.
     """
-    token = await session.scalar(select(ApiToken).where(ApiToken.token_hash == digest))
-    if token is not None and not token.is_revoked:
-        token.revoked_at = now()
+    live = [ApiToken.token_hash == digest, ApiToken.revoked_at.is_(None)]
+    if kind is not None:
+        live.append(ApiToken.kind == kind)
+    revoked = await session.execute(
+        sql_update(ApiToken).where(*live).values(revoked_at=now()).returning(ApiToken.id)
+    )
+    return revoked.scalar_one_or_none() is not None
+
+
+# --- A person's own sessions (CYLIST-143) -----------------------------------
+
+MAX_SESSIONS = 10
+"""How many live sessions one person may hold; the oldest goes past this.
+
+Every login mints a session, and a browser that is never signed out of —
+a phone, a laptop that is reinstalled, a cafe's computer — leaves one behind
+for ``session_ttl_hours``. Ten is more devices than anybody signs in from,
+and a bound that turns an endless trail of forgotten cookies into a short
+list a person can read on their account page."""
+
+
+def _live_sessions_of(person_id: UUID) -> list[ColumnElement[bool]]:
+    return [
+        ApiToken.person_id == person_id,
+        ApiToken.kind == TokenKind.SESSION,
+        ApiToken.revoked_at.is_(None),
+        (ApiToken.expires_at.is_(None)) | (ApiToken.expires_at > now()),
+    ]
+
+
+async def list_sessions(session: AsyncSession, person_id: UUID) -> list[ApiToken]:
+    """One person's live browser sessions, newest first.
+
+    Theirs alone, and only the live ones: a revoked or expired session is not
+    a way in, so it is not something to end."""
+    rows = await session.scalars(
+        select(ApiToken).where(*_live_sessions_of(person_id)).order_by(ApiToken.created_at.desc())
+    )
+    return list(rows)
+
+
+async def revoke_session(session: AsyncSession, person_id: UUID, token_id: UUID) -> ApiToken:
+    """End one of this person's own sessions.
+
+    Raises:
+        NotFoundError: if there is no live session of theirs with that id —
+            the same answer for somebody else's, so an id cannot be probed.
+    """
+    token = await session.scalar(
+        select(ApiToken).where(ApiToken.id == token_id, *_live_sessions_of(person_id))
+    )
+    if token is None:
+        raise NotFoundError("No session of yours with that id.")
+    token.revoked_at = now()
+    return token
+
+
+async def cap_sessions(session: AsyncSession, person_id: UUID, *, keep: int = MAX_SESSIONS) -> int:
+    """Revoke every live session of this person's past the newest ``keep``.
+
+    Called by login once the new session exists, so the one just issued is
+    among those kept. Returns how many went.
+    """
+    surplus = (
+        select(ApiToken.id)
+        .where(*_live_sessions_of(person_id))
+        .order_by(ApiToken.created_at.desc(), ApiToken.id)
+        .offset(keep)
+    )
+    revoked = await session.execute(
+        sql_update(ApiToken)
+        .where(ApiToken.id.in_(surplus))
+        .values(revoked_at=now())
+        .returning(ApiToken.id)
+        .execution_options(synchronize_session=False)
+    )
+    return len(revoked.all())

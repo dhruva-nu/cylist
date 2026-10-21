@@ -33,11 +33,9 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Exactly one replica, and no --workers on the uvicorn command. The registry
-  # of who is connected over a WebSocket lives in this process: a second one
-  # would split the fan-out silently, freezing most open boards, and its
-  # startup sweep would end the agent sessions its peer was holding. See
-  # DEPLOY.md, "Never add --workers".
+  # One process is plenty here, but not a rule: a second worker or replica
+  # shares the board's news over Postgres LISTEN/NOTIFY. See DEPLOY.md, "More
+  # than one worker", for the two things that stay per process.
   app:
     build:
       # The root, because this image builds the SPA as well as the API.
@@ -70,6 +68,11 @@ services:
       # callers: the app never dials these, so `localhost` here means the
       # caller's localhost, not the container's.
       CYLIST_CLIENT_URLS: '["http://localhost:8000","https://cylist.in"]'
+      # Requests reach this container from cloudflared on the host, over the
+      # Docker bridge, so the socket's peer is always the bridge gateway. The
+      # real client is in CF-Connecting-IP, believed only from these networks
+      # (CYLIST-122) — the sign-in log and the login rate limit depend on it.
+      CYLIST_TRUSTED_PROXY_CIDRS: '["172.16.0.0/12"]'
     ports:
       # Loopback only. See the note at the top of this file.
       - "127.0.0.1:8000:8000"

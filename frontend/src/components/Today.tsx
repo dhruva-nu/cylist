@@ -36,7 +36,7 @@ import {
   type Todo,
   type TodayPlan,
 } from '../api/client'
-import { useIdentity, usePeople } from '../api/queries'
+import { fetchBoardCards, useIdentity, usePeople, type BoardCards } from '../api/queries'
 import { readStored, writeStored } from '../storage'
 import {
   dayLong,
@@ -92,9 +92,16 @@ function usePlan(projectKey: string | null, day: string) {
 /** The board and its cards, which the left pane and the count are read from. */
 function useBoardCards(projectKey: string | null) {
   const enabled = projectKey !== null
+  const queryClient = useQueryClient()
+  // The board's own key and reader, so a column read further down on the
+  // board is read as far here, and the two never hold different shapes.
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
-    queryFn: () => api.listTasks(projectKey ?? ''),
+    queryFn: () =>
+      fetchBoardCards(
+        projectKey ?? '',
+        queryClient.getQueryData<BoardCards>(['tasks', projectKey]),
+      ),
     enabled,
   })
   const board = useQuery({
@@ -102,7 +109,7 @@ function useBoardCards(projectKey: string | null) {
     queryFn: () => api.listColumns(projectKey ?? ''),
     enabled,
   })
-  return { tasks: tasks.data, columns: board.data?.columns, readAt: tasks.dataUpdatedAt }
+  return { tasks: tasks.data?.tasks, columns: board.data?.columns, readAt: tasks.dataUpdatedAt }
 }
 
 /**

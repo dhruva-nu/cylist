@@ -239,6 +239,11 @@ see :mod:`app.realtime.hub`. Never sent down a socket under this name."""
 FEED_CHANGED = "agent.feed"
 """The event type a new feed line is published as, and the doorbell it rings."""
 
+AGENT_CONNECTED = "agent.connected"
+"""The event a new agent socket is published as, so that whichever process
+holds an older socket for the same session lets go of it — see
+:meth:`app.realtime.hub.Hub.register_agent`. Never sent down a socket."""
+
 
 def board_changed() -> dict[str, object]:
     """The board socket's doorbell: something on this board committed."""

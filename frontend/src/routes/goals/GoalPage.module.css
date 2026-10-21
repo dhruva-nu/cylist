@@ -421,3 +421,10 @@
     grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   }
 }
+
+/* Under the list, the way to the goal's cards past the first page. */
+.more {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 12px;
+}

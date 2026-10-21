@@ -15,7 +15,7 @@ from app.models.agent_session import (
     AgentSessionReason,
     AgentSessionState,
 )
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 NOTE_MAX = 300
 """Longest note a report may carry. A line on a card, not a log."""
@@ -95,6 +95,13 @@ class AgentPromptRead(Schema):
         description="Whether a typed reply is accepted as well as a choice. True for a "
         "question, false for a permission."
     )
+    owner_id: UUID | None = Field(
+        description="Whose agent is asking: the person the session belongs to. A "
+        "`permission` may be answered by this person alone — it is a tool running on "
+        "their machine. A `question` may be answered by anyone who may edit the card. "
+        "Null for a session owned by nobody, which nobody can answer a permission for."
+    )
+    owner: str | None = Field(description="Whose agent is asking, by name.")
     status: AgentPromptStatus
     answer: str | None = Field(
         description="What was answered: the chosen option's label, or the reply typed."
@@ -203,7 +210,6 @@ class AgentSessionRead(Schema):
     id: UUID
     task_id: UUID
     actor_label: str = Field(description="The name of the token the hook reports with.")
-    client_session_id: str = Field(description="The harness's own id for the conversation.")
     client_name: str | None = Field(description="The session's display name, if known.")
     state: AgentSessionState
     reason: AgentSessionReason | None
@@ -289,3 +295,15 @@ class AgentFeedEntryRead(Schema):
     kind: AgentFeedKind
     tool: str | None
     text: str
+
+
+class AgentSessionPage(Page[AgentSessionRead]):
+    """A page of a card's agent sessions: the open ones first."""
+
+
+class AgentFeedPage(Page[AgentFeedEntryRead]):
+    """A page of a card's agent feed, newest first."""
+
+
+class AgentPromptPage(Page[AgentPromptRead]):
+    """A page of what the agents on a card have asked, newest first."""

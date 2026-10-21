@@ -10,6 +10,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.task import Task, TaskComment
+from app.routers.paging import PageQuery
 from app.routers.tasks.dependencies import (
     COMMENT_ON_THIS_CARD,
     may_delete_this_comment,
@@ -19,22 +20,33 @@ from app.routers.tasks.dependencies import (
 from app.routers.tasks.recording import record_on_card
 from app.routers.tasks.views import comment_read
 from app.schemas.common import Acknowledged
-from app.schemas.tasks import CommentCreate, CommentRead
+from app.schemas.tasks import CommentCreate, CommentPage, CommentRead
 from app.services import activity, mentions, tasks
+from app.services.paging import PageRequest
 
 router = APIRouter(tags=["tasks"])
 
 
-@router.get(
-    "/tasks/{task_ref}/comments", response_model=list[CommentRead], summary="Read the timeline"
-)
+@router.get("/tasks/{task_ref}/comments", response_model=CommentPage, summary="Read the timeline")
 async def list_comments(
     task: Task = Depends(resolved_task),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[CommentRead]:
-    """Comments and status changes together, oldest first."""
-    return [comment_read(entry) for entry in await tasks.comments(session, task)]
+    page: PageRequest = PageQuery,
+) -> CommentPage:
+    """Comments and status changes together, newest first, a page at a time.
+
+    Read like `/history`: the newest page first, then further back. `GET
+    /tasks/{ref}` already carries the newest entries, and its `comments_next`
+    is where this continues from to read the ones before them.
+    """
+    window = await tasks.comment_page(session, task, page)
+    counted = await tasks.comment_counts(session, [task.id])
+    return CommentPage(
+        items=[comment_read(entry) for entry in window.rows],
+        next=window.next,
+        total=counted.get(task.id, 0),
+    )
 
 
 @router.post(

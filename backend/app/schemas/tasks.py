@@ -20,9 +20,14 @@ from app.models.task import (
 )
 from app.schemas.activity import HistoryEntry
 from app.schemas.agent_sessions import AgentPresence, AgentSessionRead
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 from app.schemas.files import ItemRead
 from app.schemas.people import PersonRead
+from app.schemas.templates import SubStageLabel
+
+COMMENTS_ON_A_CARD = 50
+"""How much of its timeline a card carries. The newest entries, because a card
+is opened to see where it has got to; the rest is a page away."""
 
 
 def _blank_to_none(value: str | None) -> str | None:
@@ -158,7 +163,7 @@ class TaskCreate(Schema):
     priority: TaskPriority = Field(
         default=TaskPriority.P3, description="`p0` (drop everything) to `p3`. Defaults to `p3`."
     )
-    sub_statuses: list[str] = Field(
+    sub_statuses: list[SubStageLabel] = Field(
         default_factory=list,
         max_length=4,
         description=(
@@ -315,7 +320,7 @@ class TaskUpdate(Schema):
     description: str | None = Field(default=None, min_length=1, max_length=5000)
     type: TaskType | None = None
     priority: TaskPriority | None = None
-    sub_statuses: list[str] | None = Field(
+    sub_statuses: list[SubStageLabel] | None = Field(
         default=None,
         max_length=4,
         description=(
@@ -424,7 +429,12 @@ class TaskMove(Schema):
     """
 
     column_id: UUID
-    position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+    position: int = Field(
+        default=0,
+        ge=0,
+        description="How many cards from the top of the column to put it, not a sort key. "
+        "Clamped to the column's length.",
+    )
     outcome: str | None = Field(
         default=None,
         description=(
@@ -510,7 +520,14 @@ class CommentRead(Schema):
     created_at: datetime
 
 
-class TaskRead(Schema):
+class TaskSummary(Schema):
+    """A card as a list draws it: everything but its description.
+
+    The description is the one unbounded field on a card — up to 5000
+    characters — and no list shows it, so no list carries it (CYLIST-130).
+    `GET /tasks/{ref}` is where it is read, as part of :class:`TaskDetail`.
+    """
+
     id: UUID
     project_id: UUID
     reference: str = Field(
@@ -530,11 +547,11 @@ class TaskRead(Schema):
         "and on a card in cold storage, which has left it."
     )
     position: int | None = Field(
-        description="Where the card sits in its column, from the top. Null on a sub-task and on "
+        description="Where the card sits in its column: sort ascending for top to bottom. A "
+        "sort key, not an index — it has gaps and may be negative. Null on a sub-task and on "
         "a card in cold storage."
     )
     title: str
-    description: str
     type: TaskType
     priority: TaskPriority
     sub_statuses: list[str] = Field(
@@ -627,16 +644,55 @@ class TaskRead(Schema):
     created_at: datetime
 
 
-class TaskDetail(TaskRead):
-    """One task with its timeline, its sub-tasks and its checklist."""
+class TaskSummaryPage(Page[TaskSummary]):
+    """A page of cards: cold storage, a goal's cards, a column of the board."""
 
-    comments: list[CommentRead]
+
+class ColumnTasks(Schema):
+    """The first page of one column of the board, and how many it holds in all."""
+
+    column_id: UUID
+    total: int = Field(description="Cards in the column in all, not only on this page.")
+    items: list[TaskSummary] = Field(description="The column's cards, top to bottom.")
+    next: UUID | None = Field(
+        description="Pass as `after` to `GET /columns/{column_id}/tasks` for the cards below "
+        "these. Null when the column is all here."
+    )
+
+
+class BoardTasks(Schema):
+    """A board's cards, a page per column."""
+
+    columns: list[ColumnTasks] = Field(
+        description="One per column, left to right — empty columns included, so a client can "
+        "draw the board from this alone."
+    )
+
+
+class CommentPage(Page[CommentRead]):
+    """A page of a card's timeline, newest first, and how long the whole timeline is."""
+
+    total: int = Field(description="How many entries the whole timeline holds.")
+
+
+class TaskDetail(TaskSummary):
+    """One task with its description, its latest timeline, its sub-tasks and its checklist."""
+
+    description: str
+    comments: list[CommentRead] = Field(
+        description="The newest entries of the timeline, oldest first — the last "
+        f"{COMMENTS_ON_A_CARD} at most. `comment_count` says how many there are in all."
+    )
+    comments_next: UUID | None = Field(
+        description="Pass as `after` to `GET /tasks/{ref}/comments` for the entries before "
+        "these. Null when `comments` is the whole timeline."
+    )
     agent_sessions: list[AgentSessionRead] = Field(
         default_factory=list,
         description="Every harness session on this card still worth showing: the open ones "
         "first, then the finished ones nobody has dismissed.",
     )
-    subtasks: list[TaskRead] = Field(
+    subtasks: list[TaskSummary] = Field(
         description="Sub-tasks with a reference of their own, in sub-number order. They are "
         "not on the board, so this is the only place they are listed."
     )

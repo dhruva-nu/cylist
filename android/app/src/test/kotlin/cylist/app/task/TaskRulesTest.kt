@@ -104,6 +104,17 @@ class TaskRulesTest {
     }
 
     @Test
+    fun aPermissionIsAnsweredByItsOwnerAloneAndAQuestionByAnyone() {
+        val owner = UUID.randomUUID()
+        val permission = prompt(AgentPromptKind.permission, ownerId = owner, owner = "Aditi K")
+        assertTrue(mayAnswer(permission, owner))
+        assertFalse(mayAnswer(permission, UUID.randomUUID()))
+        assertFalse(mayAnswer(permission, null))
+        assertTrue(mayAnswer(prompt(ownerId = owner), UUID.randomUUID()))
+        assertEquals("Only Aditi K can answer this: the tool runs on their machine.", notYours(permission))
+    }
+
+    @Test
     fun whoAnsweredIsYouToThemAndTheirNameToEveryoneElse() {
         val aditi = UUID.randomUUID()
         val answered = prompt(status = AgentPromptStatus.answered, answeredBy = "Aditi K", answeredById = aditi, answer = "40")

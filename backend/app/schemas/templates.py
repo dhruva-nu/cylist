@@ -4,13 +4,29 @@ be done in each column before one may leave it."""
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import Field, StringConstraints, field_validator
 
-from app.models.board import MAX_OUTCOMES
-from app.models.template import NAME_MAX_LENGTH, SUB_STAGE_MAX_COUNT
-from app.schemas.common import Schema
+from app.models.board import MAX_OUTCOMES, OUTCOME_LABEL_MAX_LENGTH
+from app.models.template import (
+    NAME_MAX_LENGTH,
+    SUB_STAGE_LABEL_MAX_LENGTH,
+    SUB_STAGE_MAX_COUNT,
+)
+from app.schemas.common import Page, Schema
+
+SubStageLabel = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=SUB_STAGE_LABEL_MAX_LENGTH)
+]
+"""One stage label, held to the column it is stored in — a template's
+``sub_stage_labels`` and a card's ``sub_statuses`` alike. Without it a long
+label reached Postgres and came back as a 500."""
+
+OutcomeLabel = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=OUTCOME_LABEL_MAX_LENGTH)
+]
 
 
 def _stripped(value: str) -> str:
@@ -32,7 +48,7 @@ class StageInput(Schema):
     them there."""
 
     column_id: UUID
-    sub_stage_labels: list[str] = Field(
+    sub_stage_labels: list[SubStageLabel] = Field(
         default_factory=list,
         max_length=SUB_STAGE_MAX_COUNT,
         description=(
@@ -43,7 +59,7 @@ class StageInput(Schema):
         ),
     )
 
-    allowed_outcomes: list[str] = Field(
+    allowed_outcomes: list[OutcomeLabel] = Field(
         default_factory=list,
         max_length=MAX_OUTCOMES,
         description=(
@@ -148,3 +164,7 @@ class TemplateRead(Schema):
     )
     task_count: int = Field(description="How many cards were created from this template.")
     created_at: datetime
+
+
+class TemplatePage(Page[TemplateRead]):
+    """A page of a project's task templates, in name order."""

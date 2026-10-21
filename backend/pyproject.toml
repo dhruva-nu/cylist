@@ -1,6 +1,6 @@
 [project]
 name = "cylist-backend"
-version = "0.4.3"
+version = "0.4.4"
 description = "Cylist API — projects, boards, files and a vault, for humans and agents alike."
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -57,6 +57,7 @@ dev = [
     "mypy>=1.14",
     "pgserver>=0.1.4",
     "pytest-xdist>=3.8.0",
+    "asyncpg-stubs>=0.31.3",
 ]
 
 [build-system]

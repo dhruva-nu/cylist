@@ -193,6 +193,6 @@ class VaultSecret(Base, TimestampMixin):
     The only field here that is not readable straight off the disk."""
 
     key_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    """Which ``CYLIST_VAULT_KEY`` sealed this row, so the key can be rotated."""
+    """Which vault key version sealed this row, so the key can be rotated."""
 
     node: Mapped[VaultNode] = relationship(back_populates="secret")

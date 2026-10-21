@@ -1,6 +1,7 @@
 /** Projects themselves: the list of them, and making and ending one. */
 
 import { jsonBody, request } from './http'
+import { fetchAllPages } from './paging'
 
 export interface Project {
   id: string
@@ -20,7 +21,7 @@ export interface ProjectInput {
 }
 
 export const projectsApi = {
-  listProjects: () => request<Project[]>('/projects'),
+  listProjects: () => fetchAllPages<Project>('/projects'),
   getProject: (projectKey: string) => request<Project>(`/projects/${projectKey}`),
   createProject: (input: ProjectInput) =>
     request<Project>('/projects', { method: 'POST', body: jsonBody(input) }),

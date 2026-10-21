@@ -10,14 +10,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
-from app.models.task import ChecklistState, Task
+from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
 from app.schemas.tasks import TaskMove
-from app.services import columns, templates
-from app.services.tasks.checklists import checklist
+from app.services import columns, goals, templates
 from app.services.tasks.history import (
     FieldChange,
     field_change,
@@ -26,8 +26,8 @@ from app.services.tasks.history import (
     stage_change,
     stage_label,
 )
-from app.services.tasks.lookup import subtasks
-from app.services.tasks.stacking import renumber, restack
+from app.services.tasks.parentage import lock_parent, refuse_open_under_finished
+from app.services.tasks.stacking import restack
 
 
 async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task, list[FieldChange]]:
@@ -75,8 +75,9 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task,
             to another project, if the card's template is not allowed in it or
             not allowed to end on the outcome named, if the outcome is not one
             of that column's, if the column it is leaving still has the card
-            short of the last sub-stage its template set there, or if the
-            destination is the last column and a sub-task is still open.
+            short of the last sub-stage its template set there, if the
+            destination is the last column and a sub-task is still open, or if
+            the card is leaving the last column while its goal is achieved.
     """
     _refuse_moving_subtask(task)
     _refuse_moving_stored(task)
@@ -88,6 +89,7 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task,
         await refuse_stage_incomplete(session, task)
     last_column = await columns.last(session, task.project_id)
     await _refuse_unfinished(session, task, destination, last_column)
+    await _refuse_reopening_on_achieved(session, task, destination, last_column)
     landing_outcome = _landing_outcome(task, destination, data.outcome)
 
     stage_before = stage_label(task.sub_statuses, task.sub_status_index)
@@ -109,7 +111,6 @@ async def move(session: AsyncSession, task: Task, data: TaskMove) -> tuple[Task,
 
     changes: list[FieldChange] = []
     if changes_column:
-        await renumber(session, source_id)
         source = await columns.get(session, source_id)
         changes.append(field_change("column", "column", source.name, destination.name))
         stage_after = stage_label(task.sub_statuses, task.sub_status_index)
@@ -151,9 +152,14 @@ async def set_finished(
     :func:`app.services.tasks.update` reports, so a history entry reads the
     same however the change was made.
 
+    Reopening one is refused while its parent is finished — see
+    :mod:`app.services.tasks.parentage` for why that is a refusal rather than
+    the parent quietly reopening too.
+
     Raises:
         UnprocessableRequestError: if the task is a top-level card, whose done
-            is the board's last column and not a field here.
+            is the board's last column and not a field here, or if it is being
+            reopened under a parent that is finished.
     """
     if task.parent_id is None:
         raise UnprocessableRequestError(
@@ -165,6 +171,8 @@ async def set_finished(
     was_finished = task.finished_at is not None
     if was_finished == finished:
         return task, []
+    if not finished and task.parent is not None:
+        await refuse_open_under_finished(session, task.parent, act=f"reopening {task.reference}")
 
     task.finished_at = datetime.now(UTC) if finished else None
     await session.flush()
@@ -248,16 +256,10 @@ async def _destination_column(session: AsyncSession, task: Task, column_id: UUID
     """The column a card is being moved into, which must be on its own board.
 
     Raises:
-        NotFoundError: if there is no such column.
-        UnprocessableRequestError: if the column is on another project's board.
+        UnprocessableRequestError: if the column is on another project's
+            board, or on none.
     """
-    column = await columns.get(session, column_id)
-    if column.project_id != task.project_id:
-        raise UnprocessableRequestError(
-            "That column is on a different project's board.",
-            details={"column_id": str(column.id)},
-        )
-    return column
+    return await columns.require_column(session, task.project_id, column_id)
 
 
 async def _refuse_unfinished(
@@ -282,6 +284,27 @@ async def _refuse_unfinished(
     await refuse_open_work(session, task, last_column, act="moving this card")
 
 
+async def _refuse_reopening_on_achieved(
+    session: AsyncSession, task: Task, destination: BoardColumn, last_column: BoardColumn
+) -> None:
+    """Stop a card leaving the last column while the goal it is on is achieved.
+
+    Leaving that column reopens the card, and an achieved goal has no open card
+    on it. The goal is locked for the rest of the move, so a request achieving
+    it at the same moment waits and then finds this card open. A cancelled card
+    is not open wherever it is, so it may go where it likes.
+
+    Raises:
+        UnprocessableRequestError: naming the goal, if it is achieved.
+    """
+    leaving_end = task.column_id == last_column.id and destination.id != last_column.id
+    if not leaving_end or task.status is TaskStatus.CANCELLED:
+        return
+    await goals.refuse_open_card_on_achieved(
+        session, task.goal_id, card=task.reference, act=f"moving it out of {last_column.name}"
+    )
+
+
 async def refuse_open_work(
     session: AsyncSession, task: Task, last_column: BoardColumn, *, act: str
 ) -> None:
@@ -292,9 +315,15 @@ async def refuse_open_work(
     done, and the last column says it is. ``act`` names what was refused, as
     the sentence's object — "moving this card", "restoring it".
 
+    The card's row is locked first, and what is under it read only once the
+    lock is held — see :mod:`app.services.tasks.parentage`. A sub-task being
+    written or reopened at the same moment takes the same lock, so one of the
+    two waits and then sees what the other committed.
+
     Raises:
         UnprocessableRequestError: if anything under the task is still open.
     """
+    await lock_parent(session, task.id)
     open_cards, open_boxes = await open_work(session, task)
     outstanding = [*open_cards, *open_boxes]
     if not outstanding:
@@ -320,11 +349,28 @@ async def open_work(session: AsyncSession, task: Task) -> tuple[list[str], list[
     Asked by anything putting a card in the board's last column, which a card
     with open work under it may not be in.
     """
+    # Read fresh rather than through whatever this session loaded earlier in
+    # the request: a sub-task reopened by another request since then is what
+    # the caller's lock was taken to see.
     open_cards = [
-        subtask.reference for subtask in await subtasks(session, task) if not subtask.is_settled
+        subtask.reference
+        for subtask in await session.scalars(
+            select(Task)
+            .where(Task.parent_id == task.id)
+            .order_by(Task.sub_number)
+            .execution_options(populate_existing=True)
+        )
+        if not subtask.is_settled
     ]
     open_boxes = [
-        item.title for item in await checklist(session, task) if item.state is ChecklistState.OPEN
+        item.title
+        for item in await session.scalars(
+            select(TaskChecklistItem)
+            .where(TaskChecklistItem.task_id == task.id)
+            .order_by(TaskChecklistItem.position)
+            .execution_options(populate_existing=True)
+        )
+        if item.state is ChecklistState.OPEN
     ]
     return open_cards, open_boxes
 

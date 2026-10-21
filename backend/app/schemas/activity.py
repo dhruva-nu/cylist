@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import ConfigDict, Field
 
 from app.models.activity import Channel
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 
 class ActivityRead(Schema):
@@ -22,6 +22,10 @@ class ActivityRead(Schema):
     entity_id: UUID | None
     project_id: UUID | None
     payload: dict[str, Any]
+
+
+class ActivityPage(Page[ActivityRead]):
+    """A page of the audit feed, newest first."""
 
 
 class FieldChange(Schema):

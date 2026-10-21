@@ -107,7 +107,7 @@ import cylist.api.generated.models.MemberRead
 import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.PrState
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskStatus
 import cylist.api.generated.models.TaskType
 import cylist.app.theme.CylistTheme
@@ -148,6 +148,7 @@ fun BoardScreen(viewModel: BoardViewModel, modifier: Modifier = Modifier, openTa
             dismissNotice = viewModel::dismissNotice,
             retry = { viewModel.refresh() },
             openTask = { ref -> state.project?.key?.let { openTask(it, ref) } },
+            loadMore = viewModel::loadMore,
         ),
         modifier = modifier,
     )
@@ -161,13 +162,15 @@ class BoardActions(
     val setAgentFilter: (AgentFilter) -> Unit = {},
     val addCard: (String, String, (String?) -> Unit) -> Unit = { _, _, done -> done(null) },
     /** Give a card to someone else. */
-    val reassign: (TaskRead, MemberRead) -> Unit = { _, _ -> },
+    val reassign: (TaskSummary, MemberRead) -> Unit = { _, _ -> },
     /** Take back the reassignment a snackbar reported. */
     val undo: (BoardNotice) -> Unit = {},
     val dismissNotice: (Long) -> Unit = {},
     val retry: () -> Unit = {},
     /** Open a card's detail, by its reference. */
     val openTask: (String) -> Unit = {},
+    /** Read the next page of a column onto the bottom of it. */
+    val loadMore: (UUID) -> Unit = {},
 )
 
 /** The screen with nothing behind it but [state], so previews and screenshots can draw it. */
@@ -198,10 +201,12 @@ fun BoardContent(state: BoardState, today: LocalDate, actions: BoardActions, mod
                 state.loading && state.tasks.isEmpty() -> Message("Loading the board…", null)
                 else -> SwipeColumns(state.columns, state.columnId, counts, actions.selectColumn) { column ->
                     val inColumn = shown.filter { it.columnId == column.id }.sortedBy { it.position ?: Int.MAX_VALUE }
+                    val more = unloadedIn(state, column.id)
+                    val loadMore = { actions.loadMore(column.id) }
                     if (column.id == lastId) {
-                        DoneList(inColumn, column.name, state.who.isNotEmpty(), actions.openTask)
+                        DoneList(inColumn, column.name, state.who.isNotEmpty(), more, loadMore, actions.openTask)
                     } else {
-                        CardList(inColumn, column.id, column.name, state, today, actions.openTask) { assigning = it.reference }
+                        CardList(inColumn, column.id, column.name, state, today, more, loadMore, actions.openTask) { assigning = it.reference }
                     }
                 }
             }
@@ -295,7 +300,7 @@ private fun TopBar(state: BoardState, selectProject: (String) -> Unit) {
 }
 
 @Composable
-private fun Toolbar(state: BoardState, board: List<TaskRead>, working: Int, needsYou: Int, actions: BoardActions) {
+private fun Toolbar(state: BoardState, board: List<TaskSummary>, working: Int, needsYou: Int, actions: BoardActions) {
     val colors = CylistTheme.colors
     var unfolded by rememberSaveable { mutableStateOf(false) }
     val owned = cardsOwned(board)
@@ -443,13 +448,15 @@ private fun ColumnTabs(state: BoardState, counts: Map<UUID, Int>, select: (UUID)
 
 @Composable
 private fun CardList(
-    cards: List<TaskRead>,
+    cards: List<TaskSummary>,
     columnId: UUID,
     columnName: String,
     state: BoardState,
     today: LocalDate,
+    more: Int,
+    loadMore: () -> Unit,
     openTask: (String) -> Unit,
-    assign: (TaskRead) -> Unit,
+    assign: (TaskSummary) -> Unit,
 ) {
     val colors = CylistTheme.colors
     val (held, open) = cards.partition(::isHeld)
@@ -477,11 +484,35 @@ private fun CardList(
             }
             if (showHeld) items(held, key = { it.id }) { TaskCard(it, today, state.me?.id, onAssign = { assign(it) }) { openTask(it.reference) } }
         }
+        if (more > 0) item(key = "more") { LoadMore(more, loadMore) }
     }
 }
 
+/**
+ * How many of a column's cards are not on the phone yet: the board arrives a
+ * page per column, and a long column's tail is read when somebody asks for it.
+ */
+private fun unloadedIn(state: BoardState, columnId: UUID): Int {
+    val stack = state.stacks[columnId] ?: return 0
+    if (stack.next == null) return 0
+    return (stack.total - state.tasks.count { it.columnId == columnId }).coerceAtLeast(1)
+}
+
 @Composable
-private fun DoneList(cards: List<TaskRead>, columnName: String, narrowed: Boolean, open: (String) -> Unit) {
+private fun LoadMore(more: Int, load: () -> Unit) {
+    Text(
+        "Show more · $more not loaded",
+        color = CylistTheme.colors.ink3,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontFamily = Figtree,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = load).padding(horizontal = 4.dp, vertical = 13.dp),
+    )
+}
+
+@Composable
+private fun DoneList(cards: List<TaskSummary>, columnName: String, narrowed: Boolean, more: Int, loadMore: () -> Unit, open: (String) -> Unit) {
     val colors = CylistTheme.colors
     val finished = cards.sortedByDescending { it.finishedAt.orEmpty() }
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 88.dp), modifier = Modifier.fillMaxSize()) {
@@ -507,6 +538,7 @@ private fun DoneList(cards: List<TaskRead>, columnName: String, narrowed: Boolea
                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
             }
         }
+        if (more > 0) item(key = "more") { LoadMore(more, loadMore) }
     }
 }
 
@@ -666,7 +698,7 @@ private fun EmptyText(columnName: String, narrowed: Boolean) {
 
 /** One card, as the design's iteration B draws it. */
 @Composable
-fun TaskCard(task: TaskRead, today: LocalDate, viewerId: UUID?, onAssign: (() -> Unit)? = null, onOpen: (() -> Unit)? = null) {
+fun TaskCard(task: TaskSummary, today: LocalDate, viewerId: UUID?, onAssign: (() -> Unit)? = null, onOpen: (() -> Unit)? = null) {
     val colors = CylistTheme.colors
     val agent = agentLineOf(task.agentSession, viewerId)
     val blocked = task.status == TaskStatus.blocked
@@ -807,7 +839,7 @@ private fun AssigneeChip(person: PersonRead, viewerId: UUID?, onAssign: (() -> U
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AssignSheet(task: TaskRead, state: BoardState, pick: (MemberRead) -> Unit, close: () -> Unit) {
+private fun AssignSheet(task: TaskSummary, state: BoardState, pick: (MemberRead) -> Unit, close: () -> Unit) {
     val colors = CylistTheme.colors
     var query by rememberSaveable { mutableStateOf("") }
     val open = openCardsOf(state.tasks, state.columns.lastOrNull()?.id)
@@ -895,7 +927,7 @@ private fun NoticeBar(notice: BoardNotice?, actions: BoardActions, modifier: Mod
 }
 
 @Composable
-private fun Progress(task: TaskRead) {
+private fun Progress(task: TaskSummary) {
     val colors = CylistTheme.colors
     val stages = task.subStatuses
     val stage = task.subStatusIndex

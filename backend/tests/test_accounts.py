@@ -18,12 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import SESSION_COOKIE
 from app.auth.invites import INVITE_PREFIX
+from app.auth.scopes import Scope
 from app.config import Settings
 from app.core.clock import now
 from app.db import Database
 from app.models.activity import Activity
-from app.models.api_token import ApiToken
+from app.models.api_token import ApiToken, TokenKind
 from app.models.person import Person
+from app.services import tokens
 from tests.conftest import (
     INVITEE_PASSWORD,
     OWNER_EMAIL,
@@ -304,7 +306,9 @@ class TestHandingSomebodyAnAccount:
         """It is a machine: it carries a token, not a password."""
         await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
         agent = next(
-            person for person in (await signed_in.get("/people")).json() if person["is_agent"]
+            person
+            for person in (await signed_in.get("/people")).json()["items"]
+            if person["is_agent"]
         )
 
         response = await signed_in.put(
@@ -474,8 +478,12 @@ class TestSigningIn:
         )
 
     async def test_an_archived_person_cannot_sign_in(
-        self, signed_in: AsyncClient, client: AsyncClient, owner: Person
+        self, signed_in: AsyncClient, client: AsyncClient, other_client: AsyncClient, owner: Person
     ) -> None:
+        # Somebody else has to be able to sign in, or the archive is refused.
+        _, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+
         await signed_in.delete(f"/people/{owner.id}")
 
         response = await client.post(
@@ -553,7 +561,88 @@ class TestTheBootstrapLogin:
             json={"current_password": OWNER_PASSWORD, "new_password": INVITEE_PASSWORD},
         )
 
-        assert response.status_code == 422
+        # Refused for who is asking, so 403 — as `today` and `devices` say it.
+        assert response.status_code == 403
+
+
+class TestBootstrapEndsWithIt:
+    """CYLIST-119: nothing the bootstrap password opened outlives bootstrap."""
+
+    async def _leftover_token(self, session: AsyncSession) -> dict[str, str]:
+        """A person-less API token, as one minted before minting from nobody
+        was refused would be."""
+        _, plaintext = await tokens.issue(
+            session,
+            name="setup script",
+            kind=TokenKind.API,
+            scopes=[Scope.READ, Scope.WRITE, Scope.ADMIN],
+            person_id=None,
+            ttl=None,
+        )
+        await session.commit()
+        return {"Authorization": f"Bearer {plaintext}"}
+
+    async def test_accepting_the_first_invitation_revokes_the_bootstrap_session(
+        self, bootstrapped: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        _, token = await open_account(bootstrapped, ADITI, ADITI_EMAIL)
+
+        await _accept(other_client, token)
+
+        assert (await bootstrapped.get("/me")).status_code == 401
+        assert (await other_client.get("/me")).status_code == 200
+
+    async def test_setting_the_first_password_revokes_it_too(
+        self, bootstrapped: AsyncClient
+    ) -> None:
+        person = (await bootstrapped.post("/people", json=ADITI)).json()
+
+        opened = await bootstrapped.put(
+            f"/people/{person['id']}/account",
+            json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD},
+        )
+
+        assert opened.status_code == 200
+        assert (await bootstrapped.get("/me")).status_code == 401
+
+    async def test_and_every_token_that_belongs_to_nobody(
+        self,
+        bootstrapped: AsyncClient,
+        other_client: AsyncClient,
+        client: AsyncClient,
+        session: AsyncSession,
+    ) -> None:
+        leftover = await self._leftover_token(session)
+        _, token = await open_account(bootstrapped, ADITI, ADITI_EMAIL)
+
+        await _accept(other_client, token)
+
+        assert (await other_client.get("/me", headers=leftover)).status_code == 401
+
+    async def test_the_bootstrap_session_cannot_mint_a_token(
+        self, bootstrapped: AsyncClient
+    ) -> None:
+        response = await bootstrapped.post("/tokens", json={"name": "setup", "scopes": ["read"]})
+
+        assert response.status_code == 403
+        assert "nobody's" in response.json()["error"]["message"]
+
+    async def test_a_personless_api_token_reaches_nothing(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Even one that somehow survived: being nobody is a pass only for the
+        bootstrap session, and only before any account exists."""
+        await signed_in.post("/projects", json={"key": "ATL", "name": "Atlas"})
+        leftover = await self._leftover_token(session)
+
+        listed = await signed_in.get("/projects", headers=leftover)
+        reached = await signed_in.get("/projects/ATL", headers=leftover)
+        administered = await signed_in.post(
+            "/projects/ATL/roles", json={"name": "Reviewer"}, headers=leftover
+        )
+
+        assert listed.json()["items"] == []
+        assert reached.status_code == administered.status_code == 404
 
 
 class TestArchivingWithdrawsAccess:
@@ -606,6 +695,98 @@ class TestArchivingWithdrawsAccess:
             "/auth/login", json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD}
         )
         assert response.status_code == 200
+
+
+class TestWhatWriteCannotReach:
+    """CYLIST-118: ``write`` is every agent's scope, so it cannot lock people out."""
+
+    async def _writer(self, signed_in: AsyncClient) -> dict[str, str]:
+        created = await signed_in.post("/tokens", json={"name": "agent", "scopes": ["write"]})
+        return {"Authorization": f"Bearer {created.json()['token']}"}
+
+    async def test_a_write_token_cannot_archive_anybody(
+        self, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+        writer = await self._writer(signed_in)
+
+        deleted = await signed_in.delete(f"/people/{person['id']}", headers=writer)
+        patched = await signed_in.patch(
+            f"/people/{person['id']}", json={"archived": True}, headers=writer
+        )
+
+        assert deleted.status_code == patched.status_code == 403
+        assert patched.json()["error"]["details"]["missing_scopes"] == ["admin"]
+        assert (await other_client.get("/me")).status_code == 200
+
+    async def test_nor_bring_anybody_back(
+        self, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+        await signed_in.delete(f"/people/{person['id']}")
+        writer = await self._writer(signed_in)
+
+        response = await signed_in.patch(
+            f"/people/{person['id']}", json={"archived": False}, headers=writer
+        )
+
+        assert response.status_code == 403
+
+    async def test_nor_change_the_address_an_account_signs_in_with(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        writer = await self._writer(signed_in)
+
+        response = await signed_in.patch(
+            f"/people/{owner.id}", json={"email": "elsewhere@cylist.dev"}, headers=writer
+        )
+
+        assert response.status_code == 403
+
+    async def test_but_can_still_tidy_the_directory(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        """A name, a title, or the email of somebody who never signs in."""
+        writer = await self._writer(signed_in)
+        client_person = (await signed_in.post("/people", json=SANJAY)).json()
+
+        renamed = await signed_in.patch(
+            f"/people/{owner.id}", json={"title": "Owner", "email": OWNER_EMAIL}, headers=writer
+        )
+        readdressed = await signed_in.patch(
+            f"/people/{client_person['id']}", json={"email": "sanjay@atlas.dev"}, headers=writer
+        )
+
+        assert renamed.status_code == readdressed.status_code == 200
+
+    async def test_the_last_person_who_can_sign_in_is_not_archived(
+        self, signed_in: AsyncClient, owner: Person
+    ) -> None:
+        deleted = await signed_in.delete(f"/people/{owner.id}")
+        patched = await signed_in.patch(f"/people/{owner.id}", json={"archived": True})
+
+        assert deleted.status_code == patched.status_code == 422
+        assert "lock everybody out" in deleted.json()["error"]["message"]
+        assert (await signed_in.get("/me")).status_code == 200
+
+    async def test_archiving_through_a_patch_is_logged_as_archiving(
+        self, signed_in: AsyncClient, session: AsyncSession
+    ) -> None:
+        person = (await signed_in.post("/people", json=SANJAY)).json()
+
+        await signed_in.patch(f"/people/{person['id']}", json={"archived": True})
+        await signed_in.patch(f"/people/{person['id']}", json={"archived": False})
+
+        verbs = list(
+            await session.scalars(
+                select(Activity.verb)
+                .where(Activity.entity_id == person["id"])
+                .order_by(Activity.occurred_at)
+            )
+        )
+        assert verbs == ["person.added", "person.archived", "person.restored"]
 
 
 class TestChangingAPassword:
@@ -708,7 +889,7 @@ class TestAttribution:
             # Or the feed would leave Hermes out: it shows the projects you are on.
             await put_members(theirs, "HRM", [str(owner.id)])
 
-        feed = (await signed_in.get("/activity")).json()
+        feed = (await signed_in.get("/activity")).json()["items"]
         started = {
             entry["payload"].get("name"): entry["actor_label"]
             for entry in feed

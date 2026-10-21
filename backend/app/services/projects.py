@@ -6,6 +6,7 @@ Project lookups accept either a UUID or a project key, so an agent can address
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import delete as sql_delete
@@ -17,11 +18,12 @@ from app.auth.principal import Principal
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
+from app.db import lock_row
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
 from app.services import blobs, columns, files, people, permissions, roles
-from app.storage import BlobStore
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -180,13 +182,17 @@ async def require_reachable(
 
     The bootstrap session is the one exception. It is nobody — the deployment
     owner signing in before any account exists — so it is on no project, and
-    it is what has to add the first person to one.
+    it is what has to add the first person to one. Any other credential with
+    nobody behind it reaches nothing (CYLIST-119): see
+    :func:`app.services.people.is_bootstrap`.
 
     Raises:
         NotFoundError: ``refusal``, if the caller may not see the project.
     """
     if principal.person_id is None:
-        return
+        if await people.is_bootstrap(session, principal):
+            return
+        raise refusal
     if not await is_member(session, project_id, principal.person_id):
         raise refusal
 
@@ -194,10 +200,11 @@ async def require_reachable(
 async def reachable_ids(session: AsyncSession, principal: Principal) -> list[UUID] | None:
     """The ids of every project this caller may see, or ``None`` for all of them.
 
-    ``None`` only for the bootstrap session — see :func:`require_reachable`.
+    ``None`` only for the bootstrap session — see :func:`require_reachable` —
+    and an empty list for any other credential with nobody behind it.
     """
     if principal.person_id is None:
-        return None
+        return None if await people.is_bootstrap(session, principal) else []
     return list(
         await session.scalars(
             select(ProjectMember.project_id).where(ProjectMember.person_id == principal.person_id)
@@ -206,16 +213,22 @@ async def reachable_ids(session: AsyncSession, principal: Principal) -> list[UUI
 
 
 async def list_projects(
-    session: AsyncSession, principal: Principal, *, include_archived: bool = False
-) -> list[Project]:
-    """Return the projects this caller is on, newest first."""
-    statement = select(Project).order_by(Project.created_at.desc())
+    session: AsyncSession,
+    principal: Principal,
+    page: PageRequest,
+    *,
+    include_archived: bool = False,
+) -> Window[Project]:
+    """Return a page of the projects this caller is on, newest first."""
+    statement = select(Project)
     reachable = await reachable_ids(session, principal)
     if reachable is not None:
         statement = statement.where(Project.id.in_(reachable))
     if not include_archived:
         statement = statement.where(Project.archived_at.is_(None))
-    return list(await session.scalars(statement))
+    return await keyset(
+        session, statement, keys=(Project.created_at, Project.id), page=page, descending=True
+    )
 
 
 async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -> Project:
@@ -243,7 +256,7 @@ async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -
     return project
 
 
-async def delete(session: AsyncSession, store: BlobStore, project: Project) -> None:
+async def delete(session: AsyncSession, project: Project) -> None:
     """Destroy a project and everything filed under it.
 
     The rows go in one statement. Every table that belongs to a project holds
@@ -268,12 +281,31 @@ async def delete(session: AsyncSession, store: BlobStore, project: Project) -> N
     blob_ids = await blobs.ids_on_project(session, project.id)
     await session.delete(project)
     await session.flush()
-    await blobs.collect_garbage(session, store, blob_ids)
+    await blobs.collect_garbage(session, blob_ids)
+
+
+@dataclass(frozen=True)
+class MembershipChange:
+    """What one membership save did, for the router to report and to log.
+
+    Who joined and who left are worked out here because only the diff knows
+    them, and the audit line is worth more naming people than counting them:
+    "set the membership to 4 people" says nothing about who was taken off.
+    """
+
+    members: list[Person]
+    joined: list[Person]
+    left: list[Person]
+    promoted: Person | None
 
 
 async def set_members(
-    session: AsyncSession, project: Project, person_ids: list[UUID]
-) -> list[Person]:
+    session: AsyncSession,
+    project: Project,
+    person_ids: list[UUID],
+    *,
+    fill_vacancy: bool,
+) -> MembershipChange:
     """Replace the project's membership with exactly these people.
 
     A diff rather than a rewrite. The obvious implementation — delete every
@@ -283,17 +315,25 @@ async def set_members(
     --add`` reads the list, appends one name and PUTs the whole thing back.
     So the rows that survive are left exactly where they are.
 
-    Dropping the project's last admin is allowed, and the role passes to
-    whoever has been on the board longest — see
-    :func:`app.services.roles.fill_admin_vacancy`. This caller is saying who
-    is on the project, not who administers it, and refusing a membership edit
-    over a role would be answering a question nobody asked.
+    Whether this caller may take an admin off the project is the router's
+    question, not this one's (CYLIST-116). What is decided here is only what
+    happens once the project has no admin: with ``fill_vacancy`` the role
+    passes to whoever has been on the board longest — see
+    :func:`app.services.roles.fill_admin_vacancy` — and without it the role is
+    left unworn. A promotion is authority being handed out, so it happens only
+    on a save made by somebody who could have handed it out themselves.
 
     Raises:
         UnprocessableRequestError: if any id is not in the directory, or names
             someone who has been archived.
     """
     people = await _load_people(session, person_ids)
+
+    # Two saves of the list at the same moment would each diff against the
+    # rows from before the other, and both insert the person they both added —
+    # the second on the first's key, as a 500. Locking the project makes them
+    # take turns, so the second diffs against what the first wrote.
+    await lock_row(session, Project, project.id)
 
     wanted = set(person_ids)
     current = set(
@@ -303,7 +343,13 @@ async def set_members(
     )
 
     leaving = current - wanted
+    left: list[Person] = []
     if leaving:
+        left = list(
+            await session.scalars(
+                select(Person).where(Person.id.in_(leaving)).order_by(Person.name)
+            )
+        )
         await session.execute(
             sql_delete(ProjectMember).where(
                 ProjectMember.project_id == project.id,
@@ -311,19 +357,16 @@ async def set_members(
             )
         )
 
-    session.add_all(
-        ProjectMember(project_id=project.id, person_id=person_id)
-        for person_id in person_ids
-        if person_id not in current
-    )
+    joined = [person for person in people if person.id not in current]
+    session.add_all(ProjectMember(project_id=project.id, person_id=person.id) for person in joined)
     await session.flush()
 
-    await roles.fill_admin_vacancy(session, project)
+    promoted = await roles.fill_admin_vacancy(session, project) if fill_vacancy else None
 
     # The relationship was loaded before the change; drop it so the next read
     # reflects what we just wrote.
     await session.refresh(project, ["members"])
-    return people
+    return MembershipChange(members=people, joined=joined, left=left, promoted=promoted)
 
 
 async def _load_people(session: AsyncSession, person_ids: list[UUID]) -> list[Person]:

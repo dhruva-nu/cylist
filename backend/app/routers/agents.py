@@ -10,7 +10,7 @@ import base64
 from uuid import UUID
 
 from anyio import to_thread
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,21 +19,28 @@ from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
+from app.core import multipart
+from app.core.body_limit import streams_upload
 from app.core.errors import NotFoundError
+from app.core.multipart import multipart_body
+from app.core.security_headers import DOWNLOAD_HEADERS
 from app.db import SessionDependency
 from app.models.agent import Skill
 from app.models.project import Project
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
 from app.schemas.agents import (
     SkillFolderFile,
     SkillFolderRead,
+    SkillPage,
     SkillRead,
     SkillUpdate,
 )
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.services import activity, agents, blobs, projects, skill_folders
+from app.services.paging import PageRequest
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["agents"])
@@ -93,21 +100,23 @@ WRITE_THIS_SKILL = guards.for_entity(Permission.AGENTS, resolved_skill)
 
 @router.get(
     "/projects/{project_ref}/skills",
-    response_model=list[SkillRead],
+    response_model=SkillPage,
     summary="List a project's skills",
 )
 async def list_skills(
     project: Project = Depends(resolved_project),
     _: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
-) -> list[SkillRead]:
-    """Every skill uploaded to this project, alphabetical.
+    page: PageRequest = PageQuery,
+) -> SkillPage:
+    """The skills uploaded to this project, alphabetical, a page at a time.
 
     A skill is a packaged job an agent can be handed. Download one with
     `/skills/{skill_id}/download`, or as the folder Claude Code loads it from
     with `/skills/{skill_id}/folder`.
     """
-    return [_skill_read(skill) for skill in await agents.list_skills(session, project)]
+    found = await agents.list_skills(session, project, page)
+    return SkillPage(items=[_skill_read(skill) for skill in found.rows], next=found.next)
 
 
 @router.post(
@@ -120,37 +129,53 @@ async def list_skills(
         413: {"description": "The upload is larger than the configured limit."},
         422: {"description": "The parts sent are not a skill's folder — see the message."},
     },
+    openapi_extra=multipart_body(
+        {
+            "file": {
+                "type": "array",
+                "items": {"type": "string", "contentMediaType": "application/octet-stream"},
+                "description": (
+                    "The skill. One part for a single-file skill, or one part per file "
+                    "for a folder — each named with the path it has inside the folder, "
+                    "'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
+                ),
+            },
+            "folder": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "The name of the folder being uploaded. Send it and every part is "
+                    "read as a path inside a folder, even if there is only one."
+                ),
+            },
+            "executable": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+                "description": (
+                    "Which parts to mark executable, by the same path, repeated once each. "
+                    "A browser cannot know; a client walking a directory can."
+                ),
+            },
+            "description": {
+                "anyOf": [
+                    {"type": "string", "maxLength": agents.DESCRIPTION_MAX_LENGTH},
+                    {"type": "null"},
+                ],
+                "description": "One line on what the skill does.",
+            },
+        },
+        required=["file"],
+    ),
 )
+@streams_upload
 async def upload_skill(
+    request: Request,
     response: Response,
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(WRITE_AGENT_KIT),
     session: AsyncSession = SessionDependency,
     store: BlobStore = Depends(get_blob_store),
     settings: Settings = Depends(app_settings),
-    file: list[UploadFile] = File(
-        description=(
-            "The skill. One part for a single-file skill, or one part per file "
-            "for a folder — each named with the path it has inside the folder, "
-            "'cylist/SKILL.md', 'cylist/scripts/setup.sh'."
-        )
-    ),
-    folder: str | None = Form(
-        default=None,
-        description=(
-            "The name of the folder being uploaded. Send it and every part is "
-            "read as a path inside a folder, even if there is only one."
-        ),
-    ),
-    executable: list[str] = Form(
-        default=[],
-        description=(
-            "Which parts to mark executable, by the same path, repeated once each. "
-            "A browser cannot know; a client walking a directory can."
-        ),
-    ),
-    description: str | None = Form(default=None, description="One line on what the skill does."),
-    added_by: UUID | None = Form(default=None, description="Which person is uploading it."),
 ) -> SkillRead:
     """Upload a skill as `multipart/form-data`.
 
@@ -171,17 +196,26 @@ async def upload_skill(
 
     Content is addressed by its SHA-256 and shared with the file store, so
     uploading bytes the server already holds costs a row and no disk.
+
+    **It is filed under whoever is uploading it** — the person behind the
+    session or token — and there is no field to say otherwise (CYLIST-142).
+    An agent's upload is its owner's, which is the person its token acts as.
+
+    The body is read only once the caller is known to be allowed to upload
+    here (CYLIST-123), and a body over the upload limit is refused with a 413
+    before it is read.
     """
-    skill, replaced = await agents.upload_skill(
+    skill, received, replaced = await agents.upload_skill(
         session,
         store,
         project,
-        file,
-        description=description,
-        folder=folder,
-        executable=set(executable),
+        multipart.Form(request),
         max_bytes=settings.max_upload_bytes,
-        added_by=added_by,
+        # The credential's person, never the form's: "added by" is an audit
+        # fact, and one the caller could choose would name somebody who never
+        # touched it. Comment authorship is the deliberate exception — see
+        # the trust model in the auth doc.
+        added_by=principal.person_id,
     )
     if replaced:
         response.status_code = status.HTTP_200_OK
@@ -192,7 +226,7 @@ async def upload_skill(
         entity_type="skill",
         entity_id=skill.id,
         project_id=project.id,
-        payload={"name": skill.name, "size": skill.size, "files": len(file)},
+        payload={"name": skill.name, "size": skill.size, "files": received.files},
     )
     return _skill_read(skill)
 
@@ -232,11 +266,10 @@ async def delete_skill(
     skill: Skill = Depends(resolved_skill),
     principal: Principal = Depends(WRITE_THIS_SKILL),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Take a skill off the project. Its content goes with it unless a file shares it."""
     name, project_id = skill.name, skill.project_id
-    await agents.delete_skill(session, store, skill)
+    await agents.delete_skill(session, skill)
     await activity.record(
         session,
         principal,
@@ -265,8 +298,9 @@ async def download_skill(
 
     return FileResponse(
         store.locate(skill.blob.path),
-        media_type=skill.mime or blobs.DEFAULT_MIME,
+        media_type=blobs.declared_mime(skill.mime),
         filename=skill.name,
+        headers=DOWNLOAD_HEADERS,
     )
 
 

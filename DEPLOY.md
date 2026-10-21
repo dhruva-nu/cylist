@@ -65,7 +65,7 @@ overwrite them:
 ```
 ~/cylist-prod/
   app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
-                 JEV_API_KEY
+                 (CYLIST_VAULT_KEYS, once rotated), JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   backups/       the dumps deploy.sh leaves behind
 ```
@@ -77,6 +77,60 @@ Both files are `chmod 600`. Everything that is not actually secret —
 > **`CYLIST_VAULT_KEY` is the one irreplaceable value here.** Change it and
 > every vault secret already stored becomes unreadable. It is deliberately kept
 > out of the backups, so keep a copy somewhere you can recover it.
+
+#### Rotating the vault key
+
+Changing a key is never done by editing `CYLIST_VAULT_KEY`. The vault holds a
+numbered *keyring*: `CYLIST_VAULT_KEY` is version 1, and later versions go in
+`CYLIST_VAULT_KEYS` as JSON. Every stored ciphertext — vault secrets and hook
+signing secrets alike — carries the version that sealed it and opens with that
+key; everything new is sealed with the highest version. So a rotation, for a
+suspected leak or on a schedule, is three steps, and nothing is unreadable at
+any point along the way:
+
+1. **Add a key.** Generate one with `make vault-key` (only the value is used),
+   keep a copy beside the old one, and add it to `app.env` with the next
+   number, leaving `CYLIST_VAULT_KEY` where it is:
+
+   ```
+   CYLIST_VAULT_KEYS={"2": "<new key>"}
+   ```
+
+   Redeploy, or `docker compose -f docker-compose.prod.yml up -d app`. From
+   now on new and edited secrets are sealed under version 2; old rows still
+   open under version 1.
+
+2. **Reseal.** Re-encrypt every row still on an older key, while the app keeps
+   serving:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml exec app python -m app.cli vault-reseal
+   ```
+
+   It works in batches of 200 rows (`--batch-size` to change), each its own
+   transaction, so it can be interrupted and run again. It ends by counting
+   the rows on each version and naming the versions no row needs any more. A
+   row that will not open — tampered with, or sealed under a key already gone
+   — is named, left as it was, and makes the command exit 1.
+
+3. **Retire the old key.** Once the reseal says version 1 is no longer needed,
+   empty `CYLIST_VAULT_KEY=` and redeploy. The keyring is now just version 2.
+   A later rotation adds `"3"` the same way, and retiring 2 means removing it
+   from `CYLIST_VAULT_KEYS`.
+
+Three things outlive the retirement and still need the old key:
+
+- **Backups.** A dump taken before the reseal holds version-1 ciphertext.
+  Keep the retired key, offline, for as long as you keep those dumps.
+- **Staging.** It restores production's data, so its `app.env` needs
+  production's keyring — add the same `CYLIST_VAULT_KEYS` there in step 1, and
+  retire the old key there in step 3.
+- **Dev slots** restored from production, for the same reason.
+
+For a *leaked* key, retiring it is the point; do steps 1–3 back to back, and
+remember the leak exposed every secret sealed under it, so the credentials in
+the vault and every hook's signing secret should be changed at their source
+too.
 
 **Push notifications** (CYLIST-107) need one more secret, a Firebase
 service-account key for the `cylist-mobile` project, kept beside the others as
@@ -313,26 +367,32 @@ If sockets turn out not to get through, nothing breaks. The board keeps its
 ten-second poll as a fallback and the agent hooks keep reporting over HTTP;
 what is lost is the promptness, not the correctness.
 
-### Never add `--workers`
+### More than one worker
 
-One uvicorn process per environment, and this is now a constraint rather
-than a default. The registry of who is connected is a dictionary in that
-process, which is a complete and correct answer for one worker and a wrong
-one for two:
+Each environment runs one uvicorn process today, because one is plenty. It
+no longer has to (CYLIST-133): `--workers N`, or a second replica on the same
+database, is safe. What used to make it unsafe, and what replaced it:
 
-* Fan-out splits silently. An agent's change reaches the boards on its own
-  worker and no others, so most open boards freeze — intermittently, and
-  looking exactly like a frontend bug.
-* The startup sweep, which ends every open agent session because a
-  just-started process can hold no sockets, would end the sessions its peer
-  workers are actively holding. Whichever worker restarts last wipes the
-  board.
+* **Fan-out.** Who is connected is still a dictionary per process, but every
+  committed event now also goes out as a Postgres `NOTIFY` on the
+  `cylist_events` channel, and every process `LISTEN`s on a connection of its
+  own and tells its own boards, long-polls and agent sockets
+  (`backend/app/realtime/bus.py`). A board on one worker hears an agent on
+  another. Each process holds one extra database connection for it.
+* **Whether an agent session is alive.** That was a question about one
+  process's memory. The process holding an agent's socket now stamps
+  `agent_session.socket_seen_at` about once a minute, and any process's
+  reaper reads that.
+* **The startup sweep** ended every open session when a process started,
+  which would have ended the sessions a peer was holding. It is gone; a
+  session whose socket died with its process is reaped once it has been
+  quiet past `AGENT_QUIET_AFTER`. Every process runs the reaper, and a
+  Postgres advisory lock makes sure only one pass at a time does the work.
 
-If the day comes that one process is not enough, `Hub.publish` in
-`backend/app/realtime/hub.py` is the single fan-out entry point and takes a
-JSON-serialisable dict, so backing it with Postgres `LISTEN`/`NOTIFY` is a
-change to one method. Until somebody does that deliberately, do not add the
-flag.
+Two things stay per process and are worth knowing before adding workers:
+`GET /api/v1/health/realtime` counts the sockets *the process that answered*
+holds, not the deployment's; and the sign-in throttle (CYLIST-121) is
+in-process, so N workers let N times as many attempts through.
 
 ## Logs
 
@@ -358,6 +418,19 @@ Reading them on the server:
 ```bash
 docker compose -f docker-compose.prod.yml exec app tail -f /data/logs/cylist.log
 ```
+
+**The `client` on each line is the real caller**, not `cloudflared`. The
+container only ever hears from the Docker bridge gateway, so every compose
+file sets `CYLIST_TRUSTED_PROXY_CIDRS='["172.16.0.0/12"]'`: a request from
+inside that network has its client taken from `CF-Connecting-IP` (Cloudflare
+sets it; nothing upstream can append to it), and the bridge address is kept
+beside it as `peer`. A request from anywhere else keeps its peer as the client
+and its headers are ignored, so nothing that reaches the port directly can
+write its own address into the log. The same address feeds the sign-in log
+and the login rate limit (`429` with `Retry-After` after five attempts at one
+account, or thirty from one address, a minute). If the stack is ever put
+behind a different proxy, the networks it connects from go in that list and
+nothing else does.
 
 Two other variables are worth knowing. `CYLIST_LOG_LEVEL=DEBUG` adds every
 static asset and every health check — for a problem being chased, not for

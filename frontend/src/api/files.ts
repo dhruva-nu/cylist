@@ -1,6 +1,7 @@
 /** A project's files: its folders, uploads and links. */
 
 import { API_BASE, jsonBody, request } from './http'
+import { fetchAllPages, pagePath } from './paging'
 import type { Person } from './people'
 import type { Sensitivity } from './roles'
 
@@ -68,8 +69,12 @@ export interface FolderChildren {
   folder: Folder
   /** The folders above this one, outermost first, ending with it. */
   path: FolderCrumb[]
+  /** Every folder directly inside — the tree's structure, never paged. */
   folders: Folder[]
+  /** A page of the files and links directly inside, alphabetical. */
   items: FileItem[]
+  /** Pass as `after` for the items after these. Null on the last page. */
+  next: string | null
 }
 
 export interface LinkInput {
@@ -95,12 +100,15 @@ export const filesApi = {
   ) =>
     request<Folder>(`/projects/${projectKey}/folders`, { method: 'POST', body: jsonBody(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
-  getFolderChildren: (id: string) => request<FolderChildren>(`/folders/${id}/children`),
+  /** What a folder holds: its subfolders whole, and a page of its items from `after`. */
+  getFolderChildren: (id: string, after: string | null = null) =>
+    request<FolderChildren>(pagePath(`/folders/${id}/children`, after)),
   /**
    * Every file and link in the project, flat — what a `>` tag is completed
    * from, and what one is recognised against when prose is read back.
    */
-  listProjectItems: (projectKey: string) => request<FiledItem[]>(`/projects/${projectKey}/items`),
+  listProjectItems: (projectKey: string) =>
+    fetchAllPages<FiledItem>(`/projects/${projectKey}/items`),
 
   uploadFile: (
     folderId: string,
@@ -109,11 +117,13 @@ export const filesApi = {
     level?: Sensitivity | null,
   ) => {
     const form = new FormData()
-    form.append('file', file)
+    // The fields before the file: the server reads the form as it arrives,
+    // and checks what it has already seen before it stores the file.
     if (addedBy) form.append('added_by', addedBy)
     // Left off rather than sent empty: omitting it is what makes the server
     // fall back to the folder's default.
     if (level) form.append('sensitivity', level)
+    form.append('file', file)
     return request<FileItem>(`/folders/${folderId}/upload`, { method: 'POST', body: form })
   },
   addLink: (folderId: string, input: LinkInput) =>

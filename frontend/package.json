@@ -2,7 +2,7 @@
   "name": "cylist-frontend",
   "private": true,
   "type": "module",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -73,6 +73,9 @@ class PushSender(Protocol):
 
     async def send(self, message: dict[str, Any]) -> SendOutcome: ...
 
+    async def aclose(self) -> None:
+        """Let go of whatever the sender holds open. Called once, at shutdown."""
+
 
 class ServiceAccountError(ValueError):
     """The configured key is missing, unreadable or not a service account."""
@@ -169,12 +172,19 @@ class NullSender:
         )
         return SendOutcome.FAILED
 
+    async def aclose(self) -> None:
+        return None
+
 
 class FcmSender:
     """Sends through FCM HTTP v1 as one service account.
 
     ``transport`` is the network unless a test answers in FCM's and Google's
     place, as ``app.state.hook_transport`` does for hooks.
+
+    One HTTP client serves every message for the sender's lifetime, so the
+    connections to Google and FCM are opened once and kept alive rather than
+    paying a TLS handshake per push; :meth:`aclose` shuts it at shutdown.
     """
 
     def __init__(
@@ -185,10 +195,10 @@ class FcmSender:
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._account = account
-        self._transport = transport
         self._clock = clock
         self._access_token: str | None = None
         self._expires_at = 0.0
+        self._http = httpx.AsyncClient(transport=transport, timeout=TIMEOUT)
 
     @property
     def enabled(self) -> bool:
@@ -204,33 +214,35 @@ class FcmSender:
         A 401 means the access token was refused — revoked, or the clock is
         off — so it is minted again and the message tried once more.
         """
-        async with httpx.AsyncClient(transport=self._transport, timeout=TIMEOUT) as http:
-            try:
-                response = await self._post(http, message)
-                if response.status_code == httpx.codes.UNAUTHORIZED:
-                    self._access_token = None
-                    response = await self._post(http, message)
-            except (httpx.HTTPError, _TokenExchangeError) as error:
-                logger.warning(
-                    "Push failed before FCM answered",
-                    extra={"context": {"error": type(error).__name__, "detail": str(error)}},
-                )
-                return SendOutcome.FAILED
+        try:
+            response = await self._post(message)
+            if response.status_code == httpx.codes.UNAUTHORIZED:
+                self._access_token = None
+                response = await self._post(message)
+        except (httpx.HTTPError, _TokenExchangeError) as error:
+            logger.warning(
+                "Push failed before FCM answered",
+                extra={"context": {"error": type(error).__name__, "detail": str(error)}},
+            )
+            return SendOutcome.FAILED
         return _outcome(response, message)
 
-    async def _post(self, http: httpx.AsyncClient, message: dict[str, Any]) -> httpx.Response:
-        token = await self._token(http)
-        return await http.post(
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+    async def _post(self, message: dict[str, Any]) -> httpx.Response:
+        token = await self._token()
+        return await self._http.post(
             SEND_URL.format(project_id=self._account.project_id),
             json={"message": message},
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    async def _token(self, http: httpx.AsyncClient) -> str:
+    async def _token(self) -> str:
         moment = self._clock()
         if self._access_token is not None and moment < self._expires_at - REFRESH_MARGIN:
             return self._access_token
-        response = await http.post(
+        response = await self._http.post(
             self._account.token_uri,
             data={
                 "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -239,7 +251,15 @@ class FcmSender:
         )
         if response.status_code != httpx.codes.OK:
             raise _TokenExchangeError(f"token endpoint answered {response.status_code}")
-        body = response.json()
+        # A 200 that is not a JSON object — a captive portal's page, a proxy's
+        # error dressed as success — is a refusal like any other, so it fails
+        # this one message and not the rest of the devices it was going to.
+        try:
+            body = response.json()
+        except ValueError:
+            raise _TokenExchangeError("token endpoint answered with something not JSON") from None
+        if not isinstance(body, dict):
+            raise _TokenExchangeError("token endpoint answered with something not an object")
         token = body.get("access_token")
         if not isinstance(token, str) or not token:
             raise _TokenExchangeError("token endpoint returned no access_token")

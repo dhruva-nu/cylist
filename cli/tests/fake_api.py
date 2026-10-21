@@ -126,7 +126,9 @@ SUMMARY = {
     "vault_secret_count": 1,
 }
 
-COLUMNS = {
+# Annotated for the same reason as MACHINE: the board's lists and its two
+# integers infer a value type of `object`, which nothing can loop over.
+COLUMNS: dict[str, Any] = {
     "columns": [
         {
             "id": BACKLOG_ID,
@@ -256,7 +258,7 @@ SUBTASK = {
     "position": None,
 }
 
-TIMELINE = [
+TIMELINE: list[dict[str, Any]] = [
     {
         "id": "0192f3c4-0008-7000-8000-000000000001",
         "task_id": TASK_TWO_ID,
@@ -625,6 +627,61 @@ class Recorder:
         return [f"{item.method} {item.url.path}" for item in self.requests]
 
 
+def page(request: httpx.Request, rows: list[dict[str, Any]]) -> httpx.Response:
+    """One page of ``rows`` as the real API serves a list: ``{items, next}``.
+
+    Honours ``after`` and ``limit`` the way the server does — ``after`` is the
+    id of the last row already read — so a test can prove a client follows
+    ``next`` to the end rather than stopping at the first page.
+    """
+    after = request.url.params.get("after")
+    limit = int(request.url.params.get("limit", "50"))
+    start = 0
+    if after:
+        start = next(index for index, row in enumerate(rows) if row["id"] == after) + 1
+    shown = rows[start : start + limit]
+    more = start + limit < len(rows)
+    return httpx.Response(200, json={"items": shown, "next": shown[-1]["id"] if more else None})
+
+
+def summary_of(task: dict[str, Any]) -> dict[str, Any]:
+    """A card as a list carries it: everything but its description."""
+    return {key: value for key, value in task.items() if key != "description"}
+
+
+def board(request: httpx.Request) -> httpx.Response:
+    """``GET /projects/{ref}/tasks``: the top of every column."""
+    limit = int(request.url.params.get("limit", "50"))
+    stacks = []
+    for column in COLUMNS["columns"]:
+        cards = [
+            summary_of(task) for task in (TASK_ONE, TASK_TWO) if task["column_id"] == column["id"]
+        ]
+        shown = cards[:limit]
+        stacks.append(
+            {
+                "column_id": column["id"],
+                "total": len(cards),
+                "items": shown,
+                "next": shown[-1]["id"] if len(cards) > limit else None,
+            }
+        )
+    return httpx.Response(200, json={"columns": stacks})
+
+
+def _children_page(request: httpx.Request, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """The ``items`` and ``next`` of a folder listing, a page of one at a time."""
+    after = request.url.params.get("after")
+    start = 0 if not after else next(i for i, item in enumerate(items) if item["id"] == after) + 1
+    shown = items[start : start + 1]
+    return {"items": shown, "next": shown[-1]["id"] if start + 1 < len(items) else None}
+
+
+def _detail(task: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """A ``GET /tasks/{ref}`` body: the card, its newest timeline and no more."""
+    return {"comments": [], "comments_next": None, **task, **extra}
+
+
 def _error(status: int, code: str, message: str) -> httpx.Response:
     return httpx.Response(status, json={"error": {"code": code, "message": message, "details": {}}})
 
@@ -672,7 +729,7 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         return httpx.Response(201, json={**MINTED, "name": body["name"], "scopes": body["scopes"]})
 
     if path == "/projects" and method == "GET":
-        return httpx.Response(200, json=[PROJECT])
+        return page(request, [PROJECT])
     if path == "/projects" and method == "POST":
         body = json.loads(request.content)
         return httpx.Response(201, json={**PROJECT, "key": body["key"], "name": body["name"]})
@@ -689,50 +746,67 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         return httpx.Response(200, json={"members": [ADITI, LENA]})
 
     if path.endswith("/goals") and method == "GET":
-        return httpx.Response(200, json=[GOAL])
+        return page(request, [GOAL])
     if path.endswith("/goals") and method == "POST":
         body = json.loads(request.content)
-        return httpx.Response(201, json={**GOAL, "name": body["name"], "tasks": []})
+        return httpx.Response(
+            201, json={**GOAL, "name": body["name"], "tasks": [], "tasks_next": None}
+        )
     if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "GET":
-        return httpx.Response(200, json={**GOAL, "tasks": [TASK_ONE]})
+        # A goal carries the first page of its cards; the rest are a page away.
+        return httpx.Response(
+            200, json={**GOAL, "tasks": [summary_of(TASK_ONE)], "tasks_next": TASK_ONE_ID}
+        )
+    if path in {"/goals/ATL-G1/tasks", f"/goals/{GOAL_ID}/tasks"} and method == "GET":
+        return page(request, [summary_of(TASK_ONE), summary_of(TASK_TWO)])
     if path in {"/goals/ATL-G1", f"/goals/{GOAL_ID}"} and method == "PATCH":
         body = json.loads(request.content)
-        return httpx.Response(200, json={**GOAL, **body, "tasks": []})
+        return httpx.Response(200, json={**GOAL, **body, "tasks": [], "tasks_next": None})
 
+    if path.startswith("/columns/") and path.endswith("/tasks") and method == "GET":
+        column_id = path.removeprefix("/columns/").removesuffix("/tasks")
+        cards = [task for task in (TASK_ONE, TASK_TWO) if task["column_id"] == column_id]
+        return page(request, [summary_of(task) for task in cards])
     if path.endswith("/tasks") and method == "GET":
-        return httpx.Response(200, json=[TASK_ONE, TASK_TWO])
+        return board(request)
     if path.endswith("/tasks") and method == "POST":
         body = json.loads(request.content)
-        created = {**TASK_ONE, "title": body["title"], "comments": []}
+        created = _detail(TASK_ONE, title=body["title"])
         return httpx.Response(201, json=created)
 
     if path.endswith("/history") and method == "GET":
         return httpx.Response(200, json=TASK_HISTORY)
     if path in {"/tasks/ATL-1", f"/tasks/{TASK_ONE_ID}"}:
-        return httpx.Response(200, json={**TASK_ONE, "comments": []})
+        return httpx.Response(200, json=_detail(TASK_ONE))
     if path in {"/tasks/ATL-2", f"/tasks/{TASK_TWO_ID}"}:
         return httpx.Response(
             200,
-            json={**TASK_TWO, "comments": TIMELINE, "subtasks": [SUBTASK], "open_subtask_count": 1},
+            json=_detail(
+                TASK_TWO,
+                comments=TIMELINE,
+                comment_count=len(TIMELINE),
+                subtasks=[summary_of(SUBTASK)],
+                open_subtask_count=1,
+            ),
         )
     if path in {"/tasks/ATL-2-1", f"/tasks/{SUBTASK_ID}"}:
-        return httpx.Response(200, json={**SUBTASK, "comments": []})
+        return httpx.Response(200, json=_detail(SUBTASK))
     if path.endswith("/finish"):
         body = json.loads(request.content)
         finished = "2026-02-04T11:00:00Z" if body["finished"] else None
-        return httpx.Response(200, json={**SUBTASK, "finished_at": finished, "comments": []})
+        return httpx.Response(200, json=_detail(SUBTASK, finished_at=finished))
     if path.endswith("/move"):
-        return httpx.Response(200, json={**TASK_TWO, "column_id": DOING_ID, "comments": []})
+        return httpx.Response(200, json=_detail(TASK_TWO, column_id=DOING_ID))
     if path.endswith("/status"):
         body = json.loads(request.content)
         return httpx.Response(
             200,
-            json={
-                **TASK_TWO,
-                "status": body["status"],
-                "waiting_on": [LENA] if body.get("waiting_on") else [],
-                "comments": TIMELINE,
-            },
+            json=_detail(
+                TASK_TWO,
+                status=body["status"],
+                waiting_on=[LENA] if body.get("waiting_on") else [],
+                comments=TIMELINE,
+            ),
         )
     if path.endswith("/comments") and method == "POST":
         return httpx.Response(201, json=TIMELINE[0])
@@ -765,7 +839,7 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         people = [ADITI, MACHINE, LENA, LEO]
         if kind:
             people = [person for person in people if person["kind"] == kind]
-        return httpx.Response(200, json=people)
+        return page(request, people)
     if path == "/people" and method == "POST":
         body = json.loads(request.content)
         return httpx.Response(201, json={**ADITI, **body})
@@ -788,7 +862,9 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
                     {"id": NESTED_ID, "name": "2026"},
                 ],
                 "folders": [],
-                "items": [MSA, PORTAL],
+                # One item a page, so that finding `portal` means reading the
+                # second page: a lookup that stops at the first one fails.
+                **_children_page(request, [MSA, PORTAL]),
             },
         )
     if path == f"/folders/{CONTRACTS_ID}/children":
@@ -813,13 +889,14 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
                     }
                 ],
                 "items": [],
+                "next": None,
             },
         )
     if path == f"/items/{MSA_ID}/download":
         return httpx.Response(200, content=MSA_BYTES)
 
     if path.endswith("/vault/trees") and method == "GET":
-        return httpx.Response(200, json=VAULT_TREES)
+        return page(request, VAULT_TREES)
     if path == f"/vault/trees/{TREE_ID}":
         return httpx.Response(200, json=VAULT_TREE_DETAIL)
     if path == f"/vault/nodes/{STRIPE_ID}/reveal":
@@ -840,7 +917,7 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         return httpx.Response(200, json=DOC_TREE)
 
     if path.endswith("/skills") and method == "GET":
-        return httpx.Response(200, json=SKILLS)
+        return page(request, SKILLS)
     if path.endswith("/skills") and method == "POST":
         return httpx.Response(201, json={**SKILLS[1], "name": "release-kit.zip", "size": 512})
     if path == f"/skills/{TIDY_SKILL_ID}/folder":
@@ -849,6 +926,6 @@ def _route(request: httpx.Request, path: str) -> httpx.Response:
         return httpx.Response(200, json=KIT_FOLDER)
 
     if path == "/activity":
-        return httpx.Response(200, json=ACTIVITY)
+        return page(request, ACTIVITY)
 
     return _error(404, "not_found", f"No route for {method} {path} in the fake API.")

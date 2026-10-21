@@ -205,11 +205,10 @@ async def may_add_card(
     if not body.sub_statuses:
         return principal
 
-    template = (
-        await templates.get_template(session, body.template_id)
-        if body.template_id is not None
-        else None
-    )
+    # Through the same check the service makes, so a template from another
+    # project is refused here as it would be there — rather than looked up by
+    # id alone, and its stages used to say where a card on this board lands.
+    template = await templates.require_template(session, project.id, body.template_id)
     board = await columns.list_for_project(session, project)
     if board:
         landing = templates.landing_column(template, board[0])

@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
@@ -28,6 +28,7 @@ from app.schemas.agent_sessions import AgentPromptAnswer, AgentPromptOption, Age
 from app.services import agent_prompts, tasks
 from app.services.agent_sessions import presence
 from tests import ws
+from tests.conftest import cards_of
 from tests.test_agent_reports import SESSION_A, SESSION_B, a_card
 
 SOCKET = f"/api/v1/agent-sessions/{SESSION_A}/ws"
@@ -76,16 +77,16 @@ async def _answer(client: AsyncClient, ref: str, prompt_id: str, **body: Any) ->
 
 
 async def _card(client: AsyncClient, ref: str) -> dict[str, Any]:
-    board = (await client.get("/projects/ATL/tasks")).json()
+    board = cards_of((await client.get("/projects/ATL/tasks")).json())
     return next(task for task in board if task["reference"] == ref)
 
 
 async def _sessions(client: AsyncClient, ref: str) -> list[dict[str, Any]]:
-    return list((await client.get(f"/tasks/{ref}/agent-sessions")).json())
+    return list((await client.get(f"/tasks/{ref}/agent-sessions")).json()["items"])
 
 
 async def _verbs(client: AsyncClient) -> list[str]:
-    feed = (await client.get("/activity")).json()
+    feed = (await client.get("/activity")).json()["items"]
     return [entry["verb"] for entry in feed if entry["verb"].startswith("agent_session.")]
 
 
@@ -170,14 +171,14 @@ class TestAsking:
         self, signed_in: AsyncClient, agent: dict[str, str]
     ) -> None:
         ref = await a_card(signed_in)
-        await _report(signed_in, agent, ref, "working", SESSION_A)
-        await _report(signed_in, agent, ref, "working", SESSION_B)
+        await _report(signed_in, agent, ref, "working", SESSION_A, client_name="A")
+        await _report(signed_in, agent, ref, "working", SESSION_B, client_name="B")
 
         await _ask(signed_in, agent, ref)
 
-        by_id = {row["client_session_id"]: row for row in await _sessions(signed_in, ref)}
-        assert by_id[SESSION_B]["reason"] == "question"
-        assert by_id[SESSION_A]["state"] == "working"
+        by_name = {row["client_name"]: row for row in await _sessions(signed_in, ref)}
+        assert by_name["B"]["reason"] == "question"
+        assert by_name["A"]["state"] == "working"
 
 
 class TestAnswering:
@@ -422,7 +423,7 @@ class TestReportsWhileAsking:
         row = await _report(signed_in, agent, ref, "working")
 
         assert row["state"] == "working"
-        prompts = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()
+        prompts = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()["items"]
         assert (prompts[0]["status"], prompts[0]["closed_reason"]) == ("withdrawn", "abandoned")
 
     async def test_a_session_ending_withdraws_what_it_asked(
@@ -465,7 +466,7 @@ class TestTheTaskPanel:
         asked = await _ask(signed_in, agent, ref)
 
         detail = (await signed_in.get(f"/tasks/{ref}")).json()
-        listed = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()
+        listed = (await signed_in.get(f"/tasks/{ref}/agent-prompts")).json()["items"]
 
         assert detail["agent_session"]["prompt"]["id"] == asked["id"]
         assert detail["agent_sessions"][0]["prompt"]["id"] == asked["id"]
@@ -759,9 +760,16 @@ class TestPermissionsOverTheSocket:
 
     async def _open_permission(self, session: AsyncSession, ref: str) -> str:
         task = await tasks.resolve(session, ref)
+        # The session the agent reported, whoever's token that was.
+        row = await session.scalar(
+            select(AgentSession).where(
+                AgentSession.task_id == task.id, AgentSession.client_session_id == SESSION_A
+            )
+        )
+        assert row is not None and row.key is not None
         prompt_id = uuid4()
         reply = await agent_prompts.open_permission(
-            session, task, SESSION_A, prompt_id, "Running ls", "Bash"
+            session, task, row.key, prompt_id, "Running ls", "Bash"
         )
         assert reply is None
         await session.commit()
@@ -810,6 +818,8 @@ class TestPresence:
             answer_key=None,
             answered_by=None,
             answered_by_id=None,
+            owner_id=None,
+            owner=None,
             answered_at=None,
             closed_reason=None,
             asked_at=asking.state_changed_at,

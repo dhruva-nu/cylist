@@ -2,6 +2,7 @@ package cylist.app.task
 
 import cylist.api.BoardEvent
 import cylist.api.BoardSocket
+import cylist.api.everyPage
 import cylist.api.generated.apis.AgentSessionsApi
 import cylist.api.generated.apis.AuthApi
 import cylist.api.generated.apis.BoardApi
@@ -68,7 +69,9 @@ class ServerTaskSource(private val session: Session) : TaskSource {
         client.api(::BoardApi).listColumnsApiV1ProjectsProjectRefColumnsGet(projectKey).columns.sortedBy { it.position }
 
     override fun templates(projectKey: String): List<TemplateRead> =
-        client.api(::TemplatesApi).listTemplatesApiV1ProjectsProjectRefTemplatesGet(projectKey)
+        everyPage { after ->
+            client.api(::TemplatesApi).listTemplatesApiV1ProjectsProjectRefTemplatesGet(projectKey, after = after).let { it.items to it.next }
+        }
 
     override fun members(projectKey: String): List<MemberRead> =
         client.api(::ProjectsApi).listMembersApiV1ProjectsProjectRefMembersGet(projectKey).members
@@ -83,7 +86,7 @@ class ServerTaskSource(private val session: Session) : TaskSource {
     }
 
     override fun feed(ref: String): List<AgentFeedEntryRead> =
-        client.api(::AgentSessionsApi).listAgentFeedApiV1TasksTaskRefAgentFeedGet(ref, limit = FEED_LIMIT)
+        client.api(::AgentSessionsApi).listAgentFeedApiV1TasksTaskRefAgentFeedGet(ref, limit = FEED_LIMIT).items
 
     override fun move(ref: String, columnId: UUID, position: Int, outcome: String?): TaskDetail =
         client.api(::TasksApi).moveTaskApiV1TasksTaskRefMovePost(ref, TaskMove(columnId = columnId, position = position, outcome = outcome))

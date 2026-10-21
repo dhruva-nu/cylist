@@ -87,7 +87,7 @@ class TestTemplates:
         """Templates are opt-in: a board works without ever naming one."""
         await _project(signed_in)
 
-        assert (await signed_in.get("/projects/ATL/templates")).json() == []
+        assert (await signed_in.get("/projects/ATL/templates")).json()["items"] == []
 
     async def test_a_template_is_created_with_its_description(self, signed_in: AsyncClient) -> None:
         await _project(signed_in)
@@ -123,7 +123,7 @@ class TestTemplates:
         await _project(signed_in)
         await _template(signed_in)
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
 
         assert listed[0]["allowed_column_ids"] == []
         assert listed[0]["stages"] == []
@@ -163,7 +163,7 @@ class TestTemplates:
         template = await _template(signed_in)
 
         assert (await signed_in.delete(f"/templates/{template}")).status_code == 200
-        assert (await signed_in.get("/projects/ATL/templates")).json() == []
+        assert (await signed_in.get("/projects/ATL/templates")).json()["items"] == []
 
     async def test_a_template_a_card_uses_is_not_deleted(self, signed_in: AsyncClient) -> None:
         """Deleting it would quietly free the card and drop what it still owes."""
@@ -181,7 +181,7 @@ class TestTemplates:
         template = await _template(signed_in)
         await _task(signed_in, person, template_id=template)
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
 
         assert listed[0]["task_count"] == 1
 
@@ -189,6 +189,35 @@ class TestTemplates:
         await _project(signed_in)
 
         assert (await signed_in.patch(f"/templates/{UNKNOWN_ID}", json={})).status_code == 404
+
+    async def test_a_new_cards_template_must_be_this_projects(self, signed_in: AsyncClient) -> None:
+        """CYLIST-146: the guard that works out where a staged card lands asks
+        the same question the service does, so a template from another board
+        — or none — is the one 422 either way."""
+        person = await _project(signed_in)
+        await signed_in.post("/projects", json={"key": "HRM", "name": "Hermes"})
+        theirs = (
+            await signed_in.post(
+                "/projects/HRM/templates",
+                json={"name": "Hotfix", "description": "Theirs.", "stages": []},
+            )
+        ).json()["id"]
+        card = {
+            "title": "Stripe webhook idempotency",
+            "description": "Duplicate deliveries create double payments.",
+            "type": "bug",
+            "assignee_id": person,
+            "sub_statuses": ["Confirmed"],
+        }
+
+        foreign = await signed_in.post("/projects/ATL/tasks", json={**card, "template_id": theirs})
+        missing = await signed_in.post(
+            "/projects/ATL/tasks", json={**card, "template_id": UNKNOWN_ID}
+        )
+
+        assert foreign.status_code == missing.status_code == 422
+        assert foreign.json()["error"]["message"] == "That template is not on this project."
+        assert missing.json()["error"]["message"] == "That template is not on this project."
 
 
 class TestStages:
@@ -205,7 +234,7 @@ class TestStages:
             ],
         )
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()[0]
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"][0]
         assert listed["id"] == template
         assert listed["allowed_column_ids"] == [columns["To do"], columns["Done"]]
         by_column = {stage["column_id"]: stage["sub_stage_labels"] for stage in listed["stages"]}
@@ -226,7 +255,7 @@ class TestStages:
             ],
         )
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()[0]
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"][0]
         assert listed["allowed_column_ids"] == [columns["To do"], columns["Done"]]
 
     async def test_a_template_may_start_with_no_stages(self, signed_in: AsyncClient) -> None:
@@ -234,7 +263,7 @@ class TestStages:
 
         template = await _template(signed_in, "Hotfix", [])
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
         assert listed[0]["id"] == template
         assert listed[0]["stages"] == []
 
@@ -349,7 +378,7 @@ class TestStages:
             json={"stages": [{"column_id": UNKNOWN_ID, "sub_stage_labels": []}]},
         )
 
-        kept = (await signed_in.get("/projects/ATL/templates")).json()[0]
+        kept = (await signed_in.get("/projects/ATL/templates")).json()["items"][0]
         assert kept["allowed_column_ids"] == [columns["To do"]]
 
     async def test_deleting_a_column_takes_it_out_of_every_template(
@@ -371,7 +400,7 @@ class TestStages:
 
         assert (await signed_in.delete(f"/columns/{review}")).status_code == 200
 
-        listed = (await signed_in.get("/projects/ATL/templates")).json()
+        listed = (await signed_in.get("/projects/ATL/templates")).json()["items"]
         assert listed[0]["allowed_column_ids"] == [columns["To do"]]
 
 
@@ -829,7 +858,9 @@ class TestWhatTheTrailSays:
             signed_in, "Hotfix", [{"column_id": columns["To do"], "sub_stage_labels": []}]
         )
 
-        entries = (await signed_in.get("/activity", params={"entity_type": "template"})).json()
+        entries = (await signed_in.get("/activity", params={"entity_type": "template"})).json()[
+            "items"
+        ]
 
         assert entries[0]["verb"] == "template.created"
 

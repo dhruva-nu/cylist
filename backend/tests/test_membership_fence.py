@@ -144,7 +144,7 @@ class TestTheList:
     async def test_a_member_sees_the_project(self, signed_in: AsyncClient) -> None:
         await _created(signed_in, "/projects", ATLAS)
 
-        assert _keys((await signed_in.get("/projects")).json()) == ["ATL"]
+        assert _keys((await signed_in.get("/projects")).json()["items"]) == ["ATL"]
 
     async def test_somebody_not_on_it_does_not(
         self, signed_in: AsyncClient, other_client: AsyncClient
@@ -152,7 +152,7 @@ class TestTheList:
         await _created(signed_in, "/projects", ATLAS)
         await _aditi(signed_in, other_client)
 
-        assert (await other_client.get("/projects")).json() == []
+        assert (await other_client.get("/projects")).json()["items"] == []
 
     async def test_an_archived_project_is_still_only_its_members(
         self, signed_in: AsyncClient, other_client: AsyncClient
@@ -163,7 +163,7 @@ class TestTheList:
 
         listed = await other_client.get("/projects", params={"include_archived": True})
 
-        assert listed.json() == []
+        assert listed.json()["items"] == []
 
     async def test_a_new_person_sees_exactly_the_one_they_were_added_to(
         self, signed_in: AsyncClient, other_client: AsyncClient
@@ -178,8 +178,8 @@ class TestTheList:
             "/auth/accept-invite", json={"token": token, "password": INVITEE_PASSWORD}
         )
 
-        assert _keys((await other_client.get("/projects")).json()) == ["HRM"]
-        assert _keys((await signed_in.get("/projects")).json()) == ["HRM", "ATL"]
+        assert _keys((await other_client.get("/projects")).json()["items"]) == ["HRM"]
+        assert _keys((await signed_in.get("/projects")).json()["items"]) == ["HRM", "ATL"]
 
 
 class TestAProjectYouAreNotOn:
@@ -271,7 +271,7 @@ class TestAProjectYouAreNotOn:
         await put_members(signed_in, "ATL", [aditi])
 
         assert (await other_client.get(paths["card"])).status_code == 200
-        assert _keys((await other_client.get("/projects")).json()) == ["ATL"]
+        assert _keys((await other_client.get("/projects")).json()["items"]) == ["ATL"]
 
     async def test_being_taken_off_closes_it_again(
         self, signed_in: AsyncClient, other_client: AsyncClient
@@ -283,7 +283,7 @@ class TestAProjectYouAreNotOn:
         await put_members(signed_in, "ATL", [])
 
         assert (await other_client.get(paths["card"])).status_code == 404
-        assert (await other_client.get("/projects")).json() == []
+        assert (await other_client.get("/projects")).json()["items"] == []
 
     async def test_its_board_socket_is_closed_as_not_found(
         self, signed_in: AsyncClient, other_client: AsyncClient
@@ -307,7 +307,7 @@ class TestTheFeed:
         await _atlas(signed_in)
         await _aditi(signed_in, other_client)
 
-        feed = (await other_client.get("/activity", params={"limit": 200})).json()
+        feed = (await other_client.get("/activity", params={"limit": 100})).json()["items"]
 
         assert feed, "the directory entries are nobody's project, so they are still there"
         assert all(entry["project_id"] is None for entry in feed)
@@ -330,7 +330,7 @@ class TestAgentTokens:
         paths = await _atlas(signed_in)
         agent = await _token(signed_in, ["read", "write"])
 
-        assert _keys((await signed_in.get("/projects", headers=agent)).json()) == ["ATL"]
+        assert _keys((await signed_in.get("/projects", headers=agent)).json()["items"]) == ["ATL"]
         assert (await signed_in.get(paths["card"], headers=agent)).status_code == 200
 
     async def test_an_outsiders_token_does_not(
@@ -341,7 +341,7 @@ class TestAgentTokens:
         await _aditi(signed_in, other_client)
         agent = await _token(other_client, ["read", "write", "vault:read", "vault:reveal", "admin"])
 
-        assert (await other_client.get("/projects", headers=agent)).json() == []
+        assert (await other_client.get("/projects", headers=agent)).json()["items"] == []
         assert (await other_client.get(paths["card"], headers=agent)).status_code == 404
         assert (await other_client.get(paths["node"], headers=agent)).status_code == 404
 
@@ -379,5 +379,5 @@ class TestTheBootstrapSession:
         await _created(bootstrapped, "/projects", ATLAS)
         await bootstrapped.put("/projects/ATL/members", json={"person_ids": []})
 
-        assert _keys((await bootstrapped.get("/projects")).json()) == ["ATL"]
+        assert _keys((await bootstrapped.get("/projects")).json()["items"]) == ["ATL"]
         assert (await bootstrapped.get("/projects/ATL/members")).status_code == 200

@@ -1,6 +1,7 @@
 /** Who is on a project, the role each of them holds, and what that role allows. */
 
 import { jsonBody, request } from './http'
+import { fetchAllPages } from './paging'
 import type { Person } from './people'
 
 /**
@@ -152,7 +153,7 @@ export const rolesApi = {
       body: jsonBody({ person_ids: personIds }),
     }),
 
-  listRoles: (projectKey: string) => request<RoleSummary[]>(`/projects/${projectKey}/roles`),
+  listRoles: (projectKey: string) => fetchAllPages<RoleSummary>(`/projects/${projectKey}/roles`),
   createRole: (projectKey: string, input: RoleInput) =>
     request<RoleSummary>(`/projects/${projectKey}/roles`, {
       method: 'POST',

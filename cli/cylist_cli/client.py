@@ -57,6 +57,10 @@ CONNECT_FAILURES = (httpx.ConnectError, httpx.ConnectTimeout)
 
 JsonDict = dict[str, Any]
 
+PAGE_LIMIT = 100
+"""The most rows the server puts on one page of a list, and so what
+:meth:`Client.get_all` asks for: the fewest round trips to read the lot."""
+
 
 class Client:
     """A session against one Cylist server, whatever address it answers on."""
@@ -121,6 +125,26 @@ class Client:
 
     def get(self, path: str, **params: Any) -> Any:
         return self._send("GET", path, params=_clean(params))
+
+    def get_all(self, path: str, *, after: str | None = None, **params: Any) -> list[JsonDict]:
+        """Every row of a paged list, following each page's ``next`` to the end.
+
+        Every list the server serves comes a page at a time (``{items, next}``).
+        That is right for a screen and wrong for a lookup: a name resolved
+        against the first hundred people misses the hundred-and-first, and
+        says "no such person" about somebody who exists. So the places that
+        look a name up, or print a whole directory, read every page.
+
+        ``after`` starts part-way down, for a list whose first page arrived
+        inside another response — a goal's cards, say.
+        """
+        rows: list[JsonDict] = []
+        while True:
+            page = self.get(path, **params, after=after, limit=PAGE_LIMIT)
+            rows.extend(page.get("items", []))
+            after = page.get("next")
+            if not after:
+                return rows
 
     def post(self, path: str, body: JsonDict | None = None) -> Any:
         return self._send("POST", path, json=body if body is not None else {})

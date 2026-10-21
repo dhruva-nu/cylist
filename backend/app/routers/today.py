@@ -92,8 +92,12 @@ async def add_pick(
     principal: Principal = Depends(require(Scope.WRITE)),
     session: AsyncSession = SessionDependency,
 ) -> PickRead:
-    """Pick a card up for a day. Picking one that is already on the day hands it back."""
-    task = await tasks.resolve(session, body.task)
+    """Pick a card up for a day. Picking one that is already on the day hands it back.
+
+    A card that is not on this project — on another board, or nowhere — is
+    one 422, whichever it is.
+    """
+    task = await tasks.require_on_project(session, project.id, body.task)
     picked = await today.pick(session, project, today.person_of(principal), task, body.day)
     await session.refresh(picked, ["todos"])
     return today.pick_read(picked)

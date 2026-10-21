@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute, defer
 
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, not_on_this_project
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
+from app.services import columns, references
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def resolve(session: AsyncSession, reference: str) -> Task:
@@ -36,35 +40,55 @@ async def resolve(session: AsyncSession, reference: str) -> Task:
     return task
 
 
+async def require_on_project(session: AsyncSession, project_id: UUID, reference: str) -> Task:
+    """A task a request body names, which has to be on this project.
+
+    The body's counterpart to ``resolved_task``, for a route whose path names
+    the project and whose body names the card. Nonexistent and elsewhere are
+    one answer, as for every reference that is not on the project
+    (CYLIST-146) — and so a card on a board the caller cannot see reads
+    exactly like one that does not exist.
+
+    Raises:
+        UnprocessableRequestError: from
+            :func:`app.core.errors.not_on_this_project`.
+    """
+    try:
+        task = await resolve(session, reference)
+    except NotFoundError:
+        raise not_on_this_project("task", task=reference) from None
+    if task.project_id != project_id:
+        raise not_on_this_project("task", task=reference)
+    return task
+
+
 def _by_reference(reference: str) -> Select[tuple[Task]]:
     """The query for the task a human reference such as ``ATL-41-2`` names.
 
     Raises:
         NotFoundError: if the reference is not shaped like one at all.
     """
-    # A key can hold no dash, so the parts are unambiguous: ``KEY-number``
-    # names a card and ``KEY-number-sub`` names a sub-task of one.
-    key, *numbers = reference.split("-")
-    if not key or not numbers or not all(part.isdigit() for part in numbers):
+    parsed = references.task_reference(reference)
+    if parsed is None:
+        if references.is_too_deep(reference):
+            raise NotFoundError(
+                f"No task matching {reference!r}. Sub-tasks go one level deep, "
+                "so a reference carries at most two numbers."
+            )
         raise NotFoundError(f"No task matching {reference!r}.")
-    if len(numbers) > 2:
-        raise NotFoundError(
-            f"No task matching {reference!r}. Sub-tasks go one level deep, "
-            "so a reference carries at most two numbers."
-        )
 
     card = (
         select(Task)
         .join(Project, Project.id == Task.project_id)
-        .where(Project.key == key.upper(), Task.number == int(numbers[0]))
+        .where(Project.key == parsed.key, Task.number == parsed.number)
     )
-    if len(numbers) == 1:
+    if parsed.sub_number is None:
         return card
 
     parent = card.subquery()
     return select(Task).where(
         Task.parent_id.in_(select(parent.c.id)),
-        Task.sub_number == int(numbers[1]),
+        Task.sub_number == parsed.sub_number,
     )
 
 
@@ -80,20 +104,100 @@ async def get(session: AsyncSession, task_id: UUID) -> Task:
     return task
 
 
-async def list_for_project(session: AsyncSession, project: Project) -> list[Task]:
-    """Return the board's cards, in the order they are stacked.
+LISTED_WITHOUT = (defer(Task.description),)
+"""Loader options for a list of cards. The description is the one unbounded
+field on a card and no list shows it, so no list reads it either."""
 
-    Top-level cards alone: a sub-task is not on the board, and arrives with the
-    card it belongs to instead — see :func:`subtasks`. Anything that wants every
-    row on the project, sub-tasks included, wants :func:`all_for_project`.
+
+@dataclass(frozen=True)
+class ColumnStack:
+    """The top of one column, and how many cards the whole column holds."""
+
+    column: BoardColumn
+    window: Window[Task]
+    total: int
+
+
+def _in_column(column_id: UUID) -> Select[tuple[Task]]:
+    # Only top-level cards are ever in a column — a sub-task is not on the
+    # board, and a card in cold storage has left it — so the column alone says
+    # which cards are on it.
+    return select(Task).where(Task.column_id == column_id)
+
+
+def _stacking() -> tuple[InstrumentedAttribute[int | None], InstrumentedAttribute[UUID]]:
+    # Top to bottom. ``position`` is a sort key with gaps, not an index, and
+    # only its order is used here; the id comes last because a page continues
+    # from a key that no other row shares.
+    return Task.position, Task.id
+
+
+async def board_pages(session: AsyncSession, project: Project, *, limit: int) -> list[ColumnStack]:
+    """The top ``limit`` cards of every column on the board, left to right.
+
+    Two queries for the whole board whatever its width: one ranks each card
+    within its column and keeps the top of each, the other counts every
+    column. Empty columns are in the answer too, so a board can be drawn from
+    it alone.
     """
-    return list(
-        await session.scalars(
-            select(Task)
-            .join(BoardColumn, BoardColumn.id == Task.column_id)
-            .where(Task.project_id == project.id, Task.parent_id.is_(None))
-            .order_by(BoardColumn.position, Task.position)
+    board = await columns.list_for_project(session, project)
+    if not board:
+        return []
+    ids = [column.id for column in board]
+    position, task_id = _stacking()
+    ranked = (
+        select(
+            Task.id,
+            func.row_number()
+            .over(partition_by=Task.column_id, order_by=(position, task_id))
+            .label("rank"),
         )
+        .where(Task.column_id.in_(ids))
+        .subquery()
+    )
+    found = await session.scalars(
+        select(Task)
+        .join(ranked, ranked.c.id == Task.id)
+        .where(ranked.c.rank <= limit + 1)
+        .options(*LISTED_WITHOUT)
+        .order_by(Task.column_id, position, task_id)
+    )
+    stacked: dict[UUID, list[Task]] = {column_id: [] for column_id in ids}
+    for task in found:
+        if task.column_id is not None:
+            stacked[task.column_id].append(task)
+    totals: dict[UUID, int] = {
+        column_id: count
+        for column_id, count in await session.execute(
+            select(Task.column_id, func.count())
+            .where(Task.column_id.in_(ids))
+            .group_by(Task.column_id)
+        )
+        if column_id is not None
+    }
+    return [
+        ColumnStack(
+            column=column,
+            window=Window(
+                rows=stacked[column.id][:limit],
+                next=stacked[column.id][limit - 1].id if len(stacked[column.id]) > limit else None,
+            ),
+            total=totals.get(column.id, 0),
+        )
+        for column in board
+    ]
+
+
+async def column_page(
+    session: AsyncSession, column: BoardColumn, page: PageRequest
+) -> Window[Task]:
+    """One page of a column, top to bottom — what follows its first page."""
+    return await keyset(
+        session,
+        _in_column(column.id),
+        keys=_stacking(),
+        page=page,
+        options=LISTED_WITHOUT,
     )
 
 
@@ -120,4 +224,15 @@ async def subtasks(session: AsyncSession, task: Task) -> list[Task]:
         await session.scalars(
             select(Task).where(Task.parent_id == task.id).order_by(Task.sub_number)
         )
+    )
+
+
+async def subtask_page(session: AsyncSession, task: Task, page: PageRequest) -> Window[Task]:
+    """One page of :func:`subtasks`, in sub-number order."""
+    return await keyset(
+        session,
+        select(Task).where(Task.parent_id == task.id),
+        keys=(Task.sub_number, Task.id),
+        page=page,
+        options=LISTED_WITHOUT,
     )

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 from app.schemas.people import PersonRead
 
 
@@ -67,3 +67,7 @@ class SkillFolderRead(Schema):
     skill: SkillRead
     folder: str = Field(description="The directory name: lowercase letters, digits and hyphens.")
     files: list[SkillFolderFile] = Field(description="SKILL.md first, then the rest by path.")
+
+
+class SkillPage(Page[SkillRead]):
+    """A page of a project's skills, by name."""

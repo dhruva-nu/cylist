@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import EmailStr, Field, field_validator
 
 from app.models.person import PersonKind
-from app.schemas.common import Schema
+from app.schemas.common import Page, Schema
 
 _COLOUR_PATTERN = r"^#(?:[0-9a-fA-F]{6})$"
 
@@ -154,5 +154,9 @@ class AccountSet(Schema):
 
 
 class PasswordChange(Schema):
-    current_password: str = Field(min_length=1)
+    current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+
+
+class PersonPage(Page[PersonRead]):
+    """A page of the people directory."""

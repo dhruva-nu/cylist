@@ -1,13 +1,18 @@
 """Who is connected, and how news reaches them.
 
-Two registries, both plain dictionaries in this process. That is not a
-shortcut: Cylist runs one uvicorn worker per environment — no ``--workers``,
-no replicas — so every socket for a project terminates in the same event loop
-and a dictionary is a complete and correct answer. It stops being one the day
-a second worker appears, which is why :meth:`Hub.publish` is the single
-fan-out entry point and takes a plain JSON-serialisable dict: swapping it for
-Postgres ``LISTEN``/``NOTIFY`` is then a change to one method rather than to
-every caller. ``DEPLOY.md`` says why that day must not arrive by accident.
+Three registries, all plain dictionaries — and all of *this process's*
+connections only. A deployment may run several processes (CYLIST-133), and a
+board in one may be watching a card an agent in another is changing; what
+joins them is :class:`app.realtime.bus.Bus`, which hands every committed
+event to this hub *and* to every other process's, over Postgres
+``LISTEN``/``NOTIFY``. So :meth:`Hub.publish` is "tell the connections held
+here", called once per process per event, and never has to know how many
+processes there are.
+
+Nothing here may decide anything that needs every process's view. "Is this
+agent session held by a socket?" used to be answered from ``_agents``, which
+was a complete answer for one worker and a wrong one for two; it is now a
+column the holding process writes (``agent_session.socket_seen_at``).
 
 **Everything published is a doorbell.** A ``board.changed`` says the board
 changed; it does not say what to, and a client answers it by refetching. That
@@ -45,8 +50,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from app.models.agent_session import SessionKey
 from app.realtime import protocol
 
 logger = logging.getLogger(__name__)
@@ -101,16 +107,28 @@ class Watcher:
 
 @dataclass(eq=False)
 class AgentLink:
-    """One agent session holding one socket."""
+    """One agent session holding one socket.
 
-    client_session_id: str
+    Keyed by the session's owner as well as its id (CYLIST-120): the id is the
+    client's to choose, and keyed by it alone, anyone who knew another
+    person's could connect under it, displace their socket, and be handed
+    their permission answers.
+    """
+
+    key: SessionKey
+    id: UUID = field(default_factory=uuid4)
+    """This connection, as distinct from any other the same session makes —
+    what tells a process that hears of a new socket whether it is its own."""
+    stamped_at: float | None = None
+    """When this socket last wrote ``socket_seen_at``, by the event loop's
+    clock. ``None`` until it first has."""
     outbox: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     """Frames for the agent that are not replies — today only a permission's
     ``answer``. Drained by the socket's handler; see :meth:`Hub.deliver`."""
     displaced: asyncio.Event = field(default_factory=asyncio.Event)
-    """Set when the same client session connects again somewhere else. The
-    handler that sees it closes without ending the database row, because the
-    row now belongs to the newer socket."""
+    """Set when the same session connects again somewhere else — here or in
+    another process. The handler that sees it closes without ending the
+    database row, because the row now belongs to the newer socket."""
 
 
 class Hub:
@@ -118,7 +136,7 @@ class Hub:
 
     def __init__(self) -> None:
         self._watchers: dict[UUID, set[Watcher]] = {}
-        self._agents: dict[str, AgentLink] = {}
+        self._agents: dict[SessionKey, AgentLink] = {}
         self._prompt_waiters: dict[UUID, set[asyncio.Event]] = {}
 
     # --- Browsers ----------------------------------------------------------
@@ -138,13 +156,19 @@ class Hub:
                     del self._watchers[project_id]
 
     def publish(self, event: dict[str, Any]) -> None:
-        """Nudge everyone watching the project this event belongs to.
+        """Nudge everyone here watching the project this event belongs to.
 
         Synchronous, and it never awaits: it is called from the code that has
         just committed a transaction, and that code is not waiting on anyone's
         network. An event for a project nobody is watching is dropped, which
         is the common case and costs a dictionary lookup.
+
+        Called by :class:`~app.realtime.bus.Bus` for this process's own events
+        and for every other process's, alike.
         """
+        if event.get("type") == protocol.AGENT_CONNECTED:
+            self._agent_connected(event)
+            return
         if event.get("type") == protocol.PROMPT_CHANGED:
             self._prompt_changed(event)
         project_id = event.get("project_id")
@@ -164,6 +188,22 @@ class Hub:
         for watcher in watchers:
             # A watcher with one waiting already has everything this would say.
             watcher.offer(key, nudge)
+
+    def resync(self) -> None:
+        """Ring every doorbell held here, and wake every long-poll.
+
+        For when this process may have missed other processes' events — its
+        line to them was down. Every message is a doorbell, so a missed one is
+        made good by ringing again: each board refetches, each waiter re-reads
+        its prompt. Costs one refetch per open board, once.
+        """
+        nudge = protocol.board_changed()
+        for watchers in self._watchers.values():
+            for watcher in watchers:
+                watcher.offer(BOARD_CHANGED, nudge)
+        for waiters in self._prompt_waiters.values():
+            for waiter in waiters:
+                waiter.set()
 
     # --- Prompts ------------------------------------------------------------
 
@@ -199,22 +239,24 @@ class Hub:
             for waiter in self._prompt_waiters.get(prompt_id, ()):
                 waiter.set()
         deliver = event.get("deliver")
-        client_session_id = event.get("client_session_id")
-        if isinstance(deliver, dict) and isinstance(client_session_id, str):
-            self.deliver(client_session_id, deliver)
+        key = _key_of(event)
+        if isinstance(deliver, dict) and key is not None:
+            self.deliver(key, deliver)
 
     # --- Agents ------------------------------------------------------------
 
-    def deliver(self, client_session_id: str, frame: dict[str, Any]) -> bool:
-        """Queue a frame for an agent's socket. False if it holds none here."""
-        link = self._agents.get(client_session_id)
+    def deliver(self, key: SessionKey, frame: dict[str, Any]) -> bool:
+        """Queue a frame for an agent's socket. False if it holds none here —
+        which, with several processes, is the usual answer: every process is
+        told, and only the one holding the socket has anything to do."""
+        link = self._agents.get(key)
         if link is None:
             return False
         link.outbox.put_nowait(frame)
         return True
 
     def register_agent(self, link: AgentLink) -> AgentLink | None:
-        """Take ownership of a client session, displacing any older socket.
+        """Take ownership of a session, displacing any older socket held here.
 
         Last writer wins. The alternative — refusing the new socket — reads as
         safer and is worse: the socket being held may be a half-dead TCP
@@ -222,31 +264,43 @@ class Hub:
         seconds, and the agent trying to reconnect is the one telling the
         truth about where it is.
 
+        An older socket held by *another* process is displaced by the
+        :data:`~app.realtime.protocol.AGENT_CONNECTED` event the caller
+        publishes next, which reaches that process's hub as
+        :meth:`_agent_connected`.
+
         Returns the link that was displaced, if there was one, already marked
         so its handler knows to leave the database row alone.
         """
-        previous = self._agents.get(link.client_session_id)
+        previous = self._agents.get(link.key)
         if previous is not None:
-            previous.displaced.set()
-            logger.info(
-                "Agent session %r reconnected; displacing the socket it left",
-                link.client_session_id,
-            )
-        self._agents[link.client_session_id] = link
+            self._displace(previous)
+        self._agents[link.key] = link
         return previous
 
     def release_agent(self, link: AgentLink) -> None:
         """Let go of a socket, unless a newer one has already taken over."""
-        if self._agents.get(link.client_session_id) is link:
-            del self._agents[link.client_session_id]
+        if self._agents.get(link.key) is link:
+            del self._agents[link.key]
 
-    def live_session_ids(self) -> frozenset[str]:
-        """The client sessions holding a socket right now.
+    def _agent_connected(self, event: dict[str, Any]) -> None:
+        """A socket for some session opened, perhaps in another process.
 
-        What the reaper checks before ending a quiet row: a session in here is
-        witnessed, however long it has been since it last said anything.
+        Whatever older socket this process holds for it is displaced — unless
+        it is the very connection the event is about, which is how a process
+        hears its own news back.
         """
-        return frozenset(self._agents)
+        key = _key_of(event)
+        link = self._agents.get(key) if key is not None else None
+        if link is None or link.id == event.get("link_id"):
+            return
+        del self._agents[link.key]
+        self._displace(link)
+
+    @staticmethod
+    def _displace(link: AgentLink) -> None:
+        link.displaced.set()
+        logger.info("An agent session reconnected; displacing the socket it left")
 
     # --- Looking in --------------------------------------------------------
 
@@ -257,3 +311,12 @@ class Hub:
             "board_watchers": sum(len(group) for group in self._watchers.values()),
             "projects_watched": len(self._watchers),
         }
+
+
+def _key_of(event: dict[str, Any]) -> SessionKey | None:
+    """The agent session an event is addressed to, if it names one whole."""
+    person_id = event.get("person_id")
+    client_session_id = event.get("client_session_id")
+    if isinstance(person_id, UUID) and isinstance(client_session_id, str):
+        return SessionKey(person_id, client_session_id)
+    return None

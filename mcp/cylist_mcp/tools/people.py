@@ -8,7 +8,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult
 from pydantic import Field
 
-from cylist_mcp.client import Api
+from cylist_mcp.client import Api, every
 from cylist_mcp.tools.common import as_tool_result, check_choice
 
 PERSON_KINDS = ("team", "client")
@@ -44,7 +44,7 @@ def register(server: MCPServer, client: Api) -> None:
                 if kind:
                     people = [person for person in people if person.get("kind") == kind]
             else:
-                people = await client.get("/people", kind=kind)
+                people = await every(client, "/people", kind=kind)
             return {"people": people}
 
         return await as_tool_result(call)

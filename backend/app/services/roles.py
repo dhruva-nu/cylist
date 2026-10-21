@@ -41,6 +41,8 @@ from app.models.person import KIND_ORDER, Person
 from app.models.project import Project, ProjectMember
 from app.models.role import ADMIN_ROLE_NAME, ProjectRole
 from app.schemas.roles import RoleCreate, RoleUpdate
+from app.services import people
+from app.services.paging import PageRequest, Window, keyset
 
 _ORDER = (ProjectRole.is_admin.desc(), ProjectRole.name)
 """Admin first, then alphabetical. The one role with authority attached is the
@@ -73,6 +75,20 @@ async def list_roles(session: AsyncSession, project: Project) -> list[ProjectRol
         await session.scalars(
             select(ProjectRole).where(ProjectRole.project_id == project.id).order_by(*_ORDER)
         )
+    )
+
+
+async def page_of_roles(
+    session: AsyncSession, project: Project, page: PageRequest
+) -> Window[ProjectRole]:
+    """A page of :func:`list_roles`, admin first."""
+    return await keyset(
+        session,
+        select(ProjectRole).where(ProjectRole.project_id == project.id),
+        # Ascending throughout, so the admin role's key is the one that is
+        # false: "is not the admin role" sorts it to the top.
+        keys=(ProjectRole.is_admin.is_(False), ProjectRole.name, ProjectRole.id),
+        page=page,
     )
 
 
@@ -140,7 +156,9 @@ async def may_administer(session: AsyncSession, project: Project, principal: Pri
 
     * **The bootstrap session**, which has no person at all — it is the
       deployment owner signing in with ``CYLIST_PASSWORD_HASH`` before any
-      account exists, and it is what opens the first one.
+      account exists, and it is what opens the first one. Only while that is
+      still true, and only the session itself (CYLIST-119): a person-less
+      credential outliving bootstrap administers nothing.
     * **Anyone holding** :attr:`~app.auth.scopes.Scope.ADMIN` **on a project
       with no admin left**. The rules below stop a project losing its last
       admin by any ordinary route, but archiving that person is not an
@@ -149,7 +167,7 @@ async def may_administer(session: AsyncSession, project: Project, principal: Pri
       letting whoever manages the deployment's tokens step in.
     """
     if principal.person_id is None:
-        return True
+        return await people.is_bootstrap(session, principal)
 
     holders = await admin_holder_ids(session, project)
     if principal.person_id in holders:

@@ -23,8 +23,6 @@ from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestEr
 from app.models.doc import SECTION_ORDER, Doc, DocSection, DocTopic
 from app.models.project import Project
 from app.schemas.docs import DocCreate, DocTopicCreate, DocUpdate
-from app.services import doc_corpus
-from app.services.doc_corpus import ProjectCorpus
 
 
 async def topics_for(session: AsyncSession, project_id: UUID) -> list[DocTopic]:
@@ -207,10 +205,19 @@ async def delete_topic(session: AsyncSession, topic: DocTopic) -> None:
 
 
 async def topic_docs(session: AsyncSession, topic_id: UUID) -> list[Doc]:
-    """A topic's docs, top to bottom, bodies and all."""
+    """A topic's docs, top to bottom, without their bodies.
+
+    Every caller wants titles or positions — to check a name, count siblings
+    or close a gap — and a topic's bodies can run to megabytes between them.
+    A doc already loaded whole keeps its body; one loaded here has it read
+    with ``session.refresh(doc, ["body"])`` when it is needed after all.
+    """
     return list(
         await session.scalars(
-            select(Doc).where(Doc.topic_id == topic_id).order_by(Doc.position, Doc.created_at)
+            select(Doc)
+            .options(defer(Doc.body))
+            .where(Doc.topic_id == topic_id)
+            .order_by(Doc.position, Doc.created_at)
         )
     )
 
@@ -309,17 +316,6 @@ async def delete_doc(session: AsyncSession, doc: Doc) -> None:
 
 
 # --- Shared with what agents read and write ------------------------------------
-
-
-async def corpus_for(session: AsyncSession, project: Project) -> ProjectCorpus:
-    """The project's docs as jev-docs reads them, bodies and all, in tree order."""
-    topics = await topics_for(session, project.id)
-    by_topic: dict[UUID, list[Doc]] = {topic.id: [] for topic in topics}
-    for doc in await session.scalars(
-        select(Doc).where(Doc.project_id == project.id).order_by(Doc.position, Doc.created_at)
-    ):
-        by_topic[doc.topic_id].append(doc)
-    return doc_corpus.build(project.key, [(topic, by_topic[topic.id]) for topic in topics])
 
 
 def no_topics_error(project: Project) -> UnprocessableRequestError:

@@ -13,14 +13,18 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.invites import INVITE_TTL, generate_invite, looks_like_invite
-from app.auth.passwords import hash_password, needs_rehash, verify_password
+from app.auth.passwords import dummy_hash, hash_password, needs_rehash, verify_password
+from app.auth.principal import Principal
 from app.auth.tokens import hash_token
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
+from app.db import flush_or_refuse
+from app.models.activity import Channel
 from app.models.person import (
     AGENT_NAME,
     AGENT_RESPONSIBILITIES,
@@ -31,6 +35,7 @@ from app.models.person import (
 )
 from app.schemas.people import PersonCreate, PersonUpdate
 from app.services import tokens
+from app.services.paging import PageRequest, Window, keyset
 
 
 async def create(session: AsyncSession, data: PersonCreate) -> Person:
@@ -99,17 +104,18 @@ async def get(session: AsyncSession, person_id: UUID) -> Person:
 
 async def list_people(
     session: AsyncSession,
+    page: PageRequest,
     *,
     kind: PersonKind | None = None,
     include_archived: bool = False,
-) -> list[Person]:
-    """Return the directory, team first, alphabetical within each kind."""
-    statement = select(Person).order_by(KIND_ORDER, Person.name)
+) -> Window[Person]:
+    """A page of the directory, team first, alphabetical within each kind."""
+    statement = select(Person)
     if kind is not None:
         statement = statement.where(Person.kind == kind)
     if not include_archived:
         statement = statement.where(Person.archived_at.is_(None))
-    return list(await session.scalars(statement))
+    return await keyset(session, statement, keys=(KIND_ORDER, Person.name, Person.id), page=page)
 
 
 async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> Person:
@@ -117,6 +123,10 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
 
     ``archived`` is translated to a timestamp here rather than exposing
     ``archived_at`` for a client to set to an arbitrary moment.
+
+    Raises:
+        UnprocessableRequestError: if this archives the last person who can
+            sign in.
     """
     person = await get(session, person_id)
 
@@ -137,6 +147,8 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
     for field, value in fields.items():
         setattr(person, field, value)
 
+    if data.archived and not person.is_archived:
+        await _require_another_way_in(session, person)
     if data.archived is not None:
         person.archived_at = now() if data.archived else None
     if data.archived:
@@ -144,17 +156,53 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
         # leaves the same way: without credentials to come back to.
         await _withdraw_access(session, person)
 
-    await session.flush()
+    await flush_or_refuse(session, _email_taken(person.email))
     return person
 
 
 async def archive(session: AsyncSession, person_id: UUID) -> Person:
-    """Hide someone from the pickers, keeping every reference to them intact."""
+    """Hide someone from the pickers, keeping every reference to them intact.
+
+    Raises:
+        UnprocessableRequestError: if they are the last person able to sign in.
+    """
     person = await get(session, person_id)
     if not person.is_archived:
+        await _require_another_way_in(session, person)
         person.archived_at = now()
     await _withdraw_access(session, person)
     return person
+
+
+async def _require_another_way_in(session: AsyncSession, person: Person) -> None:
+    """Refuse to archive the last person who can still sign in (CYLIST-118).
+
+    Archiving takes every credential somebody holds, and
+    :func:`has_any_account` counts archived accounts on purpose, so the
+    bootstrap password does not come back either. Archiving the last live
+    password would leave a deployment nobody can get into short of the
+    database — which is not a thing any caller means by "archive".
+
+    Raises:
+        UnprocessableRequestError: naming them, if nobody else could sign in.
+    """
+    if person.password_hash is None:
+        return
+    another = await session.scalar(
+        select(Person.id)
+        .where(
+            Person.password_hash.is_not(None),
+            Person.archived_at.is_(None),
+            Person.id != person.id,
+        )
+        .limit(1)
+    )
+    if another is None:
+        raise UnprocessableRequestError(
+            f"{person.name} is the last person who can sign in, and archiving them "
+            "would lock everybody out. Open an account for somebody else first.",
+            details={"person_id": str(person.id)},
+        )
 
 
 async def _withdraw_access(session: AsyncSession, person: Person) -> None:
@@ -215,6 +263,41 @@ async def has_any_account(session: AsyncSession) -> bool:
     return found is not None
 
 
+async def is_bootstrap(session: AsyncSession, principal: Principal) -> bool:
+    """Whether this caller is the bootstrap session, on a deployment still in need of it.
+
+    Three things, all of them required (CYLIST-119). Nobody behind it, or it
+    is a person. A browser session — ``Channel.WEB`` is what
+    :func:`~app.auth.dependencies.resolve_principal` gives a session token —
+    because the bootstrap password only ever buys one of those, and a
+    person-less API token is a leftover, not the deployment's owner. And no
+    account yet, because once one exists the bootstrap password no longer
+    works and nothing it opened should either.
+
+    Asked only where a caller has no person, so the query is not paid on the
+    ordinary path.
+    """
+    return (
+        principal.person_id is None
+        and principal.channel is Channel.WEB
+        and not await has_any_account(session)
+    )
+
+
+async def _close_the_bootstrap_door(session: AsyncSession) -> None:
+    """Revoke the bootstrap credentials as the first account opens.
+
+    :func:`has_any_account` already retires the bootstrap *password* the
+    moment a password exists. This retires what it left behind: its session,
+    which would otherwise last ``session_ttl_hours`` past that moment, and
+    any token minted from it before minting from a person-less caller was
+    refused. Checked before the password is written, since afterwards there
+    is always an account.
+    """
+    if not await has_any_account(session):
+        await tokens.revoke_personless(session)
+
+
 async def authenticate(session: AsyncSession, email: str, password: str) -> Person | None:
     """Return the person this email and password belong to, or ``None``.
 
@@ -234,17 +317,19 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Pers
         )
     )
     if person is None:
-        # Verify against nothing anyway. Returning early here would make a
-        # wrong email measurably faster to reject than a wrong password, which
-        # is how an attacker learns which addresses have accounts.
-        verify_password(password, None)
+        # Verify against a real hash anyway (CYLIST-121). Returning early here
+        # would make a wrong email measurably faster to reject than a wrong
+        # password, which is how an attacker learns which addresses have
+        # accounts; and a check against nothing returns at once, so it has
+        # to be a hash of a password nobody holds.
+        await verify_password(password, dummy_hash())
         return None
-    if not verify_password(password, person.password_hash):
+    if not await verify_password(password, person.password_hash):
         return None
     if person.is_archived:
         return None
     if person.password_hash is not None and needs_rehash(person.password_hash):
-        person.password_hash = hash_password(password)
+        person.password_hash = await hash_password(password)
     return person
 
 
@@ -275,7 +360,7 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
     plaintext, digest = generate_invite()
     person.invite_token_hash = digest
     person.invite_expires_at = now() + INVITE_TTL
-    await session.flush()
+    await flush_or_refuse(session, _email_taken(person.email))
     return person, plaintext
 
 
@@ -306,13 +391,14 @@ async def open_account(
     await _require_email_free(session, email, excluding=person.id)
 
     had_one = person.password_hash is not None
+    await _close_the_bootstrap_door(session)
     person.email = email
-    person.password_hash = hash_password(password)
+    person.password_hash = await hash_password(password)
     # Any outstanding invitation is answered by this: the account it would have
     # opened is open, and a link that still worked would be a second way in
     # that nobody is watching.
     _clear_invitation(person)
-    await session.flush()
+    await flush_or_refuse(session, _email_taken(email))
     return person, had_one
 
 
@@ -324,12 +410,23 @@ async def withdraw_invite(session: AsyncSession, person_id: UUID) -> Person:
     return person
 
 
+INVITE_NOT_VALID = "That invitation link is not valid, or it has expired."
+"""One message for unknown, spent, expired and archived alike: an invitation
+is a bare secret with no second factor, so what it is worth saying about one
+is whether it works, not why it does not."""
+
+
 async def accept_invite(session: AsyncSession, token: str, password: str) -> Person:
     """Turn an invitation into a password, and return whose it was.
 
-    Clearing the digest is what makes the link single-use; it happens in the
-    same transaction as setting the password, so a failure part-way leaves the
-    invitation still good rather than spent on nothing.
+    Clearing the digest is what makes the link single-use, and it is done in
+    the one statement that sets the password: ``UPDATE … WHERE the invitation
+    is still good RETURNING id``. Two accepts of one link at the same moment
+    both pass a read, and a read-then-write would hand both of them a session
+    with the second password winning (CYLIST-126). Of two conditional
+    updates the second waits on the row, finds the digest gone, touches
+    nothing, and is refused like a spent link. The read before it is only so
+    that a dead link is refused before the hash is paid for.
 
     Raises:
         UnprocessableRequestError: if the token is unknown, already used or
@@ -338,27 +435,46 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
     if not looks_like_invite(token):
         raise UnprocessableRequestError("That invitation link is not valid.")
 
-    person = await session.scalar(
-        select(Person).where(Person.invite_token_hash == hash_token(token))
-    )
-    # One message for unknown, spent, expired and archived alike: an
-    # invitation is a bare secret with no second factor, so what it is worth
-    # saying about one is whether it works, not why it does not.
+    digest = hash_token(token)
+    person = await session.scalar(select(Person).where(Person.invite_token_hash == digest))
     if person is None or not person.invite_is_pending:
-        raise UnprocessableRequestError("That invitation link is not valid, or it has expired.")
+        raise UnprocessableRequestError(INVITE_NOT_VALID)
 
-    person.password_hash = hash_password(password)
-    _clear_invitation(person)
-    await session.flush()
+    await _close_the_bootstrap_door(session)
+    password_hash = await hash_password(password)
+    consumed = await session.execute(
+        sql_update(Person)
+        .where(
+            Person.invite_token_hash == digest,
+            Person.invite_expires_at > now(),
+            Person.archived_at.is_(None),
+        )
+        .values(password_hash=password_hash, invite_token_hash=None, invite_expires_at=None)
+        .returning(Person.id)
+        .execution_options(synchronize_session=False)
+    )
+    if consumed.scalar_one_or_none() is None:
+        raise UnprocessableRequestError(INVITE_NOT_VALID)
+    # The row in hand still shows the invitation; the statement went past it.
+    await session.refresh(person)
     return person
 
 
 async def set_password(session: AsyncSession, person: Person, new_password: str) -> Person:
     """Replace somebody's password. The caller has already proved it is theirs."""
-    person.password_hash = hash_password(new_password)
+    person.password_hash = await hash_password(new_password)
     _clear_invitation(person)
     await session.flush()
     return person
+
+
+def _email_taken(email: str | None) -> ConflictError:
+    """What :func:`_require_email_free` says, for the request that passed it and
+    then lost the address to somebody else's at the index."""
+    return ConflictError(
+        f"{email} was just taken as somebody else's sign-in address.",
+        details={"email": email},
+    )
 
 
 async def _require_email_free(session: AsyncSession, email: str | None, *, excluding: UUID) -> None:

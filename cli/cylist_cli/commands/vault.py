@@ -96,7 +96,7 @@ def register(subparsers: Any) -> None:
 
 def _list(args: argparse.Namespace, ctx: Context) -> None:
     if not args.path:
-        trees = ctx.client.get(f"/projects/{args.project}/vault/trees")
+        trees = ctx.client.get_all(f"/projects/{args.project}/vault/trees")
         if ctx.as_json:
             output.emit_json(trees)
             return
@@ -109,7 +109,7 @@ def _list(args: argparse.Namespace, ctx: Context) -> None:
 
     segments = resolve.split_path(args.path)
     if len(segments) == 1:
-        trees = ctx.client.get(f"/projects/{args.project}/vault/trees")
+        trees = ctx.client.get_all(f"/projects/{args.project}/vault/trees")
         summary = resolve.pick(trees, segments[0], kind="vault tree", where=args.project)
         tree = ctx.client.get(f"/vault/trees/{summary['id']}")
         nodes = tree.get("nodes", [])
@@ -214,7 +214,7 @@ def _add(args: argparse.Namespace, ctx: Context) -> None:
     if len(segments) < 2:
         raise CylistError(f"{args.path!r} needs at least a tree and a name, e.g. 'Logins/Stripe'.")
 
-    trees = ctx.client.get(f"/projects/{args.project}/vault/trees")
+    trees = ctx.client.get_all(f"/projects/{args.project}/vault/trees")
     tree = resolve.pick(trees, segments[0], kind="vault tree", where=args.project)
 
     parent_id = None

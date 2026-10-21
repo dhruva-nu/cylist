@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import cylist.api.ApiFailure
 import cylist.api.BoardEvent
 import cylist.api.BoardSocket
+import cylist.api.everyPage
 import cylist.api.generated.apis.AuthApi
 import cylist.api.generated.apis.BoardApi
 import cylist.api.generated.apis.ProjectsApi
@@ -15,7 +16,7 @@ import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.ProjectRead
 import cylist.api.generated.models.TaskCreate
 import cylist.api.generated.models.TaskPriority
-import cylist.api.generated.models.TaskRead
+import cylist.api.generated.models.TaskSummary
 import cylist.api.generated.models.TaskType
 import cylist.app.session.Session
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +38,9 @@ data class BoardState(
     val projects: List<ProjectRead> = emptyList(),
     val project: ProjectRead? = null,
     val columns: List<ColumnRead> = emptyList(),
-    val tasks: List<TaskRead> = emptyList(),
+    val tasks: List<TaskSummary> = emptyList(),
+    /** Per column: how many cards it holds in all, and where its next page starts if not all are here. */
+    val stacks: Map<UUID, ColumnStack> = emptyMap(),
     val members: List<MemberRead> = emptyList(),
     val columnId: UUID? = null,
     /** Whose cards to show; empty is everyone. Opens on you, as the web board does. */
@@ -51,6 +54,9 @@ data class BoardState(
     /** The snackbar under the board, if one is showing. */
     val notice: BoardNotice? = null,
 )
+
+/** How much of one column is loaded: its whole size, and the cursor for the cards below what is here. */
+data class ColumnStack(val total: Int, val next: UUID?)
 
 /** A snackbar: what just happened, and the reassignment Undo would take back, if any. */
 data class BoardNotice(val serial: Long, val text: String, val undo: Reassignment? = null)
@@ -79,6 +85,9 @@ class BoardViewModel(private val session: Session) : ViewModel() {
     private var whoChosen = false
     private var notices = 0L
 
+    /** Per column, how many cards somebody asked to see by loading more; a refetch reads that far again. */
+    private val wanted = mutableMapOf<UUID, Int>()
+
     /** A card's new assignee while its PATCH is in flight, so a refetch that crosses it does not flicker back. */
     private val assigning = mutableMapOf<UUID, PersonRead>()
 
@@ -90,7 +99,9 @@ class BoardViewModel(private val session: Session) : ViewModel() {
         try {
             val (me, projects) = io {
                 client.api(::AuthApi).meApiV1MeGet().person to
-                    client.api(::ProjectsApi).listProjectsApiV1ProjectsGet()
+                    everyPage { after ->
+                        client.api(::ProjectsApi).listProjectsApiV1ProjectsGet(after = after).let { it.items to it.next }
+                    }
             }
             _state.update { it.copy(me = me, projects = projects) }
             val first = projects.firstOrNull()
@@ -108,8 +119,12 @@ class BoardViewModel(private val session: Session) : ViewModel() {
     fun selectProject(key: String) {
         val project = _state.value.projects.firstOrNull { it.key == key } ?: return
         whoChosen = false
+        wanted.clear()
         _state.update {
-            it.copy(project = project, columns = emptyList(), tasks = emptyList(), members = emptyList(), columnId = null, loading = true)
+            it.copy(
+                project = project, columns = emptyList(), tasks = emptyList(), stacks = emptyMap(),
+                members = emptyList(), columnId = null, loading = true,
+            )
         }
         socket?.stop()
         socket = client.boardSocket(project.key, Doorbell(project.key))
@@ -182,7 +197,7 @@ class BoardViewModel(private val session: Session) : ViewModel() {
      * Give [task] to [to]: the card changes at once, the server is told, and a
      * snackbar offers Undo. A failure puts the card back and says so.
      */
-    fun reassign(task: TaskRead, to: MemberRead) {
+    fun reassign(task: TaskSummary, to: MemberRead) {
         if (to.id == task.assignee.id) return
         val move = Reassignment(task.id, task.reference, task.assignee, to.asPerson())
         send(move)
@@ -227,6 +242,13 @@ class BoardViewModel(private val session: Session) : ViewModel() {
         current.copy(tasks = current.tasks.map { if (it.id == taskId) it.copy(assignee = person) else it })
     }
 
+    /** Read the next page of [columnId] onto the bottom of it, and keep reading that far on every refetch. */
+    fun loadMore(columnId: UUID) {
+        val shown = _state.value.tasks.count { it.columnId == columnId }
+        wanted[columnId] = shown + PAGE
+        refresh()
+    }
+
     /** Refetch now, collapsing a burst of doorbells into one fetch. */
     fun refresh(debounceMs: Long = 0) {
         val key = _state.value.project?.key ?: return
@@ -242,16 +264,18 @@ class BoardViewModel(private val session: Session) : ViewModel() {
             val board = io {
                 Triple(
                     client.api(::BoardApi).listColumnsApiV1ProjectsProjectRefColumnsGet(key).columns.sortedBy { it.position },
-                    client.api(::TasksApi).listTasksApiV1ProjectsProjectRefTasksGet(key),
+                    readCards(key),
                     client.api(::ProjectsApi).listMembersApiV1ProjectsProjectRefMembersGet(key).members,
                 )
             }
             if (_state.value.project?.key != key) return
-            val (columns, tasks, members) = board
+            val (columns, cards, members) = board
+            val (tasks, stacks) = cards
             _state.update { current ->
                 val me = current.me?.id
                 current.copy(
                     columns = columns,
+                    stacks = stacks,
                     tasks = tasks.map { task -> assigning[task.id]?.let { task.copy(assignee = it) } ?: task },
                     members = members.filter { it.archivedAt == null },
                     columnId = current.columnId?.takeIf { id -> columns.any { it.id == id } } ?: defaultColumn(columns, tasks, me),
@@ -265,8 +289,31 @@ class BoardViewModel(private val session: Session) : ViewModel() {
         }
     }
 
+    /**
+     * The top of every column, then as much further down each as somebody has
+     * asked to see — read again on every refetch, so loading more survives the
+     * board changing underneath it.
+     */
+    private fun readCards(key: String): Pair<List<TaskSummary>, Map<UUID, ColumnStack>> {
+        val tasks = client.api(::TasksApi)
+        val cards = mutableListOf<TaskSummary>()
+        val stacks = mutableMapOf<UUID, ColumnStack>()
+        for (column in tasks.listTasksApiV1ProjectsProjectRefTasksGet(key).columns) {
+            val rows = column.items.toMutableList()
+            var next = column.next
+            while (next != null && rows.size < (wanted[column.columnId] ?: 0)) {
+                val page = tasks.listColumnTasksApiV1ColumnsColumnIdTasksGet(column.columnId, after = next)
+                rows += page.items
+                next = page.next
+            }
+            cards += rows
+            stacks[column.columnId] = ColumnStack(total = column.total, next = next)
+        }
+        return cards to stacks
+    }
+
     /** Open on the first column that has something of yours in it, not an empty backlog. */
-    private fun defaultColumn(columns: List<ColumnRead>, tasks: List<TaskRead>, me: UUID?): UUID? {
+    private fun defaultColumn(columns: List<ColumnRead>, tasks: List<TaskSummary>, me: UUID?): UUID? {
         val open = columns.dropLast(1)
         val mine = tasks.filter { onBoard(it) && (me == null || me in ownersOf(it)) }
         return open.firstOrNull { column -> mine.any { it.columnId == column.id } }?.id ?: columns.firstOrNull()?.id
@@ -300,6 +347,9 @@ class BoardViewModel(private val session: Session) : ViewModel() {
             colour = colour, archivedAt = archivedAt, createdAt = createdAt, isAgent = isAgent,
             hasAccount = hasAccount, inviteIsPending = inviteIsPending,
         )
+
+        /** How many more cards "load more" asks a column for: one page. */
+        const val PAGE = 50
 
         /** Collapse a burst of doorbells into one refetch, as the web app does. */
         const val DEBOUNCE_MS = 250L

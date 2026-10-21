@@ -36,7 +36,9 @@ whichever module it lives in:
 * :mod:`.lifecycle` creates and deletes them;
 * :mod:`.editing` changes fields in place, and :mod:`.dates` owns the per-column
   due dates and how they read against the board;
-* :mod:`.moves` puts a card in a column and finishes or reopens it;
+* :mod:`.moves` puts a card in a column and finishes or reopens it, and
+  :mod:`.parentage` holds the rule between a finished card and the sub-tasks
+  under it, both ends under one lock;
 * :mod:`.cold_storage` takes the finished ones off the board, and puts them back;
 * :mod:`.status` stalls and unstalls it;
 * :mod:`.timeline` and :mod:`.checklists` are what hangs off a card;
@@ -53,10 +55,10 @@ from app.services.tasks.checklists import (
 )
 from app.services.tasks.cold_storage import (
     Stored,
-    list_stored,
     restore,
     store_finished,
     stored_outcome,
+    stored_page,
 )
 from app.services.tasks.counts import (
     NOT_SPLIT,
@@ -70,33 +72,48 @@ from app.services.tasks.dates import BoardDates, ColumnDue, board_dates, set_col
 from app.services.tasks.editing import set_sub_status, update
 from app.services.tasks.history import FieldChange, field_change
 from app.services.tasks.lifecycle import create, delete
-from app.services.tasks.lookup import all_for_project, get, list_for_project, resolve, subtasks
+from app.services.tasks.lookup import (
+    LISTED_WITHOUT,
+    ColumnStack,
+    all_for_project,
+    board_pages,
+    column_page,
+    get,
+    require_on_project,
+    resolve,
+    subtask_page,
+    subtasks,
+)
 from app.services.tasks.moves import move, set_finished
 from app.services.tasks.status import change_status
 from app.services.tasks.timeline import (
     comment,
     comment_counts,
-    comments,
+    comment_page,
     delete_comment,
     get_comment,
 )
 
 __all__ = [
+    "LISTED_WITHOUT",
     "NOT_SPLIT",
     "BoardDates",
     "ColumnDue",
+    "ColumnStack",
     "FieldChange",
     "Split",
     "Stored",
     "add_checklist_item",
     "all_for_project",
     "board_dates",
+    "board_pages",
     "card_count",
     "change_status",
     "checklist",
+    "column_page",
     "comment",
     "comment_counts",
-    "comments",
+    "comment_page",
     "create",
     "delete",
     "delete_checklist_item",
@@ -105,9 +122,8 @@ __all__ = [
     "get",
     "get_checklist_item",
     "get_comment",
-    "list_for_project",
-    "list_stored",
     "move",
+    "require_on_project",
     "resolve",
     "restore",
     "set_column_due_dates",
@@ -116,8 +132,10 @@ __all__ = [
     "status_counts",
     "store_finished",
     "stored_outcome",
+    "stored_page",
     "subtask_counts",
     "subtask_owners",
+    "subtask_page",
     "subtasks",
     "update",
     "update_checklist_item",

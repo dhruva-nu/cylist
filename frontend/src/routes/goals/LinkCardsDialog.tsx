@@ -45,7 +45,7 @@ export function LinkCardsDialog({
 
   const searchWord = searchText.trim().toLowerCase()
   const columnName = (id: string | null) => columns.find((column) => column.id === id)?.name ?? ''
-  const offered = (tasks.data ?? [])
+  const offered = (tasks.data?.tasks ?? [])
     .filter((task) => task.goal_id === null)
     .filter((task) => cardMatches(task, searchWord))
 

@@ -17,8 +17,10 @@ from app.core.errors import ForbiddenError
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
 from app.models.project import Project
+from app.models.role import ADMIN_ROLE_NAME
 from app.models.task import TaskStatus
 from app.routers import guards
+from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
@@ -26,6 +28,7 @@ from app.schemas.projects import (
     Membership,
     MembershipUpdate,
     ProjectCreate,
+    ProjectPage,
     ProjectRead,
     ProjectSummary,
     ProjectUpdate,
@@ -44,7 +47,7 @@ from app.services import (
     tasks,
     vault,
 )
-from app.storage import BlobStore, get_blob_store
+from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -96,42 +99,32 @@ Confirmation = Query(
 )
 
 
-async def project_admin(
-    project: Project = Depends(resolved_project),
-    principal: Principal = Depends(require(Scope.WRITE)),
-    session: AsyncSession = SessionDependency,
-) -> Principal:
-    """Admit only an admin of this project to destroying it.
+DELETE_PROJECT = guards.project_admin_only("delete it", Scope.WRITE)
+"""Destroying the project, which only its admin may do.
 
-    Deliberately not :data:`CHANGE_PROJECT`. `Permission.PROJECT` is renaming,
-    rewording and archiving — three things somebody else can put back — and a
-    role carrying it was given the right to tidy the project up, not to end it.
-    Deleting one takes its vault and its uploads with it, and the only person
-    on a board who can hand that right out is the only one who should hold it.
-
-    Written out rather than built from :mod:`app.routers.guards`, because what
-    it asks is not a permission: it is the question
-    :func:`app.services.roles.may_administer` answers, the same one
-    `/projects/{ref}/roles` asks before it lets anybody change a role.
-    """
-    if not await roles.may_administer(session, project, principal):
-        raise ForbiddenError(
-            f"Only an admin of {project.key} can delete it.",
-            details={"project_key": project.key},
-        )
-    return principal
+Deliberately not :data:`CHANGE_PROJECT`. `Permission.PROJECT` is renaming,
+rewording and archiving — three things somebody else can put back — and a
+role carrying it was given the right to tidy the project up, not to end it.
+Deleting one takes its vault and its uploads with it, and the only person on
+a board who can hand that right out is the only one who should hold it. The
+same guard as every other admin-only route (CYLIST-146), so the question is
+asked one way: :func:`app.services.roles.may_administer`.
+"""
 
 
-@router.get("", response_model=list[ProjectRead], summary="List projects")
+@router.get("", response_model=ProjectPage, summary="List projects")
 async def list_projects(
     principal: Principal = Depends(require(Scope.READ)),
     session: AsyncSession = SessionDependency,
     include_archived: bool = Query(default=False),
-) -> list[ProjectRead]:
-    """Return the projects the caller is a member of, newest first — the home
-    screen's grid."""
-    found = await projects.list_projects(session, principal, include_archived=include_archived)
-    return [_project_read(project) for project in found]
+    page: PageRequest = PageQuery,
+) -> ProjectPage:
+    """Return the projects the caller is a member of, newest first, a page at a
+    time — the home screen's grid."""
+    found = await projects.list_projects(
+        session, principal, page, include_archived=include_archived
+    )
+    return ProjectPage(items=[_project_read(project) for project in found.rows], next=found.next)
 
 
 @router.post(
@@ -274,9 +267,8 @@ async def update_project(
 async def delete_project(
     confirm: str = Confirmation,
     project: Project = Depends(resolved_project),
-    principal: Principal = Depends(project_admin),
+    principal: Principal = Depends(DELETE_PROJECT),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Delete a project, and with it everything filed under it.
 
@@ -297,7 +289,7 @@ async def delete_project(
     projects.require_confirmation(project, confirm)
 
     key, name, project_id = project.key, project.name, project.id
-    await projects.delete(session, store, project)
+    await projects.delete(session, project)
     await activity.record(
         session,
         principal,
@@ -351,7 +343,10 @@ async def list_members(
     "/{project_ref}/members",
     response_model=Membership,
     summary="Replace the member list",
-    responses={422: {"description": "An id is unknown, or names an archived person."}},
+    responses={
+        403: {"description": "This would remove an admin, and you are not an admin here."},
+        422: {"description": "An id is unknown, or names an archived person."},
+    },
 )
 async def set_members(
     body: MembershipUpdate,
@@ -364,8 +359,25 @@ async def set_members(
     This replaces the list rather than adding to it: anyone not named is
     removed from the project. They stay in the directory, and anything they are
     already assigned keeps naming them.
+
+    Taking an admin off the project needs an admin (CYLIST-116). The `people`
+    permission is the baseline's, so every member holds it; without this
+    fence a member could drop the admin, inherit the vacancy and add them back
+    with no role. For the same reason the vacancy is only filled on an admin's
+    save — handing out the role is never a side effect of somebody else's.
     """
-    people = await projects.set_members(session, project, body.person_ids)
+    administers = await roles.may_administer(session, project, principal)
+    removed_admins = await roles.admin_holder_ids(session, project) - set(body.person_ids)
+    if removed_admins and not administers:
+        raise ForbiddenError(
+            f"Only an admin of {project.key} can take an admin off it.",
+            details={
+                "project_key": project.key,
+                "admin_person_ids": sorted(str(person_id) for person_id in removed_admins),
+            },
+        )
+
+    change = await projects.set_members(session, project, body.person_ids, fill_vacancy=administers)
     await activity.record(
         session,
         principal,
@@ -373,6 +385,23 @@ async def set_members(
         entity_type="project",
         entity_id=project.id,
         project_id=project.id,
-        payload={"member_count": len(people)},
+        payload={
+            "member_count": len(change.members),
+            "joined": [person.name for person in change.joined],
+            "left": [person.name for person in change.left],
+        },
     )
-    return await _membership(session, project, people)
+    if change.promoted is not None:
+        # Written as the same event an admin handing the role out by hand
+        # would leave, because to anybody reading the trail later it is the
+        # same thing: from here on, this person runs the project.
+        await activity.record(
+            session,
+            principal,
+            "member.role_set",
+            entity_type="person",
+            entity_id=change.promoted.id,
+            project_id=project.id,
+            payload={"person": change.promoted.name, "role": ADMIN_ROLE_NAME},
+        )
+    return await _membership(session, project, change.members)

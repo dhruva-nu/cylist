@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { api, type BoardColumn, type ColdStorageRun, type Task } from '../../api/client'
 import { queryKeys, useInvalidate } from '../../api/queries'
@@ -47,9 +47,13 @@ export function ColdStorageDialog({
   onClose: () => void
 }) {
   const invalidate = useInvalidate()
-  const stored = useQuery({
+  // A page at a time, most recently finished first: cold storage only grows,
+  // and the cards worth finding in it are nearly always the latest.
+  const stored = useInfiniteQuery({
     queryKey: queryKeys.coldStorage(projectKey),
-    queryFn: () => api.listColdStorage(projectKey),
+    queryFn: ({ pageParam }) => api.listColdStorage(projectKey, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next,
   })
 
   const store = useMutation({
@@ -72,7 +76,7 @@ export function ColdStorageDialog({
     },
   })
 
-  const cards = stored.data ?? []
+  const cards = stored.data?.pages.flatMap((page) => page.items) ?? []
 
   return (
     <Modal
@@ -116,7 +120,12 @@ export function ColdStorageDialog({
 
         <h3 className={styles.heading}>
           Stored cards
-          {cards.length ? <span className={styles.count}>{cards.length}</span> : null}
+          {cards.length ? (
+            <span className={styles.count}>
+              {cards.length}
+              {stored.hasNextPage ? '+' : ''}
+            </span>
+          ) : null}
         </h3>
         {stored.isPending ? (
           <EmptyState>Loading…</EmptyState>
@@ -157,6 +166,17 @@ export function ColdStorageDialog({
             ))}
           </ul>
         )}
+        {stored.hasNextPage ? (
+          <div className={styles.more}>
+            <Button
+              small
+              disabled={stored.isFetchingNextPage}
+              onClick={() => void stored.fetchNextPage()}
+            >
+              {stored.isFetchingNextPage ? 'Loading…' : 'Show older cards'}
+            </Button>
+          </div>
+        ) : null}
       </ModalBody>
     </Modal>
   )

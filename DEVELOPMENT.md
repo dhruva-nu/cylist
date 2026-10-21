@@ -284,6 +284,11 @@ worth keeping: it is what makes a log safe to paste into a bug report.
 `CYLIST_VAULT_KEY` encrypts every vault secret with AES-256-GCM. **If you lose
 it, those secrets are unrecoverable** — keep a copy somewhere you trust.
 
+It is version 1 of a keyring. A later key goes in `CYLIST_VAULT_KEYS` as JSON
+(`{"2": "…"}`) and seals everything from then on, while older keys keep opening
+what they sealed; `make vault-reseal` moves every vault and hook secret onto the
+newest key so an old one can be removed. DEPLOY.md has the whole procedure.
+
 A complete backup is two things, and you need both to restore:
 
 ```bash

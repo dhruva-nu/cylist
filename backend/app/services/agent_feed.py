@@ -30,11 +30,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import publish_into
-from app.models.agent_session import AgentFeedEntry, AgentSession
+from app.models.agent_session import AgentFeedEntry, AgentSession, SessionKey
 from app.models.task import Task
 from app.realtime import protocol
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentFeedEntryRead
 from app.services import agent_sessions
+from app.services.paging import PageRequest, keyset
 
 KEEP_PER_SESSION = 200
 """How many lines each session keeps. Enough to scroll back through a long
@@ -44,7 +45,7 @@ turn; few enough that a card's feed is never a thing to paginate."""
 async def append(
     session: AsyncSession,
     task: Task,
-    client_session_id: str,
+    key: SessionKey,
     entries: Sequence[AgentFeedEntryIn],
 ) -> int:
     """Keep what a session just did, and say so to whoever has the card open.
@@ -54,11 +55,13 @@ async def append(
     for a session that has not been put on the card yet, or that has just
     walked off it; either way there is nothing on this card for the lines to
     belong to, and they are dropped rather than starting a row the hook never
-    reported. Returns how many were kept.
+    reported. Lines for someone else's session under the same id find no
+    row of the sender's, and are dropped the same way. Returns how many were
+    kept.
     """
     if not entries:
         return 0
-    row = await agent_sessions.open_on_card(session, task, client_session_id)
+    row = await agent_sessions.open_on_card(session, task, key)
     if row is None:
         return 0
 
@@ -99,24 +102,40 @@ async def _trim(session: AsyncSession, agent_session_id: UUID) -> None:
     )
 
 
-async def recent(session: AsyncSession, task: Task, *, limit: int) -> list[AgentFeedEntryRead]:
-    """A card's newest lines, newest first, from every session that was on it."""
-    rows = await session.execute(
-        select(AgentFeedEntry, AgentSession.client_name)
-        .join(AgentSession, AgentSession.id == AgentFeedEntry.agent_session_id)
-        .where(AgentFeedEntry.task_id == task.id)
-        .order_by(AgentFeedEntry.seq.desc())
-        .limit(limit)
+async def recent(
+    session: AsyncSession, task: Task, page: PageRequest
+) -> tuple[list[AgentFeedEntryRead], UUID | None]:
+    """A page of a card's lines, newest first, from every session that was on
+    it — and the cursor for the page before them."""
+    window = await keyset(
+        session,
+        select(AgentFeedEntry).where(AgentFeedEntry.task_id == task.id),
+        keys=(AgentFeedEntry.seq, AgentFeedEntry.id),
+        page=page,
+        descending=True,
+    )
+    # Named once per session rather than joined onto every line: a page is a
+    # hundred lines from, nearly always, one or two sessions.
+    names: dict[UUID, str | None] = dict(
+        (
+            await session.execute(
+                select(AgentSession.id, AgentSession.client_name).where(
+                    AgentSession.id.in_({entry.agent_session_id for entry in window.rows})
+                )
+            )
+        )
+        .tuples()
+        .all()
     )
     return [
         AgentFeedEntryRead(
             id=entry.id,
             agent_session_id=entry.agent_session_id,
-            client_name=client_name,
+            client_name=names.get(entry.agent_session_id),
             at=entry.at,
             kind=entry.kind,
             tool=entry.tool,
             text=entry.text,
         )
-        for entry, client_name in rows.all()
-    ]
+        for entry in window.rows
+    ], window.next

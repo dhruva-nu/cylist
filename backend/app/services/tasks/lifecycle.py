@@ -15,7 +15,8 @@ from app.schemas.tasks import TaskCreate
 from app.services import columns, goals, projects, templates
 from app.services.tasks.dates import set_column_due_dates
 from app.services.tasks.numbering import next_number, next_sub_number
-from app.services.tasks.stacking import count_cards_in_column, renumber
+from app.services.tasks.parentage import refuse_open_under_finished
+from app.services.tasks.stacking import slot
 
 _LOADED_ON_CREATE = (
     "project",
@@ -62,7 +63,9 @@ async def create(
         UnprocessableRequestError: if the assignee is not a project member, if
             no assignee was named and none can be assumed, if the template or
             the goal belongs to another project, if a sub-task is given a goal
-            of its own, or if ``parent`` is itself a sub-task.
+            of its own, if ``parent`` is itself a sub-task, if ``parent`` is
+            finished — see :mod:`app.services.tasks.parentage` — or if the
+            goal is achieved, which a new and so open card cannot be put on.
     """
     assignee_id = await _assignee_for(session, project, data, creator_id)
     template = await templates.require_template(session, project.id, data.template_id)
@@ -73,11 +76,18 @@ async def create(
     column: BoardColumn | None = None
     position: int | None = None
     if parent is None:
+        # Before the project's counter, which is locked next: a request
+        # achieving the goal locks the goal and then writes a row referencing
+        # the project, so taking these the other way round could deadlock.
+        await goals.refuse_open_card_on_achieved(
+            session, data.goal_id, card="a new card", act="writing one on it"
+        )
         number = await next_number(session, project)
         column = templates.landing_column(template, await columns.first(session, project))
-        position = await count_cards_in_column(session, column.id)
+        position = await slot(session, column.id, index=None)
     else:
         _refuse_unfit_parent(parent, data.goal_id)
+        await refuse_open_under_finished(session, parent, act="splitting more work out of it")
         sub_number = await next_sub_number(session, parent)
 
     sub_statuses = _landing_sub_statuses(template, column, data.sub_statuses)
@@ -113,19 +123,17 @@ async def create(
 
 
 async def delete(session: AsyncSession, task: Task) -> None:
-    """Remove a task, closing the gap it leaves in its column.
+    """Remove a task.
 
     Its number is not returned to the pool: ``project.task_counter`` only ever
-    goes up, so ``ATL-41`` never names a second task.
+    goes up, so ``ATL-41`` never names a second task. The hole it leaves in its
+    column is left too: positions are sort keys with room between them, not a
+    count (see :mod:`app.services.tasks.stacking`), so the cards around it are
+    already in order and nothing else needs writing.
     """
-    # A parent takes its sub-tasks with it (ON DELETE CASCADE), but they are in
-    # no column, so the only gap to close is the one the card itself left. A
-    # sub-task leaves none at all.
-    emptied = task.column_id
+    # A parent takes its sub-tasks with it (ON DELETE CASCADE).
     await session.delete(task)
     await session.flush()
-    if emptied is not None:
-        await renumber(session, emptied)
 
 
 async def _assignee_for(
