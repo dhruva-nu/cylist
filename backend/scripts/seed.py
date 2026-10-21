@@ -59,6 +59,7 @@ import io
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -92,7 +93,7 @@ from app.schemas.tasks import (
     TaskStatusChange,
 )
 from app.schemas.vault import SecretCreate, VaultNodeCreate, VaultTreeCreate
-from app.services import columns, files, goals, people, projects, tasks, vault
+from app.services import blobs, columns, files, goals, people, projects, tasks, vault
 from app.storage import BlobStore, LocalBlobStore
 from scripts.seed_sample import (
     DIRECTORY,
@@ -188,28 +189,25 @@ async def survey(session: AsyncSession) -> Inventory:
     )
 
 
-async def wipe(session: AsyncSession) -> list[str]:
-    """Delete every project and person, and return the orphaned blob paths.
+async def wipe(session: AsyncSession) -> None:
+    """Delete every project and person, and the blob rows that leaves orphaned.
 
     Not touched: ``api_token``, because deleting it would sign the operator out
     of the application they are seeding, and ``activity``, whose ``project_id``
     is ``SET NULL`` rather than ``CASCADE`` precisely so the record of what
     happened outlives the thing it happened to.
 
-    The bytes on disk are returned rather than removed, so the caller can
-    unlink them only once the transaction that dropped the rows has committed.
+    The bytes on disk are not touched: the caller sweeps once this has
+    committed, and the sweep keeps whatever the reseed has pointed a row at
+    again — which, the sample being the same, is most of it.
     """
     await session.execute(delete(Project))
     await session.execute(delete(Person))
     await session.flush()
 
     still_used = select(FileItem.blob_id).where(FileItem.blob_id.is_not(None))
-    orphaned = list(await session.scalars(select(Blob).where(Blob.id.not_in(still_used))))
-    paths = [blob.path for blob in orphaned]
-    if orphaned:
-        await session.execute(delete(Blob).where(Blob.id.in_([blob.id for blob in orphaned])))
-        await session.flush()
-    return paths
+    await session.execute(delete(Blob).where(Blob.id.not_in(still_used)))
+    await session.flush()
 
 
 async def populate(
@@ -673,7 +671,6 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
     cipher = cipher_for(settings.vault_key)
     store = LocalBlobStore(settings.blob_dir)
 
-    removable: list[str] = []
     database = Database(url)
     try:
         async with database.session() as session:
@@ -682,7 +679,7 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
             if not inventory.is_empty:
                 if not _cleared_to_wipe(inventory, name, force=force, assume_yes=assume_yes):
                     return 1
-                removable = await wipe(session)
+                await wipe(session)
 
             summary = await populate(
                 session,
@@ -690,13 +687,13 @@ async def run(settings: Settings, *, force: bool, assume_yes: bool) -> int:
                 store=store,
                 max_upload_bytes=settings.max_upload_bytes,
             )
+        # Bytes after rows, and only once the rows are committed: an
+        # unreferenced file on disk is harmless, a row pointing at content
+        # that is gone is not. No idle margin, since nothing else is uploading
+        # into a deployment being seeded.
+        await blobs.sweep(database, store, idle_for=timedelta(0))
     finally:
         await database.dispose()
-
-    # Bytes after rows, and only once the rows are committed: an unreferenced
-    # file on disk is harmless, a row pointing at content that is gone is not.
-    for path in removable:
-        await store.remove(path)
 
     print(f"\nSeeded {summary.render()}.")
     return 0

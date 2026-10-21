@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db import Database
 from app.models import Blob, Skill
-from tests.conftest import OWNER_NAME, client_for, sign_in
+from tests.conftest import OWNER_NAME, client_for, sign_in, sweep_blobs
 from tests.test_skill_folders import zipped
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
@@ -228,24 +228,26 @@ class TestReplacingASkill:
         assert download.content == new
 
     async def test_collects_the_content_it_replaced(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         old = content_of("superseded")
         await upload(project, "triage.md", old)
         assert blob_path(settings, old).exists()
 
         await upload(project, "triage.md", content_of("successor"))
+        await sweep_blobs(database, settings)
 
         assert not blob_path(settings, old).exists(), "nothing points at the old bytes"
 
     async def test_re_uploading_identical_bytes_keeps_them(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         """The replacement can be the very blob being swept for."""
         same = content_of("unchanged")
         skill = await upload(project, "triage.md", same)
 
         again = await upload(project, "triage.md", same)
+        await sweep_blobs(database, settings)
 
         assert again["id"] == skill["id"]
         assert blob_path(settings, same).exists(), "the row points at these bytes now"
@@ -296,7 +298,11 @@ class TestSkillsShareContentWithFiles:
     """A skill and a file holding the same bytes cost one copy on disk."""
 
     async def test_deleting_a_skill_keeps_bytes_a_file_still_uses(
-        self, project: AsyncClient, settings: Settings, session: AsyncSession
+        self,
+        project: AsyncClient,
+        settings: Settings,
+        session: AsyncSession,
+        database: Database,
     ) -> None:
         shared = content_of("shared-with-a-file")
         root = (await project.get("/projects/ATL/folders")).json()[0]["id"]
@@ -308,11 +314,12 @@ class TestSkillsShareContentWithFiles:
         assert await session.scalar(select(func.count()).select_from(Blob)) == 1, "one blob"
 
         assert (await project.delete(f"/skills/{skill['id']}")).status_code == 200
+        await sweep_blobs(database, settings)
 
         assert blob_path(settings, shared).exists(), "the file still points at these bytes"
 
     async def test_deleting_a_file_keeps_bytes_a_skill_still_uses(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         """The regression the shared blob module exists to prevent."""
         shared = content_of("shared-with-a-skill")
@@ -326,6 +333,7 @@ class TestSkillsShareContentWithFiles:
         await upload(project, "brief.md", shared)
 
         response = await project.delete(f"/items/{item['id']}")
+        await sweep_blobs(database, settings)
 
         assert response.status_code == 200, response.text
         assert blob_path(settings, shared).exists(), "the skill still points at these bytes"
@@ -341,12 +349,13 @@ class TestRemovingSkills:
         assert (await project.get("/projects/ATL/skills")).json() == []
 
     async def test_takes_its_content_with_it(
-        self, project: AsyncClient, settings: Settings
+        self, project: AsyncClient, settings: Settings, database: Database
     ) -> None:
         content = content_of("doomed-content")
         skill = await upload(project, "triage.md", content)
 
         await project.delete(f"/skills/{skill['id']}")
+        await sweep_blobs(database, settings)
 
         assert not blob_path(settings, content).exists()
 

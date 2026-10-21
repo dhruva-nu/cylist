@@ -262,7 +262,7 @@ async def update_folder(session: AsyncSession, folder: Folder, data: FolderUpdat
     return folder
 
 
-async def delete_folder(session: AsyncSession, store: BlobStore, folder: Folder) -> None:
+async def delete_folder(session: AsyncSession, folder: Folder) -> None:
     """Delete a folder and everything under it.
 
     The subtree goes by database cascade rather than by a walk in Python, so an
@@ -276,7 +276,7 @@ async def delete_folder(session: AsyncSession, store: BlobStore, folder: Folder)
     blob_ids = await _blob_ids_under(session, folder)
     await session.execute(delete(Folder).where(Folder.id == folder.id))
     await session.flush()
-    await blobs.collect_garbage(session, store, blob_ids)
+    await blobs.collect_garbage(session, blob_ids)
 
 
 # --- Items -----------------------------------------------------------------
@@ -460,12 +460,12 @@ async def project_id_of_item(session: AsyncSession, item: FileItem) -> UUID:
     return folder.project_id
 
 
-async def delete_item(session: AsyncSession, store: BlobStore, item: FileItem) -> None:
+async def delete_item(session: AsyncSession, item: FileItem) -> None:
     """Remove a file or link, and its content if nothing else refers to it."""
     blob_ids = {item.blob_id} if item.blob_id is not None else set()
     await session.delete(item)
     await session.flush()
-    await blobs.collect_garbage(session, store, blob_ids)
+    await blobs.collect_garbage(session, blob_ids)
 
 
 async def counts(

@@ -326,7 +326,6 @@ async def delete_folder(
     folder: Folder = Depends(resolved_folder),
     principal: Principal = Depends(WRITE_IN_THIS_FOLDER),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Delete a folder and everything inside it, subfolders included.
 
@@ -335,7 +334,7 @@ async def delete_folder(
     the project instead.
     """
     name, project_id = folder.name, folder.project_id
-    await files.delete_folder(session, store, folder)
+    await files.delete_folder(session, folder)
     await activity.record(
         session,
         principal,
@@ -497,7 +496,6 @@ async def delete_item(
     item: FileItem = Depends(resolved_item),
     principal: Principal = Depends(WRITE_THIS_ITEM),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Remove a file or link.
 
@@ -506,7 +504,7 @@ async def delete_item(
     """
     name = item.name
     project_id = await files.project_id_of_item(session, item)
-    await files.delete_item(session, store, item)
+    await files.delete_item(session, item)
     await activity.record(
         session,
         principal,

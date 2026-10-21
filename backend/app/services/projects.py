@@ -23,7 +23,6 @@ from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
 from app.schemas.projects import ProjectCreate, ProjectUpdate
 from app.services import blobs, columns, files, people, permissions, roles
-from app.storage import BlobStore
 
 
 async def create(session: AsyncSession, data: ProjectCreate, *, creator_id: UUID | None) -> Project:
@@ -250,7 +249,7 @@ async def update(session: AsyncSession, project: Project, data: ProjectUpdate) -
     return project
 
 
-async def delete(session: AsyncSession, store: BlobStore, project: Project) -> None:
+async def delete(session: AsyncSession, project: Project) -> None:
     """Destroy a project and everything filed under it.
 
     The rows go in one statement. Every table that belongs to a project holds
@@ -275,7 +274,7 @@ async def delete(session: AsyncSession, store: BlobStore, project: Project) -> N
     blob_ids = await blobs.ids_on_project(session, project.id)
     await session.delete(project)
     await session.flush()
-    await blobs.collect_garbage(session, store, blob_ids)
+    await blobs.collect_garbage(session, blob_ids)
 
 
 @dataclass(frozen=True)

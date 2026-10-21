@@ -239,11 +239,10 @@ async def delete_skill(
     skill: Skill = Depends(resolved_skill),
     principal: Principal = Depends(WRITE_THIS_SKILL),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Take a skill off the project. Its content goes with it unless a file shares it."""
     name, project_id = skill.name, skill.project_id
-    await agents.delete_skill(session, store, skill)
+    await agents.delete_skill(session, skill)
     await activity.record(
         session,
         principal,

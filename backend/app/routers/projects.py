@@ -45,7 +45,6 @@ from app.services import (
     tasks,
     vault,
 )
-from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -264,7 +263,6 @@ async def delete_project(
     project: Project = Depends(resolved_project),
     principal: Principal = Depends(DELETE_PROJECT),
     session: AsyncSession = SessionDependency,
-    store: BlobStore = Depends(get_blob_store),
 ) -> Acknowledged:
     """Delete a project, and with it everything filed under it.
 
@@ -285,7 +283,7 @@ async def delete_project(
     projects.require_confirmation(project, confirm)
 
     key, name, project_id = project.key, project.name, project.id
-    await projects.delete(session, store, project)
+    await projects.delete(session, project)
     await activity.record(
         session,
         principal,
