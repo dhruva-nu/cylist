@@ -43,6 +43,14 @@ export const queryKeys = {
 } as const satisfies Record<string, QueryKey | ((...args: string[]) => QueryKey)>
 
 /**
+ * A mutation's `meta` for one that invalidates what it changes itself, which
+ * excuses it from the refetch of everything that follows any other write
+ * (`main.tsx`). Only for a write whose keys are listed in full — a key it
+ * forgets is a list that stays stale until a reload.
+ */
+export const refreshesItself = { refreshesItself: true } as const
+
+/**
  * Who this session is.
  *
  * Not being signed in is an answer rather than a failure, so it is not retried
@@ -203,6 +211,9 @@ export function useLoadMoreCards(projectKey: string) {
   const queryClient = useQueryClient()
   const key = queryKeys.tasks(projectKey)
   return useMutation({
+    // A read, not a write: it changes nothing anybody else has on screen, and
+    // the refetch after a write would read every page it just appended again.
+    meta: refreshesItself,
     mutationFn: async (columnId: string) => {
       const cursor = queryClient
         .getQueryData<BoardCards>(key)

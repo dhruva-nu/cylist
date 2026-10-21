@@ -17,7 +17,7 @@ import {
   type Person,
   type Task,
 } from '../../api/client'
-import { queryKeys, useInvalidate, type BoardCards } from '../../api/queries'
+import { queryKeys, refreshesItself, useInvalidate, type BoardCards } from '../../api/queries'
 import { sortKeyAt } from './sortKey'
 
 /** A card dropped somewhere: where it lands, and what that changes about it. */
@@ -111,6 +111,10 @@ export function useBoardMutations(
       queryKeys.templates(projectKey),
       queryKeys.goals(projectKey),
       queryKeys.allGoals,
+      // A card moved past a stage ticks the to-do planned for it, which the
+      // sidebar's count for today and the day's report both show.
+      ['today', projectKey],
+      ['day-report', projectKey],
     )
   }
 
@@ -162,6 +166,7 @@ export function useBoardMutations(
     },
     onError: (_error, _move, snapshot) => restoreCards(snapshot),
     onSettled: refresh,
+    meta: refreshesItself,
   })
 
   /**
@@ -182,6 +187,7 @@ export function useBoardMutations(
       ),
     onError: (_error, _change, snapshot) => restoreCards(snapshot),
     onSettled: refresh,
+    meta: refreshesItself,
   })
 
   /**
@@ -204,6 +210,7 @@ export function useBoardMutations(
     },
     onError: (_error, _change, snapshot) => restoreCards(snapshot),
     onSettled: refresh,
+    meta: refreshesItself,
   })
 
   const reorderColumns = useMutation<Board, Error, string[], Snapshot<Board>>({
@@ -225,6 +232,7 @@ export function useBoardMutations(
       queryClient.setQueryData(boardKey, snapshot?.previous)
     },
     onSettled: refresh,
+    meta: refreshesItself,
   })
 
   return { refresh, moveTask, moveSubStatus, setAssignee, reorderColumns }

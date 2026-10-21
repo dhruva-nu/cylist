@@ -18,9 +18,14 @@ applyStoredTheme()
  * screen costs a few hundred bytes and takes that whole class of bug away;
  * screens still name the keys they care about, which is what makes them wait
  * for the right data before closing a dialog.
+ *
+ * The exception is a write that already says what it changes — see
+ * `refreshesItself`. The board's writes do, and on top of their own refresh
+ * this one read every list on screen a second time for each card moved.
  */
 const mutationCache = new MutationCache({
-  onSuccess: () => {
+  onSuccess: (_data, _variables, _context, mutation) => {
+    if (mutation.meta?.refreshesItself) return
     void queryClient.invalidateQueries()
   },
 })
