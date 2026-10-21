@@ -13,8 +13,10 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import UnprocessableRequestError
+from app.core.errors import ConflictError, UnprocessableRequestError
+from app.db import flush_or_refuse, lock_row
 from app.models.board import BoardColumn
+from app.models.project import Project
 from app.models.task import Task, TaskColumnDueDate
 from app.schemas.tasks import ColumnDueDateInput
 from app.services import columns
@@ -80,6 +82,17 @@ async def set_column_due_dates(
     board = await columns.list_for_project(session, task.project)
     _refuse_undatable_columns(entries, board)
 
+    # The card's row is locked first, so two people rescheduling one card at the
+    # same moment take turns. Otherwise both delete the rows neither of them
+    # can see the other inserting, and the second insert lands on the first's
+    # key and fails as a 500.
+    await lock_row(session, Project, task.project_id)
+    await lock_row(session, Task, task.id)
+    # Re-read under the lock: the rows loaded with the card may predate a
+    # schedule the other request has since committed, and clearing that stale
+    # list would leave the other's rows in place for this insert to collide with.
+    await session.refresh(task, ["column_due_dates"])
+
     # Emptied and flushed before the new rows are added, so replacing a column's
     # date is a delete and an insert rather than an insert onto its own key.
     task.column_due_dates.clear()
@@ -88,7 +101,12 @@ async def set_column_due_dates(
         TaskColumnDueDate(task_id=task.id, column_id=entry.column_id, due_date=entry.due_date)
         for entry in entries
     ]
-    await session.flush()
+    # And a column deleted between the check above and this insert is refused
+    # for what it is rather than as the foreign key's 500.
+    await flush_or_refuse(
+        session,
+        ConflictError("The board changed while those dates were being saved. Try again."),
+    )
 
 
 def _refuse_undatable_columns(entries: list[ColumnDueDateInput], board: list[BoardColumn]) -> None:

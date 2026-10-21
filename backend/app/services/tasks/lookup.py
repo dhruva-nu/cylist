@@ -11,6 +11,7 @@ from app.core.errors import NotFoundError
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
+from app.services import references
 
 
 async def resolve(session: AsyncSession, reference: str) -> Task:
@@ -42,29 +43,27 @@ def _by_reference(reference: str) -> Select[tuple[Task]]:
     Raises:
         NotFoundError: if the reference is not shaped like one at all.
     """
-    # A key can hold no dash, so the parts are unambiguous: ``KEY-number``
-    # names a card and ``KEY-number-sub`` names a sub-task of one.
-    key, *numbers = reference.split("-")
-    if not key or not numbers or not all(part.isdigit() for part in numbers):
+    parsed = references.task_reference(reference)
+    if parsed is None:
+        if references.is_too_deep(reference):
+            raise NotFoundError(
+                f"No task matching {reference!r}. Sub-tasks go one level deep, "
+                "so a reference carries at most two numbers."
+            )
         raise NotFoundError(f"No task matching {reference!r}.")
-    if len(numbers) > 2:
-        raise NotFoundError(
-            f"No task matching {reference!r}. Sub-tasks go one level deep, "
-            "so a reference carries at most two numbers."
-        )
 
     card = (
         select(Task)
         .join(Project, Project.id == Task.project_id)
-        .where(Project.key == key.upper(), Task.number == int(numbers[0]))
+        .where(Project.key == parsed.key, Task.number == parsed.number)
     )
-    if len(numbers) == 1:
+    if parsed.sub_number is None:
         return card
 
     parent = card.subquery()
     return select(Task).where(
         Task.parent_id.in_(select(parent.c.id)),
-        Task.sub_number == int(numbers[1]),
+        Task.sub_number == parsed.sub_number,
     )
 
 

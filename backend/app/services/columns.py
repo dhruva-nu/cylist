@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.db import lock_row
 from app.models.board import MAX_COLUMNS, MIN_COLUMNS, BoardColumn
 from app.models.project import Project
 from app.models.task import Task
@@ -269,6 +270,13 @@ async def delete(session: AsyncSession, column: BoardColumn) -> None:
     """
     project_id = column.project_id
 
+    # Locked before counting, project first as lock_row says, so a card being
+    # created or moved into the column at the same moment is either counted
+    # here — this waits on the lock its insert or update holds — or waits for
+    # the delete and is then refused as going to a column that is gone,
+    # instead of the delete failing on the foreign key.
+    await lock_row(session, Project, project_id)
+    await lock_row(session, BoardColumn, column.id)
     held = await session.scalar(
         select(func.count())
         .select_from(Task)

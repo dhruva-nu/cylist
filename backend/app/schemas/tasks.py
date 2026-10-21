@@ -23,6 +23,7 @@ from app.schemas.agent_sessions import AgentPresence, AgentSessionRead
 from app.schemas.common import Schema
 from app.schemas.files import ItemRead
 from app.schemas.people import PersonRead
+from app.schemas.templates import SubStageLabel
 
 
 def _blank_to_none(value: str | None) -> str | None:
@@ -158,7 +159,7 @@ class TaskCreate(Schema):
     priority: TaskPriority = Field(
         default=TaskPriority.P3, description="`p0` (drop everything) to `p3`. Defaults to `p3`."
     )
-    sub_statuses: list[str] = Field(
+    sub_statuses: list[SubStageLabel] = Field(
         default_factory=list,
         max_length=4,
         description=(
@@ -315,7 +316,7 @@ class TaskUpdate(Schema):
     description: str | None = Field(default=None, min_length=1, max_length=5000)
     type: TaskType | None = None
     priority: TaskPriority | None = None
-    sub_statuses: list[str] | None = Field(
+    sub_statuses: list[SubStageLabel] | None = Field(
         default=None,
         max_length=4,
         description=(

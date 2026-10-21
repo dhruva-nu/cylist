@@ -21,6 +21,7 @@ from app.auth.tokens import hash_token
 from app.core.clock import now
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
 from app.core.palette import colour_for
+from app.db import flush_or_refuse
 from app.models.person import (
     AGENT_NAME,
     AGENT_RESPONSIBILITIES,
@@ -144,7 +145,7 @@ async def update(session: AsyncSession, person_id: UUID, data: PersonUpdate) -> 
         # leaves the same way: without credentials to come back to.
         await _withdraw_access(session, person)
 
-    await session.flush()
+    await flush_or_refuse(session, _email_taken(person.email))
     return person
 
 
@@ -275,7 +276,7 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
     plaintext, digest = generate_invite()
     person.invite_token_hash = digest
     person.invite_expires_at = now() + INVITE_TTL
-    await session.flush()
+    await flush_or_refuse(session, _email_taken(person.email))
     return person, plaintext
 
 
@@ -312,7 +313,7 @@ async def open_account(
     # opened is open, and a link that still worked would be a second way in
     # that nobody is watching.
     _clear_invitation(person)
-    await session.flush()
+    await flush_or_refuse(session, _email_taken(email))
     return person, had_one
 
 
@@ -359,6 +360,15 @@ async def set_password(session: AsyncSession, person: Person, new_password: str)
     _clear_invitation(person)
     await session.flush()
     return person
+
+
+def _email_taken(email: str | None) -> ConflictError:
+    """What :func:`_require_email_free` says, for the request that passed it and
+    then lost the address to somebody else's at the index."""
+    return ConflictError(
+        f"{email} was just taken as somebody else's sign-in address.",
+        details={"email": email},
+    )
 
 
 async def _require_email_free(session: AsyncSession, email: str | None, *, excluding: UUID) -> None:

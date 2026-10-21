@@ -16,8 +16,11 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import UUID
 
 from fastapi import Depends, Request
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -25,6 +28,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import Session
+
+from app.core.errors import AppError
+from app.models.base import UUIDPrimaryKeyMixin
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +57,44 @@ def publish_into(session: AsyncSession | Session, event: dict[str, Any]) -> None
     two share one ``info`` dict, so it is the same outbox.
     """
     session.info.setdefault(OUTBOX, []).append(event)
+
+
+async def flush_or_refuse(session: AsyncSession, refusal: AppError) -> None:
+    """Flush, turning a unique or foreign-key violation into ``refusal``.
+
+    For a write guarded by a pre-check that another request can overtake: two
+    people naming a goal "Search" at the same moment both pass the SELECT, and
+    the index is what decides between them. The loser gets the refusal the
+    pre-check would have given it — the same 409, the same message — rather
+    than a 500. ``refusal`` is built by the caller before the flush because a
+    failed flush leaves the session unusable, rows and attributes with it.
+
+    The transaction is left aborted, so ``refusal`` must be raised all the way
+    out; nothing should catch it and carry on writing.
+    """
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise refusal from exc
+
+
+async def lock_row(session: AsyncSession, model: type[UUIDPrimaryKeyMixin], row_id: UUID) -> None:
+    """Take ``SELECT ... FOR UPDATE`` on one row until the transaction ends.
+
+    For the writes that check and then act and cannot leave the deciding to an
+    index: counting a template's cards before deleting it, or replacing a
+    role's permissions by deleting and re-inserting them. Locking the row the
+    work is about makes two such requests take turns, so the second checks
+    what the first wrote instead of racing it to a constraint.
+
+    **Lock the project first.** Creating a card locks its project's row to
+    number it, and then needs the card's column and template, which it
+    references. Anything that locks one of those and then writes a row that
+    references the project — an activity entry, which nearly everything writes
+    — is the other half of a deadlock. So a caller locking any row belonging
+    to a project locks the project before it, in the order numbering does.
+    """
+    await session.execute(select(model.id).where(model.id == row_id).with_for_update())
 
 
 class Database:

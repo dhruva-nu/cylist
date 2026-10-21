@@ -30,6 +30,7 @@ from typing import Final
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.base_path import route_path
+from app.core.errors import internal_error_response
 from app.core.logging import (
     REQUEST_ID_HEADER,
     bind_request_id,
@@ -88,16 +89,22 @@ class RequestLogMiddleware:
         except Exception:
             # Logged here rather than in an exception handler because this is
             # the only place that still has the request's timing and id in
-            # hand. Re-raised untouched: turning the failure into a response
-            # is Starlette's job, and swallowing it here would hand the client
-            # a 200 with no body.
+            # hand.
             logger.exception(
                 "%s %s failed",
                 _method(scope),
                 _path(scope),
                 extra={"context": self._context(scope, 500, started)},
             )
-            raise
+            if status_code:
+                # Too late for an envelope: the status line is already out.
+                # Re-raised so the server drops the connection rather than
+                # leave the client waiting on a body that will never finish.
+                raise
+            # Answered here rather than left to Starlette, whose exception
+            # handler runs outside this middleware: the 500 it sent would carry
+            # no request id, which is the one thing a report of it needs.
+            await internal_error_response()(scope, receive, send_wrapper)
         else:
             self._log_response(scope, status_code, started)
         finally:

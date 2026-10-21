@@ -31,6 +31,7 @@ from app.auth.principal import Principal
 from app.core import sensitivity
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.sensitivity import DEFAULT_CLEARANCE, DEFAULT_LEVEL, Sensitivity
+from app.db import lock_row
 from app.models.board import BoardColumn
 from app.models.permission import (
     EVERYONE_ELSE,
@@ -67,7 +68,12 @@ async def grant(
     A replace rather than an add: the screen sends the whole row of the grid
     every time, and a diff would only be a way for two admins on two tabs to
     end up with a union of what each of them meant.
+
+    The project is locked first, so two admins saving at the same moment take
+    turns rather than both deleting the old rows and both inserting the new,
+    the second onto the first's keys.
     """
+    await lock_row(session, Project, project.id)
     await session.execute(
         delete(ProjectPermission).where(
             ProjectPermission.project_id == project.id,
@@ -259,7 +265,10 @@ async def set_column_rules(
     are deleted rather than stored, so the table stays the list of exceptions
     somebody deliberately made — which is the list worth reading when a board
     has stopped behaving and nobody remembers why.
+
+    Locked first, for the reason :func:`grant` is.
     """
+    await lock_row(session, Project, project.id)
     await session.execute(
         delete(RoleColumnRule).where(
             RoleColumnRule.project_id == project.id,
@@ -362,7 +371,10 @@ async def set_clearance(
     The top clearance is stored as no row at all, for the reason a column rule
     that restricts nothing is: this table is the list of restrictions, and a
     row saying "may read everything" is not one.
+
+    Locked first, for the reason :func:`grant` is.
     """
+    await lock_row(session, Project, project.id)
     await session.execute(
         delete(RoleClearance).where(
             RoleClearance.project_id == project.id,

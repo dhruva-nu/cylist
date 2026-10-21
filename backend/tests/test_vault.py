@@ -515,6 +515,27 @@ class TestMoving:
 class TestSecretsNeverLeak:
     """The plaintext must appear in exactly one place: the reveal response."""
 
+    async def test_not_in_a_validation_failure(self, signed_in: AsyncClient) -> None:
+        """A model-level validator sees the whole body, so Pydantic's ``input``
+        for it is the body — secret and all — unless the handler strips it."""
+        tree_id = await _tree(signed_in)
+
+        response = await signed_in.post(
+            "/vault/nodes",
+            json={
+                "tree_id": tree_id,
+                "name": "Twilio",
+                "kind": "branch",
+                "secret": {"value": TWILIO_SECRET, "username": "ops@think41.com"},
+            },
+        )
+
+        assert response.status_code == 422
+        assert TWILIO_SECRET not in response.text
+        for field in response.json()["error"]["details"]["fields"]:
+            assert "input" not in field
+            assert "ctx" not in field
+
     async def test_not_in_the_create_response(self, signed_in: AsyncClient) -> None:
         tree_id = await _tree(signed_in)
 

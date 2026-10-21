@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.db import flush_or_refuse, lock_row
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
@@ -63,7 +64,7 @@ async def create_template(
     await _refuse_duplicate_template(session, project.id, data.name)
     template = TaskTemplate(project_id=project.id, name=data.name, description=data.description)
     session.add(template)
-    await session.flush()
+    await flush_or_refuse(session, _duplicate_template(data.name))
     await _write_stages(session, template, data.stages)
     await session.refresh(template, ["stages"])
     return template
@@ -80,6 +81,7 @@ async def update_template(
 
     if name is not None:
         template.name = name
+        await flush_or_refuse(session, _duplicate_template(name))
     if fields.get("description") is not None:
         template.description = fields["description"]
 
@@ -103,6 +105,14 @@ async def delete_template(session: AsyncSession, template: TaskTemplate) -> None
             out from under a live card would quietly free it and drop what it
             still owes.
     """
+    # Locked before counting, project first as lock_row says. A card being
+    # created from this template at the same moment holds the project's lock
+    # to number itself, so this waits for that card to commit and then counts
+    # it; and a card that comes after waits for this to finish instead of
+    # slipping in between the count and the delete, where the foreign key
+    # would refuse the delete with a 500.
+    await lock_row(session, Project, template.project_id)
+    await lock_row(session, TaskTemplate, template.id)
     held = await session.scalar(
         select(func.count()).select_from(Task).where(Task.template_id == template.id)
     )
@@ -348,3 +358,10 @@ async def _refuse_duplicate_template(session: AsyncSession, project_id: UUID, na
             f"This project already has a template called {existing.name!r}.",
             details={"template_id": str(existing.id)},
         )
+
+
+def _duplicate_template(name: str) -> ConflictError:
+    """The refusal for a name that passed the check and then lost to the index."""
+    return ConflictError(
+        f"This project already has a template called {name!r}.", details={"name": name}
+    )
