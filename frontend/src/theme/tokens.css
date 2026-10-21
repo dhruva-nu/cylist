@@ -374,8 +374,17 @@ h3 {
  * that were falling back to the browser's look pick up the Cylist one.
  */
 :where(
-    input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='button'], [type='submit'], [type='hidden'])
-  ),
+  input:not(
+    [type='checkbox'],
+    [type='radio'],
+    [type='range'],
+    [type='file'],
+    [type='color'],
+    [type='button'],
+    [type='submit'],
+    [type='hidden']
+  )
+),
 :where(select),
 :where(textarea) {
   padding: 8px 12px;
