@@ -179,7 +179,7 @@ class TestCreating:
         first = await _create(signed_in, person)
         second = await _create(signed_in, person, title="Back-fill invoices")
 
-        assert [first["position"], second["position"]] == [0, 1]
+        assert first["position"] < second["position"]
 
     async def test_refuses_an_assignee_who_is_not_on_the_project(
         self, signed_in: AsyncClient
@@ -695,17 +695,20 @@ class TestDeleting:
         assert (await signed_in.delete(f"/tasks/{task['id']}")).status_code == 200
         assert (await signed_in.get(f"/tasks/{task['id']}")).status_code == 404
 
-    async def test_closes_the_gap_it_leaves(self, signed_in: AsyncClient) -> None:
+    async def test_its_neighbours_keep_their_places(self, signed_in: AsyncClient) -> None:
+        """The hole it leaves is left: positions are sort keys, not a count."""
         person = await _setup(signed_in)
         first = await _create(signed_in, person)
-        await _create(signed_in, person, title="Second")
+        second = await _create(signed_in, person, title="Second")
         third = await _create(signed_in, person, title="Third")
 
         await signed_in.delete(f"/tasks/{first['id']}")
 
         remaining = (await signed_in.get("/projects/ATL/tasks")).json()
-        assert [task["position"] for task in remaining] == [0, 1]
-        assert remaining[1]["id"] == third["id"]
+        assert [(task["id"], task["position"]) for task in remaining] == [
+            (second["id"], second["position"]),
+            (third["id"], third["position"]),
+        ]
 
     async def test_it_is_recorded_against_the_project(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)
@@ -899,38 +902,37 @@ class TestMoving:
 
         board = (await signed_in.get("/projects/ATL/tasks")).json()
         assert [task["id"] for task in board] == [second["id"], first["id"]]
-        assert [task["position"] for task in board] == [0, 1]
+        assert board[0]["position"] < board[1]["position"]
 
     async def test_a_position_past_the_end_lands_at_the_bottom(
         self, signed_in: AsyncClient
     ) -> None:
         """So "drop at the end" needs no length lookup first."""
         person = await _setup(signed_in)
-        await _create(signed_in, person, title="First")
-        second = await _create(signed_in, person, title="Second")
-        todo = (await _columns(signed_in))[0]["id"]
-
-        moved = (
-            await signed_in.post(
-                f"/tasks/{second['id']}/move", json={"column_id": todo, "position": 99}
-            )
-        ).json()
-
-        assert moved["position"] == 1
-
-    async def test_the_source_column_closes_its_gap(self, signed_in: AsyncClient) -> None:
-        person = await _setup(signed_in)
         first = await _create(signed_in, person, title="First")
         await _create(signed_in, person, title="Second")
-        done = (await _columns(signed_in))[1]["id"]
+        todo = (await _columns(signed_in))[0]["id"]
+
+        await signed_in.post(f"/tasks/{first['id']}/move", json={"column_id": todo, "position": 99})
+
+        board = (await signed_in.get("/projects/ATL/tasks")).json()
+        assert [task["title"] for task in board] == ["Second", "First"]
+
+    async def test_the_source_column_is_left_as_it_was(self, signed_in: AsyncClient) -> None:
+        """Leaving a column writes nothing there: the hole is harmless."""
+        person = await _setup(signed_in)
+        first = await _create(signed_in, person, title="First")
+        second = await _create(signed_in, person, title="Second")
+        todo, done = (column["id"] for column in await _columns(signed_in))
 
         await signed_in.post(f"/tasks/{first['id']}/move", json={"column_id": done, "position": 0})
 
         board = (await signed_in.get("/projects/ATL/tasks")).json()
-        assert [(task["title"], task["position"]) for task in board] == [
-            ("Second", 0),
-            ("First", 0),
+        assert [(task["title"], task["column_id"]) for task in board] == [
+            ("Second", todo),
+            ("First", done),
         ]
+        assert board[0]["position"] == second["position"]
 
     async def test_refuses_a_column_on_another_board(self, signed_in: AsyncClient) -> None:
         person = await _setup(signed_in)

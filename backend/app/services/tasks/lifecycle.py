@@ -15,7 +15,7 @@ from app.schemas.tasks import TaskCreate
 from app.services import columns, goals, projects, templates
 from app.services.tasks.dates import set_column_due_dates
 from app.services.tasks.numbering import next_number, next_sub_number
-from app.services.tasks.stacking import count_cards_in_column, renumber
+from app.services.tasks.stacking import slot
 
 _LOADED_ON_CREATE = (
     "project",
@@ -75,7 +75,7 @@ async def create(
     if parent is None:
         number = await next_number(session, project)
         column = templates.landing_column(template, await columns.first(session, project))
-        position = await count_cards_in_column(session, column.id)
+        position = await slot(session, column.id, index=None)
     else:
         _refuse_unfit_parent(parent, data.goal_id)
         sub_number = await next_sub_number(session, parent)
@@ -113,19 +113,17 @@ async def create(
 
 
 async def delete(session: AsyncSession, task: Task) -> None:
-    """Remove a task, closing the gap it leaves in its column.
+    """Remove a task.
 
     Its number is not returned to the pool: ``project.task_counter`` only ever
-    goes up, so ``ATL-41`` never names a second task.
+    goes up, so ``ATL-41`` never names a second task. The hole it leaves in its
+    column is left too: positions are sort keys with room between them, not a
+    count (see :mod:`app.services.tasks.stacking`), so the cards around it are
+    already in order and nothing else needs writing.
     """
-    # A parent takes its sub-tasks with it (ON DELETE CASCADE), but they are in
-    # no column, so the only gap to close is the one the card itself left. A
-    # sub-task leaves none at all.
-    emptied = task.column_id
+    # A parent takes its sub-tasks with it (ON DELETE CASCADE).
     await session.delete(task)
     await session.flush()
-    if emptied is not None:
-        await renumber(session, emptied)
 
 
 async def _assignee_for(

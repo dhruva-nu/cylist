@@ -14931,7 +14931,7 @@
               }
             ],
             "title": "Position",
-            "description": "Where the card sits in its column, from the top. Null on a sub-task and on a card in cold storage."
+            "description": "Where the card sits in its column: sort ascending for top to bottom. A sort key, not an index — it has gaps and may be negative. Null on a sub-task and on a card in cold storage."
           },
           "title": {
             "type": "string",
@@ -15339,7 +15339,7 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Position",
-            "description": "Clamped to the column's length.",
+            "description": "How many cards from the top of the column to put it, not a sort key. Clamped to the column's length.",
             "default": 0
           },
           "outcome": {
@@ -15462,7 +15462,7 @@
               }
             ],
             "title": "Position",
-            "description": "Where the card sits in its column, from the top. Null on a sub-task and on a card in cold storage."
+            "description": "Where the card sits in its column: sort ascending for top to bottom. A sort key, not an index — it has gaps and may be negative. Null on a sub-task and on a card in cold storage."
           },
           "title": {
             "type": "string",

@@ -2401,6 +2401,85 @@ class TestColdStorage:
         }
 
 
+SPARSE_POSITIONS = "0047"
+
+
+class TestSparsePositions:
+    """Revision 0047: positions are sort keys with room between them, unique
+    within a column (CYLIST-127)."""
+
+    async def _with_a_tie(self, connection: AsyncConnection) -> None:
+        """The board above, plus card 4 sharing card 3's place — what two
+        unlocked moves at once could leave behind."""
+        await seed_board_for_cold_storage(connection)
+        await connection.execute(
+            text(
+                "INSERT INTO task (id, project_id, number, column_id, position, title,"
+                " description, type, assignee_id, status)"
+                " SELECT gen_random_uuid(), project_id, 4, column_id, position, 'Card 4',"
+                " description, type, assignee_id, status FROM task WHERE number = 3"
+            )
+        )
+
+    async def test_every_card_keeps_its_place_and_a_tie_is_broken(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0046")
+        await self._with_a_tie(connection)
+
+        await migrate(SPARSE_POSITIONS)
+
+        placed = await placed_by_number(connection)
+        assert placed[1] == ("To do", 65536)
+        assert placed[2] == ("Done", 65536)
+        assert {placed[3], placed[4]} == {("Done", 131072), ("Done", 196608)}
+
+    async def test_two_cards_can_no_longer_share_a_place(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0046")
+        await self._with_a_tie(connection)
+        await migrate(SPARSE_POSITIONS)
+
+        with pytest.raises(IntegrityError, match="uq_task_column_id_position"):
+            await connection.execute(
+                text(
+                    "UPDATE task SET position = (SELECT position FROM task WHERE number = 2)"
+                    " WHERE number = 3"
+                )
+            )
+
+    async def test_the_undo_numbers_each_column_from_zero(
+        self,
+        connection: AsyncConnection,
+        migrate: Callable[[str], Awaitable[None]],
+        rewind: Callable[[str], Awaitable[None]],
+    ) -> None:
+        await migrate("0046")
+        await seed_board_for_cold_storage(connection)
+        await migrate(SPARSE_POSITIONS)
+        # A card dropped between two others, as the service now does.
+        await connection.execute(text("UPDATE task SET position = 100000 WHERE number = 1"))
+        await connection.execute(
+            text(
+                "UPDATE task SET column_id = (SELECT column_id FROM task WHERE number = 2)"
+                " WHERE number = 1"
+            )
+        )
+
+        await rewind("0046")
+
+        assert await placed_by_number(connection) == {
+            1: ("Done", 1),
+            2: ("Done", 0),
+            3: ("Done", 2),
+        }
+
+
 class TestRunningInProcess:
     """A migration run inside a process that has its own logging."""
 

@@ -425,7 +425,12 @@ class TaskMove(Schema):
     """
 
     column_id: UUID
-    position: int = Field(default=0, ge=0, description="Clamped to the column's length.")
+    position: int = Field(
+        default=0,
+        ge=0,
+        description="How many cards from the top of the column to put it, not a sort key. "
+        "Clamped to the column's length.",
+    )
     outcome: str | None = Field(
         default=None,
         description=(
@@ -531,7 +536,8 @@ class TaskRead(Schema):
         "and on a card in cold storage, which has left it."
     )
     position: int | None = Field(
-        description="Where the card sits in its column, from the top. Null on a sub-task and on "
+        description="Where the card sits in its column: sort ascending for top to bottom. A "
+        "sort key, not an index — it has gaps and may be negative. Null on a sub-task and on "
         "a card in cold storage."
     )
     title: str

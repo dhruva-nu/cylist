@@ -132,7 +132,11 @@ export interface Task {
    * and on a card in cold storage, which has left it.
    */
   column_id: string | null
-  /** Where it sits in that column, from the top. Null on a sub-task and in cold storage. */
+  /**
+   * Where it sits in that column: sort ascending for top to bottom. A sort key,
+   * not an index — it has gaps and may be negative, so it is never a count of
+   * the cards above. Null on a sub-task and in cold storage.
+   */
   position: number | null
   title: string
   description: string

@@ -18,6 +18,7 @@ import {
   type Task,
 } from '../../api/client'
 import { queryKeys, useInvalidate } from '../../api/queries'
+import { sortKeyAt } from './sortKey'
 
 /** A card dropped somewhere: where it lands, and what that changes about it. */
 export interface Move {
@@ -26,6 +27,11 @@ export interface Move {
   taskRef: string
   /** Null when the card was dropped in the column it was already in. */
   columnId: string | null
+  /**
+   * How many cards from the top of the column it lands — what the server is
+   * asked for. Not the card's `position`, which is a sort key: `sortKeyAt`
+   * works out the one the board draws it with meanwhile.
+   */
   position: number
   /**
    * The section of a divided column the card lands on, by name, and where the
@@ -47,11 +53,23 @@ export interface Move {
  * A card as it will look once a move has landed, so the board can draw it
  * there before the server has answered.
  */
-function withMoveApplied(task: Task, move: Move, landedGoal: Goal | null | undefined): Task {
+function withMoveApplied(
+  task: Task,
+  move: Move,
+  landedGoal: Goal | null | undefined,
+  cards: Task[],
+): Task {
   const { columnId, position, outcome, outcomeIndex, goalId } = move
   return {
     ...task,
-    ...(columnId ? { column_id: columnId, position, outcome, outcome_index: outcomeIndex } : {}),
+    ...(columnId
+      ? {
+          column_id: columnId,
+          position: sortKeyAt(cards, columnId, position, task.id),
+          outcome,
+          outcome_index: outcomeIndex,
+        }
+      : {}),
     ...(goalId === undefined
       ? {}
       : {
@@ -135,8 +153,9 @@ export function useBoardMutations(
     onMutate: (move) => {
       const landedGoal =
         move.goalId === undefined ? null : (goals ?? []).find((goal) => goal.id === move.goalId)
+      const cards = queryClient.getQueryData<Task[]>(tasksKey) ?? []
       return changeCardsOptimistically((task) =>
-        task.id === move.taskId ? withMoveApplied(task, move, landedGoal) : task,
+        task.id === move.taskId ? withMoveApplied(task, move, landedGoal, cards) : task,
       )
     },
     onError: (_error, _move, snapshot) => restoreCards(snapshot),
