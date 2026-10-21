@@ -59,5 +59,5 @@ export function useBoardData(projectKey: string) {
   // the first card on a goal gets dropped.
   const goals = useGoals(projectKey)
 
-  return { board, tasks, members, templates, goals }
+  return { board, tasks, members, templates, goals, live: socket.connected }
 }

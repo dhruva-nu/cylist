@@ -8,7 +8,7 @@
  * card move makes the board feel broken even when it is working.
  */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryKey } from '@tanstack/react-query'
 import {
   api,
   type Board,
@@ -16,6 +16,7 @@ import {
   type Goal,
   type Person,
   type Task,
+  type TodayPlan,
 } from '../../api/client'
 import { queryKeys, refreshesItself, useInvalidate, type BoardCards } from '../../api/queries'
 import { sortKeyAt } from './sortKey'
@@ -89,12 +90,14 @@ interface Snapshot<T> {
 /**
  * `goals` and `members` are the project's lists as they currently stand, which
  * is what a card dropped into another goal's lane, or handed to someone, borrows
- * its new name and colour from while the request is in the air.
+ * its new name and colour from while the request is in the air. `live` is
+ * whether the board's socket is up, which decides who refetches the cards.
  */
 export function useBoardMutations(
   projectKey: string,
   goals: Goal[] | undefined,
   members: Person[] | undefined,
+  live: boolean,
 ) {
   const queryClient = useQueryClient()
   const invalidate = useInvalidate()
@@ -111,11 +114,30 @@ export function useBoardMutations(
       queryKeys.templates(projectKey),
       queryKeys.goals(projectKey),
       queryKeys.allGoals,
-      // A card moved past a stage ticks the to-do planned for it, which the
-      // sidebar's count for today and the day's report both show.
-      ['today', projectKey],
-      ['day-report', projectKey],
     )
+  }
+
+  /**
+   * What a change to one card from the board can leave out of date — less
+   * than `refresh`, because it follows every drag.
+   *
+   * While the socket is up the cards, and any card open, come back on their
+   * own: the server tells every board about the change, this one included,
+   * and reading them here too would read them twice. The socket says nothing
+   * of the card's goal, whose progress counts it, or of a day it is planned
+   * on, whose to-do a stage ticks — so those are read here, when the card has
+   * either. After a refusal it is `refresh` instead: the cards were put back
+   * from a snapshot, and the server, having changed nothing, sends no word.
+   */
+  async function refreshCard(taskId: string, goalChanged = false) {
+    const keys: QueryKey[] = live ? [] : [tasksKey, queryKeys.allTasks]
+    const card = queryClient.getQueryData<BoardCards>(tasksKey)?.tasks.find((t) => t.id === taskId)
+    if (goalChanged || card?.goal_id) keys.push(queryKeys.goals(projectKey), queryKeys.allGoals)
+    const planned = queryClient
+      .getQueriesData<TodayPlan>({ queryKey: ['today', projectKey] })
+      .some(([, plan]) => plan?.picks.some((pick) => pick.task.id === taskId))
+    if (planned) keys.push(['today', projectKey], ['day-report', projectKey])
+    await invalidate(...keys)
   }
 
   /**
@@ -165,7 +187,15 @@ export function useBoardMutations(
       )
     },
     onError: (_error, _move, snapshot) => restoreCards(snapshot),
-    onSettled: refresh,
+    // The goal it left, as well as the one it is on now.
+    onSettled: (_moved, error, move, snapshot) =>
+      error
+        ? refresh()
+        : refreshCard(
+            move.taskId,
+            move.goalId !== undefined ||
+              Boolean(snapshot?.previous?.tasks.find((t) => t.id === move.taskId)?.goal_id),
+          ),
     meta: refreshesItself,
   })
 
@@ -186,7 +216,7 @@ export function useBoardMutations(
         task.id === taskId ? { ...task, sub_status_index: index } : task,
       ),
     onError: (_error, _change, snapshot) => restoreCards(snapshot),
-    onSettled: refresh,
+    onSettled: (_task, error, { taskId }) => (error ? refresh() : refreshCard(taskId)),
     meta: refreshesItself,
   })
 
@@ -209,7 +239,7 @@ export function useBoardMutations(
       )
     },
     onError: (_error, _change, snapshot) => restoreCards(snapshot),
-    onSettled: refresh,
+    onSettled: (_task, error, { taskId }) => (error ? refresh() : refreshCard(taskId)),
     meta: refreshesItself,
   })
 
@@ -231,7 +261,8 @@ export function useBoardMutations(
     onError: (_error, _columnIds, snapshot) => {
       queryClient.setQueryData(boardKey, snapshot?.previous)
     },
-    onSettled: refresh,
+    // The templates' stages are listed in the board's order.
+    onSettled: () => invalidate(boardKey, queryKeys.templates(projectKey)),
     meta: refreshesItself,
   })
 

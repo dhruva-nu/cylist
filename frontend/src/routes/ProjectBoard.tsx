@@ -50,7 +50,7 @@ import { usePermissions } from './usePermissions'
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
   const { q: initialQuery = '', who } = useSearch({ from: '/p/$projectKey/board' })
-  const { board, tasks, members, templates, goals } = useBoardData(projectKey)
+  const { board, tasks, members, templates, goals, live } = useBoardData(projectKey)
   // Already in hand: the sign-in gate does not draw a page until it is.
   const identity = useIdentity()
 
@@ -77,6 +77,7 @@ export function ProjectBoard() {
       templates={templates.data ?? EMPTY}
       goals={goals.data ?? EMPTY}
       goalsLoaded={!goals.isPending}
+      live={live}
     />
   )
 }
@@ -108,6 +109,7 @@ function LoadedBoard({
   templates,
   goals,
   goalsLoaded,
+  live,
 }: {
   projectKey: string
   /**
@@ -129,6 +131,8 @@ function LoadedBoard({
   templates: Template[]
   goals: Goal[]
   goalsLoaded: boolean
+  /** Whether the board's socket is up — see `useBoardMutations`. */
+  live: boolean
 }) {
   const may = usePermissions(projectKey)
   const { message, announce } = useAnnouncer()
@@ -137,6 +141,7 @@ function LoadedBoard({
     projectKey,
     goals,
     members,
+    live,
   )
   const loadMore = useLoadMoreCards(projectKey)
   const boardRef = useRef<HTMLDivElement>(null)
