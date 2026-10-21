@@ -35,7 +35,7 @@ from app.models import (
 )
 from app.services import hook_delivery, retention
 from app.services.retention import Retention
-from tests.conftest import VAULT_KEY, put_members
+from tests.conftest import VAULT_KEYS, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 ADITI = {
@@ -375,7 +375,7 @@ async def test_the_couriers_hourly_prune_applies_retention(
 
     courier = hook_delivery.Courier(Retention(agent_sessions_for=MONTH, activity_for=MONTH * 12))
     running = asyncio.create_task(
-        courier.run(database, VAULT_KEY, httpx.MockTransport(lambda _: httpx.Response(200)))
+        courier.run(database, VAULT_KEYS, httpx.MockTransport(lambda _: httpx.Response(200)))
     )
     try:
         for _ in range(200):

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.core.errors import AppError
 from app.models.base import UUIDPrimaryKeyMixin
 
@@ -100,11 +101,28 @@ async def lock_row(session: AsyncSession, model: type[UUIDPrimaryKeyMixin], row_
 class Database:
     """Owns the connection pool for the lifetime of the application."""
 
-    def __init__(self, url: str, *, echo: bool = False) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        echo: bool = False,
+        pool_size: int = 10,
+        max_overflow: int = 10,
+        pool_timeout: float = 10.0,
+        statement_timeout: float = 30.0,
+    ) -> None:
         self._engine: AsyncEngine = create_async_engine(
             url,
             echo=echo,
             pool_pre_ping=True,  # survive a Postgres restart without a failed request
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+            # Set on the connection as it opens, so it holds for every
+            # statement on it without a round trip per transaction.
+            connect_args={
+                "server_settings": {"statement_timeout": str(round(statement_timeout * 1000))}
+            },
         )
         self._session_factory = async_sessionmaker(
             self._engine,
@@ -116,6 +134,18 @@ class Database:
         which is the honest default: a pool can exist before there is anyone
         to tell, and every test that does not care about pushes gets silence
         for free."""
+
+    @classmethod
+    def configured(cls, settings: Settings) -> Database:
+        """The pool these settings describe."""
+        return cls(
+            settings.database_url,
+            echo=settings.database_echo,
+            pool_size=settings.database_pool_size,
+            max_overflow=settings.database_max_overflow,
+            pool_timeout=settings.database_pool_timeout_seconds,
+            statement_timeout=settings.database_statement_timeout_seconds,
+        )
 
     @property
     def engine(self) -> AsyncEngine:
@@ -149,6 +179,25 @@ class Database:
                 await session.commit()
                 self._drain(session)
 
+    async def release(self, session: AsyncSession) -> None:
+        """Commit what ``session`` has done so far, tell its news, and give its
+        connection back to the pool.
+
+        For a request about to wait on somebody else's network — jev reading a
+        question, a hook's receiver answering a test. A pool is a handful of
+        connections, and one held idle for the length of that wait is one that
+        ``/health`` and every other request cannot have: fifteen slow doc
+        questions used to be enough to fail the container's healthcheck
+        (CYLIST-131). Whatever the request needs afterwards it gets on a fresh
+        connection, in a transaction of its own that commits as usual.
+
+        Only for a request whose work up to here may stand alone, since a
+        failure after this point cannot take it back: what came before is read,
+        or bookkeeping such as the credential's ``last_used_at``.
+        """
+        await session.commit()
+        self._drain(session)
+
     def _drain(self, session: AsyncSession) -> None:
         """Publish what the committed transaction queued.
 
@@ -169,13 +218,19 @@ class Database:
         await self._engine.dispose()
 
 
+def database_of(request: Request) -> Database:
+    """The app's pool, for a route that has to :meth:`~Database.release` its
+    session before it waits on the network."""
+    database: Database = request.app.state.database
+    return database
+
+
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     """FastAPI dependency returning the request-scoped session.
 
     Depend on :data:`SessionDependency` rather than on this directly.
     """
-    database: Database = request.app.state.database
-    async with database.session() as session:
+    async with database_of(request).session() as session:
         yield session
 
 

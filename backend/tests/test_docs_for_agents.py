@@ -13,17 +13,24 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
 from jevdocs import Action, Candidate, Change, Corpus, Hop, Plan, Route, mock_client
+from sqlalchemy import func, inspect, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ConflictError
+from app.db import Database
 from app.models.doc import Doc, DocSection, DocTopic
-from app.services import doc_corpus
+from app.models.project import Project
+from app.schemas.docs import DocWrite
+from app.services import doc_corpus, docs
 from app.services.doc_corpus import summary_of
 from app.services.doc_engine import EngineUnavailableError, JevDocEngine
 from app.services.docs import appended
+from tests.connections import assert_no_connection_held
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
 
@@ -40,8 +47,16 @@ class FakeEngine:
     down: bool = False
     asked: list[tuple[Corpus, str]] = field(default_factory=list)
     placed: list[tuple[Corpus, Change]] = field(default_factory=list)
+    database: Database | None = None
+    """The pool that must hold no connection while jev is asked — jev takes
+    seconds to answer. None for a test that holds a session itself."""
+
+    def _calling_out(self) -> None:
+        if self.database is not None:
+            assert_no_connection_held(self.database, "jev")
 
     async def ask(self, corpus: Corpus, question: str) -> Route:
+        self._calling_out()
         if self.down:
             raise EngineUnavailableError("503 overloaded")
         self.asked.append((corpus, question))
@@ -49,6 +64,7 @@ class FakeEngine:
         return self.route(corpus, question)
 
     async def place(self, corpus: Corpus, change: Change) -> Plan:
+        self._calling_out()
         if self.down:
             raise EngineUnavailableError("timed out")
         self.placed.append((corpus, change))
@@ -58,7 +74,7 @@ class FakeEngine:
 
 @pytest.fixture
 def engine(signed_in: AsyncClient) -> FakeEngine:
-    fake = FakeEngine()
+    fake = FakeEngine(database=signed_in.app.state.database)  # type: ignore[attr-defined]
     signed_in.app.state.doc_engine = fake  # type: ignore[attr-defined]
     return fake
 
@@ -526,6 +542,211 @@ class TestPlacing:
         response = await signed_in.post("/projects/ATL/docs/place", json=body)
 
         assert response.status_code == 422
+
+
+def _database(client: AsyncClient) -> Database:
+    return client.app.state.database  # type: ignore[attr-defined,no-any-return]
+
+
+async def _ask(client: AsyncClient, engine: FakeEngine) -> Corpus:
+    """Ask anything, and return the corpus jev was handed for it."""
+    engine.route = routed("engineering/webhooks.md#retries")
+    response = await client.post("/projects/ATL/docs/ask", json={"question": "Retries?"})
+    assert response.status_code == 200, response.text
+    return engine.asked[-1][0]
+
+
+def _bodies(corpus: Corpus) -> set[str]:
+    return {section.body for file in corpus.files() for section in file.sections}
+
+
+class TestTheCorpusIsKept:
+    """Built once per project and reused until something it was built from
+    changes — wherever the change was made (CYLIST-144)."""
+
+    async def test_a_second_question_reuses_the_first_ones_corpus(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        first = await _ask(signed_in, engine)
+        assert await _ask(signed_in, engine) is first
+
+        engine.plan = planned()
+        response = await signed_in.post(
+            "/projects/ATL/docs/place",
+            json={"title": "Refunds", "facts": [{"text": "Refunds go back to the card."}]},
+        )
+        assert response.status_code == 200, response.text
+        assert engine.placed[-1][0] is first, "placing reads the same corpus"
+
+    async def test_a_doc_written_through_the_api_is_in_the_next_corpus(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        filed = await _a_filed_project(signed_in)
+        first = await _ask(signed_in, engine)
+
+        await _doc(signed_in, filed["schema"]["id"], "Refunds table", "One row per refund.")
+
+        second = await _ask(signed_in, engine)
+        assert second is not first
+        assert "engineering/refunds-table.md" in {file.key for file in second.files()}
+
+    async def test_an_edit_a_rename_and_a_delete_each_rebuild_it(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        filed = await _a_filed_project(signed_in)
+        before = await _ask(signed_in, engine)
+
+        edited = await signed_in.patch(
+            f"/docs/{filed['payments']['id']}", json={"body": "One row per capture."}
+        )
+        assert edited.status_code == 200, edited.text
+        after_edit = await _ask(signed_in, engine)
+        assert after_edit is not before
+        assert "One row per capture." in _bodies(after_edit)
+
+        renamed = await signed_in.patch(
+            f"/doc-topics/{filed['schema']['id']}", json={"name": "Tables"}
+        )
+        assert renamed.status_code == 200, renamed.text
+        after_rename = await _ask(signed_in, engine)
+        assert after_rename is not after_edit
+        assert "tables" in after_rename.domains["engineering"].groups
+
+        deleted = await signed_in.delete(f"/docs/{filed['q4']['id']}")
+        assert deleted.status_code == 200, deleted.text
+        after_delete = await _ask(signed_in, engine)
+        assert after_delete is not after_rename
+        assert "product/q4-goals.md" not in {file.key for file in after_delete.files()}
+
+    async def test_a_write_from_another_process_is_seen(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        """Another worker's write reaches this one as nothing but rows: no
+        event is published here, and the corpus is rebuilt all the same."""
+        filed = await _a_filed_project(signed_in)
+        first = await _ask(signed_in, engine)
+
+        elsewhere = _database(signed_in)
+        elsewhere.publish_to(None)
+        async with elsewhere.session() as session:
+            await session.execute(
+                update(Doc)
+                .where(Doc.id == UUID(filed["payments"]["id"]))
+                .values(body="Written by another worker.")
+            )
+
+        second = await _ask(signed_in, engine)
+        assert second is not first
+        assert "Written by another worker." in _bodies(second)
+
+    async def test_a_write_that_began_first_and_committed_last_is_seen(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        """``updated_at`` is when a transaction began, so this write lands
+        older than the newest one already seen. Counting rows and the newest
+        ``updated_at`` would miss it; the stamp does not."""
+        filed = await _a_filed_project(signed_in)
+        database = _database(signed_in)
+        # This test holds a transaction open across the questions on purpose.
+        engine.database = None
+
+        async with database.session() as early:
+            await early.execute(select(func.now()))  # its clock starts here
+            async with database.session() as later:
+                await later.execute(
+                    update(Doc)
+                    .where(Doc.id == UUID(filed["q4"]["id"]))
+                    .values(body="Ship search, then filters.")
+                )
+            cached = await _ask(signed_in, engine)
+            assert "Ship search, then filters." in _bodies(cached)
+            await early.execute(
+                update(Doc)
+                .where(Doc.id == UUID(filed["payments"]["id"]))
+                .values(body="Begun first, committed last.")
+            )
+
+        assert "Begun first, committed last." in _bodies(await _ask(signed_in, engine))
+
+    async def test_another_projects_corpus_is_its_own(
+        self, signed_in: AsyncClient, engine: FakeEngine
+    ) -> None:
+        await _a_filed_project(signed_in)
+        atlas = await _ask(signed_in, engine)
+        await signed_in.post("/projects", json={"key": "ORB", "name": "Orbit"})
+        topic = (
+            await signed_in.post(
+                "/projects/ORB/doc-topics", json={"section": "engineering", "name": "APIs"}
+            )
+        ).json()
+        await _doc(signed_in, topic["id"], "Webhooks", WEBHOOKS)
+
+        response = await signed_in.post("/projects/ORB/docs/ask", json={"question": "Retries?"})
+        assert response.status_code == 200, response.text
+        orbit = engine.asked[-1][0]
+        assert orbit is not atlas
+        assert await _ask(signed_in, engine) is atlas
+
+
+class TestCheckingATitle:
+    """Writing a doc checks its title against the topic's others without
+    reading their bodies, which can run to megabytes between them."""
+
+    @staticmethod
+    def _bodies_loaded(session: AsyncSession) -> set[str]:
+        return {
+            row.title
+            for row in session.identity_map.values()
+            if isinstance(row, Doc) and "body" not in inspect(row).unloaded
+        }
+
+    async def test_a_new_title_reads_no_body(self, signed_in: AsyncClient) -> None:
+        filed = await _a_filed_project(signed_in)
+        async with _database(signed_in).session() as session:
+            project = await session.get_one(Project, UUID(filed["apis"]["project_id"]))
+            written = await docs.write(
+                session,
+                project,
+                DocWrite(title="Events", body="Every event we take.", topic_id=filed["apis"]["id"]),
+                author_id=None,
+            )
+            assert written.created
+            assert self._bodies_loaded(session) == {"Events"}, "only the one just written"
+
+    async def test_a_taken_title_reads_no_body(self, signed_in: AsyncClient) -> None:
+        filed = await _a_filed_project(signed_in)
+        async with _database(signed_in).session() as session:
+            project = await session.get_one(Project, UUID(filed["apis"]["project_id"]))
+            with pytest.raises(ConflictError):
+                await docs.write(
+                    session,
+                    project,
+                    DocWrite(title="webhooks", body="Again.", topic_id=filed["apis"]["id"]),
+                    author_id=None,
+                )
+            assert self._bodies_loaded(session) == set()
+            await session.rollback()
+
+    async def test_appending_reads_only_the_doc_appended_to(self, signed_in: AsyncClient) -> None:
+        filed = await _a_filed_project(signed_in)
+        async with _database(signed_in).session() as session:
+            project = await session.get_one(Project, UUID(filed["apis"]["project_id"]))
+            written = await docs.write(
+                session,
+                project,
+                DocWrite(
+                    title="learned.md",
+                    body="- Refunds settle in five days.",
+                    topic_id=filed["apis"]["id"],
+                    append=True,
+                ),
+                author_id=None,
+            )
+            assert written.doc.body == (
+                "- Stripe's test clock skips retries.\n- Refunds settle in five days."
+            )
+            assert self._bodies_loaded(session) == {"learned.md"}
 
 
 class TestTheRealEngineOffline:
