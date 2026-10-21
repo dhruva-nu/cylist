@@ -107,7 +107,9 @@ def build_lifespan(settings: Settings) -> Lifespan:
         # this runs. Sessions nobody reconnects to are the reaper's.
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
         courier = asyncio.create_task(
-            app.state.courier.run(app.state.database, settings.vault_key, app.state.hook_transport),
+            app.state.courier.run(
+                app.state.database, settings.vault_keyring, app.state.hook_transport
+            ),
             name="cylist-hook-courier",
         )
         try:

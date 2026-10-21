@@ -12,13 +12,15 @@ from datetime import timedelta
 from functools import lru_cache
 from ipaddress import IPv4Network, IPv6Network
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from fastapi import Request
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+from app.core.crypto import VaultKeys
 
 Environment = Literal["dev", "test", "preview", "staging", "prod"]
 
@@ -163,6 +165,22 @@ class Settings(BaseSettings):
     """
 
     vault_key: str = ""
+    """Vault key version 1 — the one every deployment started with.
+
+    Still the only key most deployments have. Later keys go in
+    :attr:`vault_keys`; once every row has been resealed onto one of them
+    (``python -m app.cli vault-reseal``) this may be emptied, which is what
+    retiring the first key means. See :attr:`vault_keyring`.
+    """
+
+    vault_keys: dict[int, str] = Field(default_factory=dict)
+    """Further vault keys by version, as JSON: ``CYLIST_VAULT_KEYS={"2": "…"}``.
+
+    The highest version seals everything written from now on; every version
+    listed, plus :attr:`vault_key` as version 1, can still open what it sealed.
+    Version 1 may be given here too, in place of :attr:`vault_key` rather than
+    beside it with a different value.
+    """
 
     # --- Jev ----------------------------------------------------------------
     # TypeSafe's System One model, which jev-docs asks which section of a
@@ -316,6 +334,44 @@ class Settings(BaseSettings):
                     "172.16.0.0/12 or 127.0.0.1/32"
                 ) from exc
         return [cidr.strip() for cidr in value]
+
+    @field_validator("vault_keys")
+    @classmethod
+    def _require_positive_versions(cls, value: dict[int, str]) -> dict[int, str]:
+        """Versions are stored in an integer column and compared by size; zero
+        or less would sort below the key every deployment already has."""
+        for version in value:
+            if version < 1:
+                raise ValueError(f"vault_keys has version {version}; versions start at 1")
+        return value
+
+    @model_validator(mode="after")
+    def _one_key_per_version(self) -> Self:
+        """Refuse two different version-1 keys at startup.
+
+        Whichever one won, the secrets sealed under the other would read as
+        tampered with, which is a far more alarming message than the truth.
+        """
+        listed = self.vault_keys.get(1, "").strip()
+        if listed and self.vault_key.strip() and listed != self.vault_key.strip():
+            raise ValueError(
+                "vault_key and vault_keys both give a version 1 key, and they differ. "
+                "Keep one of them."
+            )
+        return self
+
+    @property
+    def vault_keyring(self) -> VaultKeys:
+        """Every vault key this deployment holds, by version, oldest first.
+
+        :attr:`vault_key` is version 1; :attr:`vault_keys` adds the rest. Empty
+        when neither is set, which the cipher turns into a loud refusal — see
+        :class:`app.core.crypto.VaultCipher`.
+        """
+        keys = dict(self.vault_keys)
+        if self.vault_key.strip():
+            keys[1] = self.vault_key
+        return tuple(sorted(keys.items()))
 
     @property
     def trusted_proxies(self) -> tuple[IPv4Network | IPv6Network, ...]:

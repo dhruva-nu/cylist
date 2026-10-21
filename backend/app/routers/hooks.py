@@ -334,7 +334,7 @@ async def test_hook(
     session.add(delivery)
     async with _client(request) as client:
         await hook_delivery.send_now(
-            session, client, request.app.state.settings.vault_key, hook, delivery
+            session, client, request.app.state.settings.vault_keyring, hook, delivery
         )
     await session.flush()
     await session.refresh(delivery)
@@ -380,7 +380,7 @@ async def fire_hook(
     session.add(delivery)
     async with _client(request) as client:
         await hook_delivery.send_now(
-            session, client, request.app.state.settings.vault_key, hook, delivery
+            session, client, request.app.state.settings.vault_keyring, hook, delivery
         )
     await session.flush()
     await session.refresh(delivery)

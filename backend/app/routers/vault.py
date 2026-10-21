@@ -62,13 +62,13 @@ router = APIRouter(prefix="/vault", tags=["vault"])
 
 
 def vault_cipher(settings: Settings = Depends(app_settings)) -> VaultCipher:
-    """The cipher this deployment's ``CYLIST_VAULT_KEY`` configures.
+    """The cipher this deployment's vault keys configure.
 
     Built on demand rather than at startup, so a deployment that has not set a
     key still boots and still serves everything outside the vault — and fails
     loudly, here, the moment a credential is involved.
     """
-    return crypto.cipher_for(settings.vault_key)
+    return crypto.cipher_for(settings.vault_keyring)
 
 
 async def resolved_tree(

@@ -12,7 +12,6 @@ import base64
 import pytest
 
 from app.core.crypto import (
-    KEY_VERSION,
     SecretUnreadableError,
     VaultCipher,
     VaultUnavailableError,
@@ -20,16 +19,20 @@ from app.core.crypto import (
     cipher_for,
 )
 from app.core.ids import uuid7
-from tests.conftest import VAULT_KEY
+from tests.conftest import VAULT_KEY, VAULT_KEYS
 
 NODE = uuid7()
 OTHER_NODE = uuid7()
 SECRET = "Tw!9xLp3#Qm"
+KEY_VERSION = 1
+"""What a deployment with only ``CYLIST_VAULT_KEY`` seals under."""
+NEW_KEY = base64.urlsafe_b64encode(b"n" * 32).decode()
+"""A second key, as a rotation adds one."""
 
 
 @pytest.fixture
 def cipher() -> VaultCipher:
-    return VaultCipher(VAULT_KEY)
+    return VaultCipher({1: VAULT_KEY})
 
 
 class TestRoundTrip:
@@ -165,17 +168,89 @@ class TestKeyVersioning:
         with pytest.raises(SecretUnreadableError) as raised:
             cipher.open(sealed, node_id=NODE, key_version=KEY_VERSION + 1)
 
-        assert str(KEY_VERSION + 1) in str(raised.value)
+        # Says which version the row wants and which ones are here, so the
+        # operator knows which key to put back.
+        assert "version 2" in str(raised.value)
+        assert "version(s) 1" in str(raised.value)
 
     def test_seal_stamps_the_current_version(self, cipher: VaultCipher) -> None:
         sealed = cipher.seal(SECRET, node_id=NODE)
 
+        assert cipher.version == KEY_VERSION
         assert cipher.open(sealed, node_id=NODE, key_version=KEY_VERSION) == SECRET
+
+
+class TestRotation:
+    """Adding a key: new rows go under it, old rows still open under theirs."""
+
+    @pytest.fixture
+    def rotated(self) -> VaultCipher:
+        return VaultCipher({1: VAULT_KEY, 2: NEW_KEY})
+
+    def test_the_newest_key_seals(self, rotated: VaultCipher) -> None:
+        sealed = rotated.seal(SECRET, node_id=NODE)
+
+        assert rotated.version == 2
+        assert rotated.open(sealed, node_id=NODE, key_version=2) == SECRET
+        # Really under the new key, not the old one with a new label.
+        with pytest.raises(SecretUnreadableError):
+            VaultCipher({1: VAULT_KEY}).open(sealed, node_id=NODE, key_version=1)
+
+    def test_a_row_sealed_before_the_rotation_still_opens(
+        self, cipher: VaultCipher, rotated: VaultCipher
+    ) -> None:
+        sealed = cipher.seal(SECRET, node_id=NODE)
+
+        assert rotated.open(sealed, node_id=NODE, key_version=1) == SECRET
+
+    def test_the_version_is_authenticated_not_merely_a_lookup(
+        self, cipher: VaultCipher, rotated: VaultCipher
+    ) -> None:
+        """A version-1 row relabelled 2 fails, rather than being tried under
+        whichever key happens to work."""
+        sealed = cipher.seal(SECRET, node_id=NODE)
+
+        with pytest.raises(SecretUnreadableError):
+            rotated.open(sealed, node_id=NODE, key_version=2)
+
+    def test_the_old_key_can_be_retired(self, rotated: VaultCipher) -> None:
+        sealed = rotated.seal(SECRET, node_id=NODE)
+        retired = VaultCipher({2: NEW_KEY})
+
+        assert retired.versions == (2,)
+        assert retired.open(sealed, node_id=NODE, key_version=2) == SECRET
+
+    def test_a_retired_key_leaves_its_rows_clearly_unreadable(self, cipher: VaultCipher) -> None:
+        sealed = cipher.seal(SECRET, node_id=NODE)
+
+        with pytest.raises(SecretUnreadableError) as raised:
+            VaultCipher({2: NEW_KEY}).open(sealed, node_id=NODE, key_version=1)
+
+        assert "version 1" in str(raised.value)
+        assert "version(s) 2" in str(raised.value)
+
+    def test_versions_need_not_be_contiguous(self) -> None:
+        cipher = VaultCipher({1: VAULT_KEY, 7: NEW_KEY})
+
+        assert cipher.version == 7
+        assert cipher.versions == (1, 7)
+
+    def test_a_malformed_later_key_is_named_by_its_version(self) -> None:
+        """Every key is checked when the cipher is built, not when a row first
+        needs it."""
+        with pytest.raises(VaultUnavailableError) as raised:
+            VaultCipher({1: VAULT_KEY, 3: "not a key!!!"})
+
+        assert "version 3" in str(raised.value)
+
+    def test_a_version_below_one_is_refused(self) -> None:
+        with pytest.raises(VaultUnavailableError):
+            VaultCipher({0: VAULT_KEY})
 
 
 class TestAnotherKey:
     def test_a_different_key_cannot_open_it(self, cipher: VaultCipher) -> None:
-        other = VaultCipher(base64.urlsafe_b64encode(b"a" * 32).decode())
+        other = VaultCipher({1: base64.urlsafe_b64encode(b"a" * 32).decode()})
         sealed = cipher.seal(SECRET, node_id=NODE)
 
         with pytest.raises(SecretUnreadableError):
@@ -187,23 +262,29 @@ class TestKeyLoading:
         """Nothing may fall back to storing plaintext because `make vault-key`
         was never run."""
         with pytest.raises(VaultUnavailableError) as raised:
-            VaultCipher("")
+            VaultCipher({})
+
+        assert "CYLIST_VAULT_KEY" in str(raised.value)
+
+    def test_an_empty_key_is_refused_rather_than_skipped(self) -> None:
+        with pytest.raises(VaultUnavailableError) as raised:
+            VaultCipher({1: ""})
 
         assert "CYLIST_VAULT_KEY" in str(raised.value)
 
     def test_whitespace_is_not_a_key(self) -> None:
         with pytest.raises(VaultUnavailableError):
-            VaultCipher("   \n")
+            VaultCipher({1: "   \n"})
 
     def test_a_key_that_is_not_base64_is_refused(self) -> None:
         with pytest.raises(VaultUnavailableError) as raised:
-            VaultCipher("not a key!!!" * 4)
+            VaultCipher({1: "not a key!!!" * 4})
 
         assert "base64url" in str(raised.value)
 
     def test_a_key_of_the_wrong_length_is_refused(self) -> None:
         with pytest.raises(VaultUnavailableError) as raised:
-            VaultCipher(base64.urlsafe_b64encode(b"too short").decode())
+            VaultCipher({1: base64.urlsafe_b64encode(b"too short").decode()})
 
         assert "32 bytes" in str(raised.value)
 
@@ -213,29 +294,29 @@ class TestKeyLoading:
 
         key = base64.urlsafe_b64encode(b"k" * _VAULT_KEY_BYTES).decode()
 
-        assert VaultCipher(key).seal("x", node_id=NODE)
+        assert VaultCipher({1: key}).seal("x", node_id=NODE)
 
     def test_padding_is_optional(self) -> None:
         """Copying a key out of a secret store often loses the trailing '='."""
         padded = base64.urlsafe_b64encode(b"k" * 32).decode()
 
-        assert VaultCipher(padded.rstrip("=")).seal("x", node_id=NODE)
+        assert VaultCipher({1: padded.rstrip("=")}).seal("x", node_id=NODE)
 
     def test_the_urlsafe_alphabet_is_decoded_as_urlsafe(self) -> None:
         """`-` and `_` must mean 62 and 63, not be discarded as noise."""
         raw = bytes([0xFB, 0xFF, 0xBF]) * 10 + b"\x00\x00"
         assert "-" in base64.urlsafe_b64encode(raw).decode()
 
-        cipher = VaultCipher(base64.urlsafe_b64encode(raw).decode())
+        cipher = VaultCipher({1: base64.urlsafe_b64encode(raw).decode()})
 
         assert cipher.open(cipher.seal("x", node_id=NODE), node_id=NODE, key_version=1) == "x"
 
 
 class TestCipherCache:
     def test_the_same_key_returns_the_same_cipher(self) -> None:
-        assert cipher_for(VAULT_KEY) is cipher_for(VAULT_KEY)
+        assert cipher_for(VAULT_KEYS) is cipher_for(VAULT_KEYS)
 
     def test_a_bad_key_keeps_raising_rather_than_caching_a_broken_cipher(self) -> None:
         for _ in range(2):
             with pytest.raises(VaultUnavailableError):
-                cipher_for("")
+                cipher_for(())
