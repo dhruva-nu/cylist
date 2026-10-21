@@ -26,7 +26,7 @@ import getpass
 import secrets
 import sys
 
-from app.auth.passwords import hash_password
+from app.auth.passwords import hash_password_sync
 
 _VAULT_KEY_BYTES = 32
 
@@ -39,7 +39,7 @@ def _hash_password() -> int:
     if password != getpass.getpass("Repeat password: "):
         print("The two entries differ; no hash produced.", file=sys.stderr)
         return 1
-    print(f"\nCYLIST_PASSWORD_HASH={hash_password(password)}")
+    print(f"\nCYLIST_PASSWORD_HASH={hash_password_sync(password)}")
     return 0
 
 

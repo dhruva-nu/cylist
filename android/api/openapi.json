@@ -100,7 +100,7 @@
           "auth"
         ],
         "summary": "Sign in",
-        "description": "Exchange an email and password for a session cookie.\n\nOmitting the email asks for the bootstrap login, which is refused unless\nthe directory holds nobody who can sign in. See the module note.",
+        "description": "Exchange an email and password for a session cookie.\n\nOmitting the email asks for the bootstrap login, which is refused unless\nthe directory holds nobody who can sign in. See the module note.\n\nThe session the browser already held, if any, is revoked; and if this\nperson now holds more than ten live sessions, the oldest are revoked too.",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -126,6 +126,9 @@
           "401": {
             "description": "Wrong email or password."
           },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -145,7 +148,7 @@
           "auth"
         ],
         "summary": "Set a password from an invitation",
-        "description": "Turn an invitation link into an account, and sign in with it.\n\nUnauthenticated by necessity: the whole point is that whoever holds the\nlink has no credential yet. The link *is* the credential, which is why it\nis one-time, expiring, and stored only as a digest.",
+        "description": "Turn an invitation link into an account, and sign in with it.\n\nUnauthenticated by necessity: the whole point is that whoever holds the\nlink has no credential yet. The link *is* the credential, which is why it\nis one-time, expiring, and stored only as a digest — and why a link\naccepted twice at the same moment opens exactly one account.",
         "operationId": "accept_invite_api_v1_auth_accept_invite_post",
         "requestBody": {
           "content": {
@@ -170,6 +173,9 @@
           },
           "422": {
             "description": "The invitation is unknown, spent or expired."
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
           }
         }
       }
@@ -256,6 +262,85 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/sessions": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List your own sessions",
+        "description": "Every live browser session of the person this credential acts as,\nnewest first, with when each was last used and which one this is.\n\nOnly sessions. API tokens are listed under ``GET /tokens``.",
+        "operationId": "my_sessions_api_v1_me_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionRead"
+                  },
+                  "type": "array",
+                  "title": "Response My Sessions Api V1 Me Sessions Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The bootstrap session has no person behind it."
+          }
+        }
+      }
+    },
+    "/api/v1/me/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End one of your own sessions",
+        "description": "Revoke one session; the browser holding it is signed out at once.\n\nYours alone: somebody else's session, or a session already ended, is a\n404 either way, so the endpoint cannot be used to find out which ids\nexist. Ending the session making the request is allowed — it is a logout.",
+        "operationId": "end_my_session_api_v1_me_sessions__session_id__delete",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledged"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The bootstrap session has no person behind it."
+          },
+          "404": {
+            "description": "No live session of yours with that id."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -12377,6 +12462,7 @@
           },
           "password": {
             "type": "string",
+            "maxLength": 256,
             "minLength": 1,
             "title": "Password"
           }
@@ -12545,6 +12631,7 @@
         "properties": {
           "current_password": {
             "type": "string",
+            "maxLength": 256,
             "minLength": 1,
             "title": "Current Password"
           },
@@ -14061,6 +14148,65 @@
         ],
         "title": "SensitivityInfoRead",
         "description": "One level of classification, described well enough to draw a picker."
+      },
+      "SessionRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At",
+            "description": "When it last made a request, to the minute. Null for one never used since."
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel",
+            "description": "How it reaches the API; a session is always `web`."
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current",
+            "description": "Whether this is the session making the request."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "channel",
+          "current"
+        ],
+        "title": "SessionRead",
+        "description": "One of the caller's own browser sessions (CYLIST-143)."
       },
       "SetupInfo": {
         "properties": {

@@ -359,6 +359,19 @@ Reading them on the server:
 docker compose -f docker-compose.prod.yml exec app tail -f /data/logs/cylist.log
 ```
 
+**The `client` on each line is the real caller**, not `cloudflared`. The
+container only ever hears from the Docker bridge gateway, so every compose
+file sets `CYLIST_TRUSTED_PROXY_CIDRS='["172.16.0.0/12"]'`: a request from
+inside that network has its client taken from `CF-Connecting-IP` (Cloudflare
+sets it; nothing upstream can append to it), and the bridge address is kept
+beside it as `peer`. A request from anywhere else keeps its peer as the client
+and its headers are ignored, so nothing that reaches the port directly can
+write its own address into the log. The same address feeds the sign-in log
+and the login rate limit (`429` with `Retry-After` after five attempts at one
+account, or thirty from one address, a minute). If the stack is ever put
+behind a different proxy, the networks it connects from go in that list and
+nothing else does.
+
 Two other variables are worth knowing. `CYLIST_LOG_LEVEL=DEBUG` adds every
 static asset and every health check — for a problem being chased, not for
 leaving on. `CYLIST_LOG_FORMAT=json` writes one JSON object per line, including

@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth.throttle import SignInThrottle
 from app.config import AGENT_QUIET_AFTER, REAP_EVERY, Settings, get_settings
 from app.core.base_path import BasePathMiddleware
 from app.core.errors import register_exception_handlers
@@ -239,10 +240,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
 
+    # Who has been trying to sign in, and how often (CYLIST-121). On
+    # app.state for the hub's reason: a test replaces it so one test's
+    # refusals do not spill into the next.
+    app.state.sign_in_throttle = SignInThrottle()
+
     # Added last, so it is the outermost middleware: it times the whole stack
     # including CORS, and it binds the request id before anything inside can
     # log without one.
-    app.add_middleware(RequestLogMiddleware, api_prefix=API_PREFIX)
+    app.add_middleware(
+        RequestLogMiddleware, api_prefix=API_PREFIX, trusted_proxies=settings.trusted_proxies
+    )
 
     # Outside even that, so the request it logs is already under the base path
     # whichever way it arrived. Absent at the site root, which is production.

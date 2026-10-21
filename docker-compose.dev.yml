@@ -95,6 +95,9 @@ services:
       # As production and staging, for this slot: loopback, then the slot's
       # own hostname through the Cloudflare Tunnel (see DEPLOY.md, "Dev").
       CYLIST_CLIENT_URLS: '["http://localhost:801${CYLIST_DEV_SLOT}","https://dev${CYLIST_DEV_SLOT}.cylist.in"]'
+      # As in production: the peer is the Docker bridge, the client is in
+      # CF-Connecting-IP, and the header is believed only from the bridge.
+      CYLIST_TRUSTED_PROXY_CIDRS: '["172.16.0.0/12"]'
     ports:
       # Loopback only, 8011–8015. cloudflared relays devN.cylist.in here
       # (ingress rule in /etc/cloudflared/config.yml); nothing else should

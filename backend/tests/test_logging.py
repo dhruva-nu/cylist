@@ -12,10 +12,12 @@ import json
 import logging
 import sys
 from collections.abc import Iterator
+from ipaddress import ip_network
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.core.logging import (
@@ -26,6 +28,7 @@ from app.core.logging import (
     current_request_id,
     sanitise_request_id,
 )
+from app.core.request_log import resolve_client
 from app.db import Database
 from tests.conftest import OWNER_PASSWORD, client_for
 
@@ -421,3 +424,105 @@ async def test_a_search_term_is_not_filed_away_with_the_request(
         "DEBUG should have logged the request at all"
     )
     assert "something-private" not in json.dumps(access)
+
+
+# --- Who is really calling (CYLIST-122) ------------------------------------
+
+
+def _scope(peer: str | None, **headers: str) -> dict[str, object]:
+    return {
+        "type": "http",
+        "client": (peer, 40000) if peer else None,
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+    }
+
+
+_DOCKER = (ip_network("172.16.0.0/12"),)
+
+
+class TestResolvingTheClient:
+    def test_the_peer_when_no_proxy_is_trusted(self) -> None:
+        scope = _scope("203.0.113.9", **{"CF-Connecting-IP": "198.51.100.1"})
+        assert resolve_client(scope, ()) == "203.0.113.9"
+
+    def test_headers_from_an_untrusted_peer_are_ignored(self) -> None:
+        scope = _scope("203.0.113.9", **{"X-Forwarded-For": "198.51.100.1"})
+        assert resolve_client(scope, _DOCKER) == "203.0.113.9"
+
+    def test_cloudflares_header_from_a_trusted_peer_wins(self) -> None:
+        scope = _scope(
+            "172.18.0.1",
+            **{"CF-Connecting-IP": "198.51.100.1", "X-Forwarded-For": "10.0.0.1, 198.51.100.1"},
+        )
+        assert resolve_client(scope, _DOCKER) == "198.51.100.1"
+
+    def test_the_last_untrusted_hop_of_x_forwarded_for(self) -> None:
+        """Walking from the right: the client's own entries are on the left,
+        and are whatever the client said."""
+        scope = _scope("172.18.0.1", **{"X-Forwarded-For": "1.2.3.4, 198.51.100.1, 172.19.0.5"})
+        assert resolve_client(scope, _DOCKER) == "198.51.100.1"
+
+    def test_garbage_in_the_chain_stops_the_walk(self) -> None:
+        scope = _scope("172.18.0.1", **{"X-Forwarded-For": "198.51.100.1, not-an-address"})
+        assert resolve_client(scope, _DOCKER) == "172.18.0.1"
+
+    def test_a_chain_of_only_proxies_falls_back_to_the_peer(self) -> None:
+        scope = _scope("172.18.0.1", **{"X-Forwarded-For": "172.19.0.5"})
+        assert resolve_client(scope, _DOCKER) == "172.18.0.1"
+
+    def test_ipv6_works_too(self) -> None:
+        scope = _scope("::1", **{"CF-Connecting-IP": "2001:db8::9"})
+        assert resolve_client(scope, (ip_network("::1/128"),)) == "2001:db8::9"
+
+    def test_no_peer_at_all(self) -> None:
+        assert resolve_client(_scope(None), _DOCKER) is None
+
+    def test_a_bad_network_is_refused_at_startup(self) -> None:
+        with pytest.raises(ValidationError, match="not a network"):
+            Settings(trusted_proxy_cidrs=["172.16.0.0/12", "the proxy"])  # type: ignore[call-arg]
+
+
+async def test_a_request_through_a_trusted_proxy_logs_the_real_client(
+    settings: Settings, database: Database, tmp_path: Path
+) -> None:
+    """httpx's transport presents itself as 127.0.0.1, so trusting loopback
+    puts the test where production is: behind a proxy the app believes."""
+    configured = settings.model_copy(
+        update={
+            "log_to_file": True,
+            "log_file": tmp_path / "proxied.log",
+            "log_format": "json",
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+        }
+    )
+    async with client_for(configured, database) as http:
+        await http.get("/me", headers={"CF-Connecting-IP": "198.51.100.1"})
+        await http.post(
+            "/auth/login",
+            json={"password": "swordfish"},
+            headers={"X-Forwarded-For": "198.51.100.2"},
+        )
+
+    access = access_lines(tmp_path / "proxied.log")
+    assert [line["context"]["client"] for line in access] == ["198.51.100.1", "198.51.100.2"]
+    assert {line["context"]["peer"] for line in access} == {"127.0.0.1"}
+    failed = [
+        line
+        for line in written_lines(tmp_path / "proxied.log")
+        if line["message"] == "Failed sign-in attempt"
+    ]
+    assert failed[0]["context"]["client"] == "198.51.100.2"
+
+
+async def test_a_request_from_anywhere_else_keeps_the_peer(
+    settings: Settings, database: Database, tmp_path: Path
+) -> None:
+    configured = settings.model_copy(
+        update={"log_to_file": True, "log_file": tmp_path / "direct.log", "log_format": "json"}
+    )
+    async with client_for(configured, database) as http:
+        await http.get("/me", headers={"CF-Connecting-IP": "198.51.100.1"})
+
+    context = access_lines(tmp_path / "direct.log")[0]["context"]
+    assert context["client"] == "127.0.0.1"
+    assert "peer" not in context
