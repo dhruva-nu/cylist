@@ -72,6 +72,28 @@
         }
       }
     },
+    "/api/v1/health/storage": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Table sizes",
+        "description": "How many rows each table holds, and how much disk it takes.\n\nFor watching the tables that grow with use — ``activity``,\n``agent_session`` and its feed — between retention passes, and for\nnoticing when one starts growing faster than retention trims it\n(CYLIST-139).\n\nRead from the statistics PostgreSQL keeps anyway rather than counted, so\nit costs the same on a table of ten rows as on one of ten million: an\nunauthenticated endpoint must not be a way to make the database scan\neverything. The counts are estimates that follow every write within\nmoments; exact enough to watch a trend, not to reconcile.\n\nUnauthenticated for the reason the others are, and safe to be: table\nnames are the published schema's, and sizes say how much, never what.",
+        "operationId": "storage_counts_api_v1_health_storage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageCounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/setup": {
       "get": {
         "tags": [
@@ -14504,6 +14526,22 @@
         ],
         "title": "StageRead"
       },
+      "StorageCounts": {
+        "properties": {
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/TableSize"
+            },
+            "type": "array",
+            "title": "Tables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tables"
+        ],
+        "title": "StorageCounts"
+      },
       "SubStatusMove": {
         "properties": {
           "index": {
@@ -14643,6 +14681,29 @@
         ],
         "title": "SubtaskCreate",
         "description": "A sub-task with a reference of its own, numbered under its parent.\n\nSame fields as any other task — an owner, a description, a due date, a\npriority — because it is one in every respect but placement: a sub-task is\nwork on a card rather than a card on the board, so it lands in no column\nand is finished by being ticked off rather than by being moved.\n\n``template_id`` is still accepted: what kind of work it is stays true. Its\nstages, which are rules about columns, simply have nothing to say here."
+      },
+      "TableSize": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "rows": {
+            "type": "integer",
+            "title": "Rows"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table",
+          "rows",
+          "total_bytes"
+        ],
+        "title": "TableSize"
       },
       "TaskCreate": {
         "properties": {

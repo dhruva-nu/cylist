@@ -157,6 +157,14 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
             "task_id",
             postgresql_where=sql_text("ended_at IS NULL"),
         ),
+        # What retention reads: the dismissed rows, oldest dismissal first.
+        # Partial, because the rows still showing on a card are none of the
+        # hourly pass's business — see app/services/retention.py.
+        Index(
+            "ix_agent_session_dismissed_at",
+            "dismissed_at",
+            postgresql_where=sql_text("dismissed_at IS NOT NULL"),
+        ),
         # Done is a moment, and the moment is the state: neither "done with no
         # time" nor "working with an end time" can be written at all.
         CheckConstraint(

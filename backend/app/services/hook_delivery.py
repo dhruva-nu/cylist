@@ -51,7 +51,7 @@ from app.core.clock import now
 from app.core.crypto import cipher_for
 from app.db import Database
 from app.models.hook import DeliveryState, Hook, HookDelivery
-from app.services import hooks
+from app.services import hooks, retention
 
 logger = logging.getLogger(__name__)
 
@@ -333,8 +333,12 @@ async def prune(database: Database, *, at: datetime | None = None) -> None:
 class Courier:
     """Sends due deliveries for as long as the application runs."""
 
-    def __init__(self) -> None:
+    def __init__(self, keep: retention.Retention | None = None) -> None:
         self._wake = asyncio.Event()
+        self._keep = keep
+        """What the hourly prune also trims beyond this module's own log — see
+        :mod:`app.services.retention`. ``None`` trims nothing else, which is
+        what a test that only wants deliveries sent asks for."""
 
     def wake(self) -> None:
         """Look now rather than at the next tick. Called by the outbox, after a
@@ -364,6 +368,8 @@ class Courier:
                     if last_pruned is None or now() - last_pruned > PRUNE_EVERY:
                         await prune(database)
                         last_pruned = now()
+                        if self._keep is not None:
+                            await retention.apply(database, self._keep)
                 except asyncio.CancelledError:
                     raise
                 except Exception:

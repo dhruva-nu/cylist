@@ -88,3 +88,42 @@ class Activity(Base, UUIDPrimaryKeyMixin):
     ever goes away, so the record of what happened outlives it."""
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class ActivityArchive(Base):
+    """Trail rows old enough to have been moved off the hot table — CYLIST-139.
+
+    Every mutation writes an ``activity`` row and nothing ever removed one, so
+    the table that every card's history and every day report reads grew by
+    every agent turn, forever. Rows older than
+    :attr:`app.config.Settings.activity_retention_days` are moved here, whole,
+    by :func:`app.services.retention.archive_activity`.
+
+    Cold on purpose: nothing in the application reads it, so it carries no
+    index but its key, and no foreign keys — the record of what happened
+    outlives the token, person and project it names, which is the same promise
+    the hot table makes by nulling them, kept here by never pointing at them at
+    all. ``channel`` is plain text for the same reason: a row archived under
+    one set of channels must still be insertable after that set changes.
+    """
+
+    __tablename__ = "activity_archive"
+
+    id: Mapped[UUID] = mapped_column(postgresql.UUID(as_uuid=True), primary_key=True)
+    """The hot row's own id, kept so an archived row can be matched to
+    anything that recorded it — a hook delivery's log, say."""
+
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    actor_token_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
+    actor_person_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
+    actor_label: Mapped[str] = mapped_column(String(120), nullable=False)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    verb: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
+    project_id: Mapped[UUID | None] = mapped_column(postgresql.UUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
