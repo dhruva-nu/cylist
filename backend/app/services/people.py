@@ -10,6 +10,7 @@ checked against a row.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -202,6 +203,7 @@ async def _require_another_way_in(session: AsyncSession, person: Person) -> None
             f"{person.name} is the last person who can sign in, and archiving them "
             "would lock everybody out. Open an account for somebody else first.",
             details={"person_id": str(person.id)},
+            log_message=f"Person {person.id} is the last who can sign in; archiving refused.",
         )
 
 
@@ -237,7 +239,9 @@ def _require_may_hold_account(person: Person) -> None:
     if person.is_agent:
         raise UnprocessableRequestError(
             f"{person.name} is a machine, and a machine does not sign in. Mint it an API "
-            "token instead — see Tokens."
+            "token instead — see Tokens.",
+            details={"person_id": str(person.id)},
+            log_message=f"Person {person.id} is a machine and does not sign in.",
         )
     if person.kind is not PersonKind.TEAM:
         raise UnprocessableRequestError(
@@ -298,8 +302,20 @@ async def _close_the_bootstrap_door(session: AsyncSession) -> None:
         await tokens.revoke_personless(session)
 
 
-async def authenticate(session: AsyncSession, email: str, password: str) -> Person | None:
-    """Return the person this email and password belong to, or ``None``.
+@dataclass(frozen=True, slots=True)
+class SignInRefusal:
+    """Why a sign-in failed, for the log and the counters — never the client.
+
+    ``person_id`` is who the attempt named, when the address matched an
+    account: the log carries that rather than the address typed.
+    """
+
+    reason: str
+    person_id: UUID | None = None
+
+
+async def authenticate(session: AsyncSession, email: str, password: str) -> Person | SignInRefusal:
+    """Return the person this email and password belong to, or why not.
 
     The only place a stored password is checked. Folds case on the email,
     matching ``ix_person_account_email``, and refuses archived people — the
@@ -323,11 +339,11 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Pers
         # accounts; and a check against nothing returns at once, so it has
         # to be a hash of a password nobody holds.
         await verify_password(password, dummy_hash())
-        return None
+        return SignInRefusal("unknown_email")
     if not await verify_password(password, person.password_hash):
-        return None
+        return SignInRefusal("wrong_password", person.id)
     if person.is_archived:
-        return None
+        return SignInRefusal("archived_account", person.id)
     if person.password_hash is not None and needs_rehash(person.password_hash):
         person.password_hash = await hash_password(password)
     return person
@@ -353,7 +369,11 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
             "Give them an email address first — it is what they sign in with."
         )
     if person.password_hash is not None:
-        raise ConflictError(f"{person.name} already has an account.")
+        raise ConflictError(
+            f"{person.name} already has an account.",
+            details={"person_id": str(person.id)},
+            log_message=f"Person {person.id} already has an account.",
+        )
 
     await _require_email_free(session, person.email, excluding=person.id)
 
@@ -474,6 +494,7 @@ def _email_taken(email: str | None) -> ConflictError:
     return ConflictError(
         f"{email} was just taken as somebody else's sign-in address.",
         details={"email": email},
+        log_message="A sign-in address was just taken by somebody else.",
     )
 
 
@@ -510,6 +531,7 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
             raise ConflictError(
                 f"{email} is already the sign-in address for {clash.name}.",
                 details={"email": email},
+                log_message=f"That sign-in address already belongs to person {clash.id}.",
             )
         if clash.invite_is_pending:
             # Said as an invitation, because the usual way here is somebody
@@ -519,6 +541,7 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
                 f"{clash.name} has already been invited at {email}, and the invitation "
                 "has not expired yet. Withdraw it, or re-invite them instead.",
                 details={"email": email},
+                log_message=f"Person {clash.id} already has a pending invitation at that address.",
             )
         _clear_invitation(clash)
         lapsed = True

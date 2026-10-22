@@ -27,10 +27,20 @@ class AppError(Exception):
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
     code: str = "internal_error"
 
-    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        details: dict[str, Any] | None = None,
+        log_message: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.details = details or {}
+        self.log_message = log_message or message
+        """What the log says instead of ``message``. A refusal that names a
+        person or quotes an address for its client sets this to the same
+        sentence in ids, so the log stays pasteable into a bug report."""
 
     @property
     def headers(self) -> dict[str, str]:
@@ -277,6 +287,8 @@ def _log_app_error(request: Request, exc: AppError) -> None:
         "path": request.url.path,
     }
     if exc.status_code >= 500:
-        logger.error("Request failed: %s", exc.message, exc_info=exc, extra={"context": context})
+        logger.error(
+            "Request failed: %s", exc.log_message, exc_info=exc, extra={"context": context}
+        )
     else:
-        logger.info("Request refused: %s", exc.message, extra={"context": context})
+        logger.info("Request refused: %s", exc.log_message, extra={"context": context})

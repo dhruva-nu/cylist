@@ -1079,6 +1079,8 @@ class TestSendTest:
         assert sent["state"] == "failed"
         assert sent["last_status_code"] == 404
         assert sent["next_attempt_at"] is None
+        counts = (await signed_in.get("/health/requests")).json()
+        assert counts["deliveries_failed"] == 1
         async with _database(signed_in).session() as session:
             pending = await session.scalar(
                 select(func.count())

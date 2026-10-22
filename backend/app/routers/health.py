@@ -33,6 +33,10 @@ class RequestCounts(Schema):
     status_3xx: int
     status_4xx: int
     status_5xx: int
+    unhandled_500s: int
+    deliveries_failed: int
+    auth_refusals: dict[str, int]
+    rate_limit_hits: dict[str, int]
 
 
 class RealtimeCounts(Schema):
@@ -88,6 +92,10 @@ async def request_counts(request: Request) -> RequestCounts:
         status_3xx=metrics.status_3xx,
         status_4xx=metrics.status_4xx,
         status_5xx=metrics.status_5xx,
+        unhandled_500s=metrics.unhandled_500s,
+        deliveries_failed=metrics.deliveries_failed,
+        auth_refusals=dict(metrics.auth_refusals),
+        rate_limit_hits=dict(metrics.rate_limit_hits),
     )
 
 

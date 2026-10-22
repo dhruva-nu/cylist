@@ -8,6 +8,7 @@ reset when the process restarts, which is why the endpoint also reports
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -25,6 +26,18 @@ class Metrics:
         self.status_3xx = 0
         self.status_4xx = 0
         self.status_5xx = 0
+        self.unhandled_500s = 0
+        """Requests that raised past every handler. Also in ``status_5xx``; a
+        server error answered on purpose (a 503 for the disk) is not a bug and
+        is not counted here, which is what makes this the one to alert on."""
+        self.deliveries_failed = 0
+        """Hook deliveries that ran out of attempts and went ``failed``."""
+        self.auth_refusals: Counter[str] = Counter()
+        """Refused credentials and sign-ins, by the reason the log gives."""
+        self.rate_limit_hits: Counter[str] = Counter()
+        """Sign-in attempts the throttle turned away, by which bucket."""
+        global _live
+        _live = self
 
     def record(self, status_code: int) -> None:
         self.total += 1
@@ -37,6 +50,23 @@ class Metrics:
             self.status_4xx += 1
         elif bucket == 5:
             self.status_5xx += 1
+
+
+_live: Metrics
+"""The counters of the application most recently built.
+
+Services that run outside a request — the hook courier — have no ``app`` to
+read ``app.state.metrics`` from. There is one application per process, so they
+count through :func:`live`; a test that builds another app gets fresh counters
+because building it replaces this.
+"""
+
+
+def live() -> Metrics:
+    return _live
+
+
+_live = Metrics()
 
 
 class MetricsMiddleware:
@@ -71,6 +101,7 @@ class MetricsMiddleware:
             # Counted here as that 500, or the requests most worth alerting on
             # would be the only ones missing from the dashboard.
             self.metrics.record(status_code or 500)
+            self.metrics.unhandled_500s += 1
             raise
         if status_code:
             self.metrics.record(status_code)
