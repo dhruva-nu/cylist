@@ -33,8 +33,8 @@ from app.models.person import (
     Person,
     PersonKind,
 )
-from app.schemas.people import PersonCreate, PersonUpdate
 from app.services import tokens
+from app.services.commands.people import PersonCreate, PersonUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 

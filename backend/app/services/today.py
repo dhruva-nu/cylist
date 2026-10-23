@@ -34,8 +34,9 @@ from app.core.errors import (
 from app.models.project import Project
 from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
 from app.models.today import DayPick, Todo, TodoState, pick_loads
-from app.schemas.today import PickedCard, PickRead, TodoRead, TodoUpdate
 from app.services import tasks
+from app.services.commands.today import TodoUpdate
+from app.services.readmodels.today import PickedCard, PickRead, TodoRead
 
 
 def person_of(principal: Principal) -> UUID:

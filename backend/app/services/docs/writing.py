@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ConflictError, UnprocessableRequestError
 from app.models.doc import Doc, DocTopic
 from app.models.project import Project
-from app.schemas.docs import BODY_MAX_LENGTH, DocCreate, DocWrite
+from app.services.commands.docs import BODY_MAX_LENGTH, DocCreate, DocWrite
 from app.services.docs.filing import create_doc, no_topics_error, topic_docs, topics_for
 
 FiledBy = Literal["caller", "only_topic"]

@@ -54,6 +54,26 @@ class TestRouters:
         assert offenders == []
 
 
+class TestServices:
+    def test_no_service_imports_the_http_layer_including_its_schemas(self) -> None:
+        """What a service takes is a command (``app.services.commands``) and what it
+        returns is a read model (``app.services.readmodels``): plain values the HTTP
+        layer re-exports as its bodies and responses. So the CLI, the MCP server or
+        a script can call one without building a request."""
+        offenders: list[str] = []
+        for path in python_files("services"):
+            for module in imports_of(path):
+                if module.startswith(("app.schemas", "app.routers", "app.api")):
+                    offenders.append(f"{path.relative_to(APP)} imports {module}")
+
+        assert offenders == []
+
+    def test_commands_and_read_models_import_nothing_of_the_http_layer(self) -> None:
+        for package in ("commands", "readmodels"):
+            for path in sorted((APP / "services" / package).rglob("*.py")):
+                assert not [m for m in imports_of(path) if m.startswith("app.schemas")], path
+
+
 class TestWhatIsUnderTheHttpLayer:
     def test_nothing_below_it_imports_it(self) -> None:
         offenders: list[str] = []

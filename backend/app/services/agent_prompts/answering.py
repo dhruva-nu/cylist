@@ -21,10 +21,11 @@ from app.models.agent_session import (
 )
 from app.models.person import Person
 from app.models.task import Task
-from app.schemas.agent_sessions import AgentPromptAnswer, AgentPromptRead
 from app.services import activity
 from app.services.agent_prompts import store
 from app.services.agent_prompts.reading import options_of, read_one
+from app.services.commands.agent_sessions import AgentPromptAnswer
+from app.services.readmodels.agent_sessions import AgentPromptRead
 
 POLL_WAIT_MAX = 25
 """Longest a single long-poll on a prompt may block, in seconds. Under the

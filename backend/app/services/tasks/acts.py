@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.models.task import Task, TaskChecklistItem
-from app.schemas.tasks import ChecklistItemUpdate
 from app.services import tasks
+from app.services.commands.tasks import ChecklistItemUpdate
 from app.services.tasks.recording import record_on_card
 
 

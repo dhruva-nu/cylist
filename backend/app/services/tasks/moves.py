@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
 from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus, settled
-from app.schemas.tasks import TaskMove
 from app.services import columns, goals, templates
+from app.services.commands.tasks import TaskMove
 from app.services.tasks.history import (
     FieldChange,
     field_change,

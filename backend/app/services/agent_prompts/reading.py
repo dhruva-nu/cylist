@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_session import AgentPrompt, AgentPromptKind, AgentSession
 from app.models.person import Person
 from app.models.task import Task
-from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead
+from app.services.commands.agent_sessions import AgentPromptOption
 from app.services.paging import PageRequest, keyset
+from app.services.readmodels.agent_sessions import AgentPromptRead
 
 
 @dataclass(frozen=True)

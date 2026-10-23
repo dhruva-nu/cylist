@@ -20,9 +20,9 @@ from app.models.agent_session import (
     SessionKey,
 )
 from app.models.task import Task, card_loads
-from app.schemas.agent_sessions import AgentSessionPut
 from app.services import agent_sessions
 from app.services.agent_prompts import store
+from app.services.commands.agent_sessions import AgentSessionPut
 
 ABANDONED_AFTER = timedelta(seconds=90)
 """A question whose tool has not polled for this long has no tool behind it.

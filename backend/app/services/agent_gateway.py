@@ -28,13 +28,9 @@ from app.auth.principal import Principal
 from app.core.clock import now
 from app.models.agent_session import AgentPromptStatus, SessionKey
 from app.models.task import Task
-from app.schemas.agent_sessions import (
-    AgentFeedEntryIn,
-    AgentPromptRead,
-    AgentSessionPut,
-    AgentSessionRead,
-)
 from app.services import agent_feed, agent_prompts, agent_reports, tasks
+from app.services.commands.agent_sessions import AgentFeedEntryIn, AgentSessionPut
+from app.services.readmodels.agent_sessions import AgentPromptRead, AgentSessionRead
 
 
 class PromptWaiters(Protocol):

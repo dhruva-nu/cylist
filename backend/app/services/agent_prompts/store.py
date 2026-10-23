@@ -27,8 +27,8 @@ from app.models.agent_session import (
 from app.models.task import Task, card_loads
 from app.realtime import protocol
 from app.realtime.events import PromptChanged
-from app.schemas.agent_sessions import NOTE_MAX
 from app.services import activity, agent_sessions
+from app.services.commands.agent_sessions import NOTE_MAX
 
 ANSWERED_IN_TERMINAL = "answered_in_terminal"
 """A permission's ``closed_reason`` when the terminal's own dialog won."""

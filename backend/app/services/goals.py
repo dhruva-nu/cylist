@@ -43,9 +43,10 @@ from app.models.board import MAX_COLUMNS, BoardColumn
 from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
 from app.models.task import Task, TaskStatus, card_loads
-from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
 from app.services import columns, projects, references
+from app.services.commands.goals import GoalCreate, GoalUpdate
 from app.services.paging import PageRequest, SortKey, Window, keyset
+from app.services.readmodels.goals import GoalProgress
 
 _ANY_DATE = date(1970, 1, 1)
 

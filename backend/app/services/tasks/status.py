@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import UnprocessableRequestError
 from app.models.task import CommentKind, Task, TaskComment, TaskStatus, TaskWaitingOn
-from app.schemas.tasks import TaskStatusChange
 from app.services import goals, projects
+from app.services.commands.tasks import TaskStatusChange
 from app.services.tasks.parentage import refuse_open_under_finished
 
 

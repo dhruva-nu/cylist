@@ -5,12 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import EmailStr, Field, field_validator
+from pydantic import EmailStr, Field
 
 from app.models.person import PersonKind
 from app.schemas.common import Page, Schema
-
-_COLOUR_PATTERN = r"^#(?:[0-9a-fA-F]{6})$"
+from app.services.commands.people import (
+    _COLOUR_PATTERN as _COLOUR_PATTERN,
+)
+from app.services.commands.people import (
+    PersonCreate as PersonCreate,
+)
+from app.services.commands.people import (
+    PersonUpdate as PersonUpdate,
+)
 
 MIN_PASSWORD_LENGTH = 12
 """Long rather than complicated.
@@ -22,52 +29,6 @@ actually buys entropy, and twelve is the floor both of them land on.
 
 MAX_PASSWORD_LENGTH = 256
 """A ceiling, because Argon2 will happily spend real CPU on a megabyte."""
-
-
-class PersonCreate(Schema):
-    name: str = Field(min_length=1, max_length=120)
-    kind: PersonKind = Field(description="`team` does the work; `client` approves or unblocks it.")
-    title: str = Field(
-        min_length=1,
-        max_length=160,
-        description="Who this is, in one line — e.g. 'Finance controller, Atlas'.",
-    )
-    responsibilities: str = Field(
-        min_length=1,
-        description="What they do, and so what you would tag them about when work stalls.",
-    )
-    email: EmailStr | None = None
-    colour: str | None = Field(
-        default=None,
-        pattern=_COLOUR_PATTERN,
-        description="Six-digit hex. Omit to take a stable colour from the palette.",
-    )
-
-    @field_validator("name", "title", "responsibilities")
-    @classmethod
-    def _strip(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("must not be blank")
-        return stripped
-
-
-class PersonUpdate(Schema):
-    """Every field optional; omitted fields are left as they are."""
-
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    kind: PersonKind | None = None
-    title: str | None = Field(default=None, min_length=1, max_length=160)
-    responsibilities: str | None = Field(default=None, min_length=1)
-    email: EmailStr | None = None
-    colour: str | None = Field(default=None, pattern=_COLOUR_PATTERN)
-    archived: bool | None = Field(
-        default=None,
-        description=(
-            "Archive them: they leave the pickers and every credential they "
-            "hold is revoked. Set false to bring them back, password intact."
-        ),
-    )
 
 
 class PersonRead(Schema):
