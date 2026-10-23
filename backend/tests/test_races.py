@@ -20,7 +20,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from app.services import goals, hooks, people, templates
+from app.services import goals, people, templates
+from app.services.hooks import crud as hooks_crud
 from tests.conftest import INVITEE_PASSWORD, client_on, open_account, put_members
 
 ATLAS = {"key": "ATL", "name": "Atlas Billing Migration"}
@@ -95,7 +96,7 @@ class TestLosingTheRaceForAName:
         await _project(signed_in)
         body = {"name": "Deploys", "url": RECEIVER}
         assert (await signed_in.post("/projects/ATL/hooks", json=body)).status_code == 201
-        monkeypatch.setattr(hooks, "_refuse_taken_name", _never)
+        monkeypatch.setattr(hooks_crud, "_refuse_taken_name", _never)
 
         response = await signed_in.post("/projects/ATL/hooks", json=body)
 
