@@ -36,6 +36,8 @@ export const queryKeys = {
    * invalidating it refreshes whichever page is showing.
    */
   taskHistory: (taskId: string) => ['task-history', taskId],
+  /** One page of a card's history; a key under `taskHistory`, so that refreshes it too. */
+  taskHistoryPage: (taskId: string, page: number) => ['task-history', taskId, page],
   /** Every card's history, whichever card and project. */
   allTaskHistory: ['task-history'],
   /** What the agents on a card have read, edited, run and said. */
@@ -83,7 +85,7 @@ export const queryKeys = {
   /** Every goal's page, whichever project it is on. */
   allGoals: ['goal'],
   goal: (goalRef: string) => ['goal', goalRef],
-} as const satisfies Record<string, QueryKey | ((...args: string[]) => QueryKey)>
+} as const satisfies Record<string, QueryKey | ((...args: never[]) => QueryKey)>
 
 /**
  * A mutation's `meta` for one that invalidates what it changes itself, which

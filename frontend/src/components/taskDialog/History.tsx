@@ -30,7 +30,7 @@ export function History({ taskId }: { taskId: string }) {
   const [page, setPage] = useState(1)
 
   const history = useQuery({
-    queryKey: [...queryKeys.taskHistory(taskId), page],
+    queryKey: queryKeys.taskHistoryPage(taskId, page),
     queryFn: ({ signal }) => api.getTaskHistory(taskId, page, undefined, signal),
     enabled: open,
     // The previous page stays on screen while the next one loads. A pager that
