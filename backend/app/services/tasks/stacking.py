@@ -31,7 +31,7 @@ from sqlalchemy.orm.util import identity_key
 
 from app.models.board import BoardColumn
 from app.models.project import Project
-from app.models.task import Task
+from app.models.task import Task, card_loads
 
 GAP = 1 << 16
 """The room left between neighbours when a key is chosen at either end of a
@@ -50,7 +50,10 @@ async def cards_in_column(session: AsyncSession, column_id: UUID) -> list[Task]:
     """The cards in one column, top to bottom."""
     return list(
         await session.scalars(
-            select(Task).where(Task.column_id == column_id).order_by(Task.position)
+            select(Task)
+            .options(*card_loads())
+            .where(Task.column_id == column_id)
+            .order_by(Task.position)
         )
     )
 

@@ -24,7 +24,7 @@ from app.models.agent_session import (
     AgentSessionReason,
     AgentSessionState,
 )
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.realtime import protocol
 from app.realtime.events import PromptChanged
 from app.schemas.agent_sessions import NOTE_MAX
@@ -95,7 +95,7 @@ async def expire_if_due(
         return None
     row = await close(session, prompt, AgentPromptStatus.EXPIRED, now, reason=None)
     if row is not None:
-        task = await session.get(Task, prompt.task_id)
+        task = await session.get(Task, prompt.task_id, options=card_loads())
         if task is not None:
             await activity.record(
                 session,

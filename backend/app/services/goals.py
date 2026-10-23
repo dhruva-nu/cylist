@@ -42,7 +42,7 @@ from app.db import flush_or_refuse
 from app.models.board import MAX_COLUMNS, BoardColumn
 from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
-from app.models.task import Task, TaskStatus
+from app.models.task import Task, TaskStatus, card_loads
 from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
 from app.services import columns, projects, references
 from app.services.paging import PageRequest, SortKey, Window, keyset
@@ -252,6 +252,7 @@ async def tasks_for(session: AsyncSession, goal: Goal) -> list[Task]:
     return list(
         await session.scalars(
             select(Task)
+            .options(*card_loads())
             .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
             .where(Task.goal_id == goal.id, Task.parent_id.is_(None))
             .order_by(
@@ -287,6 +288,7 @@ async def tasks_page(session: AsyncSession, goal: Goal, page: PageRequest) -> Wi
     return await keyset(
         session,
         select(Task)
+        .options(*card_loads())
         .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
         .where(Task.goal_id == goal.id, Task.parent_id.is_(None)),
         keys=_board_order(),
@@ -447,6 +449,7 @@ async def _refuse_open_cards(session: AsyncSession, goal: Goal) -> None:
     finished = await columns.last(session, goal.project_id)
     cards = await session.scalars(
         select(Task)
+        .options(*card_loads())
         .outerjoin(BoardColumn, BoardColumn.id == Task.column_id)
         .where(Task.goal_id == goal.id, Task.parent_id.is_(None))
         .order_by(BoardColumn.position.asc().nulls_last(), Task.position)

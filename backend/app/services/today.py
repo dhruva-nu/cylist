@@ -33,7 +33,7 @@ from app.core.errors import (
 )
 from app.models.project import Project
 from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
-from app.models.today import DayPick, Todo, TodoState
+from app.models.today import DayPick, Todo, TodoState, pick_loads
 from app.schemas.today import PickedCard, PickRead, TodoRead, TodoUpdate
 from app.services import tasks
 
@@ -57,6 +57,7 @@ async def picks_for(
     return list(
         await session.scalars(
             select(DayPick)
+            .options(*pick_loads())
             .join(Task, Task.id == DayPick.task_id)
             .where(
                 DayPick.person_id == person_id,
@@ -206,9 +207,9 @@ async def _existing_pick(
     session: AsyncSession, person_id: UUID, task_id: UUID, day: date
 ) -> DayPick | None:
     found: DayPick | None = await session.scalar(
-        select(DayPick).where(
-            DayPick.person_id == person_id, DayPick.task_id == task_id, DayPick.day == day
-        )
+        select(DayPick)
+        .options(*pick_loads())
+        .where(DayPick.person_id == person_id, DayPick.task_id == task_id, DayPick.day == day)
     )
     return found
 
@@ -240,7 +241,7 @@ async def own_pick(session: AsyncSession, person_id: UUID, pick_id: UUID) -> Day
     Raises:
         NotFoundError: if there is no such pick, or it is somebody else's.
     """
-    found = await session.get(DayPick, pick_id)
+    found = await session.get(DayPick, pick_id, options=pick_loads())
     if found is None or found.person_id != person_id:
         raise NotFoundError(f"No pick matching {str(pick_id)!r}.")
     return found

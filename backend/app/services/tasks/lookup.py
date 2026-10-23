@@ -13,7 +13,7 @@ from app.auth.principal import Principal
 from app.core.errors import NotFoundError, not_on_this_project
 from app.models.board import BoardColumn
 from app.models.project import Project
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.services import columns, projects, references
 from app.services.paging import PageRequest, Window, keyset
 
@@ -33,7 +33,7 @@ async def resolve(session: AsyncSession, reference: str) -> Task:
     except ValueError:
         statement = _by_reference(reference)
     else:
-        statement = select(Task).where(Task.id == task_id)
+        statement = select(Task).options(*card_loads()).where(Task.id == task_id)
 
     task = await session.scalar(statement)
     if task is None:
@@ -98,6 +98,7 @@ def _by_reference(reference: str) -> Select[tuple[Task]]:
 
     card = (
         select(Task)
+        .options(*card_loads())
         .join(Project, Project.id == Task.project_id)
         .where(Project.key == parsed.key, Task.number == parsed.number)
     )
@@ -105,9 +106,13 @@ def _by_reference(reference: str) -> Select[tuple[Task]]:
         return card
 
     parent = card.subquery()
-    return select(Task).where(
-        Task.parent_id.in_(select(parent.c.id)),
-        Task.sub_number == parsed.sub_number,
+    return (
+        select(Task)
+        .options(*card_loads())
+        .where(
+            Task.parent_id.in_(select(parent.c.id)),
+            Task.sub_number == parsed.sub_number,
+        )
     )
 
 
@@ -117,7 +122,7 @@ async def get(session: AsyncSession, task_id: UUID) -> Task:
     Raises:
         NotFoundError: if nothing matches.
     """
-    task = await session.get(Task, task_id)
+    task = await session.get(Task, task_id, options=card_loads())
     if task is None:
         raise NotFoundError(f"No task matching {str(task_id)!r}.")
     return task
@@ -141,7 +146,7 @@ def _in_column(column_id: UUID) -> Select[tuple[Task]]:
     # Only top-level cards are ever in a column — a sub-task is not on the
     # board, and a card in cold storage has left it — so the column alone says
     # which cards are on it.
-    return select(Task).where(Task.column_id == column_id)
+    return select(Task).options(*card_loads()).where(Task.column_id == column_id)
 
 
 def _stacking() -> tuple[InstrumentedAttribute[int | None], InstrumentedAttribute[UUID]]:
@@ -176,6 +181,7 @@ async def board_pages(session: AsyncSession, project: Project, *, limit: int) ->
     )
     found = await session.scalars(
         select(Task)
+        .options(*card_loads())
         .join(ranked, ranked.c.id == Task.id)
         .where(ranked.c.rank <= limit + 1)
         .options(*LISTED_WITHOUT)
@@ -229,7 +235,10 @@ async def all_for_project(session: AsyncSession, project: Project) -> list[Task]
     """
     return list(
         await session.scalars(
-            select(Task).where(Task.project_id == project.id).order_by(Task.created_at)
+            select(Task)
+            .options(*card_loads())
+            .where(Task.project_id == project.id)
+            .order_by(Task.created_at)
         )
     )
 
@@ -241,7 +250,10 @@ async def subtasks(session: AsyncSession, task: Task) -> list[Task]:
     """
     return list(
         await session.scalars(
-            select(Task).where(Task.parent_id == task.id).order_by(Task.sub_number)
+            select(Task)
+            .options(*card_loads())
+            .where(Task.parent_id == task.id)
+            .order_by(Task.sub_number)
         )
     )
 
@@ -250,7 +262,7 @@ async def subtask_page(session: AsyncSession, task: Task, page: PageRequest) -> 
     """One page of :func:`subtasks`, in sub-number order."""
     return await keyset(
         session,
-        select(Task).where(Task.parent_id == task.id),
+        select(Task).options(*card_loads()).where(Task.parent_id == task.id),
         keys=(Task.sub_number, Task.id),
         page=page,
         options=LISTED_WITHOUT,

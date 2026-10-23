@@ -70,7 +70,7 @@ from app.models.board import BoardColumn
 from app.models.hook import Hook, HookDelivery
 from app.models.person import Person
 from app.models.project import Project
-from app.models.task import Task, TaskType
+from app.models.task import Task, TaskType, card_loads
 from app.models.template import TaskTemplate
 from app.realtime.events import HooksQueued
 from app.services import projects
@@ -281,7 +281,7 @@ async def queue_for(session: AsyncSession, entry: Activity) -> int:
 
 async def _card_of(session: AsyncSession, entry: Activity) -> _Card:
     task = (
-        await session.get(Task, entry.entity_id)
+        await session.get(Task, entry.entity_id, options=card_loads())
         if entry.entity_type == "task" and entry.entity_id is not None
         else None
     )

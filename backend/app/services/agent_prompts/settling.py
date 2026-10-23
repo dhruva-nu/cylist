@@ -19,7 +19,7 @@ from app.models.agent_session import (
     AgentSessionState,
     SessionKey,
 )
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.schemas.agent_sessions import AgentSessionPut
 from app.services import agent_sessions
 from app.services.agent_prompts import store
@@ -125,7 +125,7 @@ async def withdraw_for_sessions(
         await store.close(
             session, prompt, AgentPromptStatus.WITHDRAWN, now, reason=reason, resume=False
         )
-        task = await session.get(Task, prompt.task_id)
+        task = await session.get(Task, prompt.task_id, options=card_loads())
         if task is not None:
             store.announce(session, task, prompt, by_id[prompt.agent_session_id])
         closed += 1
@@ -161,7 +161,7 @@ async def sweep(session: AsyncSession) -> int:
             )
 
         if prompt.status is not AgentPromptStatus.OPEN:
-            task = await session.get(Task, prompt.task_id)
+            task = await session.get(Task, prompt.task_id, options=card_loads())
             row = await session.get(AgentSession, prompt.agent_session_id)
             if task is not None:
                 store.announce(session, task, prompt, row)

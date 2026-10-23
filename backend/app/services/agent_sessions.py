@@ -36,7 +36,7 @@ from app.models.agent_session import (
     AgentSessionState,
     SessionKey,
 )
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.schemas.agent_sessions import (
     AgentPresence,
     AgentPromptRead,
@@ -185,7 +185,7 @@ async def _walk_off_other_cards(
     for other in elsewhere:
         _finish(other, AgentSessionReason.MOVED, now)
         ended.append(other)
-        other_task = await session.get(Task, other.task_id)
+        other_task = await session.get(Task, other.task_id, options=card_loads())
         if other_task is not None:
             transitions.append(
                 Transition(
