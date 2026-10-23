@@ -65,7 +65,7 @@ export function ColdStorageDialog({
       await Promise.all([
         onDone(),
         // The CSV is a new file, and the files page may be cached from before.
-        invalidate(['folder-tree', projectKey], ['folder-children']),
+        invalidate(queryKeys.folderTree(projectKey), queryKeys.allFolderChildren),
       ])
     },
   })

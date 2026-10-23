@@ -100,9 +100,9 @@ export function ProjectDocs() {
 
   async function refresh(docId?: string) {
     await invalidate(
-      ['docs', projectKey],
-      ['doc-answer', projectKey],
-      ...(docId ? [['doc', docId]] : []),
+      queryKeys.docTree(projectKey),
+      queryKeys.docAnswers(projectKey),
+      ...(docId ? [queryKeys.doc(docId)] : []),
     )
   }
 

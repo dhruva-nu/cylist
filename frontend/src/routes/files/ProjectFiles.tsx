@@ -83,8 +83,8 @@ export function ProjectFiles() {
 
   async function refresh() {
     await invalidate(
-      ['folder-tree', projectKey],
-      ['folder-children'],
+      queryKeys.folderTree(projectKey),
+      queryKeys.allFolderChildren,
       // What the `>` tag in a description or a comment is completed from: a
       // file uploaded here is taggable in the next thing anybody writes.
       queryKeys.projectItems(projectKey),

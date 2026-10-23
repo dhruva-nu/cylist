@@ -61,8 +61,12 @@ export const queryKeys = {
   projectItems: (projectKey: string) => ['project-items', projectKey],
   folderTree: (projectKey: string) => ['folder-tree', projectKey],
   folderChildren: (folderId: string | null) => ['folder-children', folderId],
+  /** Every folder's children, whichever folder. */
+  allFolderChildren: ['folder-children'],
   docTree: (projectKey: string) => ['docs', projectKey],
   doc: (docId: string | null | undefined) => ['doc', docId],
+  /** Every question asked of the project's docs. */
+  docAnswers: (projectKey: string) => ['doc-answer', projectKey],
   docAnswer: (projectKey: string, question: string | null | undefined) => [
     'doc-answer',
     projectKey,
@@ -71,6 +75,8 @@ export const queryKeys = {
   hooks: (projectKey: string) => ['hooks', projectKey],
   hookDeliveries: (hookId: string) => ['hook-deliveries', hookId],
   vaultTrees: (projectKey: string) => ['vault-trees', projectKey],
+  /** Every reading of the project's trees' contents, whichever trees there were. */
+  vaultTreeDetailsOf: (projectKey: string) => ['vault-tree-details', projectKey],
   /** The trees' contents, keyed on which trees there are so a new one is read. */
   vaultTreeDetails: (projectKey: string, treeIds: string) => [
     'vault-tree-details',

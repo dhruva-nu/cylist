@@ -29,7 +29,7 @@ export function Skills({
   })
 
   async function refresh() {
-    await invalidate(['skills', projectKey])
+    await invalidate(queryKeys.skills(projectKey))
   }
 
   const upload = useMutation({

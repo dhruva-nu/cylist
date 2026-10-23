@@ -18,7 +18,7 @@ describe('queryKeys', () => {
     // that is written on keeps its old copy, and nothing says so.
     const spelled = sources('src')
       .filter((path) => !path.endsWith(join('api', 'queries.ts')))
-      .filter((path) => /queryKey:\s*\[/.test(readFileSync(path, 'utf8')))
+      .filter((path) => /(queryKey:|invalidate\()\s*\[/.test(readFileSync(path, 'utf8')))
 
     expect(spelled).toEqual([])
   })

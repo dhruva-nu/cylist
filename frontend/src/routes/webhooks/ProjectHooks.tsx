@@ -56,7 +56,7 @@ export function ProjectHooks() {
   const members = useMembers(projectKey)
 
   async function refresh() {
-    await invalidate(['hooks', projectKey])
+    await invalidate(queryKeys.hooks(projectKey))
   }
 
   const head = (

@@ -63,7 +63,7 @@ export function ProjectVault() {
   const openTrees = chosenOpenTrees ?? (firstTreeId ? [firstTreeId] : [])
 
   async function refresh() {
-    await invalidate(['vault-trees', projectKey], ['vault-tree-details', projectKey])
+    await invalidate(queryKeys.vaultTrees(projectKey), queryKeys.vaultTreeDetailsOf(projectKey))
   }
 
   const deleteNode = useMutation({

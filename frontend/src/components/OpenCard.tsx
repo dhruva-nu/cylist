@@ -59,7 +59,7 @@ export function OpenCard({
    */
   async function refresh() {
     await invalidate(
-      ['day-report', projectKey],
+      queryKeys.dayReports(projectKey),
       queryKeys.board(projectKey),
       queryKeys.tasks(projectKey),
       queryKeys.allTasks,
