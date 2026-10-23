@@ -10,13 +10,14 @@ checked against a row.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.invites import INVITE_TTL, generate_invite, looks_like_invite
+from app.auth.invites import generate_invite, looks_like_invite
 from app.auth.passwords import dummy_hash, hash_password, needs_rehash, verify_password
 from app.auth.principal import Principal
 from app.auth.tokens import hash_token
@@ -334,7 +335,9 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Pers
     return person
 
 
-async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
+async def invite(
+    session: AsyncSession, person_id: UUID, *, valid_for: timedelta
+) -> tuple[Person, str]:
     """Open an account for somebody, returning them and the one-time token.
 
     Re-inviting is allowed and replaces the outstanding invitation: a link
@@ -362,7 +365,7 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
 
     plaintext, digest = generate_invite()
     person.invite_token_hash = digest
-    person.invite_expires_at = now() + INVITE_TTL
+    person.invite_expires_at = now() + valid_for
     await flush_or_refuse(session, _email_taken(person.email))
     return person, plaintext
 

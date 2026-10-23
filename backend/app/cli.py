@@ -163,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     gc.add_argument(
         "--idle-minutes",
         type=int,
-        default=int(blobs.SWEEP_IDLE_FOR.total_seconds() // 60),
+        default=int(get_settings().blob_sweep_idle_for.total_seconds() // 60),
         help=(
             "Leave anything touched more recently than this alone (default: %(default)s). "
             "0 sweeps everything, which is safe for published bytes but would also "

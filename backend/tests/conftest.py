@@ -43,6 +43,7 @@ from app.auth import passwords
 from app.auth.passwords import hash_password_sync
 from app.auth.throttle import SignInThrottle
 from app.config import Settings
+from app.core.crypto import configured_cipher
 from app.core.palette import colour_for
 from app.db import Database
 from app.main import create_app
@@ -210,6 +211,7 @@ APP_STATE = {
     "metrics",
     "mcp",
     "sign_in_throttle",
+    "vault_cipher",
 }
 """Everything ``create_app`` hangs on ``app.state``, which :func:`as_new` must
 know how to put back. Checked, so a new one cannot be added and quietly carry
@@ -237,6 +239,7 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.bus = Bus(app.state.hub)
     app.state.courier = Courier()
     app.state.hook_transport = None
+    app.state.vault_cipher = configured_cipher(settings.vault_keyring)
     app.state.pusher = Pusher()
     app.state.push_sender = None
     app.state.doc_engine = engine_for(settings)

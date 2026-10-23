@@ -105,15 +105,18 @@ class SecretUnreadableError(AppError):
     code = "secret_unreadable"
 
 
+_NO_VAULT_KEY_MESSAGE = (
+    "CYLIST_VAULT_KEY is not set, so vault secrets can be neither stored "
+    "nor read. Generate a key with `make vault-key`."
+)
+
+
 class VaultCipher:
     """Seals vault secrets under the newest key, and opens them under any key held."""
 
     def __init__(self, keys: Mapping[int, str]) -> None:
         if not keys:
-            raise VaultUnavailableError(
-                "CYLIST_VAULT_KEY is not set, so vault secrets can be neither stored "
-                "nor read. Generate a key with `make vault-key`."
-            )
+            raise VaultUnavailableError(_NO_VAULT_KEY_MESSAGE)
         # Every key is decoded now, not when a row first needs it: a typo in a
         # key nobody has used yet would otherwise surface weeks later, as one
         # unreadable secret, instead of here as a misconfiguration.
@@ -189,6 +192,20 @@ def cipher_for(keys: VaultKeys) -> VaultCipher:
     module global means a test that supplies its own keys gets its own cipher.
     """
     return VaultCipher(dict(keys))
+
+
+def configured_cipher(keys: VaultKeys) -> VaultCipher | VaultUnavailableError:
+    """The cipher for a keyring, or the reason there is not one.
+
+    For building one at startup. A deployment with no key, or a malformed one,
+    must still boot — the board has nothing to do with the vault — so the
+    refusal is kept as a value and raised by whoever first asks for the
+    cipher, with the message that says what is wrong.
+    """
+    try:
+        return cipher_for(keys)
+    except VaultUnavailableError as exc:
+        return exc
 
 
 def _associated_data(node_id: UUID, key_version: int, domain: str = VAULT_DOMAIN) -> bytes:
