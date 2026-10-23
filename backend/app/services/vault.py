@@ -30,7 +30,8 @@ from app.core.ids import uuid7
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultNodeKind, VaultSecret, VaultTree
-from app.schemas.vault import (
+from app.services import names, permissions
+from app.services.commands.vault import (
     SecretCreate,
     SecretUpdate,
     VaultNodeCreate,
@@ -39,7 +40,6 @@ from app.schemas.vault import (
     VaultTreeCreate,
     VaultTreeUpdate,
 )
-from app.services import names, permissions
 from app.services.paging import PageRequest, Window, keyset
 
 

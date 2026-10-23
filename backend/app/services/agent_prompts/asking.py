@@ -23,10 +23,11 @@ from app.models.agent_session import (
 )
 from app.models.task import Task
 from app.realtime import protocol
-from app.schemas.agent_sessions import AgentPromptOption, AgentPromptRead, AgentQuestionCreate
 from app.services import activity, agent_sessions
 from app.services.agent_prompts import store
 from app.services.agent_prompts.reading import read_one
+from app.services.commands.agent_sessions import AgentPromptOption, AgentQuestionCreate
+from app.services.readmodels.agent_sessions import AgentPromptRead
 
 PERMISSION_OPTIONS: tuple[AgentPromptOption, ...] = (
     AgentPromptOption(key="allow_once", label="Allow once"),

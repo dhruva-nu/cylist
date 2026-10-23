@@ -41,9 +41,9 @@ from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
 from app.models.today import TodoState
-from app.schemas.activity import FieldChange, HistoryEntry
-from app.schemas.reports import CardTodos, DayReport, DayTodo, TaskDay
 from app.services import activity, columns, tasks, today
+from app.services.readmodels.activity import FieldChange, HistoryEntry
+from app.services.readmodels.reports import CardTodos, DayReport, DayTodo, TaskDay
 
 
 def today_in(zone: ZoneInfo) -> date:

@@ -37,19 +37,19 @@ from app.models.agent_session import (
     SessionKey,
 )
 from app.models.task import Task, card_loads
-from app.schemas.agent_sessions import (
-    AgentPresence,
-    AgentPromptRead,
-    AgentSessionPut,
-    AgentSessionRead,
-    PresenceState,
-)
 from app.services.activity import Recorded
+from app.services.commands.agent_sessions import AgentSessionPut
 from app.services.paging import PageRequest, Window, keyset
 
 # For its side effect: every change to an agent session below — and in the
 # modules that import this one — queues a push to the phones it is news to.
 from app.services.push import triggers as _push_triggers  # noqa: F401
+from app.services.readmodels.agent_sessions import (
+    AgentPresence,
+    AgentPromptRead,
+    AgentSessionRead,
+    PresenceState,
+)
 
 
 @dataclass(frozen=True)

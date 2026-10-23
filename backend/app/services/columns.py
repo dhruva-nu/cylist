@@ -31,7 +31,7 @@ from app.db import lock_row
 from app.models.board import MAX_COLUMNS, MIN_COLUMNS, BoardColumn
 from app.models.project import Project
 from app.models.task import Task, card_loads
-from app.schemas.columns import ColumnCreate, ColumnUpdate
+from app.services.commands.columns import ColumnCreate, ColumnUpdate
 
 STARTER_COLUMNS: tuple[ColumnCreate, ...] = (
     ColumnCreate(name="To do", description="Agreed and waiting for someone to pick it up."),

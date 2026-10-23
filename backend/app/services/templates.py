@@ -34,8 +34,8 @@ from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
 from app.models.template import TaskTemplate, TemplateStage
-from app.schemas.templates import StageInput, TemplateCreate, TemplateUpdate
 from app.services import names
+from app.services.commands.templates import StageInput, TemplateCreate, TemplateUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 # --- Templates ---------------------------------------------------------------

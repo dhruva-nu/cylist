@@ -40,8 +40,8 @@ from app.models.permission import ProjectPermission
 from app.models.person import KIND_ORDER, Person
 from app.models.project import Project, ProjectMember
 from app.models.role import ADMIN_ROLE_NAME, ProjectRole
-from app.schemas.roles import RoleCreate, RoleUpdate
 from app.services import people
+from app.services.commands.roles import RoleCreate, RoleUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 _ORDER = (ProjectRole.is_admin.desc(), ProjectRole.name)

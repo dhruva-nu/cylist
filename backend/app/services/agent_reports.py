@@ -43,8 +43,9 @@ from app.models.activity import EntityType
 from app.models.agent_session import AgentSession, AgentSessionReason, SessionKey
 from app.models.task import Task
 from app.realtime.events import BoardChanged
-from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
 from app.services import activity, agent_prompts, agent_sessions
+from app.services.commands.agent_sessions import AgentSessionPut
+from app.services.readmodels.agent_sessions import AgentSessionRead
 
 logger = logging.getLogger(__name__)
 

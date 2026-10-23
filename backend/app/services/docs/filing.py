@@ -22,8 +22,8 @@ from sqlalchemy.orm import defer
 from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.models.doc import SECTION_ORDER, Doc, DocSection, DocTopic
 from app.models.project import Project
-from app.schemas.docs import DocCreate, DocTopicCreate, DocUpdate
 from app.services import names
+from app.services.commands.docs import DocCreate, DocTopicCreate, DocUpdate
 
 
 async def topics_for(session: AsyncSession, project_id: UUID) -> list[DocTopic]:

@@ -20,8 +20,8 @@ from app.core.palette import colour_for
 from app.db import flush_or_refuse, lock_row
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
-from app.schemas.projects import ProjectCreate, ProjectUpdate
 from app.services import blobs, columns, files, people, permissions, roles
+from app.services.commands.projects import ProjectCreate, ProjectUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 

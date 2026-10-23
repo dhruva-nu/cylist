@@ -18,7 +18,7 @@ from app.core.clock import now
 from app.core.errors import ForbiddenError, NotFoundError
 from app.models.api_token import ApiToken
 from app.models.device import PushDevice
-from app.schemas.devices import DeviceRegister
+from app.services.commands.devices import DeviceRegister
 from app.services.paging import PageRequest, Window, keyset
 
 

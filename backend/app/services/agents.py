@@ -33,8 +33,8 @@ from app.core.errors import NotFoundError, PayloadTooLargeError, UnprocessableRe
 from app.models.agent import Skill
 from app.models.file import Blob
 from app.models.project import Project
-from app.schemas.agents import SkillUpdate
 from app.services import blobs, people, skill_folders
+from app.services.commands.agents import SkillUpdate
 from app.services.files import filename_of
 from app.services.paging import PageRequest, Window, keyset
 from app.services.skill_folders import MAX_UNPACKED_BYTES

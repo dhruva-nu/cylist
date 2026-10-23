@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.models.activity import Activity, Verb
-from app.schemas.activity import FieldChange, HistoryEntry
+from app.services.readmodels.activity import FieldChange, HistoryEntry
 
 
 def entry_of(entry: Activity, columns: Mapping[str, str] | None = None) -> HistoryEntry:

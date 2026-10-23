@@ -18,8 +18,8 @@ from app.db import flush_or_refuse, lock_row
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task, TaskColumnDueDate
-from app.schemas.tasks import ColumnDueDateInput
 from app.services import columns
+from app.services.commands.tasks import ColumnDueDateInput
 from app.services.tasks.history import FieldChange, field_change
 
 

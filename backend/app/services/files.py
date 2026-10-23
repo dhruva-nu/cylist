@@ -32,8 +32,14 @@ from app.core.sensitivity import Sensitivity
 from app.db import flush_or_refuse
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.project import Project
-from app.schemas.files import FolderCreate, FolderUpdate, ItemUpdate, LinkCreate, clean_name
 from app.services import blobs, names, people, permissions, trees
+from app.services.commands.files import (
+    FolderCreate,
+    FolderUpdate,
+    ItemUpdate,
+    LinkCreate,
+    clean_name,
+)
 from app.services.paging import PageRequest, Window, keyset
 from app.storage import BlobStore
 
