@@ -7,7 +7,6 @@ bound with.
 
 from __future__ import annotations
 
-import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
@@ -16,10 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.clock import now
 from app.db import SessionDependency
 from app.models.activity import Channel
-from app.models.agent_session import AgentPromptStatus
 from app.models.task import Task
 from app.realtime.hub import Hub
 from app.routers.paging import PageQuery
@@ -35,7 +32,7 @@ from app.schemas.agent_sessions import (
     AgentSessionPut,
     AgentSessionRead,
 )
-from app.services import agent_feed, agent_prompts, agent_reports, agent_sessions
+from app.services import agent_feed, agent_gateway, agent_prompts, agent_reports, agent_sessions
 from app.services.paging import PageRequest
 
 router = APIRouter(tags=["agent sessions"])
@@ -215,20 +212,15 @@ async def get_agent_prompt(
     The database connection is let go while it waits, so a hundred agents
     waiting on their people hold no more of the pool than none do."""
     hub: Hub = request.app.state.hub
-    poller = principal if wait > 0 and principal.channel is Channel.API else None
-    with hub.prompt_waiter(prompt_id) as changed:
-        current = await agent_prompts.wait_state(session, task, prompt_id, poller=poller)
-        if wait == 0 or current.status is not AgentPromptStatus.OPEN:
-            return current
-        await session.commit()
-        # Woken early to expire it, rather than late by a whole poll.
-        until_expiry = (current.expires_at - now()).total_seconds()
-        try:
-            async with asyncio.timeout(max(0.0, min(float(wait), until_expiry + 0.5))):
-                await changed.wait()
-        except TimeoutError:
-            pass
-    return await agent_prompts.wait_state(session, task, prompt_id, poller=None)
+    return await agent_gateway.long_poll_prompt(
+        session,
+        hub,
+        task,
+        prompt_id,
+        wait=wait,
+        principal=principal,
+        is_agent=principal.channel is Channel.API,
+    )
 
 
 @router.post(

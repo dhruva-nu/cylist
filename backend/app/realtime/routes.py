@@ -40,12 +40,11 @@ from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.logging import bind_request_id, new_request_id, reset_request_id
 from app.db import Database
 from app.models.agent_session import AgentPromptStatus, AgentSessionReason, SessionKey
-from app.models.task import Task
 from app.realtime import auth, protocol
 from app.realtime.bus import Bus
 from app.realtime.events import AgentConnected
 from app.realtime.hub import AgentLink, Hub, Watcher
-from app.services import agent_feed, agent_prompts, agent_reports, agent_sessions, projects, tasks
+from app.services import agent_gateway, agent_reports, agent_sessions, projects
 
 logger = logging.getLogger(__name__)
 
@@ -371,23 +370,6 @@ async def _handle_frame(
     return None
 
 
-async def _reachable_task(session: AsyncSession, principal: Principal, reference: str) -> Task:
-    """The card a frame names, if the agent's owner is on its project.
-
-    An agent token sees what the person who minted it sees, so a card on a
-    project they are not a member of is, to the socket, a card that does not
-    exist.
-
-    Raises:
-        NotFoundError: if nothing matches, or the card is out of reach.
-    """
-    task = await tasks.resolve(session, reference)
-    await projects.require_reachable(
-        session, task.project_id, principal, NotFoundError(f"No task matching {reference!r}.")
-    )
-    return task
-
-
 async def _open_prompt(
     database: Database,
     principal: Principal,
@@ -401,17 +383,17 @@ async def _open_prompt(
     """
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
+            return await agent_gateway.open_permission(
+                session,
+                principal,
+                key,
+                message.task,
+                message.prompt.id,
+                message.prompt.text,
+                message.prompt.tool,
+            )
         except NotFoundError:
             return protocol.answer(message.prompt.id, AgentPromptStatus.WITHDRAWN)
-        return await agent_prompts.open_permission(
-            session,
-            task,
-            key,
-            message.prompt.id,
-            message.prompt.text,
-            message.prompt.tool,
-        )
 
 
 async def _withdraw_prompt(
@@ -423,13 +405,8 @@ async def _withdraw_prompt(
     """The daemon stopped waiting. Unacknowledged: there is nothing to say back."""
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
-            await agent_prompts.withdraw(
-                session,
-                task,
-                message.prompt_id,
-                message.reason,
-                key=key,
+            await agent_gateway.withdraw_permission(
+                session, principal, key, message.task, message.prompt_id, message.reason
             )
         except NotFoundError:
             # A prompt this server never kept, a card since deleted, or
@@ -451,12 +428,11 @@ async def _record_report(
     """
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
+            applied = await agent_gateway.report_state(
+                session, principal, key, message.task, message.report
+            )
         except NotFoundError as exc:
             return Refusal(auth.NOT_FOUND, "not_found", str(exc))
-        applied = await agent_reports.report(
-            session, principal, task, key.client_session_id, message.report
-        )
     await websocket.send_json(protocol.ack(applied))
     return None
 
@@ -470,10 +446,9 @@ async def _record_feed(
     """Keep the lines a session sent. A card that cannot be found keeps none."""
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
+            await agent_gateway.append_feed(session, principal, key, message.task, message.entries)
         except NotFoundError:
             return
-        await agent_feed.append(session, task, key, message.entries)
 
 
 async def _end_row(

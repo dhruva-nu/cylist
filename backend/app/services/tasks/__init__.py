@@ -81,6 +81,7 @@ from app.services.tasks.lookup import (
     get,
     require_on_project,
     resolve,
+    resolve_reachable,
     subtask_page,
     subtasks,
 )
@@ -125,6 +126,7 @@ __all__ = [
     "move",
     "require_on_project",
     "resolve",
+    "resolve_reachable",
     "restore",
     "set_column_due_dates",
     "set_finished",
