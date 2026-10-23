@@ -6,10 +6,13 @@ Every path here accepts either a project id or its key, so an agent can call
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import current_principal, require
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
+from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
@@ -19,8 +22,6 @@ from app.models.person import Person, PersonKind
 from app.models.project import Project
 from app.models.role import ADMIN_ROLE_NAME
 from app.models.task import TaskStatus
-from app.routers import guards
-from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.people import PersonRead
 from app.schemas.projects import (
@@ -50,25 +51,6 @@ from app.services import (
 from app.services.paging import PageRequest
 
 router = APIRouter(prefix="/projects", tags=["projects"])
-
-ProjectRef = Path(
-    description="The project's id, or its key such as `ATL` (case-insensitive).",
-    examples=["ATL"],
-)
-
-
-async def resolved_project(
-    project_ref: str = ProjectRef,
-    principal: Principal = Depends(current_principal),
-    session: AsyncSession = SessionDependency,
-) -> Project:
-    """Turn the path segment into a project, 404-ing if nothing matches.
-
-    A project the caller is not on 404s too, so every route under
-    ``/projects/{project_ref}`` is fenced by membership through this one
-    dependency — see :func:`app.services.projects.require_reachable`.
-    """
-    return await projects.resolve_reachable(session, project_ref, principal)
 
 
 def _project_read(project: Project) -> ProjectRead:

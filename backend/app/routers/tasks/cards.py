@@ -5,18 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
-from app.auth.principal import Principal
-from app.auth.scopes import Scope
-from app.db import SessionDependency
-from app.models.board import BoardColumn
-from app.models.project import Project
-from app.models.task import Task
-from app.routers.columns import resolved_column
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.tasks import acts
-from app.routers.tasks.dependencies import (
+from app.api.card_deps import (
     WRITE_THIS_CARD,
     may_add_card,
     may_move_this_card,
@@ -24,8 +13,16 @@ from app.routers.tasks.dependencies import (
     may_write_this_card,
     resolved_task,
 )
-from app.routers.tasks.recording import record_on_card
-from app.routers.tasks.views import read_tasks, task_detail
+from app.api.deps import resolved_column, resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.tasks import read_tasks, task_detail
+from app.auth.dependencies import require
+from app.auth.principal import Principal
+from app.auth.scopes import Scope
+from app.db import SessionDependency
+from app.models.board import BoardColumn
+from app.models.project import Project
+from app.models.task import Task
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import (
     BoardTasks,
@@ -43,6 +40,8 @@ from app.schemas.tasks import (
 )
 from app.services import activity, columns, tasks
 from app.services.paging import DEFAULT_LIMIT, MAX_LIMIT, PageRequest
+from app.services.tasks import acts
+from app.services.tasks.recording import record_on_card
 
 router = APIRouter(tags=["tasks"])
 

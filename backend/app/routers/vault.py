@@ -22,12 +22,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project, vault_cipher
+from app.api.paging import PageQuery
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.config import Settings, app_settings
-from app.core import crypto
 from app.core import sensitivity as sensitivity_of
 from app.core.clock import now
 from app.core.crypto import VaultCipher
@@ -36,9 +37,6 @@ from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.vault import (
     SecretRead,
@@ -62,16 +60,6 @@ REVEAL = require(Scope.VAULT_REVEAL)
 
 project_router = APIRouter(prefix="/projects", tags=["vault"])
 router = APIRouter(prefix="/vault", tags=["vault"])
-
-
-def vault_cipher(settings: Settings = Depends(app_settings)) -> VaultCipher:
-    """The cipher this deployment's vault keys configure.
-
-    Built on demand rather than at startup, so a deployment that has not set a
-    key still boots and still serves everything outside the vault — and fails
-    loudly, here, the moment a credential is involved.
-    """
-    return crypto.cipher_for(settings.vault_keyring)
 
 
 async def resolved_tree(

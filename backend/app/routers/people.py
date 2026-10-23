@@ -19,12 +19,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.paging import PageQuery
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
-from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.people import (
     AccountSet,

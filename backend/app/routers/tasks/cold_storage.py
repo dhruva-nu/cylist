@@ -5,6 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.card_deps import WRITE_CARDS, WRITE_THIS_CARD, resolved_task
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.files import file_item_read
+from app.api.presenters.tasks import read_tasks, task_detail
 from app.auth.dependencies import require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -13,15 +18,10 @@ from app.config import Settings, app_settings
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import Task
-from app.routers.files import file_item_read
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.tasks.dependencies import WRITE_CARDS, WRITE_THIS_CARD, resolved_task
-from app.routers.tasks.recording import record_on_card
-from app.routers.tasks.views import read_tasks, task_detail
 from app.schemas.tasks import ColdStorageRun, TaskDetail, TaskSummaryPage
 from app.services import columns, permissions, tasks
 from app.services.paging import PageRequest
+from app.services.tasks.recording import record_on_card
 from app.storage import BlobStore, get_blob_store
 
 router = APIRouter(tags=["tasks"])

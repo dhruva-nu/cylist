@@ -12,6 +12,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.card_deps import WRITE_THIS_CARD, resolved_task
+from app.api.paging import PageQuery
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
@@ -19,8 +21,6 @@ from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.task import Task
 from app.realtime.hub import Hub
-from app.routers.paging import PageQuery
-from app.routers.tasks import WRITE_THIS_CARD, resolved_task
 from app.schemas.agent_sessions import (
     AgentFeedPage,
     AgentPromptAnswer,

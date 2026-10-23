@@ -8,11 +8,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.paging import PageQuery
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.routers.paging import PageQuery
 from app.schemas.activity import ActivityPage, ActivityRead
 from app.services import activity, projects
 from app.services.paging import PageRequest

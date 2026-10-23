@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import project_admin, resolved_project, resolved_role
 from app.auth.dependencies import require
 from app.auth.permissions import CATALOGUE, Permission
 from app.auth.principal import Principal
@@ -31,8 +32,6 @@ from app.models.board import BoardColumn
 from app.models.permission import EVERYONE_ELSE
 from app.models.project import Project
 from app.models.role import ProjectRole
-from app.routers.projects import resolved_project
-from app.routers.roles import project_admin, resolved_role
 from app.schemas.permissions import (
     ClearanceUpdate,
     ColumnRule,

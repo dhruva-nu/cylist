@@ -17,6 +17,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -26,8 +28,6 @@ from app.core.errors import NotFoundError
 from app.db import SessionDependency, database_of
 from app.models.doc import SECTION_ORDER, Doc, DocTopic
 from app.models.project import Project
-from app.routers import guards
-from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.docs import (
     Alternative,
