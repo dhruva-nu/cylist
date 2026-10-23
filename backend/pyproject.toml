@@ -94,8 +94,15 @@ ignore = [
     "B008",  # function call in argument default: this is how FastAPI DI works
 ]
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"datetime.datetime.now".msg = "Ask app.core.clock, so there is one place to freeze time."
+"datetime.datetime.utcnow".msg = "Ask app.core.clock; utcnow is naive and deprecated."
+"time.time".msg = "Ask app.core.clock.epoch, so there is one place to freeze time."
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S106"]  # hard-coded test credentials are fine
+"app/core/clock.py" = ["TID251"]  # the one module allowed to read the system clock
+"app/storage/local.py" = ["TID251"]  # compares against file mtimes, which are the OS's clock
+"tests/*" = ["S105", "S106", "TID251"]  # test credentials are fine; tests may read the real clock
 "alembic/versions/*" = ["E501"]
 
 [tool.ruff.lint.isort]
