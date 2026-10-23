@@ -45,6 +45,7 @@ import { feedClock, feedLabel, isCodeLike } from './agentFeed'
 import { AgentPromptAnswer } from './AgentPromptAnswer'
 import { Button, ErrorNotice } from './ui'
 import styles from './AgentPanel.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 export function AgentPanel({
   taskRef,
@@ -62,6 +63,7 @@ export function AgentPanel({
   const live = sessions.length > finished.length
 
   const dismiss = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.dismissAgentSessions(taskRef),
     onSuccess: async () => {
       await Promise.all([

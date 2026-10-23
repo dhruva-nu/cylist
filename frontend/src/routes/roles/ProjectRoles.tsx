@@ -62,6 +62,7 @@ import {
 import { RoleDetail } from './RoleDetail'
 import { AddRoleDialog, DeleteProject, DeleteProjectDialog } from './RoleDialogs'
 import styles from './ProjectRoles.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** How a line of the grid is addressed, both on the wire and in local state. */
 function keyOf(line: RolePermissions): string {
@@ -116,6 +117,7 @@ export function ProjectRoles() {
   }
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ line, permissions }: { line: RolePermissions; permissions: Permission[] }) =>
       line.role_id === null
         ? api.setBaselinePermissions(projectKey, permissions)
@@ -133,6 +135,7 @@ export function ProjectRoles() {
   })
 
   const saveColumns = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ line, columns }: { line: RolePermissions; columns: ColumnRule[] }) =>
       api.setColumnRules(projectKey, line.role_id, columns),
     onSuccess: async (saved) => {
@@ -145,6 +148,7 @@ export function ProjectRoles() {
   })
 
   const saveClearance = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ line, clearance }: { line: RolePermissions; clearance: Sensitivity }) =>
       api.setClearance(projectKey, line.role_id, clearance),
     onSuccess: async (saved) => {
@@ -154,12 +158,14 @@ export function ProjectRoles() {
   })
 
   const assignRole = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ personId, role }: { personId: string; role: string | null }) =>
       api.setMemberRole(projectKey, personId, role),
     onSuccess: refresh,
   })
 
   const deleteRole = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (role: RoleSummary) => api.deleteRole(projectKey, role.id),
     onSuccess: async () => {
       await refresh()

@@ -1,0 +1,36 @@
+.stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  display: grid;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--blocked);
+  border-radius: var(--radius-control);
+  background: var(--blocked-soft);
+  color: var(--blocked);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-base);
+  pointer-events: auto;
+}
+
+.dismiss {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}

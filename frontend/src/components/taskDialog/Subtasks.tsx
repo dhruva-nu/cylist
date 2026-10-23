@@ -28,6 +28,7 @@ import { Avatar, Button, ErrorNotice, Tagged } from '../ui'
 import { CHECKLIST_LABELS, useSubtaskTicking } from './useSubtaskTicking'
 import shared from './shared.module.css'
 import styles from './Subtasks.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 interface SubtaskListProps {
   task: TaskDetail
@@ -64,6 +65,7 @@ export function Subtasks({
   const ticking = useSubtaskTicking({ task, announce, onDone })
 
   const add = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (text: string) => api.addChecklistItem(task.id, text),
     onSuccess: async (item) => {
       announce(`Added ${item.title} to the checklist.`)
@@ -73,6 +75,7 @@ export function Subtasks({
   })
 
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (id: string) => api.deleteChecklistItem(id),
     onSuccess: ticking.refresh,
   })

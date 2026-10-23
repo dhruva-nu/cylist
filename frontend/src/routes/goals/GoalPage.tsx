@@ -42,6 +42,7 @@ import { GoalAside, REFUSAL_ID } from './GoalAside'
 import { COLD_STORAGE, Filters, GoalCardRow, placeOf } from './GoalCards'
 import styles from './GoalPage.module.css'
 import { LinkCardsDialog } from './LinkCardsDialog'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** One page of a goal's cards — the first carrying the goal itself. */
 interface GoalCardsPage {
@@ -97,6 +98,7 @@ export function GoalPage() {
   }
 
   const unlink = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (task: Task) => api.updateTask(task.reference, { goal_id: null }),
     onSuccess: async (task) => {
       await refresh()
@@ -114,6 +116,7 @@ export function GoalPage() {
    * ticking a goal off.
    */
   const close = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async (closure: GoalClosure) => {
       await api.updateGoal(goalRef, { status: closure.next })
       return closure

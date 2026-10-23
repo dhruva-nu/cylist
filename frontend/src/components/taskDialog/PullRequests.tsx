@@ -8,6 +8,7 @@ import { addPrRef, removePrRefAt, setPrRefAt, setPrStateAt } from '../prRefs'
 import { Button, ErrorNotice, prRefLabel, TaskRef } from '../ui'
 import { useRefreshTask } from './useRefreshTask'
 import styles from './PullRequests.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * How far a pull request got, in the order it gets there (CYLIST-76).
@@ -82,6 +83,7 @@ export function PrRefsRead({
   const refreshTask = useRefreshTask(onDone)
 
   const move = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ refs }: { refs: PrRef[]; label: string; state: PrState }) =>
       api.updateTask(task.id, { pr_refs: refs }),
     onSuccess: async (_updated, { label, state }) => {

@@ -3,6 +3,7 @@ import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Markdown } from '../../components/Markdown'
 import { Button, ErrorNotice } from '../../components/ui'
 import styles from './ProjectDocs.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** What the editor writes: a title, and the markdown under it. */
 export interface DocDraft {
@@ -32,7 +33,10 @@ export function DocEditor({
   const [title, setTitle] = useState(initial.title)
   const [body, setBody] = useState(initial.body)
   const [preview, setPreview] = useState(false)
-  const save = useMutation({ mutationFn: onSave })
+  const save = useMutation({
+    meta: handlesOwnErrors,
+    mutationFn: onSave,
+  })
 
   function submit(event?: FormEvent) {
     event?.preventDefault()

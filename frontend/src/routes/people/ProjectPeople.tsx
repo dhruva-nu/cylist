@@ -20,6 +20,7 @@ import { usePermissions } from '../usePermissions'
 import { DirectoryDialog } from './DirectoryDialog'
 import { PeopleGroup } from './PeopleGroup'
 import styles from './ProjectPeople.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function ProjectPeople() {
   const { projectKey } = useParams({ from: '/p/$projectKey/people' })
@@ -51,6 +52,7 @@ export function ProjectPeople() {
   }
 
   const removeFromProject = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (leaving: Member) => {
       const staying = (members.data?.members ?? []).filter((person) => person.id !== leaving.id)
       return api.setMembers(

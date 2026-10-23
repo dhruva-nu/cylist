@@ -6,6 +6,7 @@ import { MIN_PASSWORD_LENGTH, api } from '../../api/client'
 import { DialogActions, Field, Modal, ModalBody } from '../../components/Modal'
 import { ErrorBanner, ErrorNotice } from '../../components/ui'
 import styles from './Home.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * Opening the first account on a deployment that has none.
@@ -30,6 +31,7 @@ export function FirstAccountDialog({
   const [form, setForm] = useState({ name: '', title: '', email: '', password: '' })
 
   const openAccount = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async () => {
       const person = await api.createPerson({
         name: form.name.trim(),
@@ -131,6 +133,7 @@ export function ChangePasswordDialog({
   const [repeated, setRepeated] = useState('')
 
   const change = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.changePassword(current, next),
     onSuccess: () => {
       onSaved()

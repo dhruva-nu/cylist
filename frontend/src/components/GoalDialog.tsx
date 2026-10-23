@@ -27,6 +27,7 @@ import { Field, FieldPair, Modal, ModalBody } from './Modal'
 import { useProjectFiles } from './projectFiles'
 import { Button, ErrorNotice, readableInkOn } from './ui'
 import styles from './GoalDialog.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 /**
  * The goal palette, matching `GOAL_PALETTE` in `app/core/palette.py`.
@@ -84,6 +85,7 @@ export function GoalDialog({
   const files = useProjectFiles(projectKey)
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async (input: GoalInput) => {
       const payload = {
         ...input,
@@ -101,6 +103,7 @@ export function GoalDialog({
 
   // Only ever run with the goal being edited; a new one has no Delete button.
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (doomed: Goal) => api.deleteGoal(doomed.reference),
     onSuccess: async (_deleted, doomed) => {
       await onDone()

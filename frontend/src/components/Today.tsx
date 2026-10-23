@@ -59,6 +59,7 @@ import { SidebarAction } from './SidebarSection'
 import { lateAndUnplanned, openCardGroups } from './today'
 import { Button, EmptyState, ErrorNotice, Tagged } from './ui'
 import styles from './Today.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 /** Whether the open-cards pane was last left folded, per browser. */
 const CARDS_FOLDED_KEY = 'cylist.today.cardsFolded'
@@ -400,11 +401,13 @@ function CardsPane({
   const pickedByTask = new Map(plan?.picks.map((pick) => [pick.task.id, pick]) ?? [])
 
   const pick = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (task: Task) => api.pickCard(projectKey, task.reference, day),
     onSuccess: (picked) => onPicked(picked.id),
     onSettled: refresh,
   })
   const unpick = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (pickId: string) => api.unpickCard(pickId),
     onSettled: refresh,
   })
@@ -643,11 +646,13 @@ function PickBlock({
   }, [fresh, pick.todos.length])
 
   const add = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (text: string) => api.addTodo(pick.id, text),
     onSuccess: () => setDraft(''),
     onSettled: refresh,
   })
   const unpick = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.unpickCard(pick.id),
     onSettled: refresh,
   })
@@ -747,6 +752,7 @@ function TodoRow({
   const queryClient = useQueryClient()
 
   const tick = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (done: boolean) => api.updateTodo(todo.id, { state: done ? 'done' : 'open' }),
     // The box answers the click at once rather than after a round trip: a tick
     // that lags reads as a click that missed.
@@ -867,6 +873,7 @@ function WrapUpDialog({
   const staying = openIds.length - moving.length
 
   const wrap = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.wrapUpDay(projectKey, day, toDay, moving, localZone()),
     onSettled: refresh,
   })
