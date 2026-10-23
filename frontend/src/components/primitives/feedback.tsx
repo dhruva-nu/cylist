@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { errorMessage } from '../../api/client'
 import styles from './ui.module.css'
 
@@ -29,33 +29,4 @@ export function ErrorBanner({ children }: { children: ReactNode }) {
 export function ErrorNotice({ error }: { error: unknown }) {
   if (error === null || error === undefined) return null
   return <ErrorBanner>{errorMessage(error)}</ErrorBanner>
-}
-
-/**
- * Say something to a screen reader that the screen only shows.
- *
- * A card moving column, a secret revealed, an upload finishing: each is
- * obvious to anyone watching and silent to anyone not. Pair the returned
- * `message` with a :func:`LiveRegion`.
- */
-export function useAnnouncer() {
-  const [message, setMessage] = useState('')
-
-  const announce = useCallback((text: string) => {
-    // A live region whose text has not changed is not read again, so doing the
-    // same thing twice would announce once. The trailing space makes the
-    // string new without changing a word of what is spoken.
-    setMessage((current) => (current === text ? `${text}\u00a0` : text))
-  }, [])
-
-  return { message, announce }
-}
-
-/** Where :func:`useAnnouncer`'s messages are spoken. Renders nothing visible. */
-export function LiveRegion({ message }: { message: string }) {
-  return (
-    <p className="visually-hidden" role="status" aria-live="polite">
-      {message}
-    </p>
-  )
 }
