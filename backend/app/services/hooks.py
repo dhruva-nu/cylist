@@ -66,7 +66,7 @@ from app.core.errors import (
 )
 from app.core.ids import uuid7
 from app.db import flush_or_refuse
-from app.models.activity import Activity
+from app.models.activity import Activity, EntityType, Verb
 from app.models.board import BoardColumn
 from app.models.hook import Hook, HookDelivery
 from app.models.person import Person
@@ -103,12 +103,12 @@ CATEGORIES: tuple[EventCategory, ...] = (
         "Card moves",
         (
             EventKind(
-                "task.moved",
+                Verb.TASK_MOVED,
                 "Moved to another column",
                 "A card lands somewhere new — the one deploys hang off.",
             ),
             EventKind(
-                "task.sub_status_moved",
+                Verb.TASK_SUB_STATUS_MOVED,
                 "Sub-status stepped",
                 "Drafted → Reviewed, inside one column.",
             ),
@@ -118,24 +118,24 @@ CATEGORIES: tuple[EventCategory, ...] = (
         "cards",
         "Card changes",
         (
-            EventKind("task.created", "Card created", "A new card on the board."),
+            EventKind(Verb.TASK_CREATED, "Card created", "A new card on the board."),
             EventKind(
-                "task.updated", "Card edited", "Title, description, owner, dates or priority."
+                Verb.TASK_UPDATED, "Card edited", "Title, description, owner, dates or priority."
             ),
             EventKind(
-                "task.status_changed",
+                Verb.TASK_STATUS_CHANGED,
                 "Put on hold, blocked or cancelled",
                 "Or picked back up — with the reason given.",
             ),
             EventKind(
-                "task.deleted", "Card deleted", "Only the reference is sent; the card is gone."
+                Verb.TASK_DELETED, "Card deleted", "Only the reference is sent; the card is gone."
             ),
             EventKind(
-                "task.archived",
+                Verb.TASK_ARCHIVED,
                 "Moved to cold storage",
                 "Taken off the board with the rest of its last column, into a CSV.",
             ),
-            EventKind("task.restored", "Restored from cold storage", "Back in the last column."),
+            EventKind(Verb.TASK_RESTORED, "Restored from cold storage", "Back in the last column."),
         ),
     ),
     EventCategory(
@@ -143,7 +143,7 @@ CATEGORIES: tuple[EventCategory, ...] = (
         "Comments",
         (
             EventKind(
-                "task.commented",
+                Verb.TASK_COMMENTED,
                 "Comment added",
                 "The comment's text, and who it tags, are in the payload.",
             ),
@@ -153,35 +153,37 @@ CATEGORIES: tuple[EventCategory, ...] = (
         "work",
         "Sub-tasks & checklists",
         (
-            EventKind("task.subtask_created", "Sub-task created", "Split out of a card."),
-            EventKind("task.finished", "Sub-task finished", "Or reopened."),
-            EventKind("task.checklist_added", "Checklist item added"),
+            EventKind(Verb.TASK_SUBTASK_CREATED, "Sub-task created", "Split out of a card."),
+            EventKind(Verb.TASK_FINISHED, "Sub-task finished", "Or reopened."),
+            EventKind(Verb.TASK_CHECKLIST_ADDED, "Checklist item added"),
             EventKind(
-                "task.checklist_updated", "Checklist item ticked", "Or cancelled, or reopened."
+                Verb.TASK_CHECKLIST_UPDATED, "Checklist item ticked", "Or cancelled, or reopened."
             ),
-            EventKind("task.checklist_deleted", "Checklist item removed"),
+            EventKind(Verb.TASK_CHECKLIST_DELETED, "Checklist item removed"),
         ),
     ),
     EventCategory(
         "board",
         "Board setup",
         (
-            EventKind("column.created", "Column added"),
-            EventKind("column.updated", "Column changed", "Renamed, re-described or re-sectioned."),
-            EventKind("column.deleted", "Column deleted"),
-            EventKind("column.reordered", "Columns reordered"),
-            EventKind("template.created", "Template added"),
-            EventKind("template.updated", "Template changed"),
-            EventKind("template.deleted", "Template deleted"),
+            EventKind(Verb.COLUMN_CREATED, "Column added"),
+            EventKind(
+                Verb.COLUMN_UPDATED, "Column changed", "Renamed, re-described or re-sectioned."
+            ),
+            EventKind(Verb.COLUMN_DELETED, "Column deleted"),
+            EventKind(Verb.COLUMN_REORDERED, "Columns reordered"),
+            EventKind(Verb.TEMPLATE_CREATED, "Template added"),
+            EventKind(Verb.TEMPLATE_UPDATED, "Template changed"),
+            EventKind(Verb.TEMPLATE_DELETED, "Template deleted"),
         ),
     ),
     EventCategory(
         "goals",
         "Goals",
         (
-            EventKind("goal.created", "Goal added"),
-            EventKind("goal.updated", "Goal changed", "Renamed, re-dated or marked achieved."),
-            EventKind("goal.deleted", "Goal deleted"),
+            EventKind(Verb.GOAL_CREATED, "Goal added"),
+            EventKind(Verb.GOAL_UPDATED, "Goal changed", "Renamed, re-dated or marked achieved."),
+            EventKind(Verb.GOAL_DELETED, "Goal deleted"),
         ),
     ),
 )
@@ -274,16 +276,16 @@ async def queue_for(session: AsyncSession, entry: Activity) -> int:
 async def _card_of(session: AsyncSession, entry: Activity) -> _Card:
     task = (
         await session.get(Task, entry.entity_id)
-        if entry.entity_type == "task" and entry.entity_id is not None
+        if entry.entity_type == EntityType.TASK and entry.entity_id is not None
         else None
     )
     changes = entry.payload.get("changes") or []
-    moved_column = entry.verb == "task.moved" and any(
+    moved_column = entry.verb == Verb.TASK_MOVED and any(
         change.get("field") == "column" for change in changes
     )
     from_column = entry.payload.get("from_column_id") if moved_column else None
     assignee = await session.get(Person, task.assignee_id) if task is not None else None
-    mentioned = (entry.payload.get("mentioned") or []) if entry.verb == "task.commented" else []
+    mentioned = (entry.payload.get("mentioned") or []) if entry.verb == Verb.TASK_COMMENTED else []
     return _Card(
         task=task,
         moved_column=moved_column,
@@ -321,7 +323,7 @@ def matches(hook: Hook, verb: str, card: _Card) -> bool:
     if hook.agent_only and not card.assigned_to_agent:
         return False
     if (hook.mentions_only or hook.mentioned_person_id is not None) and (
-        verb != "task.commented" or not card.mentioned
+        verb != Verb.TASK_COMMENTED or not card.mentioned
     ):
         return False
     if hook.mentioned_person_id is not None and hook.mentioned_person_id not in card.mentioned:
@@ -331,7 +333,7 @@ def matches(hook: Hook, verb: str, card: _Card) -> bool:
     ):
         return False
     if hook.to_column_id is not None:
-        if verb == "task.moved" and not card.moved_column:
+        if verb == Verb.TASK_MOVED and not card.moved_column:
             return False
         if task.column_id != hook.to_column_id:
             return False
@@ -370,7 +372,7 @@ async def _event_body(session: AsyncSession, entry: Activity, card: _Card) -> di
         "changes": entry.payload.get("changes") or [],
         "detail": entry.payload,
     }
-    if task is None and entry.entity_type == "task":
+    if task is None and entry.entity_type == EntityType.TASK:
         # A deleted card is gone by now; its reference is what the trail kept.
         body["task"] = {"reference": entry.payload.get("reference")}
     if card.moved_column and task is not None:
@@ -659,7 +661,7 @@ def fired_body(
     return _bare_body(
         project,
         principal,
-        event="hook.fired",
+        event=Verb.HOOK_FIRED,
         summary=f"{principal.label} fired the hook {hook.name!r}.",
         detail={"hook": {"id": str(hook.id), "name": hook.name}, "message": message},
     )

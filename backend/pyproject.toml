@@ -104,6 +104,7 @@ ignore = [
 "app/storage/local.py" = ["TID251"]  # compares against file mtimes, which are the OS's clock
 "tests/*" = ["S105", "S106", "TID251"]  # test credentials are fine; tests may read the real clock
 "alembic/versions/*" = ["E501"]
+"app/models/activity.py" = ["S105"]  # Verb names like TOKEN_ISSUED are event names, not credentials
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

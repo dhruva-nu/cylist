@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import clock
-from app.models.activity import Activity
+from app.models.activity import Activity, EntityType, Verb
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
@@ -203,7 +203,7 @@ def _card_reference(entry: Activity) -> str | None:
     card has no id left to group by and its last day is the one most worth
     reporting.
     """
-    if entry.entity_type != "task":
+    if entry.entity_type != EntityType.TASK:
         return None
     reference = entry.payload.get("reference")
     return reference if isinstance(reference, str) else None
@@ -278,11 +278,11 @@ def _ended_in(rows: list[Activity], column_id: UUID | None) -> bool:
     everywhere it has been.
     """
     settled = next(
-        (row for row in reversed(rows) if row.verb in {"task.moved", "task.finished"}), None
+        (row for row in reversed(rows) if row.verb in {Verb.TASK_MOVED, Verb.TASK_FINISHED}), None
     )
     if settled is None:
         return False
-    if settled.verb == "task.finished":
+    if settled.verb == Verb.TASK_FINISHED:
         return bool(settled.payload.get("finished"))
     return column_id is not None and settled.payload.get("column_id") == str(column_id)
 
@@ -303,14 +303,14 @@ def _condensed(entries: list[HistoryEntry]) -> list[HistoryEntry]:
     than being dropped: it is one line either way, and a day where nothing is
     said about a card that moved reads as a day the card sat still.
     """
-    moves = [entry for entry in entries if entry.verb == "task.moved"]
+    moves = [entry for entry in entries if entry.verb == Verb.TASK_MOVED]
     if len(moves) < 2:
         return entries
 
     first, last = moves[0], moves[-1]
     started_in, _ = _column_ends(first)
     _, ended_in = _column_ends(last)
-    kept = [entry for entry in entries if entry.verb != "task.moved" or entry is last]
+    kept = [entry for entry in entries if entry.verb != Verb.TASK_MOVED or entry is last]
 
     if ended_in is None:
         # A move recorded before CYLIST-8 kept the destination's id and neither

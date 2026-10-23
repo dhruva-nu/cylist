@@ -24,6 +24,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.person import Person, PersonKind
 from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
@@ -74,8 +75,8 @@ async def create_person(
     await activity.record(
         session,
         principal,
-        "person.added",
-        entity_type="person",
+        Verb.PERSON_ADDED,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         payload={"name": person.name, "kind": person.kind.value},
     )
@@ -158,8 +159,8 @@ async def update_person(
         await activity.record(
             session,
             principal,
-            "person.updated",
-            entity_type="person",
+            Verb.PERSON_UPDATED,
+            entity_type=EntityType.PERSON,
             entity_id=person.id,
             payload={"fields": described},
         )
@@ -167,8 +168,8 @@ async def update_person(
         await activity.record(
             session,
             principal,
-            "person.archived" if body.archived else "person.restored",
-            entity_type="person",
+            Verb.PERSON_ARCHIVED if body.archived else Verb.PERSON_RESTORED,
+            entity_type=EntityType.PERSON,
             entity_id=person.id,
             payload={"name": person.name},
         )
@@ -203,8 +204,8 @@ async def archive_person(
     await activity.record(
         session,
         principal,
-        "person.archived",
-        entity_type="person",
+        Verb.PERSON_ARCHIVED,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         payload={"name": person.name},
     )
@@ -241,8 +242,8 @@ async def invite_person(
     await activity.record(
         session,
         principal,
-        "person.invited",
-        entity_type="person",
+        Verb.PERSON_INVITED,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         # The token is emphatically not in here. The audit log is readable
         # with `read` alone, and an invitation is a credential.
@@ -294,8 +295,8 @@ async def set_account(
     await activity.record(
         session,
         principal,
-        "person.password_reset" if had_one else "person.account_opened",
-        entity_type="person",
+        Verb.PERSON_PASSWORD_RESET if had_one else Verb.PERSON_ACCOUNT_OPENED,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         # The password is emphatically not in here, for the reason an
         # invitation token is not: the trail is readable with `read` alone.
@@ -319,8 +320,8 @@ async def withdraw_invite(
     await activity.record(
         session,
         principal,
-        "person.invite_withdrawn",
-        entity_type="person",
+        Verb.PERSON_INVITE_WITHDRAWN,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         payload={"name": person.name},
     )

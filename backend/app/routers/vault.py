@@ -32,6 +32,7 @@ from app.core.crypto import VaultCipher, VaultUnavailableError
 from app.core.errors import NotFoundError
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
 from app.routers import guards
@@ -207,8 +208,8 @@ async def create_tree(
     await activity.record(
         session,
         principal,
-        "vault.tree_created",
-        entity_type="vault_tree",
+        Verb.VAULT_TREE_CREATED,
+        entity_type=EntityType.VAULT_TREE,
         entity_id=tree.id,
         project_id=project.id,
         payload={"name": tree.name},
@@ -260,8 +261,8 @@ async def update_tree(
     await activity.record(
         session,
         principal,
-        "vault.tree_updated",
-        entity_type="vault_tree",
+        Verb.VAULT_TREE_UPDATED,
+        entity_type=EntityType.VAULT_TREE,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={"name": updated.name, "fields": sorted(body.model_dump(exclude_unset=True))},
@@ -281,8 +282,8 @@ async def delete_tree(
     await activity.record(
         session,
         principal,
-        "vault.tree_deleted",
-        entity_type="vault_tree",
+        Verb.VAULT_TREE_DELETED,
+        entity_type=EntityType.VAULT_TREE,
         entity_id=tree_id,
         project_id=project_id,
         payload={"name": name},
@@ -321,8 +322,8 @@ async def create_node(
     await activity.record(
         session,
         principal,
-        "vault.node_created",
-        entity_type="vault_node",
+        Verb.VAULT_NODE_CREATED,
+        entity_type=EntityType.VAULT_NODE,
         entity_id=node.id,
         project_id=tree.project_id,
         # The name and kind, never the credential: the audit log is readable
@@ -369,8 +370,8 @@ async def update_node(
     await activity.record(
         session,
         principal,
-        "vault.node_updated",
-        entity_type="vault_node",
+        Verb.VAULT_NODE_UPDATED,
+        entity_type=EntityType.VAULT_NODE,
         entity_id=updated.id,
         project_id=tree.project_id,
         payload={"name": updated.name, "fields": changed},
@@ -391,8 +392,8 @@ async def delete_node(
     await activity.record(
         session,
         principal,
-        "vault.node_deleted",
-        entity_type="vault_node",
+        Verb.VAULT_NODE_DELETED,
+        entity_type=EntityType.VAULT_NODE,
         entity_id=node_id,
         project_id=tree.project_id,
         payload={"name": name, "kind": kind, "tree": tree.name},
@@ -427,8 +428,8 @@ async def move_node(
     await activity.record(
         session,
         principal,
-        "vault.node_moved",
-        entity_type="vault_node",
+        Verb.VAULT_NODE_MOVED,
+        entity_type=EntityType.VAULT_NODE,
         entity_id=moved.id,
         project_id=tree.project_id,
         payload={
@@ -471,8 +472,8 @@ async def reveal_secret(
     await activity.record(
         session,
         principal,
-        "vault.secret_revealed",
-        entity_type="vault_node",
+        Verb.VAULT_SECRET_REVEALED,
+        entity_type=EntityType.VAULT_NODE,
         entity_id=node.id,
         project_id=tree.project_id,
         payload={"name": node.name, "tree": tree.name},

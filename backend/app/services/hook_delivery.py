@@ -70,6 +70,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import epoch, now
 from app.core.crypto import VaultKeys, cipher_for
 from app.db import Database
+from app.models.activity import Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.services import hooks, retention
 
@@ -152,7 +153,7 @@ SIGNATURE_HEADER = "X-Cylist-Signature"
 SIGNATURE_TOLERANCE = timedelta(minutes=5)
 
 TEST_EVENT = "hook.test"
-FIRED_EVENT = "hook.fired"
+FIRED_EVENT = Verb.HOOK_FIRED
 
 
 # --- Signing ---------------------------------------------------------------
