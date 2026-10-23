@@ -24,7 +24,7 @@ export function Skills({
 
   const skills = useQuery({
     queryKey: ['skills', projectKey],
-    queryFn: () => api.listSkills(projectKey),
+    queryFn: ({ signal }) => api.listSkills(projectKey, signal),
   })
 
   async function refresh() {

@@ -41,11 +41,18 @@ interface ErrorEnvelope {
   }
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * `RequestInit` where the signal may be absent *or* undefined, so a caller can
+ * hand on the optional `signal` a query gives it without first checking it.
+ */
+export type RequestOptions = Omit<RequestInit, 'signal'> & { signal?: AbortSignal | undefined }
+
+export async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
+      signal: init.signal ?? null,
       credentials: 'same-origin', // carries the session cookie
       headers: {
         Accept: 'application/json',
@@ -65,7 +72,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     return undefined as T
   }
 
-  const responseBody: unknown = await response.json().catch(() => null)
+  const text = await response.text().catch(() => '')
+  const responseBody: unknown = parsed(text)
 
   if (!response.ok) {
     const envelope = (responseBody ?? {}) as ErrorEnvelope
@@ -78,7 +86,26 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     )
   }
 
+  if (text === '') return undefined as T
+  if (responseBody === undefined) {
+    // Handing a caller `null` where it expects a list or a card is a crash
+    // somewhere else, later, with no hint of which request went wrong.
+    throw new ApiError(
+      response.status,
+      'invalid_response',
+      'The server answered with something this app could not read.',
+    )
+  }
   return responseBody as T
+}
+
+/** The JSON in `text`, or `undefined` if it is not JSON — an empty body included. */
+function parsed(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
 }
 
 /** A request body as the server takes it. */

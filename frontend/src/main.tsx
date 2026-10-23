@@ -1,8 +1,9 @@
-import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { Announcer } from './components/Announcer'
+import { noteIfSignedOut } from './api/session'
 import { keptCurrentBySocket } from './routes/useBoardSocket'
 import { applyStoredTheme } from './theme/theme'
 import './theme/tokens.css'
@@ -26,13 +27,23 @@ applyStoredTheme()
  * this one read every list on screen a second time for each card moved.
  */
 const mutationCache = new MutationCache({
+  onError: (error) => noteIfSignedOut(queryClient, error),
   onSuccess: (_data, _variables, _context, mutation) => {
     if (mutation.meta?.refreshesItself) return
     void queryClient.invalidateQueries()
   },
 })
 
-const queryClient = new QueryClient({
+/**
+ * A request that comes back unauthenticated sends the whole app to the sign-in
+ * screen, whichever screen asked — see `noteIfSignedOut`.
+ */
+const queryCache = new QueryCache({
+  onError: (error) => noteIfSignedOut(queryClient, error),
+})
+
+const queryClient: QueryClient = new QueryClient({
+  queryCache,
   mutationCache,
   defaultOptions: {
     queries: {

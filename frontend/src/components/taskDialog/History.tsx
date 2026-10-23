@@ -31,7 +31,7 @@ export function History({ taskId }: { taskId: string }) {
 
   const history = useQuery({
     queryKey: [...queryKeys.taskHistory(taskId), page],
-    queryFn: () => api.getTaskHistory(taskId, page),
+    queryFn: ({ signal }) => api.getTaskHistory(taskId, page, undefined, signal),
     enabled: open,
     // The previous page stays on screen while the next one loads. A pager that
     // empties itself between clicks makes the dialog jump under the cursor.

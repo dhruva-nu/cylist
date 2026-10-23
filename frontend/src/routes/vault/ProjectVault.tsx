@@ -38,12 +38,13 @@ export function ProjectVault() {
 
   const trees = useQuery({
     queryKey: ['vault-trees', projectKey],
-    queryFn: () => api.listVaultTrees(projectKey),
+    queryFn: ({ signal }) => api.listVaultTrees(projectKey, signal),
   })
 
   const treeDetails = useQuery({
     queryKey: ['vault-tree-details', projectKey, (trees.data ?? []).map((t) => t.id).join(',')],
-    queryFn: () => Promise.all((trees.data ?? []).map((tree) => api.getVaultTree(tree.id))),
+    queryFn: ({ signal }) =>
+      Promise.all((trees.data ?? []).map((tree) => api.getVaultTree(tree.id, signal))),
     enabled: trees.data !== undefined,
   })
 

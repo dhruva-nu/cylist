@@ -70,12 +70,12 @@ export function GoalPage() {
   // board, the top first.
   const goal = useInfiniteQuery({
     queryKey: queryKeys.goal(goalRef),
-    queryFn: async ({ pageParam }): Promise<GoalCardsPage> => {
+    queryFn: async ({ pageParam, signal }): Promise<GoalCardsPage> => {
       if (pageParam === null) {
-        const detail = await api.getGoal(goalRef)
+        const detail = await api.getGoal(goalRef, signal)
         return { detail, items: detail.tasks, next: detail.tasks_next }
       }
-      const page = await api.listGoalTasks(goalRef, pageParam)
+      const page = await api.listGoalTasks(goalRef, pageParam, signal)
       return { detail: null, ...page }
     },
     initialPageParam: null as string | null,

@@ -43,11 +43,14 @@ export function ProjectHooks() {
 
   const hooks = useQuery({
     queryKey: ['hooks', projectKey],
-    queryFn: () => api.listHooks(projectKey),
+    queryFn: ({ signal }) => api.listHooks(projectKey, signal),
     // A refusal is an answer about who is asking; asking again changes nothing.
     retry: (count, error) => !isForbidden(error) && count < 2,
   })
-  const events = useQuery({ queryKey: queryKeys.hookEvents, queryFn: api.listHookEvents })
+  const events = useQuery({
+    queryKey: queryKeys.hookEvents,
+    queryFn: ({ signal }) => api.listHookEvents(signal),
+  })
   const board = useBoard(projectKey)
   const templates = useTemplates(projectKey)
   const members = useMembers(projectKey)

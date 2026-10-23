@@ -63,12 +63,12 @@ export function ProjectDocs() {
 
   const tree = useQuery({
     queryKey: ['docs', projectKey],
-    queryFn: () => api.getDocTree(projectKey),
+    queryFn: ({ signal }) => api.getDocTree(projectKey, signal),
   })
 
   const open = useQuery({
     queryKey: ['doc', openId],
-    queryFn: () => api.getDoc(openId ?? ''),
+    queryFn: ({ signal }) => api.getDoc(openId ?? '', signal),
     enabled: Boolean(openId),
   })
 

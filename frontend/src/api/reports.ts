@@ -90,8 +90,9 @@ export const reportsApi = {
    * falls back to UTC, and a change made at 9pm in Kolkata would then land in
    * tomorrow's report.
    */
-  getDayReport: (projectKey: string, day: string, timezone: string) =>
+  getDayReport: (projectKey: string, day: string, timezone: string, signal?: AbortSignal) =>
     request<DayReport>(
       `/projects/${projectKey}/reports/day?${new URLSearchParams({ date: day, timezone })}`,
+      { signal },
     ),
 }

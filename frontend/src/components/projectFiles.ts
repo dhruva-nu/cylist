@@ -25,7 +25,7 @@ export function projectFilesKey(projectKey: string): QueryKey {
 export function useProjectFiles(projectKey: string): readonly FiledItem[] {
   const files = useQuery({
     queryKey: projectFilesKey(projectKey),
-    queryFn: () => api.listProjectItems(projectKey),
+    queryFn: ({ signal }) => api.listProjectItems(projectKey, signal),
   })
   return files.data ?? []
 }

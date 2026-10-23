@@ -31,7 +31,7 @@ export function HookDetail({
 
   const deliveries = useQuery({
     queryKey: ['hook-deliveries', hook.id],
-    queryFn: () => api.listHookDeliveries(projectKey, hook.id),
+    queryFn: ({ signal }) => api.listHookDeliveries(projectKey, hook.id, signal),
     // Retries happen in the background; a log left open should show them land.
     refetchInterval: 15_000,
   })
