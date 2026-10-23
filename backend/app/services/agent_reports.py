@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.db import publish_into
+from app.models.activity import EntityType
 from app.models.agent_session import AgentSession, AgentSessionReason, SessionKey
 from app.models.task import Task
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
@@ -95,7 +96,7 @@ async def report(
             session,
             principal,
             transition.verb,
-            entity_type="task",
+            entity_type=EntityType.TASK,
             entity_id=transition.task_id,
             project_id=transition.project_id,
             payload=transition.payload,
@@ -214,7 +215,7 @@ async def _end_each(
             session,
             agent_sessions.acting_principal(row),
             transition.verb,
-            entity_type="task",
+            entity_type=EntityType.TASK,
             entity_id=transition.task_id,
             project_id=transition.project_id,
             payload=transition.payload,

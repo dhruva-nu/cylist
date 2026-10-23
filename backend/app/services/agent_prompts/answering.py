@@ -10,7 +10,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.clock import now as clock_now
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, Reason
-from app.models.activity import Channel
+from app.models.activity import Channel, EntityType, Verb
 from app.models.agent_session import (
     AgentPrompt,
     AgentPromptKind,
@@ -88,8 +88,8 @@ async def answer(
     await activity.record(
         session,
         principal,
-        "agent_session.answered",
-        entity_type="task",
+        Verb.AGENT_SESSION_ANSWERED,
+        entity_type=EntityType.TASK,
         entity_id=task.id,
         project_id=task.project_id,
         payload={

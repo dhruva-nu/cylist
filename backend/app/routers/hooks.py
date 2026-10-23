@@ -23,6 +23,7 @@ from app.core.crypto import VaultCipher
 from app.core.errors import NotFoundError
 from app.core.ids import uuid7
 from app.db import SessionDependency, database_of, flush_or_refuse, publish_into
+from app.models.activity import EntityType, Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.project import Project
 from app.routers import guards
@@ -253,8 +254,8 @@ async def create_hook(
     await activity.record(
         session,
         principal,
-        "hook.created",
-        entity_type="hook",
+        Verb.HOOK_CREATED,
+        entity_type=EntityType.HOOK,
         entity_id=hook.id,
         project_id=project.id,
         payload={"name": hook.name},
@@ -307,8 +308,8 @@ async def update_hook(
         await activity.record(
             session,
             principal,
-            "hook.updated",
-            entity_type="hook",
+            Verb.HOOK_UPDATED,
+            entity_type=EntityType.HOOK,
             entity_id=hook.id,
             project_id=project.id,
             payload={"name": hook.name, "fields": changed},
@@ -335,8 +336,8 @@ async def delete_hook(
     await activity.record(
         session,
         principal,
-        "hook.deleted",
-        entity_type="hook",
+        Verb.HOOK_DELETED,
+        entity_type=EntityType.HOOK,
         project_id=project.id,
         payload={"name": name},
     )
@@ -362,8 +363,8 @@ async def rotate_secret(
     await activity.record(
         session,
         principal,
-        "hook.secret_rotated",
-        entity_type="hook",
+        Verb.HOOK_SECRET_ROTATED,
+        entity_type=EntityType.HOOK,
         entity_id=hook.id,
         project_id=project.id,
         payload={"name": hook.name},
@@ -427,8 +428,8 @@ async def fire_hook(
     await activity.record(
         session,
         principal,
-        "hook.fired",
-        entity_type="hook",
+        Verb.HOOK_FIRED,
+        entity_type=EntityType.HOOK,
         entity_id=hook.id,
         project_id=project.id,
         payload={"name": hook.name, "message": message},

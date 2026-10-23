@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.core.errors import ConflictError, ForbiddenError, Reason
-from app.models.activity import Channel
+from app.models.activity import Channel, EntityType, Verb
 from app.models.agent_session import (
     AgentPrompt,
     AgentPromptKind,
@@ -94,8 +94,8 @@ async def ask(
     await activity.record(
         session,
         principal,
-        "agent_session.waiting",
-        entity_type="task",
+        Verb.AGENT_SESSION_WAITING,
+        entity_type=EntityType.TASK,
         entity_id=task.id,
         project_id=task.project_id,
         payload={
