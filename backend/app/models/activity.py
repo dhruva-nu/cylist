@@ -11,7 +11,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, func
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +34,13 @@ class Activity(Base, UUIDPrimaryKeyMixin):
         Index("ix_activity_project_id_occurred_at", "project_id", "occurred_at"),
         Index("ix_activity_entity_type_entity_id", "entity_type", "entity_id"),
         Index("ix_activity_actor_person_id_occurred_at", "actor_person_id", "occurred_at"),
+        # Only the rows waiting for the courier, which are few and recent.
+        Index(
+            "ix_activity_hooks_pending",
+            "occurred_at",
+            "id",
+            postgresql_where=sql_text("hooks_pending"),
+        ),
     )
 
     occurred_at: Mapped[datetime] = mapped_column(
@@ -88,6 +96,13 @@ class Activity(Base, UUIDPrimaryKeyMixin):
     ever goes away, so the record of what happened outlives it."""
 
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    hooks_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    """Whether the hooks still have to be matched against this change. Set by the
+    write that records it, cleared by the courier when it has queued whatever
+    deliveries the change earned — see :func:`app.services.hooks.match_pending`."""
 
 
 class ActivityArchive(Base):
