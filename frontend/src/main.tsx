@@ -2,6 +2,7 @@ import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { Announcer } from './components/Announcer'
 import { keptCurrentBySocket } from './routes/useBoardSocket'
 import { applyStoredTheme } from './theme/theme'
 import './theme/tokens.css'
@@ -54,6 +55,7 @@ createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      <Announcer />
     </QueryClientProvider>
   </StrictMode>,
 )

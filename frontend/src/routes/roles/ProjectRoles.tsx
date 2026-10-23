@@ -49,7 +49,6 @@ import {
   EmptyState,
   ErrorBanner,
   ErrorNotice,
-  LiveRegion,
   cardStyles,
   useAnnouncer,
 } from '../../components/ui'
@@ -81,7 +80,7 @@ export function ProjectRoles() {
   const invalidate = useInvalidate()
   const [addingRole, setAddingRole] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   /**
    * Rows the reader has just ticked, before the server has answered.
@@ -214,7 +213,6 @@ export function ProjectRoles() {
       <ErrorNotice error={saveClearance.error} />
       <ErrorNotice error={assignRole.error} />
       <ErrorNotice error={deleteRole.error} />
-      <LiveRegion message={message} />
 
       {!amAdmin ? (
         <p className={styles.note}>

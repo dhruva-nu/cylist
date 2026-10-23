@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.models.activity import Activity, EntityType, Verb
 from app.models.board import BoardColumn
 from app.models.project import Project
@@ -47,7 +48,7 @@ from app.services import activity, columns, tasks, today
 
 def today_in(zone: ZoneInfo) -> date:
     """The date it is right now, where the caller is."""
-    return datetime.now(zone).date()
+    return clock.today(zone)
 
 
 def window(day: date, zone: ZoneInfo) -> tuple[datetime, datetime]:

@@ -41,6 +41,21 @@ export default defineConfig(({ command }) => ({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Off unless asked for. The maps are three and a half times the code they
+    // describe and are served to everyone beside it; whoever needs to read a
+    // production stack trace builds with `CYLIST_SOURCEMAP=1` and keeps the
+    // maps on their own machine.
+    sourcemap: process.env.CYLIST_SOURCEMAP === '1',
+    rollupOptions: {
+      output: {
+        // The libraries change when a dependency does, the app every deploy, so
+        // a returning visitor fetches the app again and keeps the libraries.
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          tanstack: ['@tanstack/react-query', '@tanstack/react-router'],
+          markdown: ['react-markdown', 'remark-gfm'],
+        },
+      },
+    },
   },
 }))
