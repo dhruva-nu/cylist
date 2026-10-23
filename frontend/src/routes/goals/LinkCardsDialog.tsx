@@ -6,6 +6,7 @@ import { Field, Modal, ModalBody } from '../../components/Modal'
 import { Button, EmptyState, ErrorNotice } from '../../components/ui'
 import { cardMatches } from './cardMatch'
 import styles from './GoalPage.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * Puts cards that are already on the board onto this goal.
@@ -36,6 +37,7 @@ export function LinkCardsDialog({
   const tasks = useTasks(projectKey)
 
   const link = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (task: Task) => api.updateTask(task.reference, { goal_id: goalId }),
     onSuccess: async (task) => {
       await onDone()

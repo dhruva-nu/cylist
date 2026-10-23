@@ -6,6 +6,7 @@ import { formatStamp } from '../../components/format'
 import { Modal, ModalBody } from '../../components/Modal'
 import { Avatar, Button, EmptyState, ErrorNotice } from '../../components/ui'
 import styles from './ColdStorageDialog.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * Cold storage (CYLIST-70): where the board's finished cards go once nobody
@@ -57,6 +58,7 @@ export function ColdStorageDialog({
   })
 
   const store = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.storeFinished(projectKey),
     onSuccess: async (run) => {
       announce(`${cardsWord(run.references.length)} moved to cold storage, in ${run.file.name}.`)
@@ -69,6 +71,7 @@ export function ColdStorageDialog({
   })
 
   const restore = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (task: Task) => api.restoreTask(task.reference),
     onSuccess: async (restored) => {
       announce(`${restored.reference} restored to ${column.name}.`)

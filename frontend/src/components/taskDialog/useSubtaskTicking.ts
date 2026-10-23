@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { api, type ChecklistState, type Task, type TaskDetail } from '../../api/client'
 import { useRefreshTask } from './useRefreshTask'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export const CHECKLIST_LABELS: Record<ChecklistState, string> = {
   open: 'Open',
@@ -32,6 +33,7 @@ export function useSubtaskTicking({
   const refresh = () => refreshTask(task.id)
 
   const setState = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ id, state }: { id: string; state: ChecklistState }) =>
       api.updateChecklistItem(id, { state }),
     onSuccess: async (item) => {
@@ -41,6 +43,7 @@ export function useSubtaskTicking({
   })
 
   const setFinished = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ child, finished }: { child: Task; finished: boolean }) =>
       api.finishTask(child.id, finished),
     onSuccess: async (child, { finished }) => {

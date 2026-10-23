@@ -10,6 +10,7 @@ import { Button, ErrorNotice, cardStyles } from '../../components/ui'
 import { confirms } from './projectDelete'
 import styles from './ProjectRoles.module.css'
 import { nameIsTaken } from './projectRoles'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * The end of a project, offered where the rest of its settings are.
@@ -54,6 +55,7 @@ export function DeleteProjectDialog({
   const named = confirms(projectKey, typed)
 
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.deleteProject(projectKey, typed.trim()),
     onSuccess: async () => {
       // Away from the project before the cache is cleared: every query on this
@@ -120,6 +122,7 @@ export function AddRoleDialog({
   const [description, setDescription] = useState('')
 
   const add = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () =>
       api.createRole(projectKey, { name: name.trim(), description: description.trim() }),
     onSuccess: async (role) => {

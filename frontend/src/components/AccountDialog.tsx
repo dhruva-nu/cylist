@@ -19,6 +19,7 @@ import { useState } from 'react'
 import { api, MIN_PASSWORD_LENGTH, type Person } from '../api/client'
 import { DialogActions, Field, Modal, ModalBody } from './Modal'
 import { ErrorNotice } from './ui'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 export function AccountDialog({
   person,
@@ -36,6 +37,7 @@ export function AccountDialog({
   const [password, setPassword] = useState('')
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.setAccount(person.id, email.trim(), password),
     onSuccess: async () => {
       await onDone()

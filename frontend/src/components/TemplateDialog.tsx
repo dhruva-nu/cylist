@@ -26,6 +26,7 @@ import {
 } from './templateStages'
 import { Button, EmptyState, ErrorBanner, ErrorNotice } from './ui'
 import styles from './TemplateDialog.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 /** Matches `Task.sub_statuses`: a stage's labels are loaded onto it verbatim. */
 const MAX_SUB_STAGES = 4
@@ -149,6 +150,7 @@ function TemplateEditor({
   const [stages, setStages] = useState<DraftStage[]>(draftStagesOf(template))
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => {
       const input = { name: name.trim(), description: description.trim(), stages }
       return template
@@ -164,6 +166,7 @@ function TemplateEditor({
 
   // Only ever run with the template being edited; a new one has no Delete button.
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (doomed: Template) => api.deleteTemplate(doomed.id),
     onSuccess: async (_deleted, doomed) => {
       announce(`${doomed.name} deleted.`)

@@ -9,6 +9,7 @@ import { Button, EmptyState, ErrorNotice, cardStyles } from '../../components/ui
 import { usePermissions } from '../usePermissions'
 import styles from './Agents.module.css'
 import { Section } from './AgentsSection'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function Skills({
   projectKey,
@@ -32,6 +33,7 @@ export function Skills({
   }
 
   const upload = useMutation({
+    meta: handlesOwnErrors,
     // One at a time rather than in parallel: two uploads of the same name
     // would race to replace each other, and the survivor would be whichever
     // request the server happened to finish second.
@@ -56,6 +58,7 @@ export function Skills({
   })
 
   const uploadFolder = useMutation({
+    meta: handlesOwnErrors,
     // One skill, not one per file: a folder is a skill precisely because its
     // SKILL.md points at the other files in it.
     mutationFn: async (files: File[]) => {
@@ -82,6 +85,7 @@ export function Skills({
   })
 
   const deleteSkill = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: ({ id }: { id: string; name: string }) => api.deleteSkill(id),
     onSuccess: async (_gone, { name }) => {
       await refresh()

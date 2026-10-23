@@ -8,6 +8,7 @@ import { Markdown } from '../../components/Markdown'
 import { Avatar, Button, ErrorNotice } from '../../components/ui'
 import { IconButton } from './IconButton'
 import styles from './ProjectDocs.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * Scroll to and mark the part of a doc an answer pointed into.
@@ -61,7 +62,10 @@ export function DocReader({
   }, [focusSection, doc.body])
 
   /** Every change made from here goes through this, so they share one error line. */
-  const change = useMutation({ mutationFn: (run: () => Promise<void>) => run() })
+  const change = useMutation({
+    meta: handlesOwnErrors,
+    mutationFn: (run: () => Promise<void>) => run(),
+  })
 
   const topics = tree.sections.flatMap((part) => part.topics)
   const sectionLabel = tree.sections.find((part) => part.section === doc.section)?.label

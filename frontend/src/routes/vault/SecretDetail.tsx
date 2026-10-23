@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import { api, type VaultNode } from '../../api/client'
 import { Button, ErrorNotice } from '../../components/ui'
 import styles from './ProjectVault.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 const MASK = '••••••••••••'
 
@@ -41,6 +42,7 @@ export function SecretDetail({
   }, [copied])
 
   const reveal = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.revealSecret(node.id),
     // Dropped from react-query's cache the moment nothing is showing it,
     // rather than kept for the five minutes a finished request otherwise
@@ -64,6 +66,7 @@ export function SecretDetail({
   }
 
   const copy = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async (what: Copyable) => {
       await navigator.clipboard.writeText(await textToCopy(what))
       return what

@@ -27,6 +27,7 @@ import styles from './ProjectVault.module.css'
 import { MoveDialog, NodeDialog, TreeDialog } from './VaultDialogs'
 import { TreeSection } from './VaultTreeNav'
 import { findNode, toggleId, withId, type Destination } from './vaultTree'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function ProjectVault() {
   const { projectKey } = useParams({ from: '/p/$projectKey/vault' })
@@ -66,6 +67,7 @@ export function ProjectVault() {
   }
 
   const deleteNode = useMutation({
+    meta: handlesOwnErrors,
     // The node rather than its id, so the announcement can name what has gone.
     mutationFn: (node: VaultNode) => api.deleteVaultNode(node.id),
     onSuccess: async (_deleted, node) => {

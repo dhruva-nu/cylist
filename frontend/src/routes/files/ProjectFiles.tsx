@@ -26,6 +26,7 @@ import { FolderContents } from './FolderContents'
 import { DropZone, FolderTree } from './FolderTree'
 import styles from './ProjectFiles.module.css'
 import { useFolderTree } from './useFolderTree'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** A file or folder as a mutation needs it: what to call, and what to say it was. */
 interface Named {
@@ -99,6 +100,7 @@ export function ProjectFiles() {
   const folderName = contents.data?.folder.name ?? project.data?.name ?? projectKey
 
   const upload = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async ({
       files,
       addedBy,
@@ -119,11 +121,13 @@ export function ProjectFiles() {
   })
 
   const deleteItem = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (item: Named) => api.deleteItem(item.id),
     onSuccess: (_deleted, item) => refreshAndSay(`${item.name} deleted.`),
   })
 
   const deleteFolder = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (folder: Named) => api.deleteFolder(folder.id),
     onSuccess: (_deleted, folder) => refreshAndSay(`Folder ${folder.name} deleted.`),
   })

@@ -2,7 +2,9 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { reportFailure } from './api/mutationErrors'
 import { noteIfSignedOut } from './api/session'
+import { Toasts } from './components/Toasts'
 import { keptCurrentBySocket } from './routes/useBoardSocket'
 import { applyStoredTheme } from './theme/theme'
 import './theme/tokens.css'
@@ -24,9 +26,15 @@ applyStoredTheme()
  * The exception is a write that already says what it changes — see
  * `refreshesItself`. The board's writes do, and on top of their own refresh
  * this one read every list on screen a second time for each card moved.
+ *
+ * A write that fails and whose screen does not report it says so in a toast —
+ * see `reportFailure`.
  */
 const mutationCache = new MutationCache({
-  onError: (error) => noteIfSignedOut(queryClient, error),
+  onError: (error, _variables, _context, mutation) => {
+    noteIfSignedOut(queryClient, error)
+    reportFailure(error, mutation)
+  },
   onSuccess: (_data, _variables, _context, mutation) => {
     if (mutation.meta?.refreshesItself) return
     void queryClient.invalidateQueries()
@@ -65,6 +73,7 @@ createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      <Toasts />
     </QueryClientProvider>
   </StrictMode>,
 )
