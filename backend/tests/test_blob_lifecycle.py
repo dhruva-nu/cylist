@@ -64,6 +64,10 @@ def held_at(handle: str) -> bytes:
     return Path(handle).read_bytes()
 
 
+SWEEP_IDLE_FOR = timedelta(seconds=Settings.model_fields["blob_sweep_idle_seconds"].default)
+"""What a deployment that sets nothing waits before a sweep looks at a file."""
+
+
 def age(path: Path, by: timedelta) -> None:
     """Make a file look as if nothing has touched it for ``by``."""
     then = time.time() - by.total_seconds()
@@ -281,11 +285,11 @@ class TestTheSweep:
         content = content_of("fresh orphan")
         await store.write(stream(content), max_bytes=NO_LIMIT)
 
-        assert (await blobs.sweep(database, store)).orphans == 0
+        assert (await blobs.sweep(database, store, idle_for=SWEEP_IDLE_FOR)).orphans == 0
         assert on_disk(store, content).exists()
 
-        age(on_disk(store, content), blobs.SWEEP_IDLE_FOR * 2)
-        assert (await blobs.sweep(database, store)).orphans == 1
+        age(on_disk(store, content), SWEEP_IDLE_FOR * 2)
+        assert (await blobs.sweep(database, store, idle_for=SWEEP_IDLE_FOR)).orphans == 1
 
     async def test_clears_abandoned_uploads_but_not_ones_arriving(
         self, database: Database, store: LocalBlobStore
@@ -296,9 +300,9 @@ class TestTheSweep:
         arriving = root / f"{TEMP_PREFIX}arriving"
         abandoned.write_bytes(b"half a file")
         arriving.write_bytes(b"still coming")
-        age(abandoned, blobs.SWEEP_IDLE_FOR * 2)
+        age(abandoned, SWEEP_IDLE_FOR * 2)
 
-        swept = await blobs.sweep(database, store)
+        swept = await blobs.sweep(database, store, idle_for=SWEEP_IDLE_FOR)
 
         assert swept.incoming == 1
         assert not abandoned.exists()
@@ -314,7 +318,7 @@ class TestTheSweep:
         for path in stray:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"not a blob")
-            age(path, blobs.SWEEP_IDLE_FOR * 2)
+            age(path, SWEEP_IDLE_FOR * 2)
 
         swept = await blobs.sweep(database, store, idle_for=NOW)
 
@@ -326,9 +330,11 @@ class TestTheSweep:
     ) -> None:
         async with database.session() as other:
             await other.execute(select(func.pg_advisory_xact_lock(blobs.SWEEPER_LEASE)))
-            assert await blobs.sweep_if_first(database, store) is None
+            assert await blobs.sweep_if_first(database, store, idle_for=SWEEP_IDLE_FOR) is None
 
-        assert await blobs.sweep_if_first(database, store) == blobs.Swept(orphans=0, incoming=0)
+        assert await blobs.sweep_if_first(database, store, idle_for=SWEEP_IDLE_FOR) == blobs.Swept(
+            orphans=0, incoming=0
+        )
 
 
 class TestThePeriodicSweep:
@@ -338,8 +344,12 @@ class TestThePeriodicSweep:
         store = LocalBlobStore(settings.blob_dir)
         content = content_of("swept by the loop")
         await store.write(stream(content), max_bytes=NO_LIMIT)
-        age(on_disk(store, content), blobs.SWEEP_IDLE_FOR * 2)
-        monkeypatch.setattr(blobs, "SWEEP_EVERY", timedelta(seconds=0.05))
+        age(on_disk(store, content), SWEEP_IDLE_FOR * 2)
+        monkeypatch.setattr(
+            app.state,
+            "settings",
+            settings.model_copy(update={"blob_sweep_every_seconds": 0.05}),
+        )
 
         loop = asyncio.create_task(main._sweep_blobs_forever(app))
         try:

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.config import settings_of
 from app.core.crypto import VaultCipher
 from app.core.errors import NotFoundError
 from app.core.ids import uuid7
@@ -157,7 +158,7 @@ async def _send_released(
     await database_of(request).release(session)
     async with _client(request) as client:
         await hook_delivery.send_now(
-            session, client, request.app.state.settings.vault_keyring, hook, delivery
+            session, client, settings_of(request).vault_keyring, hook, delivery
         )
 
 

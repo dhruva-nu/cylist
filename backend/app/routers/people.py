@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.config import Settings, app_settings
 from app.db import SessionDependency
 from app.models.person import Person, PersonKind
 from app.routers.paging import PageQuery
@@ -225,6 +226,7 @@ async def invite_person(
     request: Request,
     principal: Principal = Depends(require(Scope.ADMIN)),
     session: AsyncSession = SessionDependency,
+    settings: Settings = Depends(app_settings),
 ) -> InviteIssued:
     """Mint a one-time link that lets somebody set their first password.
 
@@ -235,7 +237,7 @@ async def invite_person(
     Cylist sends no email, so the link comes back here for you to pass on. It
     is shown once; ask again and the old one stops working.
     """
-    person, token = await people.invite(session, person_id)
+    person, token = await people.invite(session, person_id, valid_for=settings.invite_ttl)
     await activity.record(
         session,
         principal,

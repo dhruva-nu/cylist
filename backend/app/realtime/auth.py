@@ -55,7 +55,7 @@ IDLE = 4408
 
 A client that is still running heartbeats through this whether it is working
 or waiting, so this now means the daemon itself has gone — not that the
-person it was waiting on has. See ``AGENT_SOCKET_IDLE_AFTER``.
+person it was waiting on has. See ``Settings.agent_socket_idle_seconds``.
 """
 
 DISPLACED = 4409
