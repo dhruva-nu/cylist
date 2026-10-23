@@ -46,7 +46,7 @@ from app.config import Settings, app_settings
 from app.core.errors import ForbiddenError, UnauthorizedError
 from app.core.request_log import client_address
 from app.db import SessionDependency
-from app.models.activity import Channel
+from app.models.activity import Channel, EntityType, Verb
 from app.models.api_token import ApiToken, TokenKind
 from app.models.person import Person
 from app.schemas.auth import Identity, LoginRequest, SessionRead
@@ -125,7 +125,7 @@ async def _start_session(
         scopes=ALL_SCOPES,
         channel=Channel.WEB,
     )
-    await activity.record(session, principal, "session.started", entity_type="session")
+    await activity.record(session, principal, Verb.SESSION_STARTED, entity_type=EntityType.SESSION)
     logger.info(
         "Signed in",
         extra={
@@ -268,8 +268,8 @@ async def accept_invite(
     await activity.record(
         session,
         principal,
-        "person.account_opened",
-        entity_type="person",
+        Verb.PERSON_ACCOUNT_OPENED,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         payload={"name": person.name},
     )
@@ -322,8 +322,8 @@ async def change_password(
     await activity.record(
         session,
         principal,
-        "person.password_changed",
-        entity_type="person",
+        Verb.PERSON_PASSWORD_CHANGED,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         payload={"name": person.name},
     )
@@ -446,8 +446,8 @@ async def end_my_session(
     await activity.record(
         session,
         principal,
-        "session.ended",
-        entity_type="session",
+        Verb.SESSION_ENDED,
+        entity_type=EntityType.SESSION,
         entity_id=token.id,
         payload={"current": token.id == principal.token_id},
     )

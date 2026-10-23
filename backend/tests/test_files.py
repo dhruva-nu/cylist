@@ -140,6 +140,7 @@ class TestCreatingFolders:
 
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "conflict"
+        assert response.json()["error"]["reason"] == "duplicate_name"
 
     async def test_refuses_two_folders_with_one_name_in_the_root(
         self, project: AsyncClient
@@ -320,6 +321,20 @@ class TestFolderContents:
             "2025",
         ]
 
+    async def test_gives_the_breadcrumb_of_the_deepest_allowed_folder(
+        self, project: AsyncClient
+    ) -> None:
+        """The chain above a folder is read in one query, and comes back in order."""
+        parent: str | None = None
+        names: list[str] = []
+        for level in range(MAX_DEPTH - 1):
+            names.append(f"level-{level}")
+            parent = await make_folder(project, names[-1], parent)
+
+        body = (await project.get(f"/folders/{parent}/children")).json()
+
+        assert [crumb["name"] for crumb in body["path"]] == [ATLAS["name"], *names]
+
     async def test_an_unknown_folder_is_a_clean_404(self, project: AsyncClient) -> None:
         response = await project.get(f"/folders/{UNKNOWN_ID}/children")
 
@@ -467,6 +482,7 @@ class TestMovingFolders:
         )
 
         assert response.status_code == 422
+        assert response.json()["error"]["reason"] == "folder_too_deep"
 
     async def test_refuses_a_move_onto_a_taken_name(self, project: AsyncClient) -> None:
         parent = await make_folder(project, "Finance inputs")

@@ -19,6 +19,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import NotFoundError
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.goal import Goal
 from app.models.project import Project
 from app.schemas.common import Acknowledged
@@ -181,8 +182,8 @@ async def create_goal(
     await activity.record(
         session,
         principal,
-        "goal.created",
-        entity_type="goal",
+        Verb.GOAL_CREATED,
+        entity_type=EntityType.GOAL,
         entity_id=goal.id,
         project_id=project.id,
         payload={"reference": goal.reference, "name": goal.name},
@@ -251,8 +252,8 @@ async def update_goal(
     await activity.record(
         session,
         principal,
-        "goal.updated",
-        entity_type="goal",
+        Verb.GOAL_UPDATED,
+        entity_type=EntityType.GOAL,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={
@@ -282,8 +283,8 @@ async def delete_goal(
     await activity.record(
         session,
         principal,
-        "goal.deleted",
-        entity_type="goal",
+        Verb.GOAL_DELETED,
+        entity_type=EntityType.GOAL,
         entity_id=None,
         project_id=project_id,
         payload={"reference": reference, "name": name},

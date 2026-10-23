@@ -7,12 +7,12 @@ calls live together here.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
 from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus, settled
@@ -174,7 +174,7 @@ async def set_finished(
     if not finished and task.parent is not None:
         await refuse_open_under_finished(session, task.parent, act=f"reopening {task.reference}")
 
-    task.finished_at = datetime.now(UTC) if finished else None
+    task.finished_at = clock.now() if finished else None
     await session.flush()
     return task, [finished_change(was_finished=was_finished, now_finished=finished)]
 
@@ -405,7 +405,7 @@ def _mark_finished_by_column(
     if now_finished == was_finished:
         return None
 
-    task.finished_at = datetime.now(UTC) if now_finished else None
+    task.finished_at = clock.now() if now_finished else None
     return finished_change(was_finished=was_finished, now_finished=now_finished)
 
 

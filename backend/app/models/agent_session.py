@@ -214,7 +214,7 @@ class AgentSession(Base, UUIDPrimaryKeyMixin):
     see, so "is this session witnessed" used to be a question about one
     process's memory, and a second worker could not answer it. The process
     holding the socket now writes it here instead, on connect and then at
-    least every :data:`app.config.AGENT_SOCKET_STAMP_EVERY`; any process's
+    least every :attr:`app.config.Settings.agent_socket_stamp_seconds`; any process's
     reaper reads it. Null for a session that has never held one."""
 
     actor_label: Mapped[str] = mapped_column(String(120), nullable=False)

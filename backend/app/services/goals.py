@@ -24,16 +24,18 @@ whoever achieved it: see :func:`refuse_open_card_on_achieved`.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy import Numeric, Select, case, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
+from app.core import clock
 from app.core.errors import (
     ConflictError,
     NotFoundError,
+    Reason,
     UnprocessableRequestError,
     not_on_this_project,
 )
@@ -44,7 +46,7 @@ from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
 from app.models.task import Task, TaskStatus, card_loads
 from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
-from app.services import columns, projects, references
+from app.services import columns, names, projects, references
 from app.services.paging import PageRequest, SortKey, Window, keyset
 
 _ANY_DATE = date(1970, 1, 1)
@@ -131,13 +133,15 @@ async def find_by_name(session: AsyncSession, project_id: UUID, name: str) -> Go
     For callers holding a name off a screen rather than a reference — the CLI
     and the MCP server both take one, the same way they take a column's name.
     """
-    found: Goal | None = await session.scalar(
-        select(Goal).where(
-            Goal.project_id == project_id,
-            func.lower(Goal.name) == name.strip().casefold(),
-        )
-    )
+    found: Goal | None = await session.scalar(_named(project_id, name))
     return found
+
+
+def _named(project_id: UUID, name: str) -> Select[tuple[Goal]]:
+    return select(Goal).where(
+        Goal.project_id == project_id,
+        func.lower(Goal.name) == name.strip().casefold(),
+    )
 
 
 async def require_goal(
@@ -369,7 +373,7 @@ async def _set_status(session: AsyncSession, goal: Goal, status: GoalStatus) -> 
     """
     if status is GoalStatus.ACHIEVED:
         await _refuse_open_cards(session, goal)
-        goal.achieved_at = datetime.now(UTC)
+        goal.achieved_at = clock.now()
     else:
         # Reopening or dropping clears it: a goal that is not achieved has no
         # moment at which it was.
@@ -430,6 +434,7 @@ async def refuse_open_card_on_achieved(
         f"{goal.reference} ({goal.name}) is achieved, so {card} cannot be open on it. "
         f"Reopen {goal.reference} first, or take the card off it, before {act}.",
         details={"goal": goal.reference},
+        reason=Reason.GOAL_ACHIEVED,
     )
 
 
@@ -472,6 +477,7 @@ async def _refuse_open_cards(session: AsyncSession, goal: Goal) -> None:
         f"Finish or cancel each of them — or unlink it from the goal — before "
         f"marking {goal.name} achieved.",
         details={"open_tasks": references, "column": finished.name},
+        reason=Reason.GOAL_HAS_OPEN_CARDS,
     )
 
 
@@ -481,21 +487,22 @@ async def _refuse_duplicate(session: AsyncSession, project_id: UUID, name: str) 
         was capitalised. A card wears its goal's name, and two alike make the
         card ambiguous to read.
     """
-    existing = await find_by_name(session, project_id, name)
-    if existing is not None:
-        raise ConflictError(
+    await names.ensure_free(
+        session,
+        _named(project_id, name),
+        lambda existing: names.taken(
             f"This project already has a goal called {existing.name!r}.",
-            details={"name": existing.name, "reference": existing.reference},
-        )
+            name=existing.name,
+            reference=existing.reference,
+        ),
+    )
 
 
 def _duplicate(name: str) -> ConflictError:
     """What :func:`_refuse_duplicate` says, for the request that passed it and
     then lost the race to the index — which knows the name but not the goal
     that took it."""
-    return ConflictError(
-        f"This project already has a goal called {name!r}.", details={"name": name}
-    )
+    return names.taken(f"This project already has a goal called {name!r}.", name=name)
 
 
 async def _next_number(session: AsyncSession, project: Project) -> int:

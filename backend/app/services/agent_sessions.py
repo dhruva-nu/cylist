@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
 from app.core.errors import ForbiddenError
-from app.models.activity import Channel
+from app.models.activity import Channel, EntityType, Verb
 from app.models.agent_session import (
     AgentSession,
     AgentSessionReason,
@@ -56,7 +56,7 @@ from app.services.push import triggers as _push_triggers  # noqa: F401
 class Transition:
     """One change of state worth a line in the activity trail."""
 
-    verb: str
+    verb: Verb
     task_id: UUID
     project_id: UUID
     payload: dict[str, Any]
@@ -189,7 +189,7 @@ async def _walk_off_other_cards(
         if other_task is not None:
             transitions.append(
                 Transition(
-                    "agent_session.finished",
+                    Verb.AGENT_SESSION_FINISHED,
                     other_task.id,
                     other_task.project_id,
                     _trail_payload(other, moved_to=task.reference),
@@ -284,14 +284,14 @@ def close(
     """
     _finish(row, reason, now)
     return Transition(
-        "agent_session.finished",
+        Verb.AGENT_SESSION_FINISHED,
         row.task_id,
         project_id,
         _trail_payload(row, cause=cause),
     )
 
 
-def _trail_verb(state: AgentSessionState, *, fresh: bool) -> str | None:
+def _trail_verb(state: AgentSessionState, *, fresh: bool) -> Verb | None:
     """Which line the trail gets for a change of state, if any.
 
     Entering ``working`` is worth a line when the session is new or came back
@@ -299,10 +299,10 @@ def _trail_verb(state: AgentSessionState, *, fresh: bool) -> str | None:
     the rhythm of a conversation, and the trail would be nothing but it.
     """
     if state is AgentSessionState.WORKING:
-        return "agent_session.started" if fresh else None
+        return Verb.AGENT_SESSION_STARTED if fresh else None
     if state is AgentSessionState.WAITING:
-        return "agent_session.waiting"
-    return "agent_session.finished"
+        return Verb.AGENT_SESSION_WAITING
+    return Verb.AGENT_SESSION_FINISHED
 
 
 def _trail_payload(
@@ -423,7 +423,7 @@ async def touch_from_activity(
     The trail's own ``agent_session.*`` lines are skipped: the row they
     describe has just been written by the same request.
     """
-    if entity_type != "task" or entity_id is None or verb.startswith("agent_session."):
+    if entity_type != EntityType.TASK or entity_id is None or verb.startswith("agent_session."):
         return
 
     now = clock_now()

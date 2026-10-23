@@ -16,6 +16,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.db import SessionDependency
+from app.models.activity import Verb
 from app.models.project import Project
 from app.models.task import Task
 from app.schemas.tasks import ColdStorageRun, TaskDetail, TaskSummaryPage
@@ -116,7 +117,7 @@ async def store_finished_cards(
         await record_on_card(
             session,
             principal,
-            "task.archived",
+            Verb.TASK_ARCHIVED,
             card,
             {"column": stored.column.name, "file": stored.file.name},
         )
@@ -155,7 +156,7 @@ async def restore_card(
     await record_on_card(
         session,
         principal,
-        "task.restored",
+        Verb.TASK_RESTORED,
         restored,
         {
             "column": restored.column.name if restored.column else None,

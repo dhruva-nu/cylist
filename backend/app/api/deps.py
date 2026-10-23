@@ -11,16 +11,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import Depends, Path
+from fastapi import Depends, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import guards
 from app.auth.dependencies import current_principal
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.config import Settings, app_settings
-from app.core import crypto
-from app.core.crypto import VaultCipher
+from app.core.crypto import VaultCipher, VaultUnavailableError
 from app.core.errors import NotFoundError
 from app.db import SessionDependency
 from app.models.board import BoardColumn
@@ -93,11 +91,15 @@ letting its owner in is a job for a narrower scope on the token, not for this.
 """
 
 
-def vault_cipher(settings: Settings = Depends(app_settings)) -> VaultCipher:
+def vault_cipher(request: Request) -> VaultCipher:
     """The cipher this deployment's vault keys configure.
 
-    Built on demand rather than at startup, so a deployment that has not set a
-    key still boots and still serves everything outside the vault — and fails
-    loudly, here, the moment a credential is involved.
+    Built once when the app is, so no request pays to expand the keys. A
+    deployment with no key, or a malformed one, still boots and still serves
+    everything outside the vault — and fails loudly, here, the moment a
+    credential is involved.
     """
-    return crypto.cipher_for(settings.vault_keyring)
+    cipher: VaultCipher | VaultUnavailableError = request.app.state.vault_cipher
+    if isinstance(cipher, VaultUnavailableError):
+        raise cipher
+    return cipher

@@ -17,6 +17,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import NotFoundError
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.project import Project
 from app.models.template import TaskTemplate
 from app.schemas.common import Acknowledged
@@ -171,8 +172,8 @@ async def create_template(
     await activity.record(
         session,
         principal,
-        "template.created",
-        entity_type="template",
+        Verb.TEMPLATE_CREATED,
+        entity_type=EntityType.TEMPLATE,
         entity_id=template.id,
         project_id=project.id,
         payload={"name": template.name, "stage_count": len(template.stages)},
@@ -205,8 +206,8 @@ async def update_template(
     await activity.record(
         session,
         principal,
-        "template.updated",
-        entity_type="template",
+        Verb.TEMPLATE_UPDATED,
+        entity_type=EntityType.TEMPLATE,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={"name": updated.name, "fields": sorted(body.model_dump(exclude_unset=True))},
@@ -236,8 +237,8 @@ async def delete_template(
     await activity.record(
         session,
         principal,
-        "template.deleted",
-        entity_type="template",
+        Verb.TEMPLATE_DELETED,
+        entity_type=EntityType.TEMPLATE,
         project_id=project_id,
         payload={"name": name},
     )

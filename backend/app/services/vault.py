@@ -23,8 +23,9 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import tree
 from app.core.crypto import VaultCipher
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.ids import uuid7
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.models.project import Project
@@ -38,7 +39,7 @@ from app.schemas.vault import (
     VaultTreeCreate,
     VaultTreeUpdate,
 )
-from app.services import permissions
+from app.services import names, permissions
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -456,11 +457,11 @@ async def _refuse_taken_tree_name(
     )
     if excluding is not None:
         statement = statement.where(VaultTree.id != excluding)
-    if await session.scalar(statement) is not None:
-        raise ConflictError(
-            f"This project already has a vault tree called {name!r}.",
-            details={"name": name},
-        )
+    await names.ensure_free(
+        session,
+        statement,
+        lambda _: names.taken(f"This project already has a vault tree called {name!r}.", name=name),
+    )
 
 
 def _seal(cipher: VaultCipher, node_id: UUID, data: SecretCreate) -> VaultSecret:
@@ -557,34 +558,13 @@ def _validate_destination(
 
     _refuse_secret_parent(parent)
 
-    if _is_descendant(everything, parent, node.id):
+    if tree.is_inside(everything, parent, node.id):
         raise UnprocessableRequestError(
             f"{parent.name!r} sits inside {node.name!r}, so moving {node.name!r} there "
             "would cut the branch off from its own tree.",
             details={"node_id": str(node.id), "parent_id": str(parent_id)},
         )
     return parent
-
-
-def _is_descendant(everything: dict[UUID, VaultNode], node: VaultNode, ancestor_id: UUID) -> bool:
-    """Walk up from ``node`` looking for ``ancestor_id``.
-
-    ``everything`` holds one whole tree, whose parent links are acyclic, so the
-    walk terminates at a root. The visited set is belt and braces against a
-    cycle that somehow got written anyway: spinning forever inside a request
-    would be a far worse failure than a wrong answer.
-    """
-    seen: set[UUID] = set()
-    current = node
-    while current.parent_id is not None and current.parent_id not in seen:
-        if current.parent_id == ancestor_id:
-            return True
-        seen.add(current.parent_id)
-        found = everything.get(current.parent_id)
-        if found is None:
-            return False
-        current = found
-    return False
 
 
 def _is_child_of(parent_id: UUID | None) -> ColumnElement[bool]:
@@ -618,7 +598,9 @@ async def _siblings(
 def _refuse_duplicate_name(siblings: list[VaultNode], name: str) -> None:
     if any(sibling.name == name for sibling in siblings):
         raise ConflictError(
-            f"There is already something called {name!r} here.", details={"name": name}
+            f"There is already something called {name!r} here.",
+            details={"name": name},
+            reason=Reason.DUPLICATE_NAME,
         )
 
 

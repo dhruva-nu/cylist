@@ -10,7 +10,8 @@ import { PrIcon, prRefLabel } from '../../components/ui'
 import { TickIcon } from './icons'
 import { keepFromCard } from './keepFromCard'
 import type { MarkHandlers } from './useCardFocus'
-import styles from './TaskCard.module.css'
+import styles from './CardMarks.module.css'
+import shared from './TaskCard.module.css'
 
 /** A mark's own events, without the click it takes for itself. */
 function markEvents(handlers: MarkHandlers) {
@@ -20,7 +21,7 @@ function markEvents(handlers: MarkHandlers) {
 
 /** A mark's classes: open, or filling its hairline while it waits to open. */
 function markClass(kind: string | undefined, open: boolean, arming: boolean) {
-  return [styles.mark, kind, open && styles.markOpen, arming && styles.markArming]
+  return [shared.mark, kind, open && shared.markOpen, arming && shared.markArming]
     .filter(Boolean)
     .join(' ')
 }
@@ -58,7 +59,7 @@ export function StageMark({
 
   return (
     <span
-      className={markClass(styles.stageMark, open, arming)}
+      className={markClass(shared.stageMark, open, arming)}
       role={onMove ? 'slider' : undefined}
       tabIndex={onMove ? 0 : undefined}
       aria-label={onMove ? 'Stage' : undefined}
@@ -104,7 +105,7 @@ export function StageMark({
         ))}
       </span>
       <span className={styles.stageName}>{current}</span>
-      <span className={styles.stageCount}>
+      <span className={shared.stageCount}>
         {index + 1}/{labels.length}
       </span>
     </span>
@@ -122,7 +123,7 @@ export function SubtaskMark({ task, open, arming, handlers }: MarkProps & { task
   return (
     <button
       type="button"
-      className={markClass(styles.subtaskMark, open, arming)}
+      className={markClass(shared.subtaskMark, open, arming)}
       aria-label={label}
       aria-expanded={open}
       {...markEvents(handlers)}
@@ -156,7 +157,7 @@ export function PrMark({ refs, open, arming, handlers }: MarkProps & { refs: PrR
   return (
     <button
       type="button"
-      className={`${markClass(styles.prMark, open, arming)} ${styles[`pr_${state}`]}`}
+      className={`${markClass(shared.prMark, open, arming)} ${shared[`pr_${state}`]}`}
       aria-label={label}
       aria-expanded={open}
       title={label}

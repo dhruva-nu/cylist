@@ -23,7 +23,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,6 +32,8 @@ from typing import Any, Protocol
 import httpx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+from app.core.clock import epoch
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ class FcmSender:
         account: ServiceAccount,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = epoch,
     ) -> None:
         self._account = account
         self._clock = clock
