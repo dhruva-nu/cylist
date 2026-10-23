@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.clock import now as clock_now
-from app.core.errors import ConflictError, ForbiddenError, NotFoundError
-from app.models.activity import Channel
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, Reason
+from app.models.activity import Channel, EntityType, Verb
 from app.models.agent_session import (
     AgentPrompt,
     AgentPromptKind,
@@ -73,7 +73,7 @@ async def answer(
     now = clock_now()
     await store.expire_if_due(session, prompt, now)
     if prompt.status is not AgentPromptStatus.OPEN:
-        raise ConflictError(_already_closed(prompt))
+        raise ConflictError(_already_closed(prompt), reason=Reason.PROMPT_CLOSED)
 
     _record_answer(prompt, data)
     prompt.status = AgentPromptStatus.ANSWERED
@@ -89,8 +89,8 @@ async def answer(
     await activity.record(
         session,
         principal,
-        "agent_session.answered",
-        entity_type="task",
+        Verb.AGENT_SESSION_ANSWERED,
+        entity_type=EntityType.TASK,
         entity_id=task.id,
         project_id=task.project_id,
         payload={
@@ -146,12 +146,18 @@ def _record_answer(prompt: AgentPrompt, data: AgentPromptAnswer) -> None:
         chosen = next((option for option in offered if option.key == data.key), None)
         if chosen is None:
             keys = ", ".join(option.key for option in offered) or "none — reply with `text`"
-            raise ConflictError(f"{data.key!r} is not one of this prompt's options ({keys}).")
+            raise ConflictError(
+                f"{data.key!r} is not one of this prompt's options ({keys}).",
+                reason=Reason.PROMPT_BAD_ANSWER,
+            )
         prompt.answer, prompt.answer_key = chosen.label, chosen.key
         return
 
     if prompt.kind is AgentPromptKind.PERMISSION:
-        raise ConflictError("A permission is answered with one of its options, not a reply.")
+        raise ConflictError(
+            "A permission is answered with one of its options, not a reply.",
+            reason=Reason.PROMPT_BAD_ANSWER,
+        )
     prompt.answer, prompt.answer_key = data.text, None
 
 

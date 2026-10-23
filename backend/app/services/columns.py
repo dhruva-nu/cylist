@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import (
     ConflictError,
     NotFoundError,
+    Reason,
     UnprocessableRequestError,
     not_on_this_project,
 )
@@ -200,6 +201,7 @@ async def create(session: AsyncSession, project: Project, data: ColumnCreate) ->
         raise ConflictError(
             f"A board keeps at most {MAX_COLUMNS} columns.",
             details={"column_count": existing, "max_columns": MAX_COLUMNS},
+            reason=Reason.COLUMN_LIMIT,
         )
 
     column = BoardColumn(
@@ -307,6 +309,7 @@ async def delete(session: AsyncSession, column: BoardColumn) -> None:
         raise ConflictError(
             "Move this column's tasks somewhere else before deleting it.",
             details={"task_count": held},
+            reason=Reason.COLUMN_NOT_EMPTY,
         )
 
     existing = await count(session, project_id)
@@ -314,6 +317,7 @@ async def delete(session: AsyncSession, column: BoardColumn) -> None:
         raise ConflictError(
             f"A board keeps at least {MIN_COLUMNS} columns.",
             details={"column_count": existing, "min_columns": MIN_COLUMNS},
+            reason=Reason.COLUMN_MINIMUM,
         )
 
     await session.delete(column)

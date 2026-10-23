@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
-from app.core.errors import ConflictError, ForbiddenError
-from app.models.activity import Channel
+from app.core.errors import ConflictError, ForbiddenError, Reason
+from app.models.activity import Channel, EntityType, Verb
 from app.models.agent_session import (
     AgentPrompt,
     AgentPromptKind,
@@ -95,8 +95,8 @@ async def ask(
     await activity.record(
         session,
         principal,
-        "agent_session.waiting",
-        entity_type="task",
+        Verb.AGENT_SESSION_WAITING,
+        entity_type=EntityType.TASK,
         entity_id=task.id,
         project_id=task.project_id,
         payload={
@@ -134,7 +134,8 @@ async def _asking_session(
         raise ConflictError(
             f"No session of yours is open on {task.reference}, so nobody would see the "
             f"question there. Bind the session first (/work {task.reference}), or ask "
-            "in the terminal."
+            "in the terminal.",
+            reason=Reason.PROMPT_NOT_WAITING,
         )
     return row
 

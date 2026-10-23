@@ -237,6 +237,11 @@ jobs:
       - name: Check formatting
         run: npx prettier --check "src/**/*.{ts,tsx,css}"
 
+      # The generated types are of the committed OpenAPI document, which the
+      # backend job keeps equal to the API; this keeps them equal to it.
+      - name: Generated API types are current
+        run: npm run api:types:check
+
       - name: Type-check
         run: npm run typecheck
 

@@ -22,6 +22,7 @@ import { PrMark, StageMark, SubtaskMark } from './CardMarks'
 import { PrList, StageList, SubtaskList } from './CardSlotLists'
 import { useCardFocus } from './useCardFocus'
 import styles from './TaskCard.module.css'
+import layout from './CardLayout.module.css'
 
 const TYPE_LABELS: Record<Task['type'], string> = {
   feature: 'Feature',
@@ -211,12 +212,12 @@ function TaskCardBody({
       {/* Named on the rail rather than written on the card. The rail is the
           goal already, and one card that says so teaches the column. */}
       {task.goal_name && !agent ? (
-        <span className={styles.goalHit} aria-hidden="true">
-          <span className={styles.goalTab}>{task.goal_name}</span>
+        <span className={layout.goalHit} aria-hidden="true">
+          <span className={layout.goalTab}>{task.goal_name}</span>
         </span>
       ) : null}
 
-      <div className={styles.headLine}>
+      <div className={layout.headLine}>
         <div className={styles.title}>{task.title}</div>
         <PriorityMark priority={task.priority} />
       </div>
@@ -224,7 +225,7 @@ function TaskCardBody({
       {agent ? <AgentLine agent={agent} sessionCount={task.agent_session?.count ?? 0} /> : null}
 
       {progress ? (
-        <div className={styles.progress}>
+        <div className={layout.progress}>
           {staged ? (
             <StageMark
               task={task}
@@ -245,8 +246,8 @@ function TaskCardBody({
         </div>
       ) : null}
 
-      <div className={styles.faceLine}>
-        <span className={styles.reference}>{task.reference}</span>
+      <div className={layout.faceLine}>
+        <span className={layout.reference}>{task.reference}</span>
         <DueMark iso={owed} column={stage} />
         {task.jira_ref ? <TaskRef kind="jira" value={task.jira_ref} compact /> : null}
         {task.pr_refs.length ? (
@@ -257,7 +258,7 @@ function TaskCardBody({
             handlers={mark('prs')}
           />
         ) : null}
-        <span className={styles.faceGap} />
+        <span className={layout.faceGap} />
         {onSetAssignee ? (
           <AssigneePicker task={task} members={members} onSetAssignee={onSetAssignee} />
         ) : (
@@ -271,7 +272,7 @@ function TaskCardBody({
           shares the one cell, in the order of the marks, so switching from
           one to another slides the way the pointer moved. */}
       <div className={styles.more} {...slot}>
-        <div className={styles.slotStack}>
+        <div className={layout.slotStack}>
           <SlotPane className={styles.factsPane}>
             <CardFacts task={task} />
           </SlotPane>
@@ -299,8 +300,8 @@ function TaskCardBody({
 /** One of the lists that take turns in the card's slot. */
 function SlotPane({ className, children }: { className: string | undefined; children: ReactNode }) {
   return (
-    <div className={`${styles.slotPane} ${className}`}>
-      <div className={styles.paneInner}>{children}</div>
+    <div className={`${layout.slotPane} ${className}`}>
+      <div className={layout.paneInner}>{children}</div>
     </div>
   )
 }

@@ -18,7 +18,7 @@ import { useState } from 'react'
 import { api, type FileItem, type Sensitivity } from '../../api/client'
 import { affects, invalidates, queryKeys, useInvalidate, useProject } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import { Button, ErrorBanner, ErrorNotice, LiveRegion, useAnnouncer } from '../../components/ui'
+import { Button, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { LinkDialog, NewFolderDialog, RenameDialog, UploadDialog } from './FileDialogs'
 import { FolderContents } from './FolderContents'
@@ -50,7 +50,7 @@ export function ProjectFiles() {
   // The item being renamed, rather than a fourth `dialog` value: the dialog is
   // about one row, and it is the row it needs, not the fact that it is open.
   const [renaming, setRenaming] = useState<FileItem | null>(null)
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   const project = useProject(projectKey)
   const tree = useQuery({
@@ -168,8 +168,6 @@ export function ProjectFiles() {
       >
         Files upload to the server. Links to SharePoint or Google Drive sit in the same folders.
       </PageHead>
-
-      <LiveRegion message={message} />
       <ErrorNotice error={upload.error ?? deleteItem.error ?? deleteFolder.error} />
       <ErrorNotice error={contents.error} />
 

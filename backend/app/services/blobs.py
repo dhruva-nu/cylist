@@ -61,17 +61,6 @@ CLAIM_ATTEMPTS = 3
 Once is the race; a third time would mean deletes of the same bytes arriving
 faster than this upload can insert, which is not a race but a bug."""
 
-SWEEP_IDLE_FOR = timedelta(hours=1)
-"""How long bytes on disk must have gone untouched before a sweep looks at
-them. A margin, not the safety — the digest lock is that — but it keeps a
-sweep away from an upload still arriving into its temporary file, which holds
-no lock until it has finished."""
-
-SWEEP_EVERY = timedelta(hours=1)
-"""How often the application sweeps. Deleted content stays on disk at most
-about this plus :data:`SWEEP_IDLE_FOR`; ``python -m app.cli blobs gc`` is the
-way to reclaim it sooner."""
-
 BLOB_LOCK_CLASS = 0x6379_6C69
 """The first key of every digest lock: ``cyli``. Advisory locks taken with two
 32-bit keys never collide with those taken with one 64-bit key, like
@@ -272,9 +261,7 @@ class Swept:
     """Uploads abandoned between staging and publishing."""
 
 
-async def sweep(
-    database: Database, store: BlobStore, *, idle_for: timedelta = SWEEP_IDLE_FOR
-) -> Swept:
+async def sweep(database: Database, store: BlobStore, *, idle_for: timedelta) -> Swept:
     """Remove bytes nothing refers to, and uploads nobody finished.
 
     The only place blob bytes are ever deleted. Each digest with no row is
@@ -315,7 +302,9 @@ async def sweep(
     return Swept(orphans=orphans, incoming=incoming)
 
 
-async def sweep_if_first(database: Database, store: BlobStore) -> Swept | None:
+async def sweep_if_first(
+    database: Database, store: BlobStore, *, idle_for: timedelta
+) -> Swept | None:
     """One periodic :func:`sweep`, unless another process is already doing one.
 
     Every process runs the loop; the pass that takes :data:`SWEEPER_LEASE`
@@ -326,9 +315,7 @@ async def sweep_if_first(database: Database, store: BlobStore) -> Swept | None:
     async with database.session() as lease:
         if not await lease.scalar(select(func.pg_try_advisory_xact_lock(SWEEPER_LEASE))):
             return None
-        # Named rather than left to the default, which was fixed when this
-        # module loaded.
-        return await sweep(database, store, idle_for=SWEEP_IDLE_FOR)
+        return await sweep(database, store, idle_for=idle_for)
 
 
 async def ids_on_project(session: AsyncSession, project_id: UUID) -> set[UUID]:

@@ -39,9 +39,9 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope, parse_scopes
 from app.auth.tokens import hash_token, looks_like_token
 from app.config import SESSION_COOKIE as SESSION_COOKIE  # re-exported; it lived here
-from app.config import Settings
+from app.config import settings_of
 from app.core.clock import now
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, Reason, UnauthorizedError
 from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import ApiToken, TokenKind
@@ -66,7 +66,7 @@ def _presented_credential(connection: HTTPConnection) -> tuple[str, Channel] | N
 
     # Only this deployment's own cookie: a dev slot shares its host with
     # staging and the other slots, and the browser sends it all of theirs.
-    settings: Settings = connection.app.state.settings
+    settings = settings_of(connection)
     cookie = connection.cookies.get(settings.session_cookie_name)
     if cookie:
         return cookie, Channel.WEB
@@ -188,6 +188,7 @@ def require(*scopes: Scope) -> Callable[[Principal], Awaitable[Principal]]:
             raise ForbiddenError(
                 "This token is not allowed to perform that action.",
                 details={"missing_scopes": sorted(scope.value for scope in missing)},
+                reason=Reason.MISSING_SCOPES,
             )
         return principal
 
