@@ -27,6 +27,9 @@ class Card:
     moved_column: bool
     """A move that changed column — not a reorder, not a change of section."""
     from_column_id: UUID | None
+    to_column_id: UUID | None
+    """The column the card is in after the change: for a move, the one it arrived
+    in as the change recorded it; for anything else, where the card is now."""
     assigned_to_agent: bool
     """Whether the card's owner, after the change, is the agent."""
     mentioned: frozenset[UUID] = frozenset()
@@ -50,7 +53,7 @@ async def event_body(session: AsyncSession, entry: Activity, card: Card) -> dict
         "id": str(entry.id),
         "event": entry.verb,
         "summary": describe(entry),
-        "occurred_at": now().isoformat(),
+        "occurred_at": (entry.occurred_at or now()).isoformat(),
         "project": (
             {"id": str(project.id), "key": project.key, "name": project.name}
             if project is not None
@@ -70,7 +73,7 @@ async def event_body(session: AsyncSession, entry: Activity, card: Card) -> dict
         body["task"] = {"reference": entry.payload.get("reference")}
     if card.moved_column and task is not None:
         body["from_column"] = await _column_body(session, card.from_column_id)
-        body["to_column"] = await _column_body(session, task.column_id)
+        body["to_column"] = await _column_body(session, card.to_column_id)
     return body
 
 

@@ -1,10 +1,11 @@
 """Hooks: which changes on a board are worth telling the outside world, and to whom.
 
-Two halves. :func:`queue_for` is called by :func:`app.services.activity.record`
-for every change it writes, and turns a change that some hook on the project
-matches into one ``hook_delivery`` row per hook — in the same transaction, so a
-change that rolls back queues nothing. Sending is
-:mod:`app.services.hook_delivery`'s business.
+Two halves. A write only *marks* its change (:func:`on_recorded`, subscribed to
+the activity trail): the mark is in the transaction that made the change, so one
+that rolls back is never announced. The courier then takes the marked changes in
+a transaction of its own (:func:`match_pending`) and :func:`queue_for` turns each
+that some hook on the project matches into one ``hook_delivery`` row per hook.
+Sending is :mod:`app.services.hook_delivery`'s business.
 
 The rest is the rules themselves: a project admin's to make, change and
 delete, each with a URL and a signing secret only it and its receiver know.
@@ -67,12 +68,13 @@ from app.services.hooks.crud import (
     secret_of,
     update,
 )
-from app.services.hooks.matching import matches, on_recorded, queue_for
+from app.services.hooks.matching import MATCH_BATCH, match_pending, matches, on_recorded, queue_for
 from app.services.hooks.payload import fired_body, sample_body
 
 __all__ = [
     "CATEGORIES",
     "EVENTS",
+    "MATCH_BATCH",
     "SECRET_MAX_LENGTH",
     "SECRET_MIN_LENGTH",
     "SECRET_PREFIX",
@@ -90,6 +92,7 @@ __all__ = [
     "get",
     "labels_for",
     "list_hooks",
+    "match_pending",
     "matches",
     "on_recorded",
     "queue_for",

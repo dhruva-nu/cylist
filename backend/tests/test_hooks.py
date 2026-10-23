@@ -34,7 +34,7 @@ from app.db import Database
 from app.models.activity import Activity, Channel
 from app.models.hook import Hook, HookDelivery
 from app.models.task import Task
-from app.services import activity, hook_delivery
+from app.services import activity, hook_delivery, hooks
 from tests.conftest import INVITEE_PASSWORD, VAULT_KEYS, open_account, put_members
 from tests.connections import assert_no_connection_held
 
@@ -133,6 +133,9 @@ def _database(client: AsyncClient) -> Database:
 
 
 async def _queued(client: AsyncClient, hook_id: str | None = None) -> list[HookDelivery]:
+    # Matching is the courier's, after the commit: do its part of the pass.
+    while await hooks.match_pending(_database(client)) >= hooks.MATCH_BATCH:
+        pass
     async with _database(client).session() as session:
         query = select(HookDelivery).order_by(HookDelivery.created_at, HookDelivery.id)
         if hook_id is not None:
