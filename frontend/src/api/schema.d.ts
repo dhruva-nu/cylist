@@ -6127,6 +6127,18 @@ export interface components {
             status_4xx: number;
             /** Status 5Xx */
             status_5xx: number;
+            /** Unhandled 500S */
+            unhandled_500s: number;
+            /** Deliveries Failed */
+            deliveries_failed: number;
+            /** Auth Refusals */
+            auth_refusals: {
+                [key: string]: number;
+            };
+            /** Rate Limit Hits */
+            rate_limit_hits: {
+                [key: string]: number;
+            };
         };
         /** RoleCreate */
         RoleCreate: {
