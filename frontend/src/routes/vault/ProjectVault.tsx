@@ -11,7 +11,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type VaultNode } from '../../api/client'
-import { queryKeys, useInvalidate } from '../../api/queries'
+import { affects, invalidates, queryKeys, useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
 import { Button, EmptyState, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -60,7 +60,7 @@ export function ProjectVault() {
   }
 
   const deleteNode = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.vault) },
     // The node rather than its id, so the announcement can name what has gone.
     mutationFn: (node: VaultNode) => api.deleteVaultNode(node.id),
     onSuccess: async (_deleted, node) => {

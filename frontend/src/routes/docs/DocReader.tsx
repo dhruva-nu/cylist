@@ -9,6 +9,7 @@ import { Avatar, Button, ErrorNotice } from '../../components/ui'
 import { IconButton } from './IconButton'
 import styles from './ProjectDocs.module.css'
 import { handlesOwnErrors } from '../../api/mutationErrors'
+import { invalidates, affects } from '../../api/queries'
 
 /**
  * Scroll to and mark the part of a doc an answer pointed into.
@@ -63,7 +64,7 @@ export function DocReader({
 
   /** Every change made from here goes through this, so they share one error line. */
   const change = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.docs) },
     mutationFn: (run: () => Promise<void>) => run(),
   })
 

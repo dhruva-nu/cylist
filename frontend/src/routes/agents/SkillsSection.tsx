@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { api, type Skill } from '../../api/client'
-import { queryKeys, useInvalidate } from '../../api/queries'
+import { affects, invalidates, queryKeys, useInvalidate } from '../../api/queries'
 import { formatSize, formatStamp } from '../../components/format'
 import { Button, EmptyState, ErrorNotice, cardStyles } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -33,7 +33,7 @@ export function Skills({
   }
 
   const upload = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.skills) },
     // One at a time rather than in parallel: two uploads of the same name
     // would race to replace each other, and the survivor would be whichever
     // request the server happened to finish second.
@@ -58,7 +58,7 @@ export function Skills({
   })
 
   const uploadFolder = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.skills) },
     // One skill, not one per file: a folder is a skill precisely because its
     // SKILL.md points at the other files in it.
     mutationFn: async (files: File[]) => {
@@ -85,7 +85,7 @@ export function Skills({
   })
 
   const deleteSkill = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.skills) },
     mutationFn: ({ id }: { id: string; name: string }) => api.deleteSkill(id),
     onSuccess: async (_gone, { name }) => {
       await refresh()
