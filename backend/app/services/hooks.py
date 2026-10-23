@@ -73,7 +73,7 @@ from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
-from app.services import projects
+from app.services import names, projects
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -829,19 +829,15 @@ async def _own_member(session: AsyncSession, project: Project, person_id: UUID) 
 
 
 async def _refuse_taken_name(session: AsyncSession, project: Project, name: str) -> None:
-    taken = await session.scalar(
-        select(Hook.id).where(Hook.project_id == project.id, Hook.name == name)
+    await names.ensure_free(
+        session,
+        select(Hook.id).where(Hook.project_id == project.id, Hook.name == name),
+        lambda _: _taken_name(project, name),
     )
-    if taken is not None:
-        raise _taken_name(project, name)
 
 
 def _taken_name(project: Project, name: str) -> ConflictError:
-    return ConflictError(
-        f"{project.key} already has a hook called {name!r}.",
-        details={"name": name},
-        reason=Reason.DUPLICATE_NAME,
-    )
+    return names.taken(f"{project.key} already has a hook called {name!r}.", name=name)
 
 
 def _seal(cipher: VaultCipher, hook: Hook, secret: str | None) -> str:

@@ -530,3 +530,18 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
         lapsed = True
     if lapsed:
         await session.flush()
+
+
+async def ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
+    """Refuse an attribution to somebody who is not in the directory.
+
+    Checked here rather than left to the foreign key, so the caller hears which
+    id was wrong instead of getting an integrity error. ``None`` is always
+    fine: nobody has to be named as having added something.
+    """
+    if person_id is None:
+        return
+    if await session.get(Person, person_id) is None:
+        raise UnprocessableRequestError(
+            "That person is not in the directory.", details={"person_id": str(person_id)}
+        )

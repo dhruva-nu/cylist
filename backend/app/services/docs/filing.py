@@ -23,6 +23,7 @@ from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableR
 from app.models.doc import SECTION_ORDER, Doc, DocSection, DocTopic
 from app.models.project import Project
 from app.schemas.docs import DocCreate, DocTopicCreate, DocUpdate
+from app.services import names
 
 
 async def topics_for(session: AsyncSession, project_id: UUID) -> list[DocTopic]:
@@ -121,13 +122,21 @@ async def _refuse_taken_name(
     *,
     except_id: UUID | None = None,
 ) -> None:
-    clash = await find_topic(session, project_id, section, name)
-    if clash is not None and clash.id != except_id:
-        raise ConflictError(
-            f"{section.label} already has a topic called {clash.name!r}.",
-            details={"topic_id": str(clash.id)},
-            reason=Reason.DUPLICATE_NAME,
-        )
+    clash = select(DocTopic).where(
+        DocTopic.project_id == project_id,
+        DocTopic.section == section,
+        func.lower(DocTopic.name) == name.strip().casefold(),
+    )
+    if except_id is not None:
+        clash = clash.where(DocTopic.id != except_id)
+    await names.ensure_free(
+        session,
+        clash,
+        lambda existing: names.taken(
+            f"{section.label} already has a topic called {existing.name!r}.",
+            topic_id=str(existing.id),
+        ),
+    )
 
 
 async def create_topic(session: AsyncSession, project: Project, data: DocTopicCreate) -> DocTopic:

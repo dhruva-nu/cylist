@@ -45,7 +45,7 @@ from app.models.goal import Goal, GoalStatus
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.schemas.goals import GoalCreate, GoalProgress, GoalUpdate
-from app.services import columns, projects, references
+from app.services import columns, names, projects, references
 from app.services.paging import PageRequest, SortKey, Window, keyset
 
 _ANY_DATE = date(1970, 1, 1)
@@ -132,13 +132,15 @@ async def find_by_name(session: AsyncSession, project_id: UUID, name: str) -> Go
     For callers holding a name off a screen rather than a reference — the CLI
     and the MCP server both take one, the same way they take a column's name.
     """
-    found: Goal | None = await session.scalar(
-        select(Goal).where(
-            Goal.project_id == project_id,
-            func.lower(Goal.name) == name.strip().casefold(),
-        )
-    )
+    found: Goal | None = await session.scalar(_named(project_id, name))
     return found
+
+
+def _named(project_id: UUID, name: str) -> Select[tuple[Goal]]:
+    return select(Goal).where(
+        Goal.project_id == project_id,
+        func.lower(Goal.name) == name.strip().casefold(),
+    )
 
 
 async def require_goal(
@@ -481,24 +483,22 @@ async def _refuse_duplicate(session: AsyncSession, project_id: UUID, name: str) 
         was capitalised. A card wears its goal's name, and two alike make the
         card ambiguous to read.
     """
-    existing = await find_by_name(session, project_id, name)
-    if existing is not None:
-        raise ConflictError(
+    await names.ensure_free(
+        session,
+        _named(project_id, name),
+        lambda existing: names.taken(
             f"This project already has a goal called {existing.name!r}.",
-            details={"name": existing.name, "reference": existing.reference},
-            reason=Reason.DUPLICATE_NAME,
-        )
+            name=existing.name,
+            reference=existing.reference,
+        ),
+    )
 
 
 def _duplicate(name: str) -> ConflictError:
     """What :func:`_refuse_duplicate` says, for the request that passed it and
     then lost the race to the index — which knows the name but not the goal
     that took it."""
-    return ConflictError(
-        f"This project already has a goal called {name!r}.",
-        details={"name": name},
-        reason=Reason.DUPLICATE_NAME,
-    )
+    return names.taken(f"This project already has a goal called {name!r}.", name=name)
 
 
 async def _next_number(session: AsyncSession, project: Project) -> int:

@@ -38,7 +38,7 @@ from app.schemas.vault import (
     VaultTreeCreate,
     VaultTreeUpdate,
 )
-from app.services import permissions
+from app.services import names, permissions
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -456,12 +456,11 @@ async def _refuse_taken_tree_name(
     )
     if excluding is not None:
         statement = statement.where(VaultTree.id != excluding)
-    if await session.scalar(statement) is not None:
-        raise ConflictError(
-            f"This project already has a vault tree called {name!r}.",
-            details={"name": name},
-            reason=Reason.DUPLICATE_NAME,
-        )
+    await names.ensure_free(
+        session,
+        statement,
+        lambda _: names.taken(f"This project already has a vault tree called {name!r}.", name=name),
+    )
 
 
 def _seal(cipher: VaultCipher, node_id: UUID, data: SecretCreate) -> VaultSecret:

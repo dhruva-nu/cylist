@@ -24,17 +24,16 @@ from typing import NamedTuple
 from uuid import UUID
 
 from sqlalchemy import Select, delete, func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import multipart
 from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.sensitivity import Sensitivity
+from app.db import flush_or_refuse
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
-from app.models.person import Person
 from app.models.project import Project
 from app.schemas.files import FolderCreate, FolderUpdate, ItemUpdate, LinkCreate, clean_name
-from app.services import blobs, permissions
+from app.services import blobs, names, people, permissions
 from app.services.paging import PageRequest, Window, keyset
 from app.storage import BlobStore
 
@@ -364,7 +363,7 @@ async def upload(
             raise multipart.invalid_field("file", "send one file")
         name = filename_of(part.filename)
         await _ensure_name_is_free(session, folder, name)
-        await ensure_person_exists(session, _added_by(before))
+        await people.ensure_person_exists(session, _added_by(before))
         blob = await blobs.store_stream(session, store, part.chunks(), max_bytes=max_bytes)
         stored.append((name, blob, blobs.declared_mime(part.content_type)))
 
@@ -373,7 +372,7 @@ async def upload(
         raise multipart.invalid_field("file", "Field required", kind="missing")
     name, blob, mime = stored[0]
     added_by = _added_by(fields)
-    await ensure_person_exists(session, added_by)
+    await people.ensure_person_exists(session, added_by)
 
     return await _add_item(
         session,
@@ -439,7 +438,7 @@ async def store_generated(
         PayloadTooLargeError: if the content exceeds ``max_bytes``.
     """
     await _ensure_name_is_free(session, folder, name)
-    await ensure_person_exists(session, added_by)
+    await people.ensure_person_exists(session, added_by)
     blob = await blobs.store_bytes(session, store, data, max_bytes=max_bytes)
     return await _add_item(
         session,
@@ -477,7 +476,7 @@ async def add_link(session: AsyncSession, folder: Folder, data: LinkCreate) -> F
             _LINK_CANNOT_BE_UPLOAD, details={"source": data.source.value}
         )
     await _ensure_name_is_free(session, folder, data.name)
-    await ensure_person_exists(session, data.added_by)
+    await people.ensure_person_exists(session, data.added_by)
 
     return await _add_item(
         session,
@@ -521,7 +520,7 @@ async def update_item(session: AsyncSession, item: FileItem, data: ItemUpdate) -
     if fields.get("source") is ItemSource.UPLOAD:
         raise UnprocessableRequestError(_LINK_CANNOT_BE_UPLOAD)
     if "added_by" in fields:
-        await ensure_person_exists(session, fields["added_by"])
+        await people.ensure_person_exists(session, fields["added_by"])
 
     if fields.get("sensitivity") is not None:
         item.sensitivity = fields["sensitivity"]
@@ -627,38 +626,16 @@ async def _flush_refusing_duplicate(session: AsyncSession, name: str) -> None:
     the row after it: a failed flush leaves the session unusable, and every
     attribute read on it would try to reload the row.
     """
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise _duplicate_name(name) from exc
+    await flush_or_refuse(session, _duplicate_name(name))
 
 
 def _duplicate_name(name: str) -> ConflictError:
-    return ConflictError(
-        f"Something called {name!r} is already here.",
-        details={"name": name},
-        reason=Reason.DUPLICATE_NAME,
-    )
+    return names.taken(f"Something called {name!r} is already here.", name=name)
 
 
 async def _ensure_name_is_free(session: AsyncSession, folder: Folder, name: str) -> None:
     if not await name_is_free(session, folder, name):
         raise _duplicate_name(name)
-
-
-async def ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
-    """Refuse an attribution to somebody who is not in the directory.
-
-    Checked here rather than left to the foreign key, so the caller hears which
-    id was wrong instead of getting an integrity error. ``None`` is always
-    fine: nobody has to be named as having added something.
-    """
-    if person_id is None:
-        return
-    if await session.get(Person, person_id) is None:
-        raise UnprocessableRequestError(
-            "That person is not in the directory.", details={"person_id": str(person_id)}
-        )
 
 
 def _ensure_not_the_root(folder: Folder, attempted: str) -> None:
