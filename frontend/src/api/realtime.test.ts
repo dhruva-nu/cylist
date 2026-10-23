@@ -54,6 +54,8 @@ describe('parseEvent', () => {
     expect(parseEvent('{"type":"board.changed","at":"2026-09-10T12:00:00Z"}')).toEqual({
       type: 'board.changed',
       at: '2026-09-10T12:00:00Z',
+      // A server that names nothing is read as "anything changed".
+      changed: null,
     })
     expect(parseEvent('{"type":"error","code":"unauthorized","message":"no"}')).toEqual({
       type: 'error',
