@@ -11,7 +11,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type VaultNode } from '../../api/client'
-import { useInvalidate } from '../../api/queries'
+import { queryKeys, useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
 import { Button, EmptyState, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -38,12 +38,12 @@ export function ProjectVault() {
   const [moving, setMoving] = useState<VaultNode | null>(null)
 
   const trees = useQuery({
-    queryKey: ['vault-trees', projectKey],
+    queryKey: queryKeys.vaultTrees(projectKey),
     queryFn: ({ signal }) => api.listVaultTrees(projectKey, signal),
   })
 
   const treeDetails = useQuery({
-    queryKey: ['vault-tree-details', projectKey, (trees.data ?? []).map((t) => t.id).join(',')],
+    queryKey: queryKeys.vaultTreeDetails(projectKey, (trees.data ?? []).map((t) => t.id).join(',')),
     queryFn: ({ signal }) =>
       Promise.all((trees.data ?? []).map((tree) => api.getVaultTree(tree.id, signal))),
     enabled: trees.data !== undefined,
@@ -56,7 +56,7 @@ export function ProjectVault() {
   const openTrees = chosenOpenTrees ?? (firstTreeId ? [firstTreeId] : [])
 
   async function refresh() {
-    await invalidate(['vault-trees', projectKey], ['vault-tree-details', projectKey])
+    await invalidate(queryKeys.vaultTrees(projectKey), queryKeys.vaultTreeDetailsOf(projectKey))
   }
 
   const deleteNode = useMutation({

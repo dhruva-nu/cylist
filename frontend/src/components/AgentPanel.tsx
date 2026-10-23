@@ -68,8 +68,8 @@ export function AgentPanel({
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.task(taskId) }),
-        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
-        queryClient.invalidateQueries({ queryKey: ['board'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.allBoardCards }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.allBoards }),
       ])
     },
   })
@@ -205,7 +205,7 @@ const FEED_POLL_MS = 10_000
  */
 function AgentFeed({ taskRef, taskId, live }: { taskRef: string; taskId: string; live: boolean }) {
   const feed = useQuery({
-    queryKey: ['agent-feed', taskId],
+    queryKey: queryKeys.agentFeed(taskId),
     queryFn: ({ signal }) => api.getAgentFeed(taskRef, undefined, signal),
     // Opened from Today or a goal's page there is no board socket to ring,
     // so while an agent is still on the card the feed asks for itself — at

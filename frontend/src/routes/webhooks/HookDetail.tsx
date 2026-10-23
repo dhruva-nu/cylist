@@ -7,6 +7,7 @@ import { Button, ErrorNotice, cardStyles } from '../../components/ui'
 import styles from './ProjectHooks.module.css'
 import { STATE_WORDS, attemptTime, deliveryOutcome, describeRule, isDangling } from './projectHooks'
 import { handlesOwnErrors } from '../../api/mutationErrors'
+import { queryKeys } from '../../api/queries'
 
 /** How long after a redelivery is queued the log looks again: the courier sends it within moments. */
 const REDELIVERY_SETTLES_MS = 2_000
@@ -31,14 +32,14 @@ export function HookDetail({
   const [message, setMessage] = useState('')
 
   const deliveries = useQuery({
-    queryKey: ['hook-deliveries', hook.id],
+    queryKey: queryKeys.hookDeliveries(hook.id),
     queryFn: ({ signal }) => api.listHookDeliveries(projectKey, hook.id, signal),
     // Retries happen in the background; a log left open should show them land.
     refetchInterval: 15_000,
   })
 
   async function refreshLog() {
-    await queryClient.invalidateQueries({ queryKey: ['hook-deliveries', hook.id] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.hookDeliveries(hook.id) })
   }
 
   // The second look after a redelivery, cancelled if the pane goes first —

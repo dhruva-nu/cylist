@@ -134,9 +134,9 @@ export function useBoardMutations(
     const card = queryClient.getQueryData<BoardCards>(tasksKey)?.tasks.find((t) => t.id === taskId)
     if (goalChanged || card?.goal_id) keys.push(queryKeys.goals(projectKey), queryKeys.allGoals)
     const planned = queryClient
-      .getQueriesData<TodayPlan>({ queryKey: ['today', projectKey] })
+      .getQueriesData<TodayPlan>({ queryKey: queryKeys.todayPlans(projectKey) })
       .some(([, plan]) => plan?.picks.some((pick) => pick.task.id === taskId))
-    if (planned) keys.push(['today', projectKey], ['day-report', projectKey])
+    if (planned) keys.push(queryKeys.todayPlans(projectKey), queryKeys.dayReports(projectKey))
     await invalidate(...keys)
   }
 

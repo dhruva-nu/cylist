@@ -12,19 +12,15 @@
  * or a page on the list.
  */
 
-import { useQuery, type QueryKey } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 
 import { api, type FiledItem } from '../api/client'
-
-/** The one key, so uploading a file can invalidate every reader of it. */
-export function projectFilesKey(projectKey: string): QueryKey {
-  return ['project-items', projectKey]
-}
+import { queryKeys } from '../api/queries'
 
 /** Every file and link in the project; empty until they arrive. */
 export function useProjectFiles(projectKey: string): readonly FiledItem[] {
   const files = useQuery({
-    queryKey: projectFilesKey(projectKey),
+    queryKey: queryKeys.projectItems(projectKey),
     queryFn: ({ signal }) => api.listProjectItems(projectKey, signal),
   })
   return files.data ?? []

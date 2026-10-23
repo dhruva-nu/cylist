@@ -16,8 +16,7 @@ import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type FileItem, type Sensitivity } from '../../api/client'
-import { useInvalidate, useProject } from '../../api/queries'
-import { projectFilesKey } from '../../components/projectFiles'
+import { queryKeys, useInvalidate, useProject } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
 import { Button, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -55,7 +54,7 @@ export function ProjectFiles() {
 
   const project = useProject(projectKey)
   const tree = useQuery({
-    queryKey: ['folder-tree', projectKey],
+    queryKey: queryKeys.folderTree(projectKey),
     queryFn: ({ signal }) => api.getTree(projectKey, signal),
   })
 
@@ -65,7 +64,7 @@ export function ProjectFiles() {
   // The subfolders whole and the files a page at a time: a folder of
   // thousands of exports should open on its first hundred, not hang.
   const pages = useInfiniteQuery({
-    queryKey: ['folder-children', selectedId],
+    queryKey: queryKeys.folderChildren(selectedId),
     queryFn: ({ pageParam, signal }) =>
       api.getFolderChildren(selectedId as string, pageParam, signal),
     initialPageParam: null as string | null,
@@ -84,11 +83,11 @@ export function ProjectFiles() {
 
   async function refresh() {
     await invalidate(
-      ['folder-tree', projectKey],
-      ['folder-children'],
+      queryKeys.folderTree(projectKey),
+      queryKeys.allFolderChildren,
       // What the `>` tag in a description or a comment is completed from: a
       // file uploaded here is taggable in the next thing anybody writes.
-      projectFilesKey(projectKey),
+      queryKeys.projectItems(projectKey),
     )
   }
 

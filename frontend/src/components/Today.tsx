@@ -36,7 +36,7 @@ import {
   type Todo,
   type TodayPlan,
 } from '../api/client'
-import { fetchBoardCards, useIdentity, usePeople, type BoardCards } from '../api/queries'
+import { queryKeys, useBoard, useIdentity, usePeople, useTasks } from '../api/queries'
 import { readStored, writeStored } from '../storage'
 import {
   dayLong,
@@ -64,10 +64,6 @@ import { handlesOwnErrors } from '../api/mutationErrors'
 /** Whether the open-cards pane was last left folded, per browser. */
 const CARDS_FOLDED_KEY = 'cylist.today.cardsFolded'
 
-function planKey(projectKey: string, day: string) {
-  return ['today', projectKey, day]
-}
-
 /** The project the page is on, or null off one. */
 function useProjectKey(): string | null {
   const matchRoute = useMatchRoute()
@@ -77,7 +73,7 @@ function useProjectKey(): string | null {
 
 function usePlan(projectKey: string | null, day: string) {
   return useQuery({
-    queryKey: planKey(projectKey ?? '', day),
+    queryKey: queryKeys.todayPlan(projectKey ?? '', day),
     queryFn: ({ signal }) => api.getToday(projectKey ?? '', day, localZone(), signal),
     enabled: projectKey !== null,
     // Off by one person's session — the bootstrap login has no plan, and
@@ -93,24 +89,10 @@ function usePlan(projectKey: string | null, day: string) {
 /** The board and its cards, which the left pane and the count are read from. */
 function useBoardCards(projectKey: string | null) {
   const enabled = projectKey !== null
-  const queryClient = useQueryClient()
-  // The board's own key and reader, so a column read further down on the
-  // board is read as far here, and the two never hold different shapes.
-  const tasks = useQuery({
-    queryKey: ['tasks', projectKey],
-    queryFn: ({ signal }) =>
-      fetchBoardCards(
-        projectKey ?? '',
-        queryClient.getQueryData<BoardCards>(['tasks', projectKey]),
-        signal,
-      ),
-    enabled,
-  })
-  const board = useQuery({
-    queryKey: ['board', projectKey],
-    queryFn: ({ signal }) => api.listColumns(projectKey ?? '', signal),
-    enabled,
-  })
+  // The board's own readers, so a column read further down on the board is
+  // read as far here, and the two never hold different shapes.
+  const tasks = useTasks(projectKey ?? '', { enabled })
+  const board = useBoard(projectKey ?? '', { enabled })
   return { tasks: tasks.data?.tasks, columns: board.data?.columns, readAt: tasks.dataUpdatedAt }
 }
 
@@ -124,13 +106,13 @@ function useRefreshPlans(projectKey: string) {
   const queryClient = useQueryClient()
   return () =>
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['today', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['day-report', projectKey] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.todayPlans(projectKey) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.dayReports(projectKey) }),
       // A to-do from the card ticks the card too, so the board and any open
       // card are read again.
-      queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] }),
-      queryClient.invalidateQueries({ queryKey: ['task'] }),
-      queryClient.invalidateQueries({ queryKey: ['task-history'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks(projectKey) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.allTasks }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.allTaskHistory }),
     ])
 }
 
@@ -254,7 +236,7 @@ function TodayDialog({
   // here or anywhere else — so is the plan, which the server keeps in step
   // with them.
   useEffect(() => {
-    if (readAt) void queryClient.invalidateQueries({ queryKey: ['today', projectKey] })
+    if (readAt) void queryClient.invalidateQueries({ queryKey: queryKeys.todayPlans(projectKey) })
   }, [readAt, projectKey, queryClient])
   const [cardsFolded, setCardsFolded] = useState(() => readStored(CARDS_FOLDED_KEY) === 'true')
   /** The pick just made from the left pane, so the plan can bring it into view. */
@@ -757,8 +739,9 @@ function TodoRow({
     // The box answers the click at once rather than after a round trip: a tick
     // that lags reads as a click that missed.
     onMutate: (done) => {
-      queryClient.setQueriesData<TodayPlan>({ queryKey: ['today', projectKey] }, (plan) =>
-        plan ? withTodoState(plan, todo.id, done ? 'done' : 'open') : plan,
+      queryClient.setQueriesData<TodayPlan>(
+        { queryKey: queryKeys.todayPlans(projectKey) },
+        (plan) => (plan ? withTodoState(plan, todo.id, done ? 'done' : 'open') : plan),
       )
     },
     onSettled: refresh,
