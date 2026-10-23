@@ -26,6 +26,7 @@ matching escape hatch for the case where that has already happened.
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -43,6 +44,8 @@ from app.models.role import ADMIN_ROLE_NAME, ProjectRole
 from app.services import people
 from app.services.commands.roles import RoleCreate, RoleUpdate
 from app.services.paging import PageRequest, Window, keyset
+
+logger = logging.getLogger(__name__)
 
 _ORDER = (ProjectRole.is_admin.desc(), ProjectRole.name)
 """Admin first, then alphabetical. The one role with authority attached is the
@@ -307,6 +310,10 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
             f"{'holds' if len(wearing) == 1 else 'hold'} the {role.name} role. "
             "Move them off it first.",
             details={"holder_person_ids": [str(person.id) for person in wearing]},
+            log_message=(
+                f"{len(wearing)} still hold role {role.id}: "
+                f"{', '.join(str(person.id) for person in wearing)}."
+            ),
             reason=Reason.ROLE_IN_USE,
         )
 
@@ -349,6 +356,7 @@ async def set_member_role(
         raise UnprocessableRequestError(
             f"{person.name} is not on {project.key}. Add them under People first.",
             details={"non_member_person_ids": [str(person.id)]},
+            log_message=f"Person {person.id} is not on {project.key}.",
         )
 
     if membership.role_id != (role.id if role else None):
@@ -387,6 +395,10 @@ async def ensure_an_admin_remains(
         "and a project cannot be left with nobody able to manage it. Give the "
         f"{ADMIN_ROLE_NAME} role to somebody else first.",
         details={"admin_person_ids": [str(person_id) for person_id in sorted(holder_ids)]},
+        log_message=(
+            f"{', '.join(str(person_id) for person_id in sorted(holder_ids))} would be the "
+            f"last {ADMIN_ROLE_NAME.lower()} on {project.key}."
+        ),
         reason=Reason.LAST_ADMIN,
     )
 
@@ -438,6 +450,18 @@ async def fill_admin_vacancy(session: AsyncSession, project: Project) -> Person 
     person: Person = row[1]
     membership.role_id = role.id
     await session.flush()
+    # Nobody asked for this, so the log is where it is first seen; the board's
+    # activity feed gets the same event from the router.
+    logger.info(
+        "Admin vacancy filled by promotion",
+        extra={
+            "context": {
+                "project_id": str(project.id),
+                "person_id": str(person.id),
+                "role_id": str(role.id),
+            }
+        },
+    )
     return person
 
 

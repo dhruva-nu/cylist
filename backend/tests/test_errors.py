@@ -79,6 +79,7 @@ class TestAnUnexpectedException:
 
         counts = (await faulty.get("/health/requests")).json()
         assert counts["status_5xx"] == 1
+        assert counts["unhandled_500s"] == 1
         assert counts["total"] == 1
 
     async def test_is_logged_once_with_its_traceback(

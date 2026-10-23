@@ -21,6 +21,7 @@ down should not be told its password was wrong.
 from __future__ import annotations
 
 from app.core.errors import TooManyRequestsError
+from app.core.metrics import live
 from app.core.ratelimit import TokenBuckets
 
 ADDRESS_BURST = 30
@@ -73,6 +74,7 @@ class SignInThrottle:
         """
         wait = self._by_address.take(address or "")
         if wait is not None:
+            live().rate_limit_hits["address"] += 1
             raise TooManyRequestsError(
                 "Too many sign-in attempts from this address. Try again shortly.",
                 retry_after=wait,
@@ -81,6 +83,7 @@ class SignInThrottle:
             return
         wait = self._by_account.take(account)
         if wait is not None:
+            live().rate_limit_hits["account"] += 1
             raise TooManyRequestsError(
                 "Too many sign-in attempts for this account. Try again shortly.",
                 retry_after=wait,

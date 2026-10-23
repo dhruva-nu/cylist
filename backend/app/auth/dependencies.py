@@ -42,6 +42,7 @@ from app.config import SESSION_COOKIE as SESSION_COOKIE  # re-exported; it lived
 from app.config import settings_of
 from app.core.clock import now
 from app.core.errors import ForbiddenError, Reason, UnauthorizedError
+from app.core.metrics import live
 from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import ApiToken, TokenKind
@@ -137,7 +138,6 @@ async def resolve_principal(
             "revoked or expired credential",
             channel=channel.value,
             token_id=str(token.id),
-            label=token.name,
         )
         raise UnauthorizedError("That credential is not valid.")
 
@@ -175,9 +175,9 @@ def require(*scopes: Scope) -> Callable[[Principal], Awaitable[Principal]]:
     async def dependency(principal: Principal = Depends(current_principal)) -> Principal:
         missing = principal.missing(required)
         if missing:
+            live().auth_refusals["missing_scope"] += 1
             logger.warning(
-                "Token %r lacks the scopes for this endpoint",
-                principal.label,
+                "Token lacks the scopes for this endpoint",
                 extra={
                     "context": {
                         "token_id": str(principal.token_id),
@@ -208,6 +208,7 @@ def _refused(connection: HTTPConnection, reason: str, **context: object) -> None
     very string the database is searched by. Neither belongs in a file that
     gets pasted into bug reports.
     """
+    live().auth_refusals[reason.replace(" ", "_")] += 1
     logger.warning(
         "Authentication refused: %s",
         reason,

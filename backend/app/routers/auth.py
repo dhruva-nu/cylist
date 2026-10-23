@@ -44,6 +44,7 @@ from app.auth.throttle import SignInThrottle, account_key
 from app.auth.tokens import hash_token
 from app.config import Settings, app_settings
 from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.metrics import live
 from app.core.request_log import client_address
 from app.db import SessionDependency
 from app.models.activity import Channel, EntityType, Verb
@@ -203,21 +204,24 @@ async def login(
 
     if body.email is None:
         # The bootstrap door, shut for good once somebody is behind it.
-        if await people.has_any_account(session) or not await verify_password(
-            body.password, settings.password_hash
-        ):
-            _refuse(request, body)
+        if await people.has_any_account(session):
+            _refuse(request, "bootstrap_closed", bootstrap=True)
+        if not await verify_password(body.password, settings.password_hash):
+            _refuse(request, "bootstrap_wrong_password", bootstrap=True)
         person = None
     else:
-        person = await people.authenticate(session, body.email, body.password)
-        if person is None:
-            _refuse(request, body)
+        outcome = await people.authenticate(session, body.email, body.password)
+        if isinstance(outcome, people.SignInRefusal):
+            _refuse(request, outcome.reason, person_id=outcome.person_id)
+        person = outcome
 
     identity, _ = await _start_session(session, request, response, settings, person)
     return identity
 
 
-def _refuse(request: Request, body: LoginRequest) -> NoReturn:
+def _refuse(
+    request: Request, reason: str, *, person_id: UUID | None = None, bootstrap: bool = False
+) -> NoReturn:
     """Turn every way of failing to sign in into the same answer.
 
     One message and one status for a wrong address, a wrong password, an
@@ -225,14 +229,20 @@ def _refuse(request: Request, body: LoginRequest) -> NoReturn:
     outgrown it. The log separates them, because whoever runs the server is
     entitled to know which it was; the response must not, or it becomes a way
     to find out who has an account here.
+
+    The log names the reason and, when the address matched an account, that
+    person's id — never the address typed, which for a mistyped password is
+    somebody's email and for a mistyped email may be their password.
     """
+    live().auth_refusals[reason] += 1
     logger.warning(
         "Failed sign-in attempt",
         extra={
             "context": {
                 "client": client_address(request),
-                "email": body.email,
-                "bootstrap": body.email is None,
+                "reason": reason,
+                "person_id": str(person_id) if person_id is not None else None,
+                "bootstrap": bootstrap,
             }
         },
     )
@@ -306,6 +316,7 @@ async def change_password(
 
     person = await people.get(session, principal.person_id)
     if not await verify_password(body.current_password, person.password_hash):
+        live().auth_refusals["wrong_current_password"] += 1
         logger.warning(
             "Failed password change",
             extra={"context": {"person_id": str(person.id), "client": client_address(request)}},

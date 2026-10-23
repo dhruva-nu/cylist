@@ -30,7 +30,14 @@ from app.core.logging import (
 )
 from app.core.request_log import resolve_client
 from app.db import Database
-from tests.conftest import OWNER_PASSWORD, client_for
+from tests.conftest import (
+    OWNER_EMAIL,
+    OWNER_NAME,
+    OWNER_PASSWORD,
+    client_for,
+    ensure_owner,
+    sign_in,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -526,3 +533,44 @@ async def test_a_request_from_anywhere_else_keeps_the_peer(
     context = access_lines(tmp_path / "direct.log")[0]["context"]
     assert context["client"] == "127.0.0.1"
     assert "peer" not in context
+
+
+async def test_no_log_line_carries_an_email_or_a_name(
+    settings: Settings, database: Database, tmp_path: Path
+) -> None:
+    """A failed sign-in and a refusal that names a person, then the whole file."""
+    log = tmp_path / "private.log"
+    configured = settings.model_copy(
+        update={"log_to_file": True, "log_file": log, "log_format": "json"}
+    )
+    async with client_for(configured, database) as http:
+        owner = await ensure_owner(http)
+        for email in (OWNER_EMAIL, "nobody@cylist.dev"):
+            refused = await http.post("/auth/login", json={"email": email, "password": "wrong"})
+            assert refused.status_code == 401
+        await sign_in(http)
+        # The refusal's message names the person; the log must say their id.
+        again = await http.post(f"/people/{owner.id}/invite")
+        assert again.status_code == 409
+        assert OWNER_NAME in again.json()["error"]["message"]
+        counts = (await http.get("/health/requests")).json()
+
+    written = log.read_text()
+    assert OWNER_EMAIL not in written
+    assert "nobody@cylist.dev" not in written
+    assert OWNER_NAME not in written
+    assert str(owner.id) in written
+    assert counts["auth_refusals"] == {"wrong_password": 1, "unknown_email": 1}
+
+
+async def test_rate_limit_hits_are_counted_by_bucket(
+    settings: Settings, database: Database
+) -> None:
+    from app.auth.throttle import ACCOUNT_BURST
+
+    async with client_for(settings, database) as http:
+        for _ in range(ACCOUNT_BURST + 1):
+            await http.post("/auth/login", json={"email": OWNER_EMAIL, "password": "wrong"})
+        counts = (await http.get("/health/requests")).json()
+
+    assert counts["rate_limit_hits"] == {"account": 1}

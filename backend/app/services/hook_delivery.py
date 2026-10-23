@@ -71,6 +71,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import epoch, now
 from app.core.crypto import VaultKeys, cipher_for
+from app.core.metrics import live
 from app.db import Database
 from app.models.activity import Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
@@ -321,6 +322,7 @@ def record(delivery: HookDelivery, attempt: Attempt) -> None:
         # background would only fill the log with the same answer.
         delivery.state = DeliveryState.FAILED
         delivery.next_attempt_at = None
+        live().deliveries_failed += 1
         logger.warning(
             "Hook %s gave up on delivery %s of %s after attempt %d: %s",
             delivery.hook_id,

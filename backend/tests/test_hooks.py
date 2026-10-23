@@ -748,8 +748,12 @@ class TestDelivery:
                 await asyncio.sleep(0.02)
             await _task(signed_in, person)
             courier.wake()
+            # Wait for the record step too, not just the send: the request lands
+            # before the courier's own transaction marks the row delivered.
             for _ in range(100):
-                if len(receiver.requests) == 2:
+                if len(receiver.requests) == 2 and {
+                    delivery.state for delivery in await _queued(signed_in)
+                } == {"delivered"}:
                     break
                 await asyncio.sleep(0.02)
         finally:
@@ -1082,6 +1086,8 @@ class TestSendTest:
         assert sent["state"] == "failed"
         assert sent["last_status_code"] == 404
         assert sent["next_attempt_at"] is None
+        counts = (await signed_in.get("/health/requests")).json()
+        assert counts["deliveries_failed"] == 1
         async with _database(signed_in).session() as session:
             pending = await session.scalar(
                 select(func.count())
