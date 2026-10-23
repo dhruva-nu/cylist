@@ -35,6 +35,7 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.template import TaskTemplate, TemplateStage
 from app.schemas.templates import StageInput, TemplateCreate, TemplateUpdate
+from app.services import names
 from app.services.paging import PageRequest, Window, keyset
 
 # --- Templates ---------------------------------------------------------------
@@ -353,24 +354,19 @@ def _refuse_unknown_outcomes(column: BoardColumn, allowed: list[str]) -> None:
 
 
 async def _refuse_duplicate_template(session: AsyncSession, project_id: UUID, name: str) -> None:
-    existing = await session.scalar(
+    await names.ensure_free(
+        session,
         select(TaskTemplate).where(
             TaskTemplate.project_id == project_id,
             func.lower(TaskTemplate.name) == name.casefold(),
-        )
-    )
-    if existing is not None:
-        raise ConflictError(
+        ),
+        lambda existing: names.taken(
             f"This project already has a template called {existing.name!r}.",
-            details={"template_id": str(existing.id)},
-            reason=Reason.DUPLICATE_NAME,
-        )
+            template_id=str(existing.id),
+        ),
+    )
 
 
 def _duplicate_template(name: str) -> ConflictError:
     """The refusal for a name that passed the check and then lost to the index."""
-    return ConflictError(
-        f"This project already has a template called {name!r}.",
-        details={"name": name},
-        reason=Reason.DUPLICATE_NAME,
-    )
+    return names.taken(f"This project already has a template called {name!r}.", name=name)
