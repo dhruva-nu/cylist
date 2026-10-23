@@ -18,7 +18,7 @@
 
 import { queryKeys, useBoard, useGoals, useInvalidate, useTemplates } from '../api/queries'
 import { TaskDialog } from './TaskDialog'
-import { LiveRegion, useAnnouncer } from './ui'
+import { useAnnouncer } from './ui'
 
 export function OpenCard({
   projectKey,
@@ -33,7 +33,7 @@ export function OpenCard({
   onClose: () => void
 }) {
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   /**
    * The three lists a card dialog needs.
@@ -77,7 +77,6 @@ export function OpenCard({
 
   return (
     <>
-      <LiveRegion message={message} />
       <TaskDialog
         projectKey={projectKey}
         taskId={reference}

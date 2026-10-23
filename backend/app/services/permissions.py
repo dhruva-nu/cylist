@@ -29,7 +29,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from app.auth.permissions import ALL_PERMISSIONS, INFO, Permission, parse_permissions
 from app.auth.principal import Principal
 from app.core import sensitivity
-from app.core.errors import ForbiddenError, NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError, Reason
 from app.core.sensitivity import DEFAULT_CLEARANCE, DEFAULT_LEVEL, Sensitivity
 from app.db import lock_row
 from app.models.board import BoardColumn
@@ -156,6 +156,7 @@ async def enforce(
     raise ForbiddenError(
         f"Your role on {project.key} does not let you {INFO[permission].refusal}.",
         details={"project_key": project.key, "permission": permission.value},
+        reason=Reason.ROLE_FORBIDS,
     )
 
 
@@ -324,6 +325,7 @@ async def enforce_column_entry(
     raise ForbiddenError(
         f"Your role on {project.key} does not let you move cards into {where}.",
         details={"project_key": project.key, "column_id": str(column_id)},
+        reason=Reason.ROLE_FORBIDS,
     )
 
 
@@ -339,6 +341,7 @@ async def enforce_column_staging(
     raise ForbiddenError(
         f"Your role on {project.key} does not let you set the sub-stages for {where}.",
         details={"project_key": project.key, "column_id": str(column_id)},
+        reason=Reason.ROLE_FORBIDS,
     )
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.models.activity import Verb
 from app.models.task import Task, TaskChecklistItem
 from app.routers.tasks.recording import record_on_card
 from app.schemas.tasks import ChecklistItemUpdate
@@ -35,7 +36,7 @@ async def finish(
         await record_on_card(
             session,
             principal,
-            "task.finished",
+            Verb.TASK_FINISHED,
             updated,
             {
                 "parent": updated.parent.reference if updated.parent else None,
@@ -58,7 +59,7 @@ async def update_checklist_item(
     await record_on_card(
         session,
         principal,
-        "task.checklist_updated",
+        Verb.TASK_CHECKLIST_UPDATED,
         task,
         {"title": updated.title, "state": updated.state.value},
     )
@@ -71,7 +72,7 @@ async def move_stage(session: AsyncSession, principal: Principal, task: Task, in
     await record_on_card(
         session,
         principal,
-        "task.sub_status_moved",
+        Verb.TASK_SUB_STATUS_MOVED,
         updated,
         {
             "sub_status_index": updated.sub_status_index,

@@ -32,14 +32,14 @@
 
 import { Link, useParams } from '@tanstack/react-router'
 import { PageHead } from '../../components/Shell'
-import { LiveRegion, useAnnouncer } from '../../components/ui'
+import { useAnnouncer } from '../../components/ui'
 import styles from './Agents.module.css'
 import { Connect } from './ConnectSection'
 import { Skills } from './SkillsSection'
 
 export function Agents() {
   const { projectKey } = useParams({ from: '/p/$projectKey/agents' })
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   return (
     <>
@@ -51,8 +51,6 @@ export function Agents() {
         </Link>{' '}
         — a line on the <code>learned.md</code> of the topic it belongs to.
       </PageHead>
-
-      <LiveRegion message={message} />
       <Connect announce={announce} />
       <Skills projectKey={projectKey} announce={announce} />
     </>

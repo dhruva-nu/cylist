@@ -52,6 +52,7 @@ class TestCreating:
 
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "conflict"
+        assert response.json()["error"]["reason"] == "key_taken"
         assert response.json()["error"]["details"]["key"] == "ATL"
 
     async def test_a_duplicate_key_does_not_leave_a_half_written_project(

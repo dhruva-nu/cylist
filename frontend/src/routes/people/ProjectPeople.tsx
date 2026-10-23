@@ -15,14 +15,7 @@ import { AccountDialog } from '../../components/AccountDialog'
 import { InviteDialog } from '../../components/InviteDialog'
 import { PersonDialog } from '../../components/PersonDialog'
 import { PageHead } from '../../components/Shell'
-import {
-  Button,
-  EmptyState,
-  ErrorBanner,
-  ErrorNotice,
-  LiveRegion,
-  useAnnouncer,
-} from '../../components/ui'
+import { Button, EmptyState, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { DirectoryDialog } from './DirectoryDialog'
 import { PeopleGroup } from './PeopleGroup'
@@ -37,7 +30,7 @@ export function ProjectPeople() {
   const [editing, setEditing] = useState<Person | null>(null)
   const [inviting, setInviting] = useState<Person | null>(null)
   const [settingPasswordFor, setSettingPasswordFor] = useState<Person | null>(null)
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   // Who is looking. Already in the cache — the auth gate asked for it before
   // this screen existed — so reading it here costs nothing and is what makes
@@ -111,7 +104,6 @@ export function ProjectPeople() {
       </PageHead>
 
       <ErrorNotice error={removeFromProject.error} />
-      <LiveRegion message={message} />
 
       <PeopleGroup
         title="Team"

@@ -13,14 +13,7 @@ import { useState } from 'react'
 import { api, type VaultNode } from '../../api/client'
 import { useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import {
-  Button,
-  EmptyState,
-  ErrorBanner,
-  ErrorNotice,
-  LiveRegion,
-  useAnnouncer,
-} from '../../components/ui'
+import { Button, EmptyState, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { NodeDetail, NothingSelected } from './NodeDetail'
 import styles from './ProjectVault.module.css'
@@ -33,7 +26,7 @@ export function ProjectVault() {
   const { projectKey } = useParams({ from: '/p/$projectKey/vault' })
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   /** Which trees are open. Null until the reader opens or closes one — see below. */
   const [chosenOpenTrees, setChosenOpenTrees] = useState<string[] | null>(null)
@@ -118,8 +111,6 @@ export function ProjectVault() {
         Multiple trees, each as deep as you like. Secrets stay masked until you reveal them, and
         every reveal is written to the activity log.
       </PageHead>
-
-      <LiveRegion message={message} />
 
       <ErrorNotice error={deleteNode.error} />
 
