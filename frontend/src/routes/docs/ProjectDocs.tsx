@@ -26,7 +26,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type Doc, type DocTopicWithDocs, type DocTree } from '../../api/client'
-import { useInvalidate } from '../../api/queries'
+import { queryKeys, useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
 import { EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -62,12 +62,12 @@ export function ProjectDocs() {
   const setMode = (next: Mode) => setEntered({ mode: next, address })
 
   const tree = useQuery({
-    queryKey: ['docs', projectKey],
+    queryKey: queryKeys.docTree(projectKey),
     queryFn: ({ signal }) => api.getDocTree(projectKey, signal),
   })
 
   const open = useQuery({
-    queryKey: ['doc', openId],
+    queryKey: queryKeys.doc(openId),
     queryFn: ({ signal }) => api.getDoc(openId ?? '', signal),
     enabled: Boolean(openId),
   })
@@ -76,7 +76,7 @@ export function ProjectDocs() {
   // asked again whenever the window regains focus; an edit to the docs is what
   // makes it stale, and `refresh` says so.
   const answer = useQuery({
-    queryKey: ['doc-answer', projectKey, ask],
+    queryKey: queryKeys.docAnswer(projectKey, ask),
     queryFn: () => api.askDocs(projectKey, ask ?? ''),
     enabled: Boolean(ask),
     staleTime: 5 * 60_000,

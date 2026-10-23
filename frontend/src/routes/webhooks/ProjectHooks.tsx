@@ -42,7 +42,7 @@ export function ProjectHooks() {
   const [shownSecret, setShownSecret] = useState<{ name: string; secret: string } | null>(null)
 
   const hooks = useQuery({
-    queryKey: ['hooks', projectKey],
+    queryKey: queryKeys.hooks(projectKey),
     queryFn: ({ signal }) => api.listHooks(projectKey, signal),
     // A refusal is an answer about who is asking; asking again changes nothing.
     retry: (count, error) => !isForbidden(error) && count < 2,

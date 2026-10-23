@@ -27,7 +27,11 @@ const liveBoards = new Set<string>()
 
 /** Whether a board socket already keeps this query's data current. */
 export function keptCurrentBySocket(queryKey: readonly unknown[]): boolean {
-  return queryKey[0] === 'tasks' && typeof queryKey[1] === 'string' && liveBoards.has(queryKey[1])
+  return (
+    queryKey[0] === queryKeys.allBoardCards[0] &&
+    typeof queryKey[1] === 'string' &&
+    liveBoards.has(queryKey[1])
+  )
 }
 
 export interface BoardSocketState {
@@ -68,12 +72,12 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
       }
       if (debounce.current) clearTimeout(debounce.current)
       debounce.current = setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ['tasks', projectKey] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.tasks(projectKey) })
         // An open card is looking at the same change from the other side.
         void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
         // And so is its agent feed, whose own nudge may have been the one
         // the server coalesced away.
-        void queryClient.invalidateQueries({ queryKey: ['agent-feed'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.allAgentFeeds })
       }, DEBOUNCE_MS)
     }
 
@@ -84,7 +88,7 @@ export function useBoardSocket(projectKey: string): BoardSocketState {
         missedWhileHidden.current = true
         return
       }
-      void queryClient.invalidateQueries({ queryKey: ['agent-feed', taskId] })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentFeed(taskId) })
     }
 
     const open = () => {

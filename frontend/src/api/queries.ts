@@ -36,6 +36,49 @@ export const queryKeys = {
    * invalidating it refreshes whichever page is showing.
    */
   taskHistory: (taskId: string) => ['task-history', taskId],
+  /** Every card's history, whichever card and project. */
+  allTaskHistory: ['task-history'],
+  /** What the agents on a card have read, edited, run and said. */
+  agentFeed: (taskId: string) => ['agent-feed', taskId],
+  /** Every card's agent feed. */
+  allAgentFeeds: ['agent-feed'],
+  /** A day's plan. The project's plans share the two-part prefix `todayPlans`. */
+  todayPlan: (projectKey: string, day: string) => ['today', projectKey, day],
+  /** Every day of the project's plans. */
+  todayPlans: (projectKey: string) => ['today', projectKey],
+  dayReport: (projectKey: string, day: string, zone: string) => [
+    'day-report',
+    projectKey,
+    day,
+    zone,
+  ],
+  /** Every day of the project's reports. */
+  dayReports: (projectKey: string) => ['day-report', projectKey],
+  skills: (projectKey: string) => ['skills', projectKey],
+  /** Every file and link in the project, flat — the `>` picker's choices. */
+  projectItems: (projectKey: string) => ['project-items', projectKey],
+  folderTree: (projectKey: string) => ['folder-tree', projectKey],
+  folderChildren: (folderId: string | null) => ['folder-children', folderId],
+  docTree: (projectKey: string) => ['docs', projectKey],
+  doc: (docId: string | null | undefined) => ['doc', docId],
+  docAnswer: (projectKey: string, question: string | null | undefined) => [
+    'doc-answer',
+    projectKey,
+    question,
+  ],
+  hooks: (projectKey: string) => ['hooks', projectKey],
+  hookDeliveries: (hookId: string) => ['hook-deliveries', hookId],
+  vaultTrees: (projectKey: string) => ['vault-trees', projectKey],
+  /** The trees' contents, keyed on which trees there are so a new one is read. */
+  vaultTreeDetails: (projectKey: string, treeIds: string) => [
+    'vault-tree-details',
+    projectKey,
+    treeIds,
+  ],
+  /** Every project's board cards: what a write that does not know the project refreshes. */
+  allBoardCards: ['tasks'],
+  /** Every project's columns. */
+  allBoards: ['board'],
   goals: (projectKey: string) => ['goals', projectKey],
   /** Every goal's page, whichever project it is on. */
   allGoals: ['goal'],
@@ -134,10 +177,16 @@ export function usePermissionGrid(projectKey: string) {
 }
 
 /** The board's columns, and the limits the server holds them to. */
-export function useBoard(projectKey: string) {
+/** Read nothing until `enabled` says there is something to read — see `useTasks`. */
+interface ReadOptions {
+  enabled?: boolean | undefined
+}
+
+export function useBoard(projectKey: string, { enabled = true }: ReadOptions = {}) {
   return useQuery({
     queryKey: queryKeys.board(projectKey),
     queryFn: ({ signal }) => api.listColumns(projectKey, signal),
+    enabled,
   })
 }
 
@@ -211,10 +260,11 @@ export async function fetchBoardCards(
 }
 
 /** The board's cards, as far as each column has been read — see `BoardCards`. */
-export function useTasks(projectKey: string) {
+export function useTasks(projectKey: string, { enabled = true }: ReadOptions = {}) {
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: queryKeys.tasks(projectKey),
+    enabled,
     queryFn: ({ signal }) =>
       fetchBoardCards(
         projectKey,

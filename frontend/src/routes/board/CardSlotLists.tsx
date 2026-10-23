@@ -75,11 +75,6 @@ function stageState(position: number, index: number, last: number): string {
   return ''
 }
 
-/** The card's own detail, under the key its dialog reads too. */
-function cardDetailKey(task: Task) {
-  return queryKeys.task(task.id)
-}
-
 /**
  * Finishing a card's parts from the board: a sub-task, or a tick box.
  *
@@ -92,7 +87,7 @@ function useCardParts(task: Task) {
   const { projectKey } = useCardActions()
 
   // The count on the card is the board's, so the board is out of date too.
-  const refresh = () => invalidate(cardDetailKey(task), queryKeys.tasks(projectKey))
+  const refresh = () => invalidate(queryKeys.task(task.id), queryKeys.tasks(projectKey))
 
   const finish = useMutation({
     mutationFn: ({ part, finished }: { part: Task; finished: boolean }) =>
@@ -141,7 +136,7 @@ export function SubtaskList({
   onOpenTask: ((taskId: string) => void) | undefined
 }) {
   const detail = useQuery({
-    queryKey: cardDetailKey(task),
+    queryKey: queryKeys.task(task.id),
     queryFn: ({ signal }) => api.getTask(task.reference, signal),
   })
   const parts = useCardParts(task)

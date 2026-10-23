@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { api, type Skill } from '../../api/client'
-import { useInvalidate } from '../../api/queries'
+import { queryKeys, useInvalidate } from '../../api/queries'
 import { formatSize, formatStamp } from '../../components/format'
 import { Button, EmptyState, ErrorNotice, cardStyles } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -24,7 +24,7 @@ export function Skills({
   const folderPicker = useRef<HTMLInputElement>(null)
 
   const skills = useQuery({
-    queryKey: ['skills', projectKey],
+    queryKey: queryKeys.skills(projectKey),
     queryFn: ({ signal }) => api.listSkills(projectKey, signal),
   })
 
