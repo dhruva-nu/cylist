@@ -19,7 +19,8 @@ import {
 } from '../../components/ui'
 import type { AgentIndicator } from '../agentState'
 import { stopAtCard } from './keepFromCard'
-import styles from './TaskCard.module.css'
+import styles from './CardFace.module.css'
+import shared from './TaskCard.module.css'
 
 /**
  * The date a card is being asked for now, and the column it is wanted in by
@@ -146,7 +147,7 @@ export function AgentLine({
       // The line is cut to the card's width; the whole of it is a hover away.
       title={agent.detail ? `${agent.label} · ${agent.detail}` : agent.label}
     >
-      <span className={styles.agentLabel}>{agent.label}</span>
+      <span className={shared.agentLabel}>{agent.label}</span>
       {agent.detail ? <span className={styles.agentDetail}>{agent.detail}</span> : null}
       {sessionCount > 1 ? (
         <span className={styles.agentCount} title={`${sessionCount} sessions`}>
@@ -210,33 +211,33 @@ export function CardFacts({ task }: { task: Task }) {
   return (
     <div className={styles.facts}>
       {task.comment_count ? (
-        <span className={styles.fact} title={`${task.comment_count} comments`}>
+        <span className={shared.fact} title={`${task.comment_count} comments`}>
           <CommentIcon size={13} />
           <span aria-hidden="true">{task.comment_count}</span>
           <span className="visually-hidden">{task.comment_count} comments</span>
         </span>
       ) : null}
       {task.status === 'active' ? null : (
-        <span className={`${styles.fact} ${styles.status} ${styles[`status_${task.status}`]}`}>
+        <span className={`${shared.fact} ${shared.status} ${shared[`status_${task.status}`]}`}>
           {STATUS_LABELS[task.status]}
         </span>
       )}
       {task.waiting_on.length ? (
-        <span className={styles.fact} title="Waiting on">
+        <span className={shared.fact} title="Waiting on">
           <ClockIcon size={13} />
           {task.waiting_on.map((person) => `@${person.name.split(' ')[0]}`).join(' ')}
           <span className="visually-hidden">waiting on them</span>
         </span>
       ) : null}
       {task.parent_reference ? (
-        <span className={styles.fact} title={`Sub-task of ${task.parent_reference}`}>
+        <span className={shared.fact} title={`Sub-task of ${task.parent_reference}`}>
           <span aria-hidden="true">↳</span>
           <span className={styles.factMono}>{task.parent_reference}</span>
         </span>
       ) : null}
       {task.subtask_assignees.length ? (
         <span
-          className={`${styles.fact} ${styles.owners}`}
+          className={`${shared.fact} ${shared.owners}`}
           title={`Sub-tasks: ${task.subtask_assignees.map((person) => person.name).join(', ')}`}
         >
           {task.subtask_assignees.map((person) => (
@@ -245,7 +246,7 @@ export function CardFacts({ task }: { task: Task }) {
         </span>
       ) : null}
       {task.jira_ref ? (
-        <span className={styles.fact}>
+        <span className={shared.fact}>
           <JiraIcon size={13} />
           <span className={styles.factMono}>{jiraRefLabel(task.jira_ref)}</span>
         </span>

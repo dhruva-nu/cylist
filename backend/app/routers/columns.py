@@ -18,6 +18,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import NotFoundError
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.routers import guards
@@ -104,8 +105,8 @@ async def create_column(
     await activity.record(
         session,
         principal,
-        "column.created",
-        entity_type="column",
+        Verb.COLUMN_CREATED,
+        entity_type=EntityType.COLUMN,
         entity_id=column.id,
         project_id=project.id,
         payload={"name": column.name, "position": column.position},
@@ -135,8 +136,8 @@ async def reorder_columns(
     await activity.record(
         session,
         principal,
-        "column.reordered",
-        entity_type="column",
+        Verb.COLUMN_REORDERED,
+        entity_type=EntityType.COLUMN,
         project_id=project.id,
         payload={"column_ids": [str(column_id) for column_id in body.column_ids]},
     )
@@ -155,8 +156,8 @@ async def update_column(
     await activity.record(
         session,
         principal,
-        "column.updated",
-        entity_type="column",
+        Verb.COLUMN_UPDATED,
+        entity_type=EntityType.COLUMN,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True))},
@@ -187,8 +188,8 @@ async def delete_column(
     await activity.record(
         session,
         principal,
-        "column.deleted",
-        entity_type="column",
+        Verb.COLUMN_DELETED,
+        entity_type=EntityType.COLUMN,
         project_id=project_id,
         payload={"name": name},
     )

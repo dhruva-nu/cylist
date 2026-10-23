@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.db import SessionDependency
+from app.models.activity import Verb
 from app.models.task import Task, TaskChecklistItem
 from app.routers.tasks import acts
 from app.routers.tasks.dependencies import (
@@ -43,7 +44,7 @@ async def add_checklist_item(
     can reach the board's last column.
     """
     item = await tasks.add_checklist_item(session, task, body)
-    await record_on_card(session, principal, "task.checklist_added", task, {"title": item.title})
+    await record_on_card(session, principal, Verb.TASK_CHECKLIST_ADDED, task, {"title": item.title})
     return checklist_item_read(item)
 
 
@@ -79,5 +80,5 @@ async def delete_checklist_item(
     task = await tasks.get(session, item.task_id)
     title = item.title
     await tasks.delete_checklist_item(session, item)
-    await record_on_card(session, principal, "task.checklist_deleted", task, {"title": title})
+    await record_on_card(session, principal, Verb.TASK_CHECKLIST_DELETED, task, {"title": title})
     return Acknowledged()

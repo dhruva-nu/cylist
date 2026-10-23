@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.config import AGENT_SOCKET_IDLE_AFTER, AGENT_SOCKET_STAMP_EVERY, Settings
+from app.config import Settings, settings_of
 from app.core.clock import now
 from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.logging import bind_request_id, new_request_id, reset_request_id
@@ -75,7 +75,7 @@ async def board_socket(websocket: WebSocket, project_ref: str) -> None:
     one of its cards grows. Reads nothing: a client with something to say has
     the HTTP API for it.
     """
-    settings: Settings = websocket.app.state.settings
+    settings = settings_of(websocket)
     hub: Hub = websocket.app.state.hub
     database: Database = websocket.app.state.database
 
@@ -180,7 +180,7 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
     could not do, and the reason the board no longer has to guess from a
     clock.
     """
-    settings: Settings = websocket.app.state.settings
+    settings = settings_of(websocket)
     hub: Hub = websocket.app.state.hub
     bus: Bus = websocket.app.state.bus
     database: Database = websocket.app.state.database
@@ -214,10 +214,10 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
         )
         # Before `ready`, so that by the time the agent hears it, this socket
         # already holds the session and vouches for it to every process.
-        await _stamp(database, link)
+        await _stamp(database, link, settings)
         await websocket.send_json(protocol.ready(client_session_id, principal.label))
 
-        code, cause = await _serve_agent(websocket, database, principal, link)
+        code, cause = await _serve_agent(websocket, database, principal, link, settings)
     except WebSocketDisconnect as exc:
         code = exc.code
     except asyncio.CancelledError:
@@ -250,6 +250,7 @@ async def _serve_agent(
     database: Database,
     principal: Principal,
     link: AgentLink,
+    settings: Settings,
 ) -> tuple[int, str]:
     """Read reports until the session ends. Returns its close code and cause.
 
@@ -263,7 +264,7 @@ async def _serve_agent(
     has nothing to say until it hears it.
     """
     loop = asyncio.get_running_loop()
-    idle = AGENT_SOCKET_IDLE_AFTER.total_seconds()
+    idle = settings.agent_socket_idle_after.total_seconds()
     incoming: asyncio.Future[str] = asyncio.ensure_future(websocket.receive_text())
     outgoing: asyncio.Future[dict[str, object]] = asyncio.ensure_future(link.outbox.get())
     try:
@@ -289,7 +290,7 @@ async def _serve_agent(
                 ending = await _handle_frame(websocket, database, principal, link.key, raw)
                 if ending is not None:
                     return ending
-                await _stamp(database, link)
+                await _stamp(database, link, settings)
     except TimeoutError:
         await websocket.close(code=auth.IDLE)
         return auth.IDLE, "idle"
@@ -298,16 +299,16 @@ async def _serve_agent(
         outgoing.cancel()
 
 
-async def _stamp(database: Database, link: AgentLink) -> None:
+async def _stamp(database: Database, link: AgentLink, settings: Settings) -> None:
     """Vouch for this socket's session, if it has not lately.
 
     On connect, and then on the first frame each
-    :data:`~app.config.AGENT_SOCKET_STAMP_EVERY`. A frame that ends the
+    :attr:`~app.config.Settings.agent_socket_stamp_seconds`. A frame that ends the
     socket stamps nothing, since nothing is left to vouch for.
     """
     loop_now = asyncio.get_running_loop().time()
     due = link.stamped_at is None or (
-        loop_now - link.stamped_at >= AGENT_SOCKET_STAMP_EVERY.total_seconds()
+        loop_now - link.stamped_at >= settings.agent_socket_stamp_every.total_seconds()
     )
     if not due:
         return

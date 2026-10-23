@@ -20,7 +20,7 @@ from httpx import AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import AGENT_QUIET_AFTER, AGENT_SOCKET_WITNESSES_FOR
+from app.config import Settings
 from app.models import AgentSession, Person
 from app.services import agent_prompts, agent_reports, tasks
 from tests import ws
@@ -285,7 +285,9 @@ class TestAQuestionBeingWaitedOn:
 
     async def _reap(self, session: AsyncSession) -> int:
         reaped = await agent_reports.reap_unwitnessed(
-            session, quiet_after=AGENT_QUIET_AFTER, witnessed_for=AGENT_SOCKET_WITNESSES_FOR
+            session,
+            quiet_after=Settings().agent_quiet_after,
+            witnessed_for=Settings().agent_socket_witnesses_for,
         )
         await session.commit()
         return reaped
