@@ -22,6 +22,20 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * The page's own elements: the app's, and the overlay beside it that dialogs,
+ * toasts and the live region are drawn in. Call before rendering anything that
+ * uses `Overlay`.
+ */
+export function mountPage(): { app: HTMLElement; overlay: HTMLElement } {
+  const app = document.createElement('div')
+  app.id = 'root'
+  const overlay = document.createElement('div')
+  overlay.id = 'overlay'
+  document.body.append(app, overlay)
+  return { app, overlay }
+}
+
 /** A `WebSocket` that does what it is told by the test, and nothing else. */
 export class FakeWebSocket {
   static instances: FakeWebSocket[] = []

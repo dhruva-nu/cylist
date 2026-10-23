@@ -44,7 +44,6 @@ button on the Hooks page — :func:`fired_body` is what that sends.
 from app.services.hooks.catalogue import (
     CATEGORIES,
     EVENTS,
-    QUEUED,
     SECRET_MAX_LENGTH,
     SECRET_MIN_LENGTH,
     SECRET_PREFIX,
@@ -74,7 +73,6 @@ from app.services.hooks.payload import fired_body, sample_body
 __all__ = [
     "CATEGORIES",
     "EVENTS",
-    "QUEUED",
     "SECRET_MAX_LENGTH",
     "SECRET_MIN_LENGTH",
     "SECRET_PREFIX",

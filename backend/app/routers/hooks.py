@@ -26,6 +26,7 @@ from app.db import SessionDependency, database_of, flush_or_refuse, publish_into
 from app.models.activity import EntityType, Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.project import Project
+from app.realtime.events import HooksQueued
 from app.routers import guards
 from app.routers.paging import PageQuery
 from app.routers.projects import resolved_project
@@ -476,7 +477,7 @@ async def redeliver(
     hook_delivery.requeue(delivery)
     # Through the outbox rather than straight at the courier: woken before the
     # commit, it would look, find nothing due yet, and sleep through it.
-    publish_into(session, {"type": hooks.QUEUED})
+    publish_into(session, HooksQueued())
     await session.flush()
     await session.refresh(delivery)
     return HookDeliveryRead.model_validate(delivery)

@@ -130,10 +130,6 @@ EVENTS: dict[str, str] = {
 }
 """The same verbs, flat, in the same order: what matching and validation ask."""
 
-QUEUED = "hooks.queued"
-"""The outbox event :func:`app.services.activity.record` publishes when this
-transaction queued deliveries, so the courier wakes once it has committed."""
-
 SECRET_PREFIX = "whsec_"  # noqa: S105 - a prefix, not a secret
 SECRET_MIN_LENGTH = 16
 SECRET_MAX_LENGTH = 200

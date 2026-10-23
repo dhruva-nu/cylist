@@ -5,7 +5,11 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Modal } from './Modal'
 
-import '../test/dom'
+import { mountPage } from '../test/dom'
+
+function show(ui: React.ReactElement) {
+  return render(ui, { container: mountPage().app })
+}
 
 function Opener({ onClosed = () => undefined }: { onClosed?: () => void }) {
   const [open, setOpen] = useState(false)
@@ -31,7 +35,7 @@ function Opener({ onClosed = () => undefined }: { onClosed?: () => void }) {
 
 describe('Modal', () => {
   it('is a modal dialog named by its title', async () => {
-    render(<Opener />)
+    show(<Opener />)
     await userEvent.click(screen.getByText('Open it'))
 
     const dialog = screen.getByRole('dialog', { name: 'Rename the column' })
@@ -39,15 +43,43 @@ describe('Modal', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true')
   })
 
+  it('is named by its heading, not by a copy of it', async () => {
+    show(<Opener />)
+    await userEvent.click(screen.getByText('Open it'))
+
+    expect(screen.getByRole('dialog').getAttribute('aria-labelledby')).toBe(
+      screen.getByRole('heading', { name: 'Rename the column' }).id,
+    )
+  })
+
+  it('makes the app inert behind it, and awake again once it closes', async () => {
+    show(<Opener />)
+    const app = document.getElementById('root') as HTMLElement
+    await userEvent.click(screen.getByText('Open it'))
+    expect(app.inert).toBe(true)
+
+    await userEvent.keyboard('{Escape}')
+
+    expect(app.inert).toBe(false)
+  })
+
+  it('draws the dialog outside the app, so the app going inert does not take it too', async () => {
+    show(<Opener />)
+    await userEvent.click(screen.getByText('Open it'))
+
+    expect(document.getElementById('overlay')?.contains(screen.getByRole('dialog'))).toBe(true)
+    expect(document.getElementById('root')?.contains(screen.getByRole('dialog'))).toBe(false)
+  })
+
   it('moves focus into the dialog when it opens', async () => {
-    render(<Opener />)
+    show(<Opener />)
     await userEvent.click(screen.getByText('Open it'))
 
     expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true)
   })
 
   it('keeps Tab inside, wrapping from the last control to the first and back', async () => {
-    render(<Opener />)
+    show(<Opener />)
     await userEvent.click(screen.getByText('Open it'))
     const dialog = screen.getByRole('dialog')
     const stops = [...dialog.querySelectorAll<HTMLElement>('input, button')]
@@ -64,7 +96,7 @@ describe('Modal', () => {
 
   it('closes on Escape and gives focus back to what opened it', async () => {
     const closed = vi.fn()
-    render(<Opener onClosed={closed} />)
+    show(<Opener onClosed={closed} />)
     const opener = screen.getByText('Open it')
     await userEvent.click(opener)
 
@@ -77,7 +109,7 @@ describe('Modal', () => {
 
   it('closes on a click on the backdrop, and not on one inside the panel', async () => {
     const closed = vi.fn()
-    render(<Opener onClosed={closed} />)
+    show(<Opener onClosed={closed} />)
     await userEvent.click(screen.getByText('Open it'))
 
     await userEvent.click(screen.getByLabelText('Name'))
@@ -91,7 +123,7 @@ describe('Modal', () => {
   it('lets only the innermost of two dialogs answer Escape', async () => {
     const outer = vi.fn()
     const inner = vi.fn()
-    render(
+    show(
       <>
         <Modal title="Outer" onClose={outer} footer={null}>
           <p>behind</p>

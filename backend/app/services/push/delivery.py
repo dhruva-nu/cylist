@@ -37,6 +37,7 @@ from app.db import Database
 from app.models.api_token import ApiToken
 from app.models.person import Person
 from app.models.task import Task
+from app.realtime.events import PushQueued
 from app.services import devices
 from app.services.push.fcm import PushSender, SendOutcome, redact
 from app.services.push.messages import CardContext, SessionSnapshot, message_for
@@ -137,9 +138,9 @@ class Pusher:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[SessionSnapshot] = asyncio.Queue(maxsize=QUEUE_LIMIT)
 
-    def notify(self, event: dict[str, Any]) -> None:
+    def notify(self, event: PushQueued) -> None:
         """Take one committed outbox event. Never blocks and never raises."""
-        snapshot = event.get("snapshot")
+        snapshot = event.snapshot
         if not isinstance(snapshot, SessionSnapshot):  # pragma: no cover - defensive
             return
         if self._queue.full():

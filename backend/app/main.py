@@ -15,7 +15,6 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,13 +35,13 @@ from app.core.security_headers import SecurityHeadersMiddleware
 from app.db import Database
 from app.mcp import mount_mcp
 from app.realtime.bus import Bus
+from app.realtime.events import Event, HooksQueued, PushQueued
 from app.realtime.hub import Hub
 from app.routers import api_router
-from app.services import agent_prompts, agent_reports, blobs, hooks
+from app.services import agent_prompts, agent_reports, blobs
 from app.services.doc_engine import engine_for
 from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
-from app.services.push import triggers as push_triggers
 from app.services.push.delivery import Pusher
 from app.services.push.fcm import PushSender, sender_for
 from app.services.retention import Retention
@@ -135,7 +134,7 @@ def build_lifespan(settings: Settings) -> Lifespan:
     return lifespan
 
 
-def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
+def _publisher(app: FastAPI) -> Callable[[Event], None]:
     """Where a committed transaction's news goes: hook deliveries to the
     courier, agent-session pushes to the pusher, everything else to the
     boards — this process's and every other's.
@@ -147,11 +146,10 @@ def _publisher(app: FastAPI) -> Callable[[dict[str, Any]], None]:
     courier: Courier = app.state.courier
     pusher: Pusher = app.state.pusher
 
-    def publish(event: dict[str, Any]) -> None:
-        kind = event.get("type")
-        if kind == hooks.QUEUED:
+    def publish(event: Event) -> None:
+        if isinstance(event, HooksQueued):
             courier.wake()
-        elif kind == push_triggers.QUEUED:
+        elif isinstance(event, PushQueued):
             pusher.notify(event)
         else:
             bus.publish(event)

@@ -81,6 +81,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 from app.core.clock import now
 from app.models.agent_session import AgentPromptStatus, AgentSessionReason
+from app.realtime.events import BoardChanged
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentSessionPut, AgentSessionRead
 from app.schemas.common import Schema
 
@@ -231,18 +232,8 @@ def answer(
     }
 
 
-PROMPT_CHANGED = "agent.prompt"
-"""The event a prompt opening or closing is published as. Rings the board's
-doorbell, wakes long-polls, and carries a permission's answer to its agent —
-see :mod:`app.realtime.hub`. Never sent down a socket under this name."""
-
 FEED_CHANGED = "agent.feed"
 """The event type a new feed line is published as, and the doorbell it rings."""
-
-AGENT_CONNECTED = "agent.connected"
-"""The event a new agent socket is published as, so that whichever process
-holds an older socket for the same session lets go of it — see
-:meth:`app.realtime.hub.Hub.register_agent`. Never sent down a socket."""
 
 
 CHANGED_MAX = 25
@@ -279,12 +270,16 @@ def merge_changed(first: dict[str, object], second: dict[str, object]) -> dict[s
     return {**first, "changed": joined if len(joined) <= CHANGED_MAX else None}
 
 
-def changed_ref(event: dict[str, object]) -> list[dict[str, str]] | None:
+def changed_ref(event: BoardChanged) -> list[dict[str, str]] | None:
     """The hint a published event gives, or ``None`` where it names nothing."""
-    entity_type, entity_id = event.get("entity_type"), event.get("entity_id")
-    if not isinstance(entity_type, str):
+    if event.entity_type is None:
         return None
-    return [{"entity_type": entity_type, "entity_id": str(entity_id) if entity_id else ""}]
+    return [
+        {
+            "entity_type": str(event.entity_type),
+            "entity_id": str(event.entity_id) if event.entity_id else "",
+        }
+    ]
 
 
 def feed_changed(task_id: str) -> dict[str, object]:
