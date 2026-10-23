@@ -39,7 +39,8 @@ from sqlalchemy import (
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
+from sqlalchemy.orm.strategy_options import _AbstractLoad
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.board import BoardColumn
@@ -594,19 +595,22 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Highest sub-number ever handed out under this card. Only ever goes up,
     for the same reason ``project.task_counter`` does."""
 
+    # `project` and `parent` are loaded with every card, because `reference` cannot
+    # be read without them. The rest raise when read unloaded, and a query that
+    # wants them asks — see `card_loads`.
     project: Mapped[Project] = relationship(lazy="selectin")
-    assignee: Mapped[Person] = relationship(lazy="selectin")
-    column: Mapped[BoardColumn | None] = relationship(lazy="selectin")
-    """The column the card is in, loaded with it so ``outcome_index`` can be
-    read back as the label it points at. Null on a sub-task, and on a card in
-    cold storage, which are in none."""
-    template: Mapped[TaskTemplate | None] = relationship(lazy="selectin")
-    goal: Mapped[Goal | None] = relationship(lazy="selectin")
+    assignee: Mapped[Person] = relationship(lazy="raise")
+    column: Mapped[BoardColumn | None] = relationship(lazy="raise")
+    """The column the card is in, which ``outcome_index`` is read back through as
+    the label it points at. Null on a sub-task, and on a card in cold storage,
+    which are in none."""
+    template: Mapped[TaskTemplate | None] = relationship(lazy="raise")
+    goal: Mapped[Goal | None] = relationship(lazy="raise")
 
     waiting_on: Mapped[list[Person]] = relationship(
         secondary="task_waiting_on",
         order_by=Person.name,
-        lazy="selectin",  # one extra query per fetch, never N+1
+        lazy="raise",
     )
 
     parent: Mapped[Task | None] = relationship(
@@ -632,14 +636,14 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="TaskChecklistItem.position",
         passive_deletes=True,
-        lazy="selectin",
+        lazy="raise",
     )
 
     column_due_dates: Mapped[list[TaskColumnDueDate]] = relationship(
         back_populates="task",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="selectin",
+        lazy="raise",
     )
     """The dates this card is wanted in particular columns by.
 
@@ -683,7 +687,12 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         and the only two states a parent's move to the last column is allowed to
         find under it.
         """
-        return self.status is TaskStatus.CANCELLED or self.finished_at is not None
+        return settled(self.status, self.finished_at)
+
+
+def settled(status: TaskStatus, finished_at: datetime | None) -> bool:
+    """:attr:`Task.is_settled` for a row read as columns rather than as a card."""
+    return status is TaskStatus.CANCELLED or finished_at is not None
 
 
 class TaskWaitingOn(Base, TimestampMixin):
@@ -811,3 +820,29 @@ class TaskChecklistItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Top to bottom within the card, contiguous from zero."""
 
     task: Mapped[Task] = relationship(back_populates="checklist")
+
+
+def card_loads() -> tuple[_AbstractLoad, ...]:
+    """What a query for whole cards asks for besides the cards.
+
+    The relationships a card is drawn from raise when they are read unloaded
+    (``lazy="raise"``) instead of being fetched with every card whether or not
+    the caller reads them: a query that wants them says so with these, and one
+    that wants only the row — a count, a lock, an id — pays for nothing.
+    ``project`` and ``parent`` are not here because they are always loaded:
+    ``reference``, which is in every response a card appears in, cannot be read
+    without them.
+
+    A function rather than a constant because naming ``Task.assignee`` makes
+    SQLAlchemy configure every mapper, and this module is imported before the
+    others have been.
+    """
+    return (
+        selectinload(Task.assignee),
+        selectinload(Task.column),
+        selectinload(Task.template),
+        selectinload(Task.goal),
+        selectinload(Task.waiting_on),
+        selectinload(Task.checklist),
+        selectinload(Task.column_due_dates),
+    )

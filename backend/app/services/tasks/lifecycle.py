@@ -21,6 +21,7 @@ from app.services.tasks.stacking import slot
 _LOADED_ON_CREATE = (
     "project",
     "assignee",
+    "column",
     "template",
     "goal",
     "waiting_on",

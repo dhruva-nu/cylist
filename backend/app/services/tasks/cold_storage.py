@@ -38,7 +38,7 @@ from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
 from app.models.file import FileItem, Folder
 from app.models.project import Project
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.services import columns, files, templates
 from app.services.paging import PageRequest, Window, keyset
 from app.services.tasks.history import FieldChange, field_change
@@ -196,7 +196,9 @@ async def stored_page(session: AsyncSession, project: Project, page: PageRequest
     """
     return await keyset(
         session,
-        select(Task).where(Task.project_id == project.id, Task.archived_at.is_not(None)),
+        select(Task)
+        .options(*card_loads())
+        .where(Task.project_id == project.id, Task.archived_at.is_not(None)),
         keys=(Task.finished_at, Task.id),
         page=page,
         descending=True,
@@ -288,7 +290,10 @@ async def _csv_of(
 async def _subtasks_of(session: AsyncSession, card_ids: list[UUID]) -> dict[UUID, list[Task]]:
     """Every card's sub-tasks, in one query rather than one per card."""
     rows = await session.scalars(
-        select(Task).where(Task.parent_id.in_(card_ids)).order_by(Task.sub_number)
+        select(Task)
+        .options(*card_loads())
+        .where(Task.parent_id.in_(card_ids))
+        .order_by(Task.sub_number)
     )
     by_card: dict[UUID, list[Task]] = defaultdict(list)
     for sub in rows:

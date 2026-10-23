@@ -12,7 +12,7 @@ from app.db import publish_into
 from app.models.activity import Activity, EntityType, Verb
 from app.models.hook import Hook, HookDelivery
 from app.models.person import Person
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.realtime.events import HooksQueued
 from app.services.activity import Recorded
 from app.services.hooks.catalogue import EVENTS
@@ -81,7 +81,7 @@ async def queue_for(session: AsyncSession, entry: Activity) -> int:
 
 async def _card_of(session: AsyncSession, entry: Activity) -> Card:
     task = (
-        await session.get(Task, entry.entity_id)
+        await session.get(Task, entry.entity_id, options=card_loads())
         if entry.entity_type == EntityType.TASK and entry.entity_id is not None
         else None
     )

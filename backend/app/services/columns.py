@@ -30,7 +30,7 @@ from app.core.errors import (
 from app.db import lock_row
 from app.models.board import MAX_COLUMNS, MIN_COLUMNS, BoardColumn
 from app.models.project import Project
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.schemas.columns import ColumnCreate, ColumnUpdate
 
 STARTER_COLUMNS: tuple[ColumnCreate, ...] = (
@@ -272,7 +272,9 @@ async def _resettle(session: AsyncSession, column: BoardColumn) -> None:
     """
     cards = list(
         await session.scalars(
-            select(Task).where(Task.column_id == column.id, Task.outcome_index.is_not(None))
+            select(Task)
+            .options(*card_loads())
+            .where(Task.column_id == column.id, Task.outcome_index.is_not(None))
         )
     )
     ceiling = len(column.outcomes) - 1
