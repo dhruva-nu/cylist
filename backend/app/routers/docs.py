@@ -26,6 +26,7 @@ from app.auth.scopes import Scope
 from app.config import Settings, app_settings
 from app.core.errors import NotFoundError
 from app.db import SessionDependency, database_of
+from app.models.activity import EntityType, Verb
 from app.models.doc import SECTION_ORDER, Doc, DocTopic
 from app.models.project import Project
 from app.schemas.common import Acknowledged
@@ -175,9 +176,9 @@ async def _tree(session: AsyncSession, project: Project) -> DocTree:
 async def _record(
     session: AsyncSession,
     principal: Principal,
-    verb: str,
+    verb: Verb,
     *,
-    entity_type: str,
+    entity_type: EntityType,
     entity_id: UUID | None,
     project_id: UUID,
     **payload: object,
@@ -364,8 +365,8 @@ async def write_doc(
     await _record(
         session,
         principal,
-        "doc.created" if written.created else "doc.appended",
-        entity_type="doc",
+        Verb.DOC_CREATED if written.created else Verb.DOC_APPENDED,
+        entity_type=EntityType.DOC,
         entity_id=written.doc.id,
         project_id=project.id,
         title=written.doc.title,
@@ -399,8 +400,8 @@ async def create_topic(
     await _record(
         session,
         principal,
-        "doc_topic.created",
-        entity_type="doc_topic",
+        Verb.DOC_TOPIC_CREATED,
+        entity_type=EntityType.DOC_TOPIC,
         entity_id=topic.id,
         project_id=project.id,
         section=topic.section.value,
@@ -426,8 +427,8 @@ async def reorder_topics(
     await _record(
         session,
         principal,
-        "doc_topic.reordered",
-        entity_type="doc_topic",
+        Verb.DOC_TOPIC_REORDERED,
+        entity_type=EntityType.DOC_TOPIC,
         entity_id=None,
         project_id=project.id,
         section=body.section.value,
@@ -454,8 +455,8 @@ async def rename_topic(
     await _record(
         session,
         principal,
-        "doc_topic.renamed",
-        entity_type="doc_topic",
+        Verb.DOC_TOPIC_RENAMED,
+        entity_type=EntityType.DOC_TOPIC,
         entity_id=renamed.id,
         project_id=renamed.project_id,
         before=before,
@@ -486,8 +487,8 @@ async def delete_topic(
     await _record(
         session,
         principal,
-        "doc_topic.deleted",
-        entity_type="doc_topic",
+        Verb.DOC_TOPIC_DELETED,
+        entity_type=EntityType.DOC_TOPIC,
         entity_id=None,
         project_id=project_id,
         section=section,
@@ -513,8 +514,8 @@ async def reorder_docs(
     await _record(
         session,
         principal,
-        "doc.reordered",
-        entity_type="doc_topic",
+        Verb.DOC_REORDERED,
+        entity_type=EntityType.DOC_TOPIC,
         entity_id=topic.id,
         project_id=topic.project_id,
         name=topic.name,
@@ -543,8 +544,8 @@ async def create_doc(
     await _record(
         session,
         principal,
-        "doc.created",
-        entity_type="doc",
+        Verb.DOC_CREATED,
+        entity_type=EntityType.DOC,
         entity_id=doc.id,
         project_id=doc.project_id,
         title=doc.title,
@@ -586,8 +587,8 @@ async def update_doc(
     await _record(
         session,
         principal,
-        "doc.moved" if updated.topic_id != origin else "doc.updated",
-        entity_type="doc",
+        Verb.DOC_MOVED if updated.topic_id != origin else Verb.DOC_UPDATED,
+        entity_type=EntityType.DOC,
         entity_id=updated.id,
         project_id=updated.project_id,
         title=updated.title,
@@ -608,8 +609,8 @@ async def delete_doc(
     await _record(
         session,
         principal,
-        "doc.deleted",
-        entity_type="doc",
+        Verb.DOC_DELETED,
+        entity_type=EntityType.DOC,
         entity_id=None,
         project_id=project_id,
         title=title,

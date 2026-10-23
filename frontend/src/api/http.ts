@@ -2,9 +2,10 @@
  * The one way this client talks to the server.
  *
  * Every failure the server produces arrives in one envelope:
- *   { "error": { "code": "...", "message": "...", "details": {} } }
+ *   { "error": { "code": "...", "reason": "..." | null, "message": "...", "details": {} } }
  * so `request` turns any non-2xx response into an `ApiError` carrying that
- * code. Callers branch on `error.code`, never on a status number.
+ * code. Callers branch on `error.code`, never on a status number — and, to tell
+ * one kind of conflict from another, on `error.reason`, never on the message.
  */
 
 import { withBase } from './basePath'
@@ -19,6 +20,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly details: Record<string, unknown> = {},
+    readonly reason: string | null = null,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -31,7 +33,12 @@ export class ApiError extends Error {
 }
 
 interface ErrorEnvelope {
-  error?: { code?: string; message?: string; details?: Record<string, unknown> }
+  error?: {
+    code?: string
+    reason?: string | null
+    message?: string
+    details?: Record<string, unknown>
+  }
 }
 
 /**
@@ -75,6 +82,7 @@ export async function request<T>(path: string, init: RequestOptions = {}): Promi
       envelope.error?.code ?? 'unknown_error',
       envelope.error?.message ?? 'Something went wrong.',
       envelope.error?.details ?? {},
+      envelope.error?.reason ?? null,
     )
   }
 

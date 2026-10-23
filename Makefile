@@ -230,11 +230,16 @@ android-install: ## Build the Android debug APK and install it on the phone adb 
 # The Android client is generated from android/api/openapi.json, a committed
 # copy of the API's OpenAPI document. Refresh it after changing anything a
 # route takes or returns; CI fails the backend job until you do.
-openapi: ## Refresh android/api/openapi.json from the backend
+# The web app's types are generated from the same document
+# (frontend/src/api/schema.d.ts) and checked against what the client expects in
+# frontend/src/api/schema.test.ts.
+openapi: ## Refresh android/api/openapi.json and the web app's generated types
 	cd $(BACKEND) && uv run python -m scripts.openapi
+	npm --prefix $(FRONTEND) run api:types
 
-openapi-check: ## Fail if android/api/openapi.json is behind the backend
+openapi-check: ## Fail if android/api/openapi.json or the web app's types are behind the API
 	cd $(BACKEND) && uv run python -m scripts.openapi --check
+	npm --prefix $(FRONTEND) run api:types:check
 
 clean: ## Remove caches and build output
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

@@ -20,19 +20,10 @@ from __future__ import annotations
 
 import base64
 import secrets
-from datetime import timedelta
 
 from app.auth.tokens import hash_token
 
 INVITE_PREFIX = "cylinv_"
-INVITE_TTL = timedelta(days=7)
-"""How long an invitation stays good for.
-
-Long enough to survive a weekend and a forwarded email, short enough that an
-address that has stopped being read does not leave a way in open for months.
-Re-inviting mints a fresh one and invalidates the old.
-"""
-
 _INVITE_BYTES = 32
 
 

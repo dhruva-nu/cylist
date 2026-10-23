@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.palette import colour_for
 from app.models.permission import ProjectPermission
 from app.models.person import KIND_ORDER, Person
@@ -221,6 +221,7 @@ async def create(session: AsyncSession, project: Project, data: RoleCreate) -> P
         raise ConflictError(
             f"{key} already has a role called {data.name}.",
             details={"name": data.name},
+            reason=Reason.DUPLICATE_NAME,
         ) from exc
 
     await _copy_baseline(session, project, role)
@@ -267,6 +268,7 @@ async def update(session: AsyncSession, role: ProjectRole, data: RoleUpdate) -> 
             f"The {role.name} role cannot be renamed — every explanation of who "
             "may do what on a project names it.",
             details={"role_id": str(role.id)},
+            reason=Reason.ROLE_PROTECTED,
         )
 
     for field, value in fields.items():
@@ -278,6 +280,7 @@ async def update(session: AsyncSession, role: ProjectRole, data: RoleUpdate) -> 
         raise ConflictError(
             f"That project already has a role called {fields.get('name')}.",
             details={"name": fields.get("name")},
+            reason=Reason.DUPLICATE_NAME,
         ) from exc
     return role
 
@@ -294,6 +297,7 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
             f"The {role.name} role cannot be deleted — it is what makes anyone "
             "able to manage the others.",
             details={"role_id": str(role.id)},
+            reason=Reason.ROLE_PROTECTED,
         )
 
     wearing = await holders(session, project, role)
@@ -303,6 +307,7 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
             f"{'holds' if len(wearing) == 1 else 'hold'} the {role.name} role. "
             "Move them off it first.",
             details={"holder_person_ids": [str(person.id) for person in wearing]},
+            reason=Reason.ROLE_IN_USE,
         )
 
     # Its grants, column rules and clearance go with it, by the cascade on
@@ -382,6 +387,7 @@ async def ensure_an_admin_remains(
         "and a project cannot be left with nobody able to manage it. Give the "
         f"{ADMIN_ROLE_NAME} role to somebody else first.",
         details={"admin_person_ids": [str(person_id) for person_id in sorted(holder_ids)]},
+        reason=Reason.LAST_ADMIN,
     )
 
 

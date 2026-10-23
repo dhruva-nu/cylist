@@ -323,6 +323,7 @@ class TestKeepingAnAdmin:
         )
 
         assert response.status_code == 422
+        assert response.json()["error"]["reason"] == "last_admin"
         assert OWNER_NAME in response.json()["error"]["message"]
 
     async def test_a_second_admin_frees_the_first(self, signed_in: AsyncClient) -> None:

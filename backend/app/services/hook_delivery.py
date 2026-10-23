@@ -69,9 +69,10 @@ import httpx
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.clock import now
+from app.core.clock import epoch, now
 from app.core.crypto import VaultKeys, cipher_for
 from app.db import Database
+from app.models.activity import Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.services import hooks, retention
 
@@ -154,7 +155,7 @@ SIGNATURE_HEADER = "X-Cylist-Signature"
 SIGNATURE_TOLERANCE = timedelta(minutes=5)
 
 TEST_EVENT = "hook.test"
-FIRED_EVENT = "hook.fired"
+FIRED_EVENT = Verb.HOOK_FIRED
 
 
 # --- Signing ---------------------------------------------------------------
@@ -178,7 +179,7 @@ def verify(secret: str, header: str, body: bytes, *, at: float | None = None) ->
         timestamp = int(parts["t"])
     except (KeyError, ValueError):
         return False
-    current = time.time() if at is None else at
+    current = epoch() if at is None else at
     if abs(current - timestamp) > SIGNATURE_TOLERANCE.total_seconds():
         return False
     expected = sign(secret, timestamp, body).split("v1=", 1)[1]

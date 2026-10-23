@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
 from app.db import publish_into
+from app.models.activity import EntityType, Verb
 from app.models.agent_session import (
     AgentPrompt,
     AgentPromptKind,
@@ -100,8 +101,8 @@ async def expire_if_due(
             await activity.record(
                 session,
                 agent_sessions.acting_principal(row),
-                "agent_session.unanswered",
-                entity_type="task",
+                Verb.AGENT_SESSION_UNANSWERED,
+                entity_type=EntityType.TASK,
                 entity_id=task.id,
                 project_id=task.project_id,
                 payload={"kind": prompt.kind.value, "text": prompt.text},

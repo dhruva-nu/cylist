@@ -12,7 +12,8 @@ import { BoardAnnounce } from '../CardPromptPopover'
 import { useCardActions } from './cardActions'
 import { ChevronIcon, OutIcon, TickIcon } from './icons'
 import { keepFromCard, stopAtCard } from './keepFromCard'
-import styles from './TaskCard.module.css'
+import styles from './CardSlotLists.module.css'
+import shared from './TaskCard.module.css'
 
 /**
  * Every stage on one line, where the bar was a picture of them: done, here,
@@ -247,7 +248,7 @@ export function PrList({ refs }: { refs: PrRef[] }) {
             <PrIcon state={ref.state} size={12} />
             {repo ? <span className={styles.prRepo}>{repo}</span> : null}
             <span className={styles.prNumber}>{prRefLabel(ref.url)}</span>
-            <span className={`${styles.prState} ${styles[`pr_${ref.state}`]}`}>{ref.state}</span>
+            <span className={`${shared.prState} ${shared[`pr_${ref.state}`]}`}>{ref.state}</span>
           </>
         )
         return (

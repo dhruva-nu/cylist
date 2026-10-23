@@ -1,0 +1,156 @@
+/* The priority, as its glyph and its name in figures. No box at any level:
+   colour on the two that ask for something, grey on the one that does not. */
+
+.prio {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  align-items: center;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+}
+
+.priority_p0 {
+  color: var(--priority-p0);
+}
+
+.priority_p1 {
+  color: var(--priority-p1);
+}
+
+.priority_p2 {
+  color: var(--ink-3);
+}
+
+.priority_p3 {
+  color: var(--priority-p3);
+}
+
+/* The owner's disc, made a control: the select sits over it and does the
+   clicking, so the disc itself stays the only thing drawn. */
+
+.assigneePicker {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.assigneeSelect {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* A due date, drawn as near or as far as it is — five steps, and the same
+   height in all five so that a column of cards keeps one edge down its side.
+   The mark never changes size and never takes a ground; only its ink and its
+   weight move. */
+
+.due {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+/* Past its date: the red p0 takes, because the two are meant to read as one
+   alarm rather than two. */
+
+.dueLate {
+  color: var(--blocked);
+  font-weight: var(--weight-semibold);
+}
+
+.dueToday,
+.dueTomorrow {
+  color: var(--hold);
+  font-weight: var(--weight-semibold);
+}
+
+/* From here out the mark is only reporting, so it stops using words and shows
+   the date. Two steps of ink rather than one: inside the week is something you
+   are working towards, past it is something you have merely been told. */
+
+.dueSoon {
+  color: var(--ink-2);
+}
+
+.dueLater {
+  color: var(--ink-3);
+}
+
+/* The words in the near states are set in the UI face; the dates in the far
+   ones are figures, and are set as figures. */
+
+.dueSoon .dueText,
+.dueLater .dueText {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+}
+
+/* The card's other facts: icon and value, one line, wrapping if it must. */
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding-top: 2px;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.factMono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* What an agent on the card is doing, in the stages' slot: words behind a 2px
+   rule in the border's colour, and no fill. One line, cut to fit — what a
+   working agent is doing changes with every tool call, and a line that
+   wrapped to two whenever the command was long would make the column jump. */
+
+.agentLine {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 1px 0 1px 9px;
+  border-left: 2px solid var(--agent-ring, var(--agent));
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: 1.35;
+}
+
+/* The detail gives way before the headline does: "You: 409 Conflict" matters
+   more than the tool call after it. */
+
+.agentDetail {
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentCount {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}

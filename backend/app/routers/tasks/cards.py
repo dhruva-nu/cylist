@@ -20,6 +20,7 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
@@ -153,7 +154,7 @@ async def create_task(
     is the writer's until they hand it on, which `PATCH /tasks/{ref}` does.
     """
     task = await tasks.create(session, project, body, creator_id=principal.person_id)
-    await record_on_card(session, principal, "task.created", task, {"title": task.title})
+    await record_on_card(session, principal, Verb.TASK_CREATED, task, {"title": task.title})
     return await task_detail(session, task)
 
 
@@ -237,7 +238,7 @@ async def update_task(
     which is the only path that can insist on a reason.
     """
     updated, changes = await tasks.update(session, task, body)
-    await record_on_card(session, principal, "task.updated", updated, {"changes": changes})
+    await record_on_card(session, principal, Verb.TASK_UPDATED, updated, {"changes": changes})
     return await task_detail(session, updated)
 
 
@@ -259,8 +260,8 @@ async def delete_task(
     await activity.record(
         session,
         principal,
-        "task.deleted",
-        entity_type="task",
+        Verb.TASK_DELETED,
+        entity_type=EntityType.TASK,
         project_id=project_id,
         payload={"reference": reference},
     )
@@ -305,7 +306,7 @@ async def move_task(
     await record_on_card(
         session,
         principal,
-        "task.moved",
+        Verb.TASK_MOVED,
         moved,
         {
             "column_id": str(moved.column_id),
@@ -397,7 +398,7 @@ async def change_status(
     await record_on_card(
         session,
         principal,
-        "task.status_changed",
+        Verb.TASK_STATUS_CHANGED,
         updated,
         {**entry.meta, "changes": [status_change]},
     )
@@ -467,7 +468,7 @@ async def create_subtask(
     await record_on_card(
         session,
         principal,
-        "task.subtask_created",
+        Verb.TASK_SUBTASK_CREATED,
         subtask,
         {"parent": task.reference, "title": subtask.title},
     )

@@ -31,6 +31,7 @@ from app.core.multipart import multipart_body
 from app.core.security_headers import DOWNLOAD_HEADERS
 from app.core.sensitivity import DEFAULT_LEVEL
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
 from app.schemas.common import Acknowledged
@@ -196,8 +197,8 @@ async def create_folder(
     await activity.record(
         session,
         principal,
-        "folder.created",
-        entity_type="folder",
+        Verb.FOLDER_CREATED,
+        entity_type=EntityType.FOLDER,
         entity_id=folder.id,
         project_id=project.id,
         payload={
@@ -299,8 +300,8 @@ async def update_folder(
     await activity.record(
         session,
         principal,
-        "folder.updated",
-        entity_type="folder",
+        Verb.FOLDER_UPDATED,
+        entity_type=EntityType.FOLDER,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
@@ -330,8 +331,8 @@ async def delete_folder(
     await activity.record(
         session,
         principal,
-        "folder.deleted",
-        entity_type="folder",
+        Verb.FOLDER_DELETED,
+        entity_type=EntityType.FOLDER,
         project_id=project_id,
         payload={"name": name},
     )
@@ -395,8 +396,8 @@ async def upload_file(
     await activity.record(
         session,
         principal,
-        "file.uploaded",
-        entity_type="item",
+        Verb.FILE_UPLOADED,
+        entity_type=EntityType.ITEM,
         entity_id=item.id,
         project_id=folder.project_id,
         payload={"name": item.name, "size": item.size, "sensitivity": item.sensitivity},
@@ -427,8 +428,8 @@ async def add_link(
     await activity.record(
         session,
         principal,
-        "link.added",
-        entity_type="item",
+        Verb.LINK_ADDED,
+        entity_type=EntityType.ITEM,
         entity_id=item.id,
         project_id=folder.project_id,
         payload={"name": item.name, "source": item.source.value},
@@ -485,8 +486,8 @@ async def update_item(
     await activity.record(
         session,
         principal,
-        "item.updated",
-        entity_type="item",
+        Verb.ITEM_UPDATED,
+        entity_type=EntityType.ITEM,
         entity_id=updated.id,
         project_id=await files.project_id_of_item(session, updated),
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
@@ -511,8 +512,8 @@ async def delete_item(
     await activity.record(
         session,
         principal,
-        "item.deleted",
-        entity_type="item",
+        Verb.ITEM_DELETED,
+        entity_type=EntityType.ITEM,
         project_id=project_id,
         payload={"name": name},
     )

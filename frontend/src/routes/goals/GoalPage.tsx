@@ -33,7 +33,6 @@ import {
   ErrorBanner,
   ErrorNotice,
   Eyebrow,
-  LiveRegion,
   useAnnouncer,
 } from '../../components/ui'
 import { EVERYONE } from '../board/boardPeople'
@@ -57,7 +56,7 @@ export function GoalPage() {
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
   const navigate = useNavigate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
   const [editing, setEditing] = useState(false)
   const [linking, setLinking] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
@@ -208,8 +207,6 @@ export function GoalPage() {
           </>
         }
       />
-
-      <LiveRegion message={message} />
       <ErrorNotice error={unlink.error} />
       {/* The button holds itself shut over open cards, so this is for what the
           page could not know: a card finished in another tab, or a role the
