@@ -6,10 +6,9 @@ too. Each is written here once, change and history line together, so the two
 paths cannot drift: a to-do ticked is the card changed exactly as the board
 would change it, and recorded the same way.
 
-None of these checks who may: the caller does, with
-:func:`app.routers.tasks.dependencies.may_write_card` or
-:func:`~app.routers.tasks.dependencies.may_stage_card`, which are the rules
-the board's guards apply.
+None of these checks who may: the caller does — the route with its guard, and
+the day's plan with the same rules (``may_write_card``, ``may_stage_card``) the
+board's guards apply.
 """
 
 from __future__ import annotations
@@ -17,10 +16,11 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.models.activity import Verb
 from app.models.task import Task, TaskChecklistItem
-from app.routers.tasks.recording import record_on_card
-from app.schemas.tasks import ChecklistItemUpdate
 from app.services import tasks
+from app.services.commands.tasks import ChecklistItemUpdate
+from app.services.tasks.recording import record_on_card
 
 
 async def finish(
@@ -35,7 +35,7 @@ async def finish(
         await record_on_card(
             session,
             principal,
-            "task.finished",
+            Verb.TASK_FINISHED,
             updated,
             {
                 "parent": updated.parent.reference if updated.parent else None,
@@ -58,7 +58,7 @@ async def update_checklist_item(
     await record_on_card(
         session,
         principal,
-        "task.checklist_updated",
+        Verb.TASK_CHECKLIST_UPDATED,
         task,
         {"title": updated.title, "state": updated.state.value},
     )
@@ -71,7 +71,7 @@ async def move_stage(session: AsyncSession, principal: Principal, task: Task, in
     await record_on_card(
         session,
         principal,
-        "task.sub_status_moved",
+        Verb.TASK_SUB_STATUS_MOVED,
         updated,
         {
             "sub_status_index": updated.sub_status_index,

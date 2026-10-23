@@ -34,17 +34,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.config import AGENT_SOCKET_IDLE_AFTER, AGENT_SOCKET_STAMP_EVERY, Settings
+from app.config import Settings, settings_of
 from app.core.clock import now
 from app.core.errors import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.logging import bind_request_id, new_request_id, reset_request_id
 from app.db import Database
 from app.models.agent_session import AgentPromptStatus, AgentSessionReason, SessionKey
-from app.models.task import Task
 from app.realtime import auth, protocol
 from app.realtime.bus import Bus
+from app.realtime.events import AgentConnected
 from app.realtime.hub import AgentLink, Hub, Watcher
-from app.services import agent_feed, agent_prompts, agent_reports, agent_sessions, projects, tasks
+from app.services import agent_gateway, agent_reports, agent_sessions, projects
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ async def board_socket(websocket: WebSocket, project_ref: str) -> None:
     one of its cards grows. Reads nothing: a client with something to say has
     the HTTP API for it.
     """
-    settings: Settings = websocket.app.state.settings
+    settings = settings_of(websocket)
     hub: Hub = websocket.app.state.hub
     database: Database = websocket.app.state.database
 
@@ -179,7 +179,7 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
     could not do, and the reason the board no longer has to guess from a
     clock.
     """
-    settings: Settings = websocket.app.state.settings
+    settings = settings_of(websocket)
     hub: Hub = websocket.app.state.hub
     bus: Bus = websocket.app.state.bus
     database: Database = websocket.app.state.database
@@ -207,19 +207,16 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
         hub.register_agent(link)
         # Any other process holding an older socket for this session lets go.
         bus.publish(
-            {
-                "type": protocol.AGENT_CONNECTED,
-                "person_id": key.person_id,
-                "client_session_id": key.client_session_id,
-                "link_id": link.id,
-            }
+            AgentConnected(
+                person_id=key.person_id, client_session_id=key.client_session_id, link_id=link.id
+            )
         )
         # Before `ready`, so that by the time the agent hears it, this socket
         # already holds the session and vouches for it to every process.
-        await _stamp(database, link)
+        await _stamp(database, link, settings)
         await websocket.send_json(protocol.ready(client_session_id, principal.label))
 
-        code, cause = await _serve_agent(websocket, database, principal, link)
+        code, cause = await _serve_agent(websocket, database, principal, link, settings)
     except WebSocketDisconnect as exc:
         code = exc.code
     except asyncio.CancelledError:
@@ -252,6 +249,7 @@ async def _serve_agent(
     database: Database,
     principal: Principal,
     link: AgentLink,
+    settings: Settings,
 ) -> tuple[int, str]:
     """Read reports until the session ends. Returns its close code and cause.
 
@@ -265,7 +263,7 @@ async def _serve_agent(
     has nothing to say until it hears it.
     """
     loop = asyncio.get_running_loop()
-    idle = AGENT_SOCKET_IDLE_AFTER.total_seconds()
+    idle = settings.agent_socket_idle_after.total_seconds()
     incoming: asyncio.Future[str] = asyncio.ensure_future(websocket.receive_text())
     outgoing: asyncio.Future[dict[str, object]] = asyncio.ensure_future(link.outbox.get())
     try:
@@ -291,7 +289,7 @@ async def _serve_agent(
                 ending = await _handle_frame(websocket, database, principal, link.key, raw)
                 if ending is not None:
                     return ending
-                await _stamp(database, link)
+                await _stamp(database, link, settings)
     except TimeoutError:
         await websocket.close(code=auth.IDLE)
         return auth.IDLE, "idle"
@@ -300,16 +298,16 @@ async def _serve_agent(
         outgoing.cancel()
 
 
-async def _stamp(database: Database, link: AgentLink) -> None:
+async def _stamp(database: Database, link: AgentLink, settings: Settings) -> None:
     """Vouch for this socket's session, if it has not lately.
 
     On connect, and then on the first frame each
-    :data:`~app.config.AGENT_SOCKET_STAMP_EVERY`. A frame that ends the
+    :attr:`~app.config.Settings.agent_socket_stamp_seconds`. A frame that ends the
     socket stamps nothing, since nothing is left to vouch for.
     """
     loop_now = asyncio.get_running_loop().time()
     due = link.stamped_at is None or (
-        loop_now - link.stamped_at >= AGENT_SOCKET_STAMP_EVERY.total_seconds()
+        loop_now - link.stamped_at >= settings.agent_socket_stamp_every.total_seconds()
     )
     if not due:
         return
@@ -373,23 +371,6 @@ async def _handle_frame(
     return None
 
 
-async def _reachable_task(session: AsyncSession, principal: Principal, reference: str) -> Task:
-    """The card a frame names, if the agent's owner is on its project.
-
-    An agent token sees what the person who minted it sees, so a card on a
-    project they are not a member of is, to the socket, a card that does not
-    exist.
-
-    Raises:
-        NotFoundError: if nothing matches, or the card is out of reach.
-    """
-    task = await tasks.resolve(session, reference)
-    await projects.require_reachable(
-        session, task.project_id, principal, NotFoundError(f"No task matching {reference!r}.")
-    )
-    return task
-
-
 async def _open_prompt(
     database: Database,
     principal: Principal,
@@ -403,17 +384,17 @@ async def _open_prompt(
     """
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
+            return await agent_gateway.open_permission(
+                session,
+                principal,
+                key,
+                message.task,
+                message.prompt.id,
+                message.prompt.text,
+                message.prompt.tool,
+            )
         except NotFoundError:
             return protocol.answer(message.prompt.id, AgentPromptStatus.WITHDRAWN)
-        return await agent_prompts.open_permission(
-            session,
-            task,
-            key,
-            message.prompt.id,
-            message.prompt.text,
-            message.prompt.tool,
-        )
 
 
 async def _withdraw_prompt(
@@ -425,13 +406,8 @@ async def _withdraw_prompt(
     """The daemon stopped waiting. Unacknowledged: there is nothing to say back."""
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
-            await agent_prompts.withdraw(
-                session,
-                task,
-                message.prompt_id,
-                message.reason,
-                key=key,
+            await agent_gateway.withdraw_permission(
+                session, principal, key, message.task, message.prompt_id, message.reason
             )
         except NotFoundError:
             # A prompt this server never kept, a card since deleted, or
@@ -453,12 +429,11 @@ async def _record_report(
     """
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
+            applied = await agent_gateway.report_state(
+                session, principal, key, message.task, message.report
+            )
         except NotFoundError as exc:
             return Refusal(auth.NOT_FOUND, "not_found", str(exc))
-        applied = await agent_reports.report(
-            session, principal, task, key.client_session_id, message.report
-        )
     await websocket.send_json(protocol.ack(applied))
     return None
 
@@ -472,10 +447,9 @@ async def _record_feed(
     """Keep the lines a session sent. A card that cannot be found keeps none."""
     async with database.session() as session:
         try:
-            task = await _reachable_task(session, principal, message.task)
+            await agent_gateway.append_feed(session, principal, key, message.task, message.entries)
         except NotFoundError:
             return
-        await agent_feed.append(session, task, key, message.entries)
 
 
 async def _end_row(

@@ -35,14 +35,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.palette import colour_for
 from app.models.permission import ProjectPermission
 from app.models.person import KIND_ORDER, Person
 from app.models.project import Project, ProjectMember
 from app.models.role import ADMIN_ROLE_NAME, ProjectRole
-from app.schemas.roles import RoleCreate, RoleUpdate
 from app.services import people
+from app.services.commands.roles import RoleCreate, RoleUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 logger = logging.getLogger(__name__)
@@ -224,6 +224,7 @@ async def create(session: AsyncSession, project: Project, data: RoleCreate) -> P
         raise ConflictError(
             f"{key} already has a role called {data.name}.",
             details={"name": data.name},
+            reason=Reason.DUPLICATE_NAME,
         ) from exc
 
     await _copy_baseline(session, project, role)
@@ -270,6 +271,7 @@ async def update(session: AsyncSession, role: ProjectRole, data: RoleUpdate) -> 
             f"The {role.name} role cannot be renamed — every explanation of who "
             "may do what on a project names it.",
             details={"role_id": str(role.id)},
+            reason=Reason.ROLE_PROTECTED,
         )
 
     for field, value in fields.items():
@@ -281,6 +283,7 @@ async def update(session: AsyncSession, role: ProjectRole, data: RoleUpdate) -> 
         raise ConflictError(
             f"That project already has a role called {fields.get('name')}.",
             details={"name": fields.get("name")},
+            reason=Reason.DUPLICATE_NAME,
         ) from exc
     return role
 
@@ -297,6 +300,7 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
             f"The {role.name} role cannot be deleted — it is what makes anyone "
             "able to manage the others.",
             details={"role_id": str(role.id)},
+            reason=Reason.ROLE_PROTECTED,
         )
 
     wearing = await holders(session, project, role)
@@ -310,6 +314,7 @@ async def delete(session: AsyncSession, project: Project, role: ProjectRole) -> 
                 f"{len(wearing)} still hold role {role.id}: "
                 f"{', '.join(str(person.id) for person in wearing)}."
             ),
+            reason=Reason.ROLE_IN_USE,
         )
 
     # Its grants, column rules and clearance go with it, by the cascade on
@@ -394,6 +399,7 @@ async def ensure_an_admin_remains(
             f"{', '.join(str(person_id) for person_id in sorted(holder_ids))} would be the "
             f"last {ADMIN_ROLE_NAME.lower()} on {project.key}."
         ),
+        reason=Reason.LAST_ADMIN,
     )
 
 

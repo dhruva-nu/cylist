@@ -19,6 +19,7 @@ import { api } from '../api/client'
 import { queryKeys, useSetup } from '../api/queries'
 import { Button, ErrorNotice } from '../components/ui'
 import styles from './SignIn.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 export function SignIn() {
   const queryClient = useQueryClient()
@@ -34,6 +35,7 @@ export function SignIn() {
   // The refetch of who this is happens inside the request, so the button
   // stays busy until the gate swaps this screen for the app.
   const signIn = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async () => {
       await (bootstrapping ? api.bootstrapSignIn(password) : api.signIn(email, password))
       await queryClient.invalidateQueries({ queryKey: queryKeys.identity })

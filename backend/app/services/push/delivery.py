@@ -36,7 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import Database
 from app.models.api_token import ApiToken
 from app.models.person import Person
-from app.models.task import Task
+from app.models.task import Task, card_loads
+from app.realtime.events import PushQueued
 from app.services import devices
 from app.services.push.fcm import PushSender, SendOutcome, redact
 from app.services.push.messages import CardContext, SessionSnapshot, message_for
@@ -77,7 +78,7 @@ async def recipients_of(session: AsyncSession, snapshot: SessionSnapshot, task: 
 
 async def outgoing_for(session: AsyncSession, snapshot: SessionSnapshot) -> list[Outgoing]:
     """Every message one snapshot becomes: one per device of each recipient."""
-    task = await session.get(Task, snapshot.task_id)
+    task = await session.get(Task, snapshot.task_id, options=card_loads())
     if task is None:
         return []  # the card was deleted since; nothing to point a phone at
     card = CardContext(reference=task.reference, title=task.title, project_key=task.project.key)
@@ -137,9 +138,9 @@ class Pusher:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[SessionSnapshot] = asyncio.Queue(maxsize=QUEUE_LIMIT)
 
-    def notify(self, event: dict[str, Any]) -> None:
+    def notify(self, event: PushQueued) -> None:
         """Take one committed outbox event. Never blocks and never raises."""
-        snapshot = event.get("snapshot")
+        snapshot = event.snapshot
         if not isinstance(snapshot, SessionSnapshot):  # pragma: no cover - defensive
             return
         if self._queue.full():

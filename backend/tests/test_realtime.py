@@ -16,6 +16,8 @@ from uuid import uuid4
 import pytest
 from httpx import AsyncClient
 
+from app.realtime import protocol
+from app.realtime.events import BoardChanged
 from app.realtime.hub import Watcher
 from tests import ws
 from tests.conftest import put_members
@@ -128,8 +130,9 @@ class TestBeingTold:
         assert nudge["type"] == "board.changed"
 
     async def test_the_nudge_carries_no_board_data(self, signed_in: AsyncClient) -> None:
-        """It is a doorbell. Anything more would be a second way to build a
-        card, and the second one drifts — see `app.realtime.hub`."""
+        """It is a doorbell. It names what changed and says nothing of what it
+        changed to: anything more would be a second way to build a card, and
+        the second one drifts — see `app.realtime.hub`."""
         person = await make_project(signed_in)
 
         async with ws.connect(signed_in.app, BOARD, cookies=cookie_of(signed_in)) as socket:
@@ -137,7 +140,10 @@ class TestBeingTold:
             await make_task(signed_in, person)
             nudge = await socket.receive_json()
 
-        assert set(nudge) == {"type", "at"}
+        assert set(nudge) == {"type", "at", "changed"}
+        assert nudge["changed"]
+        assert {ref["entity_type"] for ref in nudge["changed"]} == {"task"}
+        assert all(set(ref) == {"entity_type", "entity_id"} for ref in nudge["changed"])
 
     async def test_a_change_to_another_project_is_not_this_board_s_business(
         self, signed_in: AsyncClient
@@ -313,3 +319,49 @@ class TestTheHubsDoorbells:
                 break
         assert seen.count("agent.feed") == 16
         assert seen[-1] == "board.changed"
+
+
+class TestWhatTheDoorbellSaysChanged:
+    """A board.changed names the things that changed, and a burst joins its hints."""
+
+    def test_an_event_that_names_nothing_is_a_doorbell_for_anything(self) -> None:
+        assert protocol.board_changed(protocol.changed_ref(BoardChanged()))["changed"] is None
+
+    def test_an_event_that_names_a_thing_says_so(self) -> None:
+        ref = protocol.changed_ref(BoardChanged(entity_type="goal", entity_id=uuid4()))
+
+        assert ref is not None
+        assert ref[0]["entity_type"] == "goal"
+
+    async def test_a_burst_is_one_nudge_naming_all_of_it(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+        task = [{"entity_type": "task", "entity_id": "a"}]
+        goal = [{"entity_type": "goal", "entity_id": "b"}]
+
+        watcher.offer("board.changed", protocol.board_changed(task))
+        watcher.offer("board.changed", protocol.board_changed(goal))
+        watcher.offer("board.changed", protocol.board_changed(task))
+        nudge = await watcher.next()
+
+        assert nudge["changed"] == [*task, *goal]
+
+    async def test_one_that_says_anything_makes_the_whole_burst_say_it(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        watcher.offer(
+            "board.changed", protocol.board_changed([{"entity_type": "task", "entity_id": "a"}])
+        )
+        watcher.offer("board.changed", protocol.board_changed(None))
+
+        assert (await watcher.next())["changed"] is None
+
+    async def test_a_burst_past_the_cap_stops_naming_things(self) -> None:
+        watcher = Watcher(project_id=uuid4())
+
+        for n in range(protocol.CHANGED_MAX + 1):
+            watcher.offer(
+                "board.changed",
+                protocol.board_changed([{"entity_type": "task", "entity_id": str(n)}]),
+            )
+
+        assert (await watcher.next())["changed"] is None

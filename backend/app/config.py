@@ -19,6 +19,7 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+from starlette.requests import HTTPConnection
 
 from app.core.crypto import VaultKeys
 
@@ -38,72 +39,6 @@ LogFormat = Literal["text", "json"]
 One object per line, so ``jq`` and any log shipper can read the file without a
 multi-line grammar for tracebacks.
 """
-
-AGENT_SOCKET_IDLE_AFTER = timedelta(minutes=5)
-"""How long an agent's socket may say nothing before the server closes it.
-
-Measured on *application* messages. Protocol pongs are answered below the
-ASGI layer and never reach the handler, which is what makes this mean "the
-agent has nothing to say" rather than "the TCP connection is quiet".
-
-The client's side of the bargain: it keeps the socket warm for as long as the
-session is open, working or waiting alike — a single tool call can run for
-twenty minutes without a hook event, and a person can leave a prompt
-unanswered for an afternoon. So this window closing means one thing only:
-*the daemon has gone*. It is not how the board learns that a human has
-wandered off, and it never was a good way to.
-
-It used to be read as both. The client stopped its keepalive while waiting,
-so a session waiting on its human went quiet, was closed here at five
-minutes, and had its card put out while the conversation was still on screen
-— nine cards in ten, on a machine running ten sessions. The client now ends a
-session when the ``claude`` process it belongs to exits (CYLIST-74), which is
-the question actually being asked, and says ``bye`` on its way out. Nothing
-here changed; it simply stopped being asked to guess.
-
-Comfortably more than the client's sixty-second keepalive, so five missed in
-a row is the threshold rather than one unlucky one.
-"""
-
-AGENT_QUIET_AFTER = timedelta(minutes=10)
-"""How long an *unwitnessed* session may go quiet before it is ended.
-
-For the clients that report over HTTP and hold no socket. A socket closing
-says the session is over; a PUT that stops coming says nothing at all, so
-something has to go looking. A session holding a socket is exempt however
-long it has been silent — it is witnessed, which is better evidence than a
-timestamp.
-
-This is what the computed staleness used to do, moved from the read to a
-write: the board now reads a fact rather than a guess about the clock.
-
-It is also how a session whose socket's process died is ended, now that no
-sweep on startup does it (CYLIST-133): its socket stops vouching for it, and
-once it has been quiet this long it is unwitnessed and quiet like any other.
-A daemon that is still alive reconnects within seconds and is never asked.
-"""
-
-AGENT_SOCKET_STAMP_EVERY = timedelta(seconds=60)
-"""How often a socket writes down that it still holds its session.
-
-On connect, and then on the first frame after this has passed — the
-client's keepalive is sixty seconds, so a live socket stamps about once a
-minute. One indexed UPDATE per socket per minute is the price of any
-process being able to tell whether a session is witnessed.
-"""
-
-AGENT_SOCKET_WITNESSES_FOR = AGENT_SOCKET_IDLE_AFTER + AGENT_SOCKET_STAMP_EVERY
-"""How long a stamp vouches for a session.
-
-A live socket cannot go quieter than the idle window without being closed,
-and its latest stamp is never more than one stamp interval older than its
-latest frame; so a socket that is still open has always stamped within the
-two together. A stamp older than that
-belongs to a socket that is gone, whichever process held it.
-"""
-
-REAP_EVERY = timedelta(seconds=60)
-"""How often to go looking. Cheap — one indexed query over the open rows."""
 
 SESSION_COOKIE = "cylist_session"
 """The session cookie's name in production. Every other deployment on the host
@@ -212,6 +147,76 @@ class Settings(BaseSettings):
     Version 1 may be given here too, in place of :attr:`vault_key` rather than
     beside it with a different value.
     """
+
+    # --- Timings ----------------------------------------------------------
+    # The clocks the background loops and sockets run on. Seconds, like the
+    # pool's, so one environment variable means the same thing everywhere; the
+    # `timedelta` each is read as is a property below. Protocol constants stay
+    # beside the code that depends on them (a permission's wait, the poll window
+    # a prompt is abandoned after) because they are bargains with a client's own
+    # timeouts, not tuning.
+    agent_socket_idle_seconds: float = Field(default=300.0, gt=0)
+    """How long an agent's socket may say nothing before the server closes it.
+
+    Measured on *application* messages. Protocol pongs are answered below the
+    ASGI layer and never reach the handler, which is what makes this mean "the
+    agent has nothing to say" rather than "the TCP connection is quiet".
+
+    The client keeps the socket warm for as long as the session is open,
+    working or waiting alike — a single tool call can run for twenty minutes
+    without a hook event, and a person can leave a prompt unanswered for an
+    afternoon. So this window closing means one thing only: *the daemon has
+    gone*. It is not how the board learns that a human has wandered off, and
+    it never was a good way to: it used to be read as both, and a session
+    waiting on its human was closed at five minutes and had its card put out
+    while the conversation was still on screen (CYLIST-74). Comfortably more
+    than the client's sixty-second keepalive, so five missed in a row is the
+    threshold rather than one unlucky one.
+    """
+
+    agent_socket_stamp_seconds: float = Field(default=60.0, gt=0)
+    """How often a socket writes down that it still holds its session.
+
+    On connect, and then on the first frame after this has passed — the
+    client's keepalive is sixty seconds, so a live socket stamps about once a
+    minute. One indexed UPDATE per socket per minute is the price of any
+    process being able to tell whether a session is witnessed.
+    """
+
+    agent_quiet_seconds: float = Field(default=600.0, gt=0)
+    """How long an *unwitnessed* session may go quiet before it is ended.
+
+    For the clients that report over HTTP and hold no socket. A socket closing
+    says the session is over; a PUT that stops coming says nothing at all, so
+    something has to go looking. A session holding a socket is exempt however
+    long it has been silent — it is witnessed, which is better evidence than a
+    timestamp. It is also how a session whose socket's process died is ended
+    (CYLIST-133): its socket stops vouching for it, and once it has been quiet
+    this long it is unwitnessed and quiet like any other.
+    """
+
+    agent_reap_every_seconds: float = Field(default=60.0, gt=0)
+    """How often to go looking for sessions to end. Cheap — one indexed query
+    over the open rows."""
+
+    invite_ttl_days: int = Field(default=7, gt=0)
+    """How long an invitation link stays valid.
+
+    Long enough to survive a weekend and a forwarded email, short enough that
+    an address that has stopped being read does not leave a way in open for
+    months. Re-inviting mints a fresh one and invalidates the old.
+    """
+
+    blob_sweep_idle_seconds: float = Field(default=3600.0, ge=0)
+    """How long bytes on disk must have gone untouched before a sweep looks at
+    them. A margin, not the safety — the digest lock is that — but it keeps a
+    sweep away from an upload still arriving into its temporary file, which
+    holds no lock until it has finished."""
+
+    blob_sweep_every_seconds: float = Field(default=3600.0, gt=0)
+    """How often the application sweeps. Deleted content stays on disk at most
+    about this plus :attr:`blob_sweep_idle_seconds`; ``python -m app.cli blobs
+    gc`` is the way to reclaim it sooner."""
 
     # --- Jev ----------------------------------------------------------------
     # TypeSafe's System One model, which jev-docs asks which section of a
@@ -392,6 +397,46 @@ class Settings(BaseSettings):
         return self
 
     @property
+    def agent_socket_idle_after(self) -> timedelta:
+        return timedelta(seconds=self.agent_socket_idle_seconds)
+
+    @property
+    def agent_socket_stamp_every(self) -> timedelta:
+        return timedelta(seconds=self.agent_socket_stamp_seconds)
+
+    @property
+    def agent_socket_witnesses_for(self) -> timedelta:
+        """How long a stamp vouches for a session.
+
+        A live socket cannot go quieter than the idle window without being
+        closed, and its latest stamp is never more than one stamp interval
+        older than its latest frame; so a socket that is still open has always
+        stamped within the two together. A stamp older than that belongs to a
+        socket that is gone, whichever process held it.
+        """
+        return self.agent_socket_idle_after + self.agent_socket_stamp_every
+
+    @property
+    def agent_quiet_after(self) -> timedelta:
+        return timedelta(seconds=self.agent_quiet_seconds)
+
+    @property
+    def agent_reap_every(self) -> timedelta:
+        return timedelta(seconds=self.agent_reap_every_seconds)
+
+    @property
+    def invite_ttl(self) -> timedelta:
+        return timedelta(days=self.invite_ttl_days)
+
+    @property
+    def blob_sweep_idle_for(self) -> timedelta:
+        return timedelta(seconds=self.blob_sweep_idle_seconds)
+
+    @property
+    def blob_sweep_every(self) -> timedelta:
+        return timedelta(seconds=self.blob_sweep_every_seconds)
+
+    @property
     def vault_keyring(self) -> VaultKeys:
         """Every vault key this deployment holds, by version, oldest first.
 
@@ -521,12 +566,19 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def app_settings(request: Request) -> Settings:
-    """FastAPI dependency returning the settings this app was built with.
+def settings_of(connection: HTTPConnection) -> Settings:
+    """The settings the app serving this request or socket was built with.
 
-    Routes must depend on this rather than on :func:`get_settings`, whose cache
-    is process-wide: a test that builds an app with its own configuration has
-    to see that configuration, not whatever is in the environment.
+    The one way to reach them from inside the app. Code holding a connection —
+    a middleware, a websocket handler, a dependency — calls this rather than
+    :func:`get_settings`, whose cache is process-wide: a test that builds an
+    app with its own configuration has to see that configuration, not whatever
+    is in the environment.
     """
-    settings: Settings = request.app.state.settings
+    settings: Settings = connection.app.state.settings
     return settings
+
+
+def app_settings(request: Request) -> Settings:
+    """:func:`settings_of`, as a FastAPI dependency for a route to declare."""
+    return settings_of(request)

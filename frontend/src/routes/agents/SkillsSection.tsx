@@ -3,12 +3,13 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { api, type Skill } from '../../api/client'
-import { useInvalidate } from '../../api/queries'
+import { affects, invalidates, queryKeys, useInvalidate } from '../../api/queries'
 import { formatSize, formatStamp } from '../../components/format'
 import { Button, EmptyState, ErrorNotice, cardStyles } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import styles from './Agents.module.css'
 import { Section } from './AgentsSection'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function Skills({
   projectKey,
@@ -23,15 +24,16 @@ export function Skills({
   const folderPicker = useRef<HTMLInputElement>(null)
 
   const skills = useQuery({
-    queryKey: ['skills', projectKey],
-    queryFn: () => api.listSkills(projectKey),
+    queryKey: queryKeys.skills(projectKey),
+    queryFn: ({ signal }) => api.listSkills(projectKey, signal),
   })
 
   async function refresh() {
-    await invalidate(['skills', projectKey])
+    await invalidate(queryKeys.skills(projectKey))
   }
 
   const upload = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.skills) },
     // One at a time rather than in parallel: two uploads of the same name
     // would race to replace each other, and the survivor would be whichever
     // request the server happened to finish second.
@@ -56,6 +58,7 @@ export function Skills({
   })
 
   const uploadFolder = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.skills) },
     // One skill, not one per file: a folder is a skill precisely because its
     // SKILL.md points at the other files in it.
     mutationFn: async (files: File[]) => {
@@ -82,6 +85,7 @@ export function Skills({
   })
 
   const deleteSkill = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.skills) },
     mutationFn: ({ id }: { id: string; name: string }) => api.deleteSkill(id),
     onSuccess: async (_gone, { name }) => {
       await refresh()

@@ -46,7 +46,8 @@ from sqlalchemy import (
 )
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
+from sqlalchemy.orm.strategy_options import _AbstractLoad
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.task import Task
@@ -173,3 +174,19 @@ class Todo(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     own, and keeping it in step with its card no longer puts the card's back."""
 
     pick: Mapped[DayPick] = relationship(back_populates="todos")
+
+
+def pick_loads() -> tuple[_AbstractLoad, ...]:
+    """What a query for picks asks for besides the picks: the card, its column
+    and its tick boxes.
+
+    A plan names its cards by column and lists a card's tick boxes as to-dos, and
+    both raise when read unloaded (see :func:`app.models.task.card_loads`). A
+    function, not a constant, for that module's reason.
+    """
+    return (
+        joinedload(DayPick.task).options(
+            selectinload(Task.column),
+            selectinload(Task.checklist),
+        ),
+    )

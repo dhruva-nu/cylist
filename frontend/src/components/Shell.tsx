@@ -7,6 +7,7 @@
 import { Link, Outlet, useMatchRoute } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useIdentity, useProject, useProjects } from '../api/queries'
+import { useProjectSocket } from '../routes/useBoardSocket'
 import { ProjectTabs } from './ProjectNav'
 import { Sidebar } from './Sidebar'
 import { Avatar } from './ui'
@@ -59,6 +60,17 @@ function usePageWidth(): string | undefined {
   return styles.pageReading
 }
 
+/**
+ * The socket of whichever project the page is on, held from here so that it is
+ * the same one whichever of the project's pages is showing.
+ */
+function ProjectSocket() {
+  const matchRoute = useMatchRoute()
+  const match = matchRoute({ to: '/p/$projectKey', fuzzy: true })
+  useProjectSocket(match ? match.projectKey : null)
+  return null
+}
+
 export function Shell() {
   const matchRoute = useMatchRoute()
   // The board and Docs scroll inside themselves — the board's columns, the
@@ -81,6 +93,7 @@ export function Shell() {
         now than it did with the panel on the other side, where it came after
         the content rather than before it.
       */}
+      <ProjectSocket />
       <a href="#content" className={styles.skip}>
         Skip to content
       </a>

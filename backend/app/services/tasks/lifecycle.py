@@ -11,8 +11,8 @@ from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.models.template import TaskTemplate
-from app.schemas.tasks import TaskCreate
 from app.services import columns, goals, projects, templates
+from app.services.commands.tasks import TaskCreate
 from app.services.tasks.dates import set_column_due_dates
 from app.services.tasks.numbering import next_number, next_sub_number
 from app.services.tasks.parentage import refuse_open_under_finished
@@ -21,6 +21,7 @@ from app.services.tasks.stacking import slot
 _LOADED_ON_CREATE = (
     "project",
     "assignee",
+    "column",
     "template",
     "goal",
     "waiting_on",

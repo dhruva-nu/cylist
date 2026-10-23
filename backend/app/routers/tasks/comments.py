@@ -5,24 +5,25 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
-from app.auth.principal import Principal
-from app.auth.scopes import Scope
-from app.db import SessionDependency
-from app.models.task import Task, TaskComment
-from app.routers.paging import PageQuery
-from app.routers.tasks.dependencies import (
+from app.api.card_deps import (
     COMMENT_ON_THIS_CARD,
     may_delete_this_comment,
     resolved_comment,
     resolved_task,
 )
-from app.routers.tasks.recording import record_on_card
-from app.routers.tasks.views import comment_read
+from app.api.paging import PageQuery
+from app.api.presenters.tasks import comment_read
+from app.auth.dependencies import require
+from app.auth.principal import Principal
+from app.auth.scopes import Scope
+from app.db import SessionDependency
+from app.models.activity import Verb
+from app.models.task import Task, TaskComment
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import CommentCreate, CommentPage, CommentRead
 from app.services import activity, mentions, tasks
 from app.services.paging import PageRequest
+from app.services.tasks.recording import record_on_card
 
 router = APIRouter(tags=["tasks"])
 
@@ -72,7 +73,7 @@ async def add_comment(
     await record_on_card(
         session,
         principal,
-        "task.commented",
+        Verb.TASK_COMMENTED,
         task,
         {
             "comment_id": str(entry.id),
@@ -112,7 +113,7 @@ async def delete_comment(
     await record_on_card(
         session,
         principal,
-        "task.comment_deleted",
+        Verb.TASK_COMMENT_DELETED,
         task,
         {"comment_id": str(comment_id), "comment": activity.excerpt(said)},
     )

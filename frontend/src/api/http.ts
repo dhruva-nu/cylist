@@ -2,9 +2,10 @@
  * The one way this client talks to the server.
  *
  * Every failure the server produces arrives in one envelope:
- *   { "error": { "code": "...", "message": "...", "details": {} } }
+ *   { "error": { "code": "...", "reason": "..." | null, "message": "...", "details": {} } }
  * so `request` turns any non-2xx response into an `ApiError` carrying that
- * code. Callers branch on `error.code`, never on a status number.
+ * code. Callers branch on `error.code`, never on a status number — and, to tell
+ * one kind of conflict from another, on `error.reason`, never on the message.
  */
 
 import { withBase } from './basePath'
@@ -19,6 +20,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly details: Record<string, unknown> = {},
+    readonly reason: string | null = null,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -31,14 +33,26 @@ export class ApiError extends Error {
 }
 
 interface ErrorEnvelope {
-  error?: { code?: string; message?: string; details?: Record<string, unknown> }
+  error?: {
+    code?: string
+    reason?: string | null
+    message?: string
+    details?: Record<string, unknown>
+  }
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * `RequestInit` where the signal may be absent *or* undefined, so a caller can
+ * hand on the optional `signal` a query gives it without first checking it.
+ */
+export type RequestOptions = Omit<RequestInit, 'signal'> & { signal?: AbortSignal | undefined }
+
+export async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
+      signal: init.signal ?? null,
       credentials: 'same-origin', // carries the session cookie
       headers: {
         Accept: 'application/json',
@@ -58,7 +72,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     return undefined as T
   }
 
-  const responseBody: unknown = await response.json().catch(() => null)
+  const text = await response.text().catch(() => '')
+  const responseBody: unknown = parsed(text)
 
   if (!response.ok) {
     const envelope = (responseBody ?? {}) as ErrorEnvelope
@@ -67,10 +82,30 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       envelope.error?.code ?? 'unknown_error',
       envelope.error?.message ?? 'Something went wrong.',
       envelope.error?.details ?? {},
+      envelope.error?.reason ?? null,
     )
   }
 
+  if (text === '') return undefined as T
+  if (responseBody === undefined) {
+    // Handing a caller `null` where it expects a list or a card is a crash
+    // somewhere else, later, with no hint of which request went wrong.
+    throw new ApiError(
+      response.status,
+      'invalid_response',
+      'The server answered with something this app could not read.',
+    )
+  }
   return responseBody as T
+}
+
+/** The JSON in `text`, or `undefined` if it is not JSON — an empty body included. */
+function parsed(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
 }
 
 /** A request body as the server takes it. */

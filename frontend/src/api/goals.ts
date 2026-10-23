@@ -74,12 +74,16 @@ export interface GoalInput {
 }
 
 export const goalsApi = {
-  listGoals: (projectKey: string, openOnly = false) =>
-    fetchAllPages<Goal>(`/projects/${projectKey}/goals${openOnly ? '?open_only=true' : ''}`),
-  getGoal: (goalRef: string) => request<GoalDetail>(`/goals/${goalRef}`),
+  listGoals: (projectKey: string, openOnly = false, signal?: AbortSignal) =>
+    fetchAllPages<Goal>(
+      `/projects/${projectKey}/goals${openOnly ? '?open_only=true' : ''}`,
+      signal,
+    ),
+  getGoal: (goalRef: string, signal?: AbortSignal) =>
+    request<GoalDetail>(`/goals/${goalRef}`, { signal }),
   /** The goal's cards after `after`, continuing from its `tasks_next`. */
-  listGoalTasks: (goalRef: string, after: string) =>
-    fetchPage<Task>(`/goals/${goalRef}/tasks`, after),
+  listGoalTasks: (goalRef: string, after: string, signal?: AbortSignal) =>
+    fetchPage<Task>(`/goals/${goalRef}/tasks`, after, undefined, signal),
   createGoal: (projectKey: string, input: GoalInput) =>
     request<GoalDetail>(`/projects/${projectKey}/goals`, { method: 'POST', body: jsonBody(input) }),
   updateGoal: (goalRef: string, input: Partial<GoalInput>) =>

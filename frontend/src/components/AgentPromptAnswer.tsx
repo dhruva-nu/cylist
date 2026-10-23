@@ -43,20 +43,20 @@ export function useAnswerPrompt(taskRef: string, onAnswered?: (answered: AgentPr
     mutationFn: ({ prompt, answer }: { prompt: AgentPrompt; answer: AgentPromptAnswer }) =>
       api.answerAgentPrompt(taskRef, prompt.id, answer),
     onSuccess: (answered) => {
-      queryClient.setQueriesData<BoardCards>({ queryKey: ['tasks'] }, (old) =>
+      queryClient.setQueriesData<BoardCards>({ queryKey: queryKeys.allBoardCards }, (old) =>
         old ? { ...old, tasks: tasksWithPromptAnswered(old.tasks, answered) } : old,
       )
       queryClient.setQueriesData<TaskDetail>({ queryKey: queryKeys.allTasks }, (old) =>
         old ? detailWithPromptAnswered(old, answered) : old,
       )
-      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allBoardCards })
       void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
       onAnswered?.(answered)
     },
     onError: (error) => {
       // Closed before we got there: the card on screen is out of date.
       if (promptClosedUnderUs(error)) {
-        void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.allBoardCards })
         void queryClient.invalidateQueries({ queryKey: queryKeys.allTasks })
       }
     },

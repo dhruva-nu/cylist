@@ -19,6 +19,7 @@ from httpx import AsyncClient
 from sqlalchemy.exc import DataError, IntegrityError
 
 from app.config import Settings
+from app.core.errors import Reason, error_body
 from app.core.logging import REQUEST_ID_HEADER
 from app.db import Database
 from app.main import create_app
@@ -102,20 +103,21 @@ class TestAnUnexpectedException:
 
 class TestTheDatabaseRefusingAWrite:
     @pytest.mark.parametrize(
-        ("path", "status", "code"),
+        ("path", "status", "code", "reason"),
         [
-            ("/_test/integrity", 409, "conflict"),
-            ("/_test/data", 422, "unprocessable"),
-            ("/_test/disk", 503, "service_unavailable"),
+            ("/_test/integrity", 409, "conflict", "changed_concurrently"),
+            ("/_test/data", 422, "unprocessable", None),
+            ("/_test/disk", 503, "service_unavailable", None),
         ],
     )
     async def test_gets_the_status_it_deserves(
-        self, faulty: AsyncClient, path: str, status: int, code: str
+        self, faulty: AsyncClient, path: str, status: int, code: str, reason: str | None
     ) -> None:
         response = await faulty.get(path)
 
         assert response.status_code == status
         assert response.json()["error"]["code"] == code
+        assert response.json()["error"]["reason"] == reason
         assert response.headers[REQUEST_ID_HEADER]
 
     async def test_does_not_echo_the_driver_message(self, faulty: AsyncClient) -> None:
@@ -134,3 +136,23 @@ class TestAValidationFailure:
         assert fields
         for field in fields:
             assert set(field) <= {"type", "loc", "msg"}
+
+
+class TestReasons:
+    """The machine-readable half of an error: stable, and never reworded."""
+
+    def test_every_reason_is_its_own_lowercase_name(self) -> None:
+        """A client holds these spellings, so a member and its value cannot drift."""
+        assert all(reason.value == reason.name.lower() for reason in Reason)
+
+    def test_the_envelope_carries_the_reason_beside_the_code(self) -> None:
+        body = error_body("conflict", "Taken.", {"name": "x"}, Reason.DUPLICATE_NAME)
+
+        assert body == {
+            "error": {
+                "code": "conflict",
+                "reason": "duplicate_name",
+                "message": "Taken.",
+                "details": {"name": "x"},
+            }
+        }

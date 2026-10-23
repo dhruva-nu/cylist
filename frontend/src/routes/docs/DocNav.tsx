@@ -15,6 +15,8 @@ import {
 import { Button } from '../../components/ui'
 import { IconButton } from './IconButton'
 import styles from './ProjectDocs.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
+import { invalidates, affects } from '../../api/queries'
 
 export function DocNav({
   projectKey,
@@ -124,6 +126,7 @@ function TopicItem({
   const [renaming, setRenaming] = useState(false)
 
   const shift = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.docs) },
     mutationFn: async (step: -1 | 1) => {
       const order = siblings.map((sibling) => sibling.id)
       order.splice(index, 1)
@@ -136,6 +139,7 @@ function TopicItem({
   })
 
   const remove = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.docs) },
     mutationFn: async () => {
       await api.deleteDocTopic(topic.id)
       await onChanged()
@@ -277,7 +281,10 @@ function NameForm({
   onCancel: () => void
 }) {
   const [name, setName] = useState(initial)
-  const save = useMutation({ mutationFn: onSubmit })
+  const save = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.docs) },
+    mutationFn: onSubmit,
+  })
 
   function submit(event: FormEvent) {
     event.preventDefault()

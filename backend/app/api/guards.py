@@ -56,11 +56,11 @@ def on_project(permission: Permission, *scopes: Scope) -> Guard:
         scopes: What the credential has to carry. ``write`` unless given —
             the vault asks for more, and says so at its own call sites.
     """
-    # Imported here rather than at the top because `app.routers.projects`
+    # Imported here rather than at the top because `app.api.deps`
     # owns the resolver and wants a guard of its own: at module scope the two
     # would be a cycle, and this is called after both modules have their
     # definitions.
-    from app.routers.projects import resolved_project
+    from app.api.deps import resolved_project
 
     required = scopes or (Scope.WRITE,)
 
@@ -128,7 +128,7 @@ def project_admin_only(refused_action: str, *scopes: Scope) -> Guard:
         scopes: What the credential has to carry, checked before the role.
     """
     # Imported here for the reason `on_project` does it.
-    from app.routers.projects import resolved_project
+    from app.api.deps import resolved_project
 
     async def dependency(
         project: Project = Depends(resolved_project),

@@ -5,21 +5,22 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.principal import Principal
-from app.db import SessionDependency
-from app.models.task import Task, TaskChecklistItem
-from app.routers.tasks import acts
-from app.routers.tasks.dependencies import (
+from app.api.card_deps import (
     WRITE_THIS_CARD,
     WRITE_THIS_CHECKLIST,
     resolved_checklist_item,
     resolved_task,
 )
-from app.routers.tasks.recording import record_on_card
-from app.routers.tasks.views import checklist_item_read
+from app.api.presenters.tasks import checklist_item_read
+from app.auth.principal import Principal
+from app.db import SessionDependency
+from app.models.activity import Verb
+from app.models.task import Task, TaskChecklistItem
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import ChecklistItemCreate, ChecklistItemRead, ChecklistItemUpdate
 from app.services import tasks
+from app.services.tasks import acts
+from app.services.tasks.recording import record_on_card
 
 router = APIRouter(tags=["tasks"])
 
@@ -43,7 +44,7 @@ async def add_checklist_item(
     can reach the board's last column.
     """
     item = await tasks.add_checklist_item(session, task, body)
-    await record_on_card(session, principal, "task.checklist_added", task, {"title": item.title})
+    await record_on_card(session, principal, Verb.TASK_CHECKLIST_ADDED, task, {"title": item.title})
     return checklist_item_read(item)
 
 
@@ -79,5 +80,5 @@ async def delete_checklist_item(
     task = await tasks.get(session, item.task_id)
     title = item.title
     await tasks.delete_checklist_item(session, item)
-    await record_on_card(session, principal, "task.checklist_deleted", task, {"title": title})
+    await record_on_card(session, principal, Verb.TASK_CHECKLIST_DELETED, task, {"title": title})
     return Acknowledged()

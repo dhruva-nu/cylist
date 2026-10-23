@@ -11,18 +11,17 @@ from uuid import UUID
 
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.palette import colour_for
-from app.db import lock_row
+from app.db import flush_or_refuse, lock_row
 from app.models.person import Person, PersonKind
 from app.models.project import Project, ProjectMember
-from app.schemas.projects import ProjectCreate, ProjectUpdate
 from app.services import blobs, columns, files, people, permissions, roles
+from app.services.commands.projects import ProjectCreate, ProjectUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -107,13 +106,14 @@ async def _flush_claiming_key(session: AsyncSession, key: str) -> None:
     Raises:
         ConflictError: if another project already has the key.
     """
-    try:
-        await session.flush()
-    except IntegrityError as exc:
-        raise ConflictError(
+    await flush_or_refuse(
+        session,
+        ConflictError(
             f"The key {key} is already used by another project.",
             details={"key": key},
-        ) from exc
+            reason=Reason.KEY_TAKEN,
+        ),
+    )
 
 
 def require_confirmation(project: Project, confirm: str) -> None:

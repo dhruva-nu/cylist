@@ -7,17 +7,17 @@ calls live together here.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
-from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
-from app.schemas.tasks import TaskMove
+from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus, settled
 from app.services import columns, goals, templates
+from app.services.commands.tasks import TaskMove
 from app.services.tasks.history import (
     FieldChange,
     field_change,
@@ -174,7 +174,7 @@ async def set_finished(
     if not finished and task.parent is not None:
         await refuse_open_under_finished(session, task.parent, act=f"reopening {task.reference}")
 
-    task.finished_at = datetime.now(UTC) if finished else None
+    task.finished_at = clock.now() if finished else None
     await session.flush()
     return task, [finished_change(was_finished=was_finished, now_finished=finished)]
 
@@ -352,15 +352,17 @@ async def open_work(session: AsyncSession, task: Task) -> tuple[list[str], list[
     # Read fresh rather than through whatever this session loaded earlier in
     # the request: a sub-task reopened by another request since then is what
     # the caller's lock was taken to see.
+    # As columns, not cards: a card read through the session would re-populate
+    # whatever it reaches by relationship — this card, as a sub-task's parent —
+    # and leave it without what the caller loaded it with.
     open_cards = [
-        subtask.reference
-        for subtask in await session.scalars(
-            select(Task)
+        f"{task.reference}-{sub_number}"
+        for sub_number, status, finished_at in await session.execute(
+            select(Task.sub_number, Task.status, Task.finished_at)
             .where(Task.parent_id == task.id)
             .order_by(Task.sub_number)
-            .execution_options(populate_existing=True)
         )
-        if not subtask.is_settled
+        if not settled(status, finished_at)
     ]
     open_boxes = [
         item.title
@@ -403,7 +405,7 @@ def _mark_finished_by_column(
     if now_finished == was_finished:
         return None
 
-    task.finished_at = datetime.now(UTC) if now_finished else None
+    task.finished_at = clock.now() if now_finished else None
     return finished_change(was_finished=was_finished, now_finished=now_finished)
 
 

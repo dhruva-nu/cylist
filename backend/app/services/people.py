@@ -11,18 +11,19 @@ checked against a row.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.invites import INVITE_TTL, generate_invite, looks_like_invite
+from app.auth.invites import generate_invite, looks_like_invite
 from app.auth.passwords import dummy_hash, hash_password, needs_rehash, verify_password
 from app.auth.principal import Principal
 from app.auth.tokens import hash_token
 from app.core.clock import now
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.palette import colour_for
 from app.db import flush_or_refuse
 from app.models.activity import Channel
@@ -34,8 +35,8 @@ from app.models.person import (
     Person,
     PersonKind,
 )
-from app.schemas.people import PersonCreate, PersonUpdate
 from app.services import tokens
+from app.services.commands.people import PersonCreate, PersonUpdate
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -204,6 +205,7 @@ async def _require_another_way_in(session: AsyncSession, person: Person) -> None
             "would lock everybody out. Open an account for somebody else first.",
             details={"person_id": str(person.id)},
             log_message=f"Person {person.id} is the last who can sign in; archiving refused.",
+            reason=Reason.LAST_SIGN_IN,
         )
 
 
@@ -349,7 +351,9 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Pers
     return person
 
 
-async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
+async def invite(
+    session: AsyncSession, person_id: UUID, *, valid_for: timedelta
+) -> tuple[Person, str]:
     """Open an account for somebody, returning them and the one-time token.
 
     Re-inviting is allowed and replaces the outstanding invitation: a link
@@ -373,13 +377,14 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
             f"{person.name} already has an account.",
             details={"person_id": str(person.id)},
             log_message=f"Person {person.id} already has an account.",
+            reason=Reason.ALREADY_HAS_ACCOUNT,
         )
 
     await _require_email_free(session, person.email, excluding=person.id)
 
     plaintext, digest = generate_invite()
     person.invite_token_hash = digest
-    person.invite_expires_at = now() + INVITE_TTL
+    person.invite_expires_at = now() + valid_for
     await flush_or_refuse(session, _email_taken(person.email))
     return person, plaintext
 
@@ -495,6 +500,7 @@ def _email_taken(email: str | None) -> ConflictError:
         f"{email} was just taken as somebody else's sign-in address.",
         details={"email": email},
         log_message="A sign-in address was just taken by somebody else.",
+        reason=Reason.EMAIL_TAKEN,
     )
 
 
@@ -532,6 +538,7 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
                 f"{email} is already the sign-in address for {clash.name}.",
                 details={"email": email},
                 log_message=f"That sign-in address already belongs to person {clash.id}.",
+                reason=Reason.EMAIL_TAKEN,
             )
         if clash.invite_is_pending:
             # Said as an invitation, because the usual way here is somebody
@@ -542,8 +549,24 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
                 "has not expired yet. Withdraw it, or re-invite them instead.",
                 details={"email": email},
                 log_message=f"Person {clash.id} already has a pending invitation at that address.",
+                reason=Reason.ALREADY_INVITED,
             )
         _clear_invitation(clash)
         lapsed = True
     if lapsed:
         await session.flush()
+
+
+async def ensure_person_exists(session: AsyncSession, person_id: UUID | None) -> None:
+    """Refuse an attribution to somebody who is not in the directory.
+
+    Checked here rather than left to the foreign key, so the caller hears which
+    id was wrong instead of getting an integrity error. ``None`` is always
+    fine: nobody has to be named as having added something.
+    """
+    if person_id is None:
+        return
+    if await session.get(Person, person_id) is None:
+        raise UnprocessableRequestError(
+            "That person is not in the directory.", details={"person_id": str(person_id)}
+        )

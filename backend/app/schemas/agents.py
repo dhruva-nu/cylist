@@ -10,6 +10,9 @@ from pydantic import Field
 
 from app.schemas.common import Page, Schema
 from app.schemas.people import PersonRead
+from app.services.commands.agents import (
+    SkillUpdate as SkillUpdate,
+)
 
 
 class SkillRead(Schema):
@@ -28,16 +31,6 @@ class SkillRead(Schema):
     mime: str
     added_by: PersonRead | None
     created_at: datetime
-
-
-class SkillUpdate(Schema):
-    """Change a skill's description without re-uploading it."""
-
-    description: str | None = Field(
-        default=None,
-        max_length=2000,
-        description="One line on what the skill does. Send null to clear it.",
-    )
 
 
 class SkillFolderFile(Schema):

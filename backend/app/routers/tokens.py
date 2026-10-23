@@ -19,14 +19,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.paging import PageQuery
 from app.auth.dependencies import current_principal, require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import ForbiddenError
 from app.db import SessionDependency
-from app.models.activity import Channel
+from app.models.activity import Channel, EntityType, Verb
 from app.models.api_token import TokenKind
-from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.tokens import TokenCreate, TokenIssued, TokenPage, TokenRead
 from app.services import activity, tokens
@@ -130,8 +130,8 @@ async def create_token(
     await activity.record(
         session,
         principal,
-        "token.issued",
-        entity_type="token",
+        Verb.TOKEN_ISSUED,
+        entity_type=EntityType.TOKEN,
         entity_id=token.id,
         payload={"name": token.name, "scopes": token.scopes},
     )
@@ -167,8 +167,8 @@ async def revoke_token(
     await activity.record(
         session,
         principal,
-        "token.revoked",
-        entity_type="token",
+        Verb.TOKEN_REVOKED,
+        entity_type=EntityType.TOKEN,
         entity_id=token.id,
         payload={"name": token.name},
     )

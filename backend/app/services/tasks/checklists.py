@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
 from app.models.task import ChecklistState, Task, TaskChecklistItem
-from app.schemas.tasks import ChecklistItemCreate, ChecklistItemUpdate
+from app.services.commands.tasks import ChecklistItemCreate, ChecklistItemUpdate
 
 
 async def checklist(session: AsyncSession, task: Task) -> list[TaskChecklistItem]:

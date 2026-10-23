@@ -32,10 +32,8 @@ from sqlalchemy.orm import Mapper, Session, object_session
 
 from app.db import publish_into
 from app.models.agent_session import AgentSession
+from app.realtime.events import PushQueued
 from app.services.push.messages import SessionSnapshot, worth_pushing
-
-QUEUED = "push.agent_session"
-"""The outbox event type the application's publisher hands to the pusher."""
 
 _PENDING = "push_pending"
 """Key under ``session.info``: this transaction's queued events, by session."""
@@ -82,14 +80,14 @@ def _queue(row: AgentSession, before: SessionSnapshot | None) -> None:
     if session is None:  # pragma: no cover - a flush always has a session
         return
     after = snapshot(row)
-    pending: dict[UUID, dict[str, Any]] = session.info.setdefault(_PENDING, {})
+    pending: dict[UUID, PushQueued] = session.info.setdefault(_PENDING, {})
     queued = pending.get(row.id)
     if queued is not None:
-        # Already on the outbox, which holds this very dict: whatever this
+        # Already on the outbox, which holds this very event: whatever this
         # flush changed, the push carries the state the transaction ends on.
-        queued["snapshot"] = after
+        queued.snapshot = after
     elif worth_pushing(before, after):
-        queued = {"type": QUEUED, "snapshot": after}
+        queued = PushQueued(snapshot=after)
         pending[row.id] = queued
         publish_into(session, queued)
 

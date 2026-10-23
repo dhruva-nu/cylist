@@ -13,11 +13,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.paging import PageQuery
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
-from app.routers.paging import PageQuery
 from app.schemas.common import Acknowledged
 from app.schemas.devices import DevicePage, DeviceRead, DeviceRegister
 from app.services import devices

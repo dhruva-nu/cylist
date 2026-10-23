@@ -21,6 +21,7 @@ import { useCommentDeleting } from './useCommentDeleting'
 import { useRefreshTask } from './useRefreshTask'
 import shared from './shared.module.css'
 import styles from './TaskDetailView.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * The detail view of a card: read it, tick its sub-tasks off, and say how far
@@ -61,6 +62,7 @@ export function TaskDetailView({
   const [author, setAuthor] = useCommentAuthor(members)
   const [draft, setDraft] = useState('')
   const post = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.addComment(task.id, draft.trim(), author || null),
     onSuccess: async () => {
       setDraft('')
@@ -353,6 +355,7 @@ function StoredNotice({
 }) {
   const may = usePermissions(projectKey)
   const restore = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.restoreTask(task.reference),
     onSuccess: async (restored) => {
       announce(`${restored.reference} restored to ${lastColumn?.name ?? 'the board'}.`)

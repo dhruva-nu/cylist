@@ -23,14 +23,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import (
     ConflictError,
     NotFoundError,
+    Reason,
     UnprocessableRequestError,
     not_on_this_project,
 )
 from app.db import lock_row
 from app.models.board import MAX_COLUMNS, MIN_COLUMNS, BoardColumn
 from app.models.project import Project
-from app.models.task import Task
-from app.schemas.columns import ColumnCreate, ColumnUpdate
+from app.models.task import Task, card_loads
+from app.services.commands.columns import ColumnCreate, ColumnUpdate
 
 STARTER_COLUMNS: tuple[ColumnCreate, ...] = (
     ColumnCreate(name="To do", description="Agreed and waiting for someone to pick it up."),
@@ -200,6 +201,7 @@ async def create(session: AsyncSession, project: Project, data: ColumnCreate) ->
         raise ConflictError(
             f"A board keeps at most {MAX_COLUMNS} columns.",
             details={"column_count": existing, "max_columns": MAX_COLUMNS},
+            reason=Reason.COLUMN_LIMIT,
         )
 
     column = BoardColumn(
@@ -270,7 +272,9 @@ async def _resettle(session: AsyncSession, column: BoardColumn) -> None:
     """
     cards = list(
         await session.scalars(
-            select(Task).where(Task.column_id == column.id, Task.outcome_index.is_not(None))
+            select(Task)
+            .options(*card_loads())
+            .where(Task.column_id == column.id, Task.outcome_index.is_not(None))
         )
     )
     ceiling = len(column.outcomes) - 1
@@ -305,6 +309,7 @@ async def delete(session: AsyncSession, column: BoardColumn) -> None:
         raise ConflictError(
             "Move this column's tasks somewhere else before deleting it.",
             details={"task_count": held},
+            reason=Reason.COLUMN_NOT_EMPTY,
         )
 
     existing = await count(session, project_id)
@@ -312,6 +317,7 @@ async def delete(session: AsyncSession, column: BoardColumn) -> None:
         raise ConflictError(
             f"A board keeps at least {MIN_COLUMNS} columns.",
             details={"column_count": existing, "min_columns": MIN_COLUMNS},
+            reason=Reason.COLUMN_MINIMUM,
         )
 
     await session.delete(column)

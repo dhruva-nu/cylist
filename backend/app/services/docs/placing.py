@@ -18,7 +18,7 @@ from jevdocs.placement import (
 )
 
 from app.models.project import Project
-from app.schemas.docs import DocPlace
+from app.services.commands.docs import DocPlace
 from app.services.doc_corpus import FiledDoc, FiledTopic, ProjectCorpus
 from app.services.doc_engine import DocEngine, EngineUnavailableError
 from app.services.docs.filing import no_topics_error

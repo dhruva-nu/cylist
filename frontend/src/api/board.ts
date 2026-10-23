@@ -94,7 +94,8 @@ export interface TemplateInput {
 }
 
 export const boardApi = {
-  listColumns: (projectKey: string) => request<Board>(`/projects/${projectKey}/columns`),
+  listColumns: (projectKey: string, signal?: AbortSignal) =>
+    request<Board>(`/projects/${projectKey}/columns`, { signal }),
   createColumn: (projectKey: string, input: ColumnInput) =>
     request<BoardColumn>(`/projects/${projectKey}/columns`, {
       method: 'POST',
@@ -109,8 +110,8 @@ export const boardApi = {
       body: jsonBody({ column_ids: columnIds }),
     }),
 
-  listTemplates: (projectKey: string) =>
-    fetchAllPages<Template>(`/projects/${projectKey}/templates`),
+  listTemplates: (projectKey: string, signal?: AbortSignal) =>
+    fetchAllPages<Template>(`/projects/${projectKey}/templates`, signal),
   createTemplate: (projectKey: string, input: TemplateInput) =>
     request<Template>(`/projects/${projectKey}/templates`, {
       method: 'POST',

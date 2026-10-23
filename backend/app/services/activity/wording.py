@@ -13,8 +13,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
-from app.models.activity import Activity
-from app.schemas.activity import FieldChange, HistoryEntry
+from app.models.activity import Activity, Verb
+from app.services.readmodels.activity import FieldChange, HistoryEntry
 
 
 def entry_of(entry: Activity, columns: Mapping[str, str] | None = None) -> HistoryEntry:
@@ -96,48 +96,9 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
     payload = entry.payload
     changes = payload.get("changes") or []
 
-    if entry.verb == "task.created":
-        return "Created this task."
-    if entry.verb == "task.subtask_created":
-        parent = payload.get("parent")
-        return f"Split out of {parent}." if parent else "Created as a sub-task."
-    if entry.verb == "task.updated":
-        return _describe_update(payload, changes)
-    if entry.verb == "task.moved":
-        return _describe_move(payload, changes, columns)
-    if entry.verb == "task.finished":
-        # Worded as the sub-task's own line, because that is the card whose
-        # history it is written to. The parent it belongs to is named on every
-        # other line of that history already.
-        return "Finished." if payload.get("finished") else "Reopened."
-    if entry.verb == "task.sub_status_moved":
-        stage = payload.get("sub_status")
-        return f"Sub-status set to {stage}." if stage else "Sub-status moved."
-    if entry.verb == "task.status_changed":
-        reason = (payload.get("reason") or "").strip()
-        label = _STATUS_WORDS.get(str(payload.get("to")), str(payload.get("to")))
-        return f"Status {label} — {reason}" if reason else f"Status {label}."
-    if entry.verb == "task.commented":
-        said = str(payload.get("comment") or "").strip()
-        return f"Commented: {_quoted(said)}" if said else "Added a comment."
-    if entry.verb == "task.comment_deleted":
-        said = str(payload.get("comment") or "").strip()
-        return f"Deleted the comment {_quoted(said)}." if said else "Deleted a comment."
-    if entry.verb == "task.archived":
-        file = payload.get("file")
-        return f"Moved to cold storage, in {file}." if file else "Moved to cold storage."
-    if entry.verb == "task.restored":
-        column = payload.get("column")
-        return (
-            f"Restored from cold storage to {column}." if column else "Restored from cold storage."
-        )
-    if entry.verb == "task.checklist_added":
-        return f"Added {_quoted(payload.get('title'))} to the checklist."
-    if entry.verb == "task.checklist_updated":
-        state = _CHECKLIST_WORDS.get(str(payload.get("state")), "changed")
-        return f"{state} {_quoted(payload.get('title'))}."
-    if entry.verb == "task.checklist_deleted":
-        return f"Removed {_quoted(payload.get('title'))} from the checklist."
+    task_words = _TASK.get(entry.verb)
+    if task_words is not None:
+        return task_words(payload, changes, columns)
 
     written = _ELSEWHERE.get(entry.verb)
     if written is not None:
@@ -145,7 +106,22 @@ def describe(entry: Activity, columns: Mapping[str, str] | None = None) -> str:
 
     # An entry this function has not been taught about is still worth showing:
     # a history with a gap in it is worse than one worded a little stiffly.
-    return entry.verb.split(".")[-1].replace("_", " ").capitalize() + "."
+    return fallback(entry.verb)
+
+
+def is_worded(verb: str) -> bool:
+    """Whether a verb has a sentence written for it, rather than the fallback."""
+    return verb in _TASK or verb in _ELSEWHERE
+
+
+def fallback(verb: str) -> str:
+    """What an entry says when nothing has been written for its verb.
+
+    The last word of the verb, capitalised: stiff, but true. Reached by rows
+    recorded under a verb since retired; no current :class:`Verb` should get
+    here, and a test holds the list to that.
+    """
+    return verb.split(".")[-1].replace("_", " ").capitalize() + "."
 
 
 def _describe_update(payload: Mapping[str, Any], changes: list[dict[str, Any]]) -> str:
@@ -299,6 +275,82 @@ def _listed(words: Any) -> str:
     return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
+_TaskWords = Callable[[dict[str, Any], list[dict[str, Any]], Mapping[str, str] | None], str]
+
+
+def _finished(payload: dict[str, Any], *_: object) -> str:
+    # Worded as the sub-task's own line, because that is the card whose
+    # history it is written to. The parent it belongs to is named on every
+    # other line of that history already.
+    return "Finished." if payload.get("finished") else "Reopened."
+
+
+def _subtask_created(payload: dict[str, Any], *_: object) -> str:
+    parent = payload.get("parent")
+    return f"Split out of {parent}." if parent else "Created as a sub-task."
+
+
+def _sub_status_moved(payload: dict[str, Any], *_: object) -> str:
+    stage = payload.get("sub_status")
+    return f"Sub-status set to {stage}." if stage else "Sub-status moved."
+
+
+def _status_changed(payload: dict[str, Any], *_: object) -> str:
+    reason = (payload.get("reason") or "").strip()
+    label = _STATUS_WORDS.get(str(payload.get("to")), str(payload.get("to")))
+    return f"Status {label} — {reason}" if reason else f"Status {label}."
+
+
+def _commented(payload: dict[str, Any], *_: object) -> str:
+    said = str(payload.get("comment") or "").strip()
+    return f"Commented: {_quoted(said)}" if said else "Added a comment."
+
+
+def _comment_deleted(payload: dict[str, Any], *_: object) -> str:
+    said = str(payload.get("comment") or "").strip()
+    return f"Deleted the comment {_quoted(said)}." if said else "Deleted a comment."
+
+
+def _archived(payload: dict[str, Any], *_: object) -> str:
+    file = payload.get("file")
+    return f"Moved to cold storage, in {file}." if file else "Moved to cold storage."
+
+
+def _restored(payload: dict[str, Any], *_: object) -> str:
+    column = payload.get("column")
+    return f"Restored from cold storage to {column}." if column else "Restored from cold storage."
+
+
+def _checklist_updated(payload: dict[str, Any], *_: object) -> str:
+    state = _CHECKLIST_WORDS.get(str(payload.get("state")), "changed")
+    return f"{state} {_quoted(payload.get('title'))}."
+
+
+_TASK: dict[str, _TaskWords] = {
+    Verb.TASK_CREATED: lambda p, c, cols: "Created this task.",
+    Verb.TASK_SUBTASK_CREATED: _subtask_created,
+    Verb.TASK_UPDATED: lambda p, c, cols: _describe_update(p, c),
+    Verb.TASK_MOVED: lambda p, c, cols: _describe_move(p, c, cols),
+    Verb.TASK_FINISHED: _finished,
+    Verb.TASK_SUB_STATUS_MOVED: _sub_status_moved,
+    Verb.TASK_STATUS_CHANGED: _status_changed,
+    Verb.TASK_COMMENTED: _commented,
+    Verb.TASK_COMMENT_DELETED: _comment_deleted,
+    Verb.TASK_ARCHIVED: _archived,
+    Verb.TASK_RESTORED: _restored,
+    Verb.TASK_CHECKLIST_ADDED: lambda p, c, cols: (
+        f"Added {_quoted(p.get('title'))} to the checklist."
+    ),
+    Verb.TASK_CHECKLIST_UPDATED: _checklist_updated,
+    Verb.TASK_CHECKLIST_DELETED: lambda p, c, cols: (
+        f"Removed {_quoted(p.get('title'))} from the checklist."
+    ),
+    Verb.TASK_DELETED: lambda p, c, cols: "Deleted this task.",
+}
+"""A card's own events, worded at length: they are the ones a history is made of
+and the only ones carrying old and new values."""
+
+
 def _worded(kind: Any) -> str:
     """A stored enum value as a word: ``gdrive`` reads as Google Drive."""
     return _WORDS.get(str(kind), str(kind).replace("_", " "))
@@ -324,101 +376,141 @@ _AGENT_WAITING = {
 
 _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     # --- The project itself -------------------------------------------------
-    "project.created": lambda p: f"Started the project {p.get('name') or p.get('key')}.",
-    "project.updated": lambda p: f"Changed the project's {_worded_fields(p)}.",
-    "project.archived": lambda p: "Archived the project.",
-    "project.restored": lambda p: "Brought the project back out of the archive.",
-    "project.deleted": lambda p: f"Deleted the project {p.get('name') or p.get('key')}.",
-    "project.members_changed": lambda p: _membership_sentence(p),
+    Verb.PROJECT_CREATED: lambda p: f"Started the project {p.get('name') or p.get('key')}.",
+    Verb.PROJECT_UPDATED: lambda p: f"Changed the project's {_worded_fields(p)}.",
+    Verb.PROJECT_ARCHIVED: lambda p: "Archived the project.",
+    Verb.PROJECT_RESTORED: lambda p: "Brought the project back out of the archive.",
+    Verb.PROJECT_DELETED: lambda p: f"Deleted the project {p.get('name') or p.get('key')}.",
+    Verb.PROJECT_MEMBERS_CHANGED: lambda p: _membership_sentence(p),
     # --- Roles, and who wears them ------------------------------------------
-    "role.created": lambda p: f"Added the role {_quoted(p.get('name'))}.",
-    "role.updated": lambda p: (
+    Verb.ROLE_CREATED: lambda p: f"Added the role {_quoted(p.get('name'))}.",
+    Verb.ROLE_UPDATED: lambda p: (
         f"Renamed the role {_quoted(p.get('was'))} to {_quoted(p.get('name'))}."
         if p.get("was")
         else f"Changed the role {_quoted(p.get('name'))}'s {_worded_fields(p)}."
     ),
-    "role.deleted": lambda p: f"Deleted the role {_quoted(p.get('name'))}.",
-    "member.role_set": lambda p: (
+    Verb.ROLE_DELETED: lambda p: f"Deleted the role {_quoted(p.get('name'))}.",
+    Verb.MEMBER_ROLE_SET: lambda p: (
         f"Made {p.get('person')} {_quoted(p.get('role'))} on this project."
         if p.get("role")
         else f"Took {p.get('person')}'s role off."
     ),
     # --- The board's columns ------------------------------------------------
-    "column.created": lambda p: f"Added the column {_quoted(p.get('name'))}.",
-    "column.updated": lambda p: f"Changed a column's {_worded_fields(p)}.",
-    "column.deleted": lambda p: f"Deleted the column {_quoted(p.get('name'))}.",
-    "column.reordered": lambda p: "Reordered the board's columns.",
+    Verb.COLUMN_CREATED: lambda p: f"Added the column {_quoted(p.get('name'))}.",
+    Verb.COLUMN_UPDATED: lambda p: f"Changed a column's {_worded_fields(p)}.",
+    Verb.COLUMN_DELETED: lambda p: f"Deleted the column {_quoted(p.get('name'))}.",
+    Verb.COLUMN_REORDERED: lambda p: "Reordered the board's columns.",
     # --- Task templates -------------------------------------------------------
-    "template.created": lambda p: (
+    Verb.TEMPLATE_CREATED: lambda p: (
         f"Added the task template {_quoted(p.get('name'))}, with {p.get('stage_count', 0)} "
         f"{'column' if p.get('stage_count') == 1 else 'columns'} set up."
     ),
-    "template.updated": lambda p: f"Changed the task template {_quoted(p.get('name'))}.",
-    "template.deleted": lambda p: f"Deleted the task template {_quoted(p.get('name'))}.",
+    Verb.TEMPLATE_UPDATED: lambda p: f"Changed the task template {_quoted(p.get('name'))}.",
+    Verb.TEMPLATE_DELETED: lambda p: f"Deleted the task template {_quoted(p.get('name'))}.",
     # --- Hooks. Never the secret, which is not in the payload to begin with ---
-    "hook.created": lambda p: f"Added the hook {_quoted(p.get('name'))}.",
-    "hook.updated": lambda p: f"Changed the hook {_quoted(p.get('name'))}'s {_worded_fields(p)}.",
-    "hook.secret_rotated": lambda p: (
+    Verb.HOOK_CREATED: lambda p: f"Added the hook {_quoted(p.get('name'))}.",
+    Verb.HOOK_UPDATED: lambda p: (
+        f"Changed the hook {_quoted(p.get('name'))}'s {_worded_fields(p)}."
+    ),
+    Verb.HOOK_SECRET_ROTATED: lambda p: (
         f"Gave the hook {_quoted(p.get('name'))} a new signing secret."
     ),
-    "hook.deleted": lambda p: f"Deleted the hook {_quoted(p.get('name'))}.",
-    "hook.fired": lambda p: f"Fired the hook {_quoted(p.get('name'))}.",
+    Verb.HOOK_DELETED: lambda p: f"Deleted the hook {_quoted(p.get('name'))}.",
+    Verb.HOOK_FIRED: lambda p: f"Fired the hook {_quoted(p.get('name'))}.",
     # --- Files --------------------------------------------------------------
-    "folder.created": lambda p: f"Created the folder {_quoted(p.get('name'))}.",
-    "folder.updated": lambda p: (
+    Verb.FOLDER_CREATED: lambda p: f"Created the folder {_quoted(p.get('name'))}.",
+    Verb.FOLDER_UPDATED: lambda p: (
         f"Changed the folder {_quoted(p.get('name'))}'s {_worded_fields(p)}."
     ),
-    "folder.deleted": lambda p: f"Deleted the folder {_quoted(p.get('name'))}.",
-    "file.uploaded": lambda p: f"Uploaded {_quoted(p.get('name'))}.",
-    "link.added": lambda p: f"Linked {_quoted(p.get('name'))} from {_worded(p.get('source'))}.",
-    "item.updated": lambda p: f"Changed {_quoted(p.get('name'))}'s {_worded_fields(p)}.",
-    "item.deleted": lambda p: f"Deleted {_quoted(p.get('name'))}.",
+    Verb.FOLDER_DELETED: lambda p: f"Deleted the folder {_quoted(p.get('name'))}.",
+    Verb.FILE_UPLOADED: lambda p: f"Uploaded {_quoted(p.get('name'))}.",
+    Verb.LINK_ADDED: lambda p: f"Linked {_quoted(p.get('name'))} from {_worded(p.get('source'))}.",
+    Verb.ITEM_UPDATED: lambda p: f"Changed {_quoted(p.get('name'))}'s {_worded_fields(p)}.",
+    Verb.ITEM_DELETED: lambda p: f"Deleted {_quoted(p.get('name'))}.",
     # --- The vault. Names and structure only; never a value -----------------
-    "vault.tree_created": lambda p: f"Created the vault tree {_quoted(p.get('name'))}.",
-    "vault.tree_updated": lambda p: f"Changed the vault tree {_quoted(p.get('name'))}.",
-    "vault.tree_deleted": lambda p: f"Deleted the vault tree {_quoted(p.get('name'))}.",
-    "vault.node_created": lambda p: (
+    Verb.VAULT_TREE_CREATED: lambda p: f"Created the vault tree {_quoted(p.get('name'))}.",
+    Verb.VAULT_TREE_UPDATED: lambda p: f"Changed the vault tree {_quoted(p.get('name'))}.",
+    Verb.VAULT_TREE_DELETED: lambda p: f"Deleted the vault tree {_quoted(p.get('name'))}.",
+    Verb.VAULT_NODE_CREATED: lambda p: (
         f"Added the {_worded(p.get('kind'))} {_quoted(p.get('name'))} to {p.get('tree')}."
     ),
-    "vault.node_updated": lambda p: f"Changed the vault entry {_quoted(p.get('name'))}.",
-    "vault.node_deleted": lambda p: (
+    Verb.VAULT_NODE_UPDATED: lambda p: f"Changed the vault entry {_quoted(p.get('name'))}.",
+    Verb.VAULT_NODE_DELETED: lambda p: (
         f"Deleted the {_worded(p.get('kind'))} {_quoted(p.get('name'))} from {p.get('tree')}."
     ),
-    "vault.node_moved": lambda p: f"Moved the vault entry {_quoted(p.get('name'))}.",
-    "vault.secret_revealed": lambda p: (
+    Verb.VAULT_NODE_MOVED: lambda p: f"Moved the vault entry {_quoted(p.get('name'))}.",
+    Verb.VAULT_SECRET_REVEALED: lambda p: (
         f"Revealed the secret {_quoted(p.get('name'))} in {p.get('tree')}."
     ),
     # --- The directory, tokens, and coming in through the front door --------
-    "person.added": lambda p: f"Added {p.get('name')} as a {_worded(p.get('kind'))}.",
-    "person.updated": lambda p: f"Changed a person's {_worded_fields(p)}.",
-    "person.archived": lambda p: f"Archived {p.get('name')}.",
-    "person.restored": lambda p: f"Brought {p.get('name')} back out of the archive.",
-    "token.issued": lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
-    "token.revoked": lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
-    "session.started": lambda p: "Signed in.",
+    Verb.PERSON_ADDED: lambda p: f"Added {p.get('name')} as a {_worded(p.get('kind'))}.",
+    Verb.PERSON_UPDATED: lambda p: f"Changed a person's {_worded_fields(p)}.",
+    Verb.PERSON_ARCHIVED: lambda p: f"Archived {p.get('name')}.",
+    Verb.PERSON_RESTORED: lambda p: f"Brought {p.get('name')} back out of the archive.",
+    Verb.TOKEN_ISSUED: lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
+    Verb.TOKEN_REVOKED: lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
+    Verb.SESSION_STARTED: lambda p: "Signed in.",
+    Verb.SESSION_ENDED: lambda p: "Signed out." if p.get("current") else "Signed out a session.",
+    Verb.PERSON_INVITED: lambda p: f"Invited {p.get('name')} to open an account.",
+    Verb.PERSON_INVITE_WITHDRAWN: lambda p: f"Withdrew the invitation to {p.get('name')}.",
+    Verb.PERSON_ACCOUNT_OPENED: lambda p: f"{p.get('name')} opened their account.",
+    Verb.PERSON_PASSWORD_CHANGED: lambda p: f"{p.get('name')} changed their password.",
+    Verb.PERSON_PASSWORD_RESET: lambda p: f"Reset {p.get('name')}'s password.",
+    # --- Goals --------------------------------------------------------------
+    Verb.GOAL_CREATED: lambda p: f"Added the goal {_quoted(p.get('name'))}.",
+    Verb.GOAL_UPDATED: lambda p: (
+        f"Changed the goal {_quoted(p.get('name'))}'s {_worded_fields(p)}."
+    ),
+    Verb.GOAL_DELETED: lambda p: f"Deleted the goal {_quoted(p.get('name'))}.",
+    # --- What a role may do ---------------------------------------------------
+    Verb.ROLE_PERMISSIONS_SET: lambda p: f"Changed what {_quoted(p.get('name'))} may do.",
+    Verb.ROLE_COLUMNS_SET: lambda p: (
+        f"Changed which columns {_quoted(p.get('name'))} may move cards into."
+    ),
+    Verb.ROLE_CLEARANCE_SET: lambda p: (
+        f"Set how sensitive a file {_quoted(p.get('name'))} may read to {p.get('clearance')}."
+    ),
+    # --- Skills ---------------------------------------------------------------
+    Verb.SKILL_UPLOADED: lambda p: f"Uploaded the skill {_quoted(p.get('name'))}.",
+    Verb.SKILL_REPLACED: lambda p: f"Replaced the skill {_quoted(p.get('name'))}.",
+    Verb.SKILL_UPDATED: lambda p: f"Changed a skill's {_worded_fields(p)}.",
+    Verb.SKILL_DELETED: lambda p: f"Deleted the skill {_quoted(p.get('name'))}.",
+    # --- Docs ---------------------------------------------------------------
+    Verb.DOC_CREATED: lambda p: f"Filed the doc {_quoted(p.get('title'))}.",
+    Verb.DOC_APPENDED: lambda p: f"Added to the doc {_quoted(p.get('title'))}.",
+    Verb.DOC_UPDATED: lambda p: f"Changed the doc {_quoted(p.get('title'))}.",
+    Verb.DOC_MOVED: lambda p: f"Moved the doc {_quoted(p.get('title'))} to another topic.",
+    Verb.DOC_DELETED: lambda p: f"Deleted the doc {_quoted(p.get('title'))}.",
+    Verb.DOC_REORDERED: lambda p: f"Reordered the docs under {_quoted(p.get('name'))}.",
+    Verb.DOC_TOPIC_CREATED: lambda p: f"Added the doc topic {_quoted(p.get('name'))}.",
+    Verb.DOC_TOPIC_RENAMED: lambda p: (
+        f"Renamed the doc topic {_quoted(p.get('before'))} to {_quoted(p.get('name'))}."
+    ),
+    Verb.DOC_TOPIC_REORDERED: lambda p: "Reordered the doc topics.",
+    Verb.DOC_TOPIC_DELETED: lambda p: f"Deleted the doc topic {_quoted(p.get('name'))}.",
     # --- Agents on a card. Written by the harness's hooks, one line per change
     #     of state and never per heartbeat --------------------------------------
-    "agent_session.started": lambda p: (
+    Verb.AGENT_SESSION_STARTED: lambda p: (
         f"An agent started working on this card ({p.get('client_name')})."
         if p.get("client_name")
         else "An agent started working on this card."
     ),
-    "agent_session.waiting": lambda p: (
+    Verb.AGENT_SESSION_WAITING: lambda p: (
         f"The agent asked: {p.get('question')}"
         if p.get("reason") == "question" and p.get("question")
         else _AGENT_WAITING.get(str(p.get("reason")), "The agent is waiting on you.")
     ),
-    "agent_session.answered": lambda p: (
+    Verb.AGENT_SESSION_ANSWERED: lambda p: (
         f"Answered the agent's permission request ({p.get('text')}): {p.get('answer')}."
         if p.get("kind") == "permission"
         else f"Answered the agent's question {_quoted(p.get('text'))}: {p.get('answer')}"
     ),
-    "agent_session.unanswered": lambda p: (
+    Verb.AGENT_SESSION_UNANSWERED: lambda p: (
         "Nobody answered the agent's request in time; it was left to the terminal."
         if p.get("kind") == "permission"
         else f"Nobody answered the agent's question {_quoted(p.get('text'))} in time."
     ),
-    "agent_session.finished": lambda p: (
+    Verb.AGENT_SESSION_FINISHED: lambda p: (
         f"The agent moved on to {p.get('moved_to')}."
         if p.get("reason") == "moved" and p.get("moved_to")
         else "The agent's session ended."

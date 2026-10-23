@@ -21,8 +21,9 @@ export interface ProjectInput {
 }
 
 export const projectsApi = {
-  listProjects: () => fetchAllPages<Project>('/projects'),
-  getProject: (projectKey: string) => request<Project>(`/projects/${projectKey}`),
+  listProjects: (signal?: AbortSignal) => fetchAllPages<Project>('/projects', signal),
+  getProject: (projectKey: string, signal?: AbortSignal) =>
+    request<Project>(`/projects/${projectKey}`, { signal }),
   createProject: (input: ProjectInput) =>
     request<Project>('/projects', { method: 'POST', body: jsonBody(input) }),
   /**

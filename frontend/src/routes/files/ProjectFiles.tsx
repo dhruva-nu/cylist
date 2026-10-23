@@ -16,16 +16,16 @@ import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type FileItem, type Sensitivity } from '../../api/client'
-import { useInvalidate, useProject } from '../../api/queries'
-import { projectFilesKey } from '../../components/projectFiles'
+import { affects, invalidates, queryKeys, useInvalidate, useProject } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import { Button, ErrorBanner, ErrorNotice, LiveRegion, useAnnouncer } from '../../components/ui'
+import { Button, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { LinkDialog, NewFolderDialog, RenameDialog, UploadDialog } from './FileDialogs'
 import { FolderContents } from './FolderContents'
 import { DropZone, FolderTree } from './FolderTree'
 import styles from './ProjectFiles.module.css'
 import { useFolderTree } from './useFolderTree'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** A file or folder as a mutation needs it: what to call, and what to say it was. */
 interface Named {
@@ -50,12 +50,12 @@ export function ProjectFiles() {
   // The item being renamed, rather than a fourth `dialog` value: the dialog is
   // about one row, and it is the row it needs, not the fact that it is open.
   const [renaming, setRenaming] = useState<FileItem | null>(null)
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   const project = useProject(projectKey)
   const tree = useQuery({
-    queryKey: ['folder-tree', projectKey],
-    queryFn: () => api.getTree(projectKey),
+    queryKey: queryKeys.folderTree(projectKey),
+    queryFn: ({ signal }) => api.getTree(projectKey, signal),
   })
 
   const folderTree = useFolderTree(tree.data ?? null)
@@ -64,8 +64,9 @@ export function ProjectFiles() {
   // The subfolders whole and the files a page at a time: a folder of
   // thousands of exports should open on its first hundred, not hang.
   const pages = useInfiniteQuery({
-    queryKey: ['folder-children', selectedId],
-    queryFn: ({ pageParam }) => api.getFolderChildren(selectedId as string, pageParam),
+    queryKey: queryKeys.folderChildren(selectedId),
+    queryFn: ({ pageParam, signal }) =>
+      api.getFolderChildren(selectedId as string, pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next,
     enabled: selectedId !== null,
@@ -82,11 +83,11 @@ export function ProjectFiles() {
 
   async function refresh() {
     await invalidate(
-      ['folder-tree', projectKey],
-      ['folder-children'],
+      queryKeys.folderTree(projectKey),
+      queryKeys.allFolderChildren,
       // What the `>` tag in a description or a comment is completed from: a
       // file uploaded here is taggable in the next thing anybody writes.
-      projectFilesKey(projectKey),
+      queryKeys.projectItems(projectKey),
     )
   }
 
@@ -98,6 +99,7 @@ export function ProjectFiles() {
   const folderName = contents.data?.folder.name ?? project.data?.name ?? projectKey
 
   const upload = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: async ({
       files,
       addedBy,
@@ -118,11 +120,13 @@ export function ProjectFiles() {
   })
 
   const deleteItem = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: (item: Named) => api.deleteItem(item.id),
     onSuccess: (_deleted, item) => refreshAndSay(`${item.name} deleted.`),
   })
 
   const deleteFolder = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: (folder: Named) => api.deleteFolder(folder.id),
     onSuccess: (_deleted, folder) => refreshAndSay(`Folder ${folder.name} deleted.`),
   })
@@ -164,8 +168,6 @@ export function ProjectFiles() {
       >
         Files upload to the server. Links to SharePoint or Google Drive sit in the same folders.
       </PageHead>
-
-      <LiveRegion message={message} />
       <ErrorNotice error={upload.error ?? deleteItem.error ?? deleteFolder.error} />
       <ErrorNotice error={contents.error} />
 

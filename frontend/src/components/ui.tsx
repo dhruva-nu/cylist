@@ -9,14 +9,8 @@ import styles from './primitives/ui.module.css'
 
 export { Avatar, initials, readableInkOn } from './primitives/Avatar'
 export { Button } from './primitives/Button'
-export {
-  EmptyState,
-  ErrorBanner,
-  ErrorNotice,
-  Eyebrow,
-  LiveRegion,
-  useAnnouncer,
-} from './primitives/feedback'
+export { EmptyState, ErrorBanner, ErrorNotice, Eyebrow } from './primitives/feedback'
+export { useAnnouncer } from './primitives/announcer'
 export {
   AlertIcon,
   CalendarIcon,

@@ -5,6 +5,7 @@ import { usePeople } from '../../api/queries'
 import { DialogActions, Modal, ModalBody } from '../../components/Modal'
 import { Avatar, ErrorNotice } from '../../components/ui'
 import styles from './ProjectPeople.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** Pick who from the directory is on this project. */
 export function DirectoryDialog({
@@ -24,6 +25,7 @@ export function DirectoryDialog({
   const directory = usePeople()
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.setMembers(projectKey, selected),
     onSuccess: async (result) => {
       await onDone()

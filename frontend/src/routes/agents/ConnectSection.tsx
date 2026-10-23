@@ -2,11 +2,12 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { BASE_PATH } from '../../api/basePath'
 import { api, type TokenIssued } from '../../api/client'
-import { useSetup } from '../../api/queries'
+import { invalidates, useSetup } from '../../api/queries'
 import { Button, ErrorBanner, ErrorNotice, cardStyles } from '../../components/ui'
 import styles from './Agents.module.css'
 import { Section } from './AgentsSection'
 import { MCP_NAME, agentScopes, connectLine } from './connectLine'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * The line that connects Claude Code on another machine to this deployment.
@@ -31,6 +32,7 @@ export function Connect({ announce }: { announce: (message: string) => void }) {
 
   const setup = useSetup()
   const mint = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates() },
     mutationFn: (label: string) => api.createToken(label, agentScopes(setup.data)),
     // The token is in the line on screen, shown once; react-query has no
     // reason to keep a copy of it once that line is put away.

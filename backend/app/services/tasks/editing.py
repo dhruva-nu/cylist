@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import UnprocessableRequestError
 from app.models.task import Task, TaskStatus
 from app.models.template import TaskTemplate
-from app.schemas.tasks import TaskUpdate
 from app.services import columns, goals, projects, templates
+from app.services.commands.tasks import TaskUpdate
 from app.services.tasks.dates import (
     column_dates_change,
     column_due_dates_of,

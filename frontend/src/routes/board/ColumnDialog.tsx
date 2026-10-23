@@ -4,6 +4,7 @@ import { api, type BoardColumn, type ColumnInput } from '../../api/client'
 import { DialogActions, Field, Modal, ModalBody } from '../../components/Modal'
 import { Button, ErrorNotice } from '../../components/ui'
 import styles from './ColumnDialog.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** Creates a column, or renames and deletes one. */
 export function ColumnDialog({
@@ -40,6 +41,7 @@ export function ColumnDialog({
   const outcomes = form.outcomes ?? []
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (input: ColumnInput) =>
       column ? api.updateColumn(column.id, input) : api.createColumn(projectKey, input),
     onSuccess: async (saved) => {
@@ -50,6 +52,7 @@ export function ColumnDialog({
   })
 
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (existing: BoardColumn) => api.deleteColumn(existing.id),
     onSuccess: async (_deleted, existing) => {
       announce(`Column ${existing.name} deleted.`)

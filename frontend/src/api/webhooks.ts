@@ -123,8 +123,9 @@ export interface HookDelivery {
 }
 
 export const webhooksApi = {
-  listHookEvents: () => request<HookEvent[]>('/hooks/events'),
-  listHooks: (projectKey: string) => fetchAllPages<Hook>(`/projects/${projectKey}/hooks`),
+  listHookEvents: (signal?: AbortSignal) => request<HookEvent[]>('/hooks/events', { signal }),
+  listHooks: (projectKey: string, signal?: AbortSignal) =>
+    fetchAllPages<Hook>(`/projects/${projectKey}/hooks`, signal),
   createHook: (projectKey: string, input: HookInput) =>
     request<HookCreated>(`/projects/${projectKey}/hooks`, {
       method: 'POST',
@@ -151,9 +152,15 @@ export const webhooksApi = {
       body: jsonBody({ message: message.trim() || null }),
     }),
   /** The newest page of a hook's deliveries: what a reader checks to see whether it works. */
-  listHookDeliveries: async (projectKey: string, id: string) =>
-    (await fetchPage<HookDelivery>(`/projects/${projectKey}/hooks/${id}/deliveries`, null, 25))
-      .items,
+  listHookDeliveries: async (projectKey: string, id: string, signal?: AbortSignal) =>
+    (
+      await fetchPage<HookDelivery>(
+        `/projects/${projectKey}/hooks/${id}/deliveries`,
+        null,
+        25,
+        signal,
+      )
+    ).items,
   redeliverHook: (projectKey: string, id: string, deliveryId: string) =>
     request<HookDelivery>(
       `/projects/${projectKey}/hooks/${id}/deliveries/${deliveryId}/redeliver`,

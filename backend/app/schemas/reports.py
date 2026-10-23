@@ -2,111 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-
-from pydantic import Field
-
-from app.models.task import TaskStatus
-from app.models.today import TodoState
-from app.schemas.activity import HistoryEntry
-from app.schemas.common import Schema
-
-
-class TaskDay(Schema):
-    """One card's share of a day: everything that happened to it, in order."""
-
-    reference: str = Field(description="`ATL-41`, or `ATL-41-2` for a sub-task.")
-    title: str = Field(
-        description="The card's title now — or the one it had at the time, if it "
-        "has since been deleted."
-    )
-    column: str | None = Field(
-        description="Which column the card sits in now. Null on a sub-task, which is not on "
-        "the board, and on a card that no longer exists — `parent` tells the two apart."
-    )
-    parent: str | None = Field(
-        description="`ATL-41`, when this is a sub-task. Null on a card, and on anything "
-        "deleted, whose parentage is no longer on record."
-    )
-    status: TaskStatus | None = Field(description="Its status now. Null if it no longer exists.")
-    finished: bool = Field(
-        description="Whether the day left it finished: a card by ending it in the board's last "
-        "column, a sub-task by being ticked off. False for either one undone again afterwards."
-    )
-    entries: list[HistoryEntry] = Field(
-        description="What happened to it, oldest first. Its moves appear as the one "
-        "move they amounted to — from the column the day started in to the one it "
-        "ended in — carrying `moves` in the payload to say how many there were."
-    )
-
-
-class DayTodo(Schema):
-    """One to-do from the asker's plan for the day, and how the day left it."""
-
-    text: str = Field(description="As written, `@person` and `>file` tags included.")
-    state: TodoState = Field(
-        description="`done`, `moved` (to `moved_to`), `not_done`, or `open` for a day "
-        "that has not been wrapped up yet."
-    )
-    moved_to: date | None
-    carried_from: date | None = Field(description="The day it was moved on from, if it was.")
-
-
-class CardTodos(Schema):
-    """One card on the asker's plan, with what they meant to do about it."""
-
-    reference: str
-    title: str
-    column: str | None = Field(description="Where the card sits now; null in cold storage.")
-    todos: list[DayTodo]
-
-
-class DayReport(Schema):
-    """What one project's day amounted to, ready to be read or pasted.
-
-    Grouped by card rather than left as a flat feed, because a day spent on
-    four cards is four pieces of work and thirty audit rows — the grouping is
-    the part that turns the record into a report. Condensed for the same
-    reason: a card's moves collapse to where it started and where it ended, so
-    a card walked across the board reads as one step rather than four.
-    """
-
-    project_key: str
-    project_name: str
-    day: date = Field(description="The day this reports on, in `timezone`.")
-    timezone: str = Field(
-        description="The IANA zone the day was cut by, e.g. `Asia/Kolkata`. The zone "
-        "the request settled on, which for a loosely spelled one is not the name it "
-        "asked with — this is the one to trust."
-    )
-    starts_at: datetime = Field(description="Midnight that began the day, in UTC.")
-    ends_at: datetime = Field(
-        description="Midnight that ended it, in UTC. Exclusive: an entry at "
-        "exactly this moment belongs to the next day."
-    )
-    entry_count: int = Field(
-        description="How many lines the report holds — a card's day of moves counting "
-        "as the one move it amounted to, not as each drag."
-    )
-    finished: list[str] = Field(
-        description="References of the cards that ended the day in the board's last column."
-    )
-    tasks: list[TaskDay] = Field(
-        description="The cards touched today, in the order they were first touched."
-    )
-    elsewhere: list[HistoryEntry] = Field(
-        description="Changes that were not to a card — files, columns, the vault, "
-        "the project itself — oldest first."
-    )
-    todos: list[CardTodos] = Field(
-        default_factory=list,
-        description="The asker's own plan for the day — the cards they picked up and "
-        "their to-dos under each — in the order picked. Empty for anyone who did not "
-        "plan the day, and always for the bootstrap session, which is nobody.",
-    )
-    headline: str = Field(description="The day in one sentence.")
-    markdown: str = Field(
-        description="The whole report as Markdown, worded by the server so a "
-        "stand-up note pasted from the browser and one written by an agent read "
-        "the same."
-    )
+from app.services.readmodels.reports import (
+    CardTodos as CardTodos,
+)
+from app.services.readmodels.reports import (
+    DayReport as DayReport,
+)
+from app.services.readmodels.reports import (
+    DayTodo as DayTodo,
+)
+from app.services.readmodels.reports import (
+    TaskDay as TaskDay,
+)

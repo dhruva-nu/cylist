@@ -350,21 +350,29 @@ export interface CommentPage extends Page<TaskComment> {
 
 export const tasksApi = {
   /** The top `limit` cards of every column. */
-  listTasks: (projectKey: string, limit = BOARD_PAGE) =>
-    request<BoardTasks>(`/projects/${projectKey}/tasks?limit=${limit}`),
+  listTasks: (projectKey: string, limit = BOARD_PAGE, signal?: AbortSignal) =>
+    request<BoardTasks>(`/projects/${projectKey}/tasks?limit=${limit}`, { signal }),
   /** The cards of one column after `after`, continuing from its `next`. */
-  listColumnTasks: (columnId: string, after: string, limit = BOARD_PAGE) =>
-    fetchPage<Task>(`/columns/${columnId}/tasks`, after, limit),
+  listColumnTasks: (columnId: string, after: string, limit = BOARD_PAGE, signal?: AbortSignal) =>
+    fetchPage<Task>(`/columns/${columnId}/tasks`, after, limit, signal),
   /** A page of a card's timeline, newest first, from `after` back. */
-  listComments: (taskRef: string, after: string | null) =>
-    request<CommentPage>(pagePath(`/tasks/${taskRef}/comments`, after, 50)),
-  getTask: (taskRef: string) => request<TaskDetail>(`/tasks/${taskRef}`),
+  listComments: (taskRef: string, after: string | null, signal?: AbortSignal) =>
+    request<CommentPage>(pagePath(`/tasks/${taskRef}/comments`, after, 50), { signal }),
+  getTask: (taskRef: string, signal?: AbortSignal) =>
+    request<TaskDetail>(`/tasks/${taskRef}`, { signal }),
   /**
    * One page of what has been done to a card — every edit, move and tick —
    * newest first. Its own request, made only when somebody asks to see it.
    */
-  getTaskHistory: (taskRef: string, page: number, perPage = HISTORY_PER_PAGE) =>
-    request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`),
+  getTaskHistory: (
+    taskRef: string,
+    page: number,
+    perPage = HISTORY_PER_PAGE,
+    signal?: AbortSignal,
+  ) =>
+    request<TaskHistoryPage>(`/tasks/${taskRef}/history?page=${page}&per_page=${perPage}`, {
+      signal,
+    }),
   createTask: (projectKey: string, input: TaskInput) =>
     request<TaskDetail>(`/projects/${projectKey}/tasks`, { method: 'POST', body: jsonBody(input) }),
   /** Split a task into a sub-task with its own card, referenced `ATL-41-2`. */
@@ -421,8 +429,8 @@ export const tasksApi = {
   deleteComment: (commentId: string) =>
     request<void>(`/comments/${commentId}`, { method: 'DELETE' }),
   /** A page of the board's cards in cold storage, most recently finished first. */
-  listColdStorage: (projectKey: string, after: string | null = null) =>
-    fetchPage<Task>(`/projects/${projectKey}/cold-storage`, after),
+  listColdStorage: (projectKey: string, after: string | null = null, signal?: AbortSignal) =>
+    fetchPage<Task>(`/projects/${projectKey}/cold-storage`, after, undefined, signal),
   /**
    * Take every card in the board's last column off the board, into a CSV in the
    * project's files. The cards are kept, not deleted, and each can be restored.

@@ -15,19 +15,21 @@ import httpx
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project, vault_cipher
+from app.api.paging import PageQuery
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
+from app.config import settings_of
 from app.core.crypto import VaultCipher
 from app.core.errors import NotFoundError
 from app.core.ids import uuid7
 from app.db import SessionDependency, database_of, flush_or_refuse, publish_into
+from app.models.activity import EntityType, Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.project import Project
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.vault import vault_cipher
+from app.realtime.events import HooksQueued
 from app.schemas.hooks import (
     DeliverySummary,
     HookCreate,
@@ -157,7 +159,7 @@ async def _send_released(
     await database_of(request).release(session)
     async with _client(request) as client:
         await hook_delivery.send_now(
-            session, client, request.app.state.settings.vault_keyring, hook, delivery
+            session, client, settings_of(request).vault_keyring, hook, delivery
         )
 
 
@@ -252,8 +254,8 @@ async def create_hook(
     await activity.record(
         session,
         principal,
-        "hook.created",
-        entity_type="hook",
+        Verb.HOOK_CREATED,
+        entity_type=EntityType.HOOK,
         entity_id=hook.id,
         project_id=project.id,
         payload={"name": hook.name},
@@ -306,8 +308,8 @@ async def update_hook(
         await activity.record(
             session,
             principal,
-            "hook.updated",
-            entity_type="hook",
+            Verb.HOOK_UPDATED,
+            entity_type=EntityType.HOOK,
             entity_id=hook.id,
             project_id=project.id,
             payload={"name": hook.name, "fields": changed},
@@ -334,8 +336,8 @@ async def delete_hook(
     await activity.record(
         session,
         principal,
-        "hook.deleted",
-        entity_type="hook",
+        Verb.HOOK_DELETED,
+        entity_type=EntityType.HOOK,
         project_id=project.id,
         payload={"name": name},
     )
@@ -361,8 +363,8 @@ async def rotate_secret(
     await activity.record(
         session,
         principal,
-        "hook.secret_rotated",
-        entity_type="hook",
+        Verb.HOOK_SECRET_ROTATED,
+        entity_type=EntityType.HOOK,
         entity_id=hook.id,
         project_id=project.id,
         payload={"name": hook.name},
@@ -426,8 +428,8 @@ async def fire_hook(
     await activity.record(
         session,
         principal,
-        "hook.fired",
-        entity_type="hook",
+        Verb.HOOK_FIRED,
+        entity_type=EntityType.HOOK,
         entity_id=hook.id,
         project_id=project.id,
         payload={"name": hook.name, "message": message},
@@ -474,7 +476,7 @@ async def redeliver(
     hook_delivery.requeue(delivery)
     # Through the outbox rather than straight at the courier: woken before the
     # commit, it would look, find nothing due yet, and sleep through it.
-    publish_into(session, {"type": hooks.QUEUED})
+    publish_into(session, HooksQueued())
     await session.flush()
     await session.refresh(delivery)
     return HookDeliveryRead.model_validate(delivery)

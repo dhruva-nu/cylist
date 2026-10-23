@@ -36,11 +36,76 @@ export const queryKeys = {
    * invalidating it refreshes whichever page is showing.
    */
   taskHistory: (taskId: string) => ['task-history', taskId],
+  /** One page of a card's history; a key under `taskHistory`, so that refreshes it too. */
+  taskHistoryPage: (taskId: string, page: number) => ['task-history', taskId, page],
+  /** Every card's history, whichever card and project. */
+  allTaskHistory: ['task-history'],
+  /** What the agents on a card have read, edited, run and said. */
+  agentFeed: (taskId: string) => ['agent-feed', taskId],
+  /** Every card's agent feed. */
+  allAgentFeeds: ['agent-feed'],
+  /** A day's plan. The project's plans share the two-part prefix `todayPlans`. */
+  todayPlan: (projectKey: string, day: string) => ['today', projectKey, day],
+  /** Every day of the project's plans. */
+  todayPlans: (projectKey: string) => ['today', projectKey],
+  dayReport: (projectKey: string, day: string, zone: string) => [
+    'day-report',
+    projectKey,
+    day,
+    zone,
+  ],
+  /** Every day of the project's reports. */
+  dayReports: (projectKey: string) => ['day-report', projectKey],
+  skills: (projectKey: string) => ['skills', projectKey],
+  /** Every file and link in the project, flat — the `>` picker's choices. */
+  projectItems: (projectKey: string) => ['project-items', projectKey],
+  folderTree: (projectKey: string) => ['folder-tree', projectKey],
+  folderChildren: (folderId: string | null) => ['folder-children', folderId],
+  /** Every folder's children, whichever folder. */
+  allFolderChildren: ['folder-children'],
+  docTree: (projectKey: string) => ['docs', projectKey],
+  doc: (docId: string | null | undefined) => ['doc', docId],
+  /** Every question asked of the project's docs. */
+  docAnswers: (projectKey: string) => ['doc-answer', projectKey],
+  docAnswer: (projectKey: string, question: string | null | undefined) => [
+    'doc-answer',
+    projectKey,
+    question,
+  ],
+  hooks: (projectKey: string) => ['hooks', projectKey],
+  hookDeliveries: (hookId: string) => ['hook-deliveries', hookId],
+  vaultTrees: (projectKey: string) => ['vault-trees', projectKey],
+  /** Every reading of the project's trees' contents, whichever trees there were. */
+  vaultTreeDetailsOf: (projectKey: string) => ['vault-tree-details', projectKey],
+  /** The trees' contents, keyed on which trees there are so a new one is read. */
+  vaultTreeDetails: (projectKey: string, treeIds: string) => [
+    'vault-tree-details',
+    projectKey,
+    treeIds,
+  ],
+  /** Every project's board cards: what a write that does not know the project refreshes. */
+  allBoardCards: ['tasks'],
+  /** Every project's columns. */
+  allBoards: ['board'],
+  /** Every project's hooks, and every hook's delivery log. */
+  allHooks: ['hooks'],
+  allHookDeliveries: ['hook-deliveries'],
+  /** Every project's vault: its trees, and what is in them. */
+  allVaultTrees: ['vault-trees'],
+  allVaultTreeDetails: ['vault-tree-details'],
+  /** Every project's docs: the tree, any one doc, and the answers drawn from them. */
+  allDocTrees: ['docs'],
+  allDocs: ['doc'],
+  allDocAnswers: ['doc-answer'],
+  allSkills: ['skills'],
+  /** Every project's folders, and what is in them, and the flat list of its files. */
+  allFolderTrees: ['folder-tree'],
+  allProjectItems: ['project-items'],
   goals: (projectKey: string) => ['goals', projectKey],
   /** Every goal's page, whichever project it is on. */
   allGoals: ['goal'],
   goal: (goalRef: string) => ['goal', goalRef],
-} as const satisfies Record<string, QueryKey | ((...args: string[]) => QueryKey)>
+} as const satisfies Record<string, QueryKey | ((...args: never[]) => QueryKey)>
 
 /**
  * A mutation's `meta` for one that invalidates what it changes itself, which
@@ -49,6 +114,37 @@ export const queryKeys = {
  * forgets is a list that stays stale until a reload.
  */
 export const refreshesItself = { refreshesItself: true } as const
+
+/**
+ * A mutation's `meta` for one that says what it changes: only those queries are
+ * read again, instead of every one on screen (`main.tsx`).
+ *
+ * Narrower than `refreshesItself`, which leaves the refetch to the write's own
+ * code and so cannot be checked in one place. Where the keys are listed here,
+ * a write to the hooks cannot cost the board its cards. Give it nothing for a
+ * write that changes nothing anybody has cached — a secret revealed, a line
+ * copied.
+ */
+export function invalidates(...keys: QueryKey[]) {
+  return { invalidates: keys } as const
+}
+
+/**
+ * What each area of the app caches, for a write there to name.
+ *
+ * Whole areas rather than the one project or row a write was made on: only a
+ * query somebody is looking at is read again, so the width costs nothing, and a
+ * write made from a dialog that does not know its project still reaches every
+ * reader. An area's writes never touch the board's cards or the directory;
+ * that is what puts them here rather than on the blanket refetch.
+ */
+export const affects = {
+  hooks: [queryKeys.allHooks, queryKeys.allHookDeliveries],
+  vault: [queryKeys.allVaultTrees, queryKeys.allVaultTreeDetails],
+  docs: [queryKeys.allDocTrees, queryKeys.allDocs, queryKeys.allDocAnswers],
+  skills: [queryKeys.allSkills],
+  files: [queryKeys.allFolderTrees, queryKeys.allFolderChildren, queryKeys.allProjectItems],
+} as const satisfies Record<string, readonly QueryKey[]>
 
 /**
  * How long a list that hardly ever changes counts as fresh: who you are, what
@@ -72,7 +168,7 @@ const SETTLED_MS = 5 * 60_000
 export function useIdentity() {
   return useQuery({
     queryKey: queryKeys.identity,
-    queryFn: api.me,
+    queryFn: ({ signal }) => api.me(signal),
     staleTime: SETTLED_MS,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.isUnauthenticated) && failureCount < 2,
@@ -81,13 +177,13 @@ export function useIdentity() {
 
 /** What this deployment is, and whether anybody can sign in to it yet. */
 export function useSetup() {
-  return useQuery({ queryKey: queryKeys.setup, queryFn: api.setup })
+  return useQuery({ queryKey: queryKeys.setup, queryFn: ({ signal }) => api.setup(signal) })
 }
 
 export function useProjects() {
   return useQuery({
     queryKey: queryKeys.projects,
-    queryFn: api.listProjects,
+    queryFn: ({ signal }) => api.listProjects(signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -95,20 +191,20 @@ export function useProjects() {
 export function useProject(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.project(projectKey),
-    queryFn: () => api.getProject(projectKey),
+    queryFn: ({ signal }) => api.getProject(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
 
 /** The whole directory, every project's people together. */
 export function usePeople() {
-  return useQuery({ queryKey: queryKeys.people, queryFn: api.listPeople })
+  return useQuery({ queryKey: queryKeys.people, queryFn: ({ signal }) => api.listPeople(signal) })
 }
 
 export function useMembers(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.members(projectKey),
-    queryFn: () => api.listMembers(projectKey),
+    queryFn: ({ signal }) => api.listMembers(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -117,7 +213,7 @@ export function useMembers(projectKey: string) {
 export function useRoles(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.roles(projectKey),
-    queryFn: () => api.listRoles(projectKey),
+    queryFn: ({ signal }) => api.listRoles(projectKey, signal),
   })
 }
 
@@ -128,23 +224,29 @@ export function useRoles(projectKey: string) {
 export function usePermissionGrid(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.permissions(projectKey),
-    queryFn: () => api.getPermissions(projectKey),
+    queryFn: ({ signal }) => api.getPermissions(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
 
 /** The board's columns, and the limits the server holds them to. */
-export function useBoard(projectKey: string) {
+/** Read nothing until `enabled` says there is something to read — see `useTasks`. */
+interface ReadOptions {
+  enabled?: boolean | undefined
+}
+
+export function useBoard(projectKey: string, { enabled = true }: ReadOptions = {}) {
   return useQuery({
     queryKey: queryKeys.board(projectKey),
-    queryFn: () => api.listColumns(projectKey),
+    queryFn: ({ signal }) => api.listColumns(projectKey, signal),
+    enabled,
   })
 }
 
 export function useTemplates(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.templates(projectKey),
-    queryFn: () => api.listTemplates(projectKey),
+    queryFn: ({ signal }) => api.listTemplates(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -184,8 +286,9 @@ export interface BoardCards {
 export async function fetchBoardCards(
   projectKey: string,
   previous?: BoardCards,
+  signal?: AbortSignal,
 ): Promise<BoardCards> {
-  const board = await api.listTasks(projectKey)
+  const board = await api.listTasks(projectKey, undefined, signal)
   const tasks: Task[] = []
   const columns: ColumnCards[] = []
   for (const column of board.columns) {
@@ -195,7 +298,7 @@ export async function fetchBoardCards(
     tasks.push(...column.items)
     while (next && pages < wanted) {
       try {
-        const page = await api.listColumnTasks(column.column_id, next)
+        const page = await api.listColumnTasks(column.column_id, next, undefined, signal)
         tasks.push(...page.items)
         next = page.next
         pages += 1
@@ -210,14 +313,16 @@ export async function fetchBoardCards(
 }
 
 /** The board's cards, as far as each column has been read — see `BoardCards`. */
-export function useTasks(projectKey: string) {
+export function useTasks(projectKey: string, { enabled = true }: ReadOptions = {}) {
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: queryKeys.tasks(projectKey),
-    queryFn: () =>
+    enabled,
+    queryFn: ({ signal }) =>
       fetchBoardCards(
         projectKey,
         queryClient.getQueryData<BoardCards>(queryKeys.tasks(projectKey)),
+        signal,
       ),
   })
 }
@@ -265,7 +370,7 @@ export function useLoadMoreCards(projectKey: string) {
 export function useGoals(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.goals(projectKey),
-    queryFn: () => api.listGoals(projectKey),
+    queryFn: ({ signal }) => api.listGoals(projectKey, undefined, signal),
   })
 }
 
