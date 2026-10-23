@@ -11,7 +11,8 @@
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "api:types": "openapi-typescript http://localhost:8000/api/v1/openapi.json -o src/api/schema.d.ts"
+    "api:types": "openapi-typescript ../android/api/openapi.json -o src/api/schema.d.ts",
+    "api:types:check": "openapi-typescript ../android/api/openapi.json -o src/api/schema.d.ts --check"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

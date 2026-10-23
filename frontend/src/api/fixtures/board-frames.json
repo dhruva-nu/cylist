@@ -1,0 +1,44 @@
+{
+  "ready": {
+    "type": "ready"
+  },
+  "changed, naming a card": {
+    "type": "board.changed",
+    "at": "2026-10-22T10:00:00+00:00",
+    "changed": [
+      {
+        "entity_type": "task",
+        "entity_id": "4f1c2a9e-0000-7000-8000-000000000001"
+      }
+    ]
+  },
+  "changed, naming nothing": {
+    "type": "board.changed",
+    "at": "2026-10-22T10:00:00+00:00",
+    "changed": null
+  },
+  "changed, naming two things": {
+    "type": "board.changed",
+    "at": "2026-10-22T10:00:00+00:00",
+    "changed": [
+      {
+        "entity_type": "task",
+        "entity_id": "a"
+      },
+      {
+        "entity_type": "goal",
+        "entity_id": "b"
+      }
+    ]
+  },
+  "agent feed": {
+    "type": "agent.feed",
+    "task_id": "4f1c2a9e-0000-7000-8000-000000000001",
+    "at": "2026-10-22T10:00:00+00:00"
+  },
+  "error": {
+    "type": "error",
+    "code": "not_found",
+    "message": "No such project."
+  }
+}
