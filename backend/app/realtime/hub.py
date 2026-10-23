@@ -57,6 +57,7 @@ from uuid import UUID, uuid4
 
 from app.models.agent_session import SessionKey
 from app.realtime import protocol
+from app.realtime.events import AgentConnected, BoardChanged, Event, FeedChanged, PromptChanged
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class Hub:
                 if not watchers:
                     del self._watchers[project_id]
 
-    def publish(self, event: dict[str, Any]) -> None:
+    def publish(self, event: Event) -> None:
         """Nudge everyone here watching the project this event belongs to.
 
         Synchronous, and it never awaits: it is called from the code that has
@@ -174,25 +175,27 @@ class Hub:
         Called by :class:`~app.realtime.bus.Bus` for this process's own events
         and for every other process's, alike.
         """
-        if event.get("type") == protocol.AGENT_CONNECTED:
+        if isinstance(event, AgentConnected):
             self._agent_connected(event)
             return
-        if event.get("type") == protocol.PROMPT_CHANGED:
+        if isinstance(event, PromptChanged):
             self._prompt_changed(event)
-        project_id = event.get("project_id")
-        if not isinstance(project_id, UUID):
+        if not isinstance(event, BoardChanged | FeedChanged | PromptChanged):
             return
-        watchers = self._watchers.get(project_id)
+        if event.project_id is None:
+            return
+        watchers = self._watchers.get(event.project_id)
         if not watchers:
             return
 
-        task_id = event.get("task_id")
-        if event.get("type") == protocol.FEED_CHANGED and isinstance(task_id, UUID):
-            key = f"{protocol.FEED_CHANGED}:{task_id}"
-            nudge = protocol.feed_changed(str(task_id))
+        if isinstance(event, FeedChanged):
+            key = f"{FeedChanged.type}:{event.task_id}"
+            nudge = protocol.feed_changed(str(event.task_id))
         else:
             key = BOARD_CHANGED
-            nudge = protocol.board_changed(protocol.changed_ref(event))
+            nudge = protocol.board_changed(
+                protocol.changed_ref(event) if isinstance(event, BoardChanged) else None
+            )
         for watcher in watchers:
             # A watcher with one waiting already has everything this would say.
             watcher.offer(key, nudge)
@@ -234,7 +237,7 @@ class Hub:
                 if not waiters:
                     del self._prompt_waiters[prompt_id]
 
-    def _prompt_changed(self, event: dict[str, Any]) -> None:
+    def _prompt_changed(self, event: PromptChanged) -> None:
         """Wake whoever waits on a prompt, and hand an agent its answer.
 
         The answer frame is the one thing published here that is not a
@@ -242,14 +245,10 @@ class Hub:
         re-sends the prompt on its next connection and is answered then, and
         a hook that is never answered leaves the terminal's dialog to decide.
         """
-        prompt_id = event.get("prompt_id")
-        if isinstance(prompt_id, UUID):
-            for waiter in self._prompt_waiters.get(prompt_id, ()):
-                waiter.set()
-        deliver = event.get("deliver")
-        key = _key_of(event)
-        if isinstance(deliver, dict) and key is not None:
-            self.deliver(key, deliver)
+        for waiter in self._prompt_waiters.get(event.prompt_id, ()):
+            waiter.set()
+        if event.deliver is not None and event.person_id is not None and event.client_session_id:
+            self.deliver(SessionKey(event.person_id, event.client_session_id), event.deliver)
 
     # --- Agents ------------------------------------------------------------
 
@@ -273,7 +272,7 @@ class Hub:
         truth about where it is.
 
         An older socket held by *another* process is displaced by the
-        :data:`~app.realtime.protocol.AGENT_CONNECTED` event the caller
+        :class:`~app.realtime.events.AgentConnected` event the caller
         publishes next, which reaches that process's hub as
         :meth:`_agent_connected`.
 
@@ -291,16 +290,15 @@ class Hub:
         if self._agents.get(link.key) is link:
             del self._agents[link.key]
 
-    def _agent_connected(self, event: dict[str, Any]) -> None:
+    def _agent_connected(self, event: AgentConnected) -> None:
         """A socket for some session opened, perhaps in another process.
 
         Whatever older socket this process holds for it is displaced — unless
         it is the very connection the event is about, which is how a process
         hears its own news back.
         """
-        key = _key_of(event)
-        link = self._agents.get(key) if key is not None else None
-        if link is None or link.id == event.get("link_id"):
+        link = self._agents.get(SessionKey(event.person_id, event.client_session_id))
+        if link is None or link.id == event.link_id:
             return
         del self._agents[link.key]
         self._displace(link)
@@ -319,12 +317,3 @@ class Hub:
             "board_watchers": sum(len(group) for group in self._watchers.values()),
             "projects_watched": len(self._watchers),
         }
-
-
-def _key_of(event: dict[str, Any]) -> SessionKey | None:
-    """The agent session an event is addressed to, if it names one whole."""
-    person_id = event.get("person_id")
-    client_session_id = event.get("client_session_id")
-    if isinstance(person_id, UUID) and isinstance(client_session_id, str):
-        return SessionKey(person_id, client_session_id)
-    return None

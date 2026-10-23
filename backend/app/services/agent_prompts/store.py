@@ -26,6 +26,7 @@ from app.models.agent_session import (
 )
 from app.models.task import Task
 from app.realtime import protocol
+from app.realtime.events import PromptChanged
 from app.schemas.agent_sessions import NOTE_MAX
 from app.services import activity, agent_sessions
 
@@ -207,15 +208,14 @@ def announce(
     key = row.key if row is not None else None
     publish_into(
         session,
-        {
-            "type": protocol.PROMPT_CHANGED,
-            "project_id": task.project_id,
-            "task_id": task.id,
-            "prompt_id": prompt.id,
-            "person_id": key.person_id if key else None,
-            "client_session_id": key.client_session_id if key else None,
-            "deliver": deliver,
-        },
+        PromptChanged(
+            project_id=task.project_id,
+            task_id=task.id,
+            prompt_id=prompt.id,
+            person_id=key.person_id if key else None,
+            client_session_id=key.client_session_id if key else None,
+            deliver=deliver,
+        ),
     )
 
 

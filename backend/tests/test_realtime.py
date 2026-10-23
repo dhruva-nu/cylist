@@ -17,6 +17,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.realtime import protocol
+from app.realtime.events import BoardChanged
 from app.realtime.hub import Watcher
 from tests import ws
 from tests.conftest import put_members
@@ -324,13 +325,10 @@ class TestWhatTheDoorbellSaysChanged:
     """A board.changed names the things that changed, and a burst joins its hints."""
 
     def test_an_event_that_names_nothing_is_a_doorbell_for_anything(self) -> None:
-        assert (
-            protocol.board_changed(protocol.changed_ref({"type": "board.changed"}))["changed"]
-            is None
-        )
+        assert protocol.board_changed(protocol.changed_ref(BoardChanged()))["changed"] is None
 
     def test_an_event_that_names_a_thing_says_so(self) -> None:
-        ref = protocol.changed_ref({"entity_type": "goal", "entity_id": uuid4()})
+        ref = protocol.changed_ref(BoardChanged(entity_type="goal", entity_id=uuid4()))
 
         assert ref is not None
         assert ref[0]["entity_type"] == "goal"

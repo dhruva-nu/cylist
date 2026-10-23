@@ -41,6 +41,7 @@ from app.core.clock import now as clock_now
 from app.db import publish_into
 from app.models.agent_session import AgentSession, AgentSessionReason, SessionKey
 from app.models.task import Task
+from app.realtime.events import BoardChanged
 from app.schemas.agent_sessions import AgentSessionPut, AgentSessionRead
 from app.services import activity, agent_prompts, agent_sessions
 
@@ -104,13 +105,12 @@ async def report(
         # A transition above has already rung the board's doorbell.
         publish_into(
             session,
-            {
-                "type": "board.changed",
-                "project_id": task.project_id,
-                "entity_type": "task",
-                "entity_id": task.id,
-                "verb": "agent_session.noted",
-            },
+            BoardChanged(
+                project_id=task.project_id,
+                entity_type="task",
+                entity_id=task.id,
+                verb="agent_session.noted",
+            ),
         )
     return agent_sessions.read(upserted.row)
 

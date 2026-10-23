@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import publish_into
 from app.models.agent_session import AgentFeedEntry, AgentSession, SessionKey
 from app.models.task import Task
-from app.realtime import protocol
+from app.realtime.events import FeedChanged
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentFeedEntryRead
 from app.services import agent_sessions
 from app.services.paging import PageRequest, keyset
@@ -79,10 +79,7 @@ async def append(
     await session.flush()
     await _trim(session, row.id)
 
-    publish_into(
-        session,
-        {"type": protocol.FEED_CHANGED, "project_id": task.project_id, "task_id": task.id},
-    )
+    publish_into(session, FeedChanged(project_id=task.project_id, task_id=task.id))
     return len(entries)
 
 

@@ -16,6 +16,7 @@ from app.config import Settings
 from app.core.palette import colour_for
 from app.db import Database, publish_into
 from app.models.person import Person, PersonKind
+from app.realtime.events import BoardChanged, Event
 from tests.connections import assert_no_connection_held, connections_held
 
 
@@ -102,19 +103,19 @@ class TestTheLimits:
 
 class TestReleasing:
     async def test_it_commits_tells_and_hands_the_connection_back(self, database: Database) -> None:
-        told: list[dict[str, Any]] = []
+        told: list[Event] = []
         database.publish_to(told.append)
         try:
             async with database.session() as session:
                 session.add(_person("Aditi K"))
-                publish_into(session, {"type": "board.changed"})
+                publish_into(session, BoardChanged())
                 await session.flush()
                 assert connections_held(database) == 1
 
                 await database.release(session)
 
                 assert connections_held(database) == 0
-                assert told == [{"type": "board.changed"}], "told once it committed"
+                assert told == [BoardChanged()], "told once it committed"
                 async with database.session() as other:
                     seen = await other.scalar(select(Person.name).where(Person.name == "Aditi K"))
                 assert seen == "Aditi K", "committed, so another connection reads it"
@@ -125,7 +126,7 @@ class TestReleasing:
             async with database.session() as other:
                 names = set(await other.scalars(select(Person.name)))
             assert {"Aditi K", "Ravi S"} <= names
-            assert told == [{"type": "board.changed"}], "nothing told twice"
+            assert told == [BoardChanged()], "nothing told twice"
         finally:
             database.publish_to(None)
 

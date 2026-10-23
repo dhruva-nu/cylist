@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, Request
@@ -32,6 +31,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.core.errors import AppError
 from app.models.base import UUIDPrimaryKeyMixin
+from app.realtime.events import Event
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ that falls out for free if the two are the same object.
 """
 
 
-def publish_into(session: AsyncSession | Session, event: dict[str, Any]) -> None:
+def publish_into(session: AsyncSession | Session, event: Event) -> None:
     """Queue one event to be published if — and only if — this session commits.
 
     The alternative, publishing where the change is made, is the bug
@@ -129,7 +129,7 @@ class Database:
             expire_on_commit=False,  # attributes stay readable after commit
             autoflush=False,
         )
-        self._publish: Callable[[dict[str, Any]], None] | None = None
+        self._publish: Callable[[Event], None] | None = None
         """Where committed events go. ``None`` until something is listening,
         which is the honest default: a pool can exist before there is anyone
         to tell, and every test that does not care about pushes gets silence
@@ -151,7 +151,7 @@ class Database:
     def engine(self) -> AsyncEngine:
         return self._engine
 
-    def publish_to(self, publish: Callable[[dict[str, Any]], None] | None) -> None:
+    def publish_to(self, publish: Callable[[Event], None] | None) -> None:
         """Send committed events here from now on.
 
         Set by whoever owns both the pool and the audience — the application's

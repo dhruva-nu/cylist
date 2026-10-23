@@ -43,6 +43,7 @@ from app.models.agent_session import AgentPromptStatus, AgentSessionReason, Sess
 from app.models.task import Task
 from app.realtime import auth, protocol
 from app.realtime.bus import Bus
+from app.realtime.events import AgentConnected
 from app.realtime.hub import AgentLink, Hub, Watcher
 from app.services import agent_feed, agent_prompts, agent_reports, agent_sessions, projects, tasks
 
@@ -207,12 +208,9 @@ async def agent_socket(websocket: WebSocket, client_session_id: str) -> None:
         hub.register_agent(link)
         # Any other process holding an older socket for this session lets go.
         bus.publish(
-            {
-                "type": protocol.AGENT_CONNECTED,
-                "person_id": key.person_id,
-                "client_session_id": key.client_session_id,
-                "link_id": link.id,
-            }
+            AgentConnected(
+                person_id=key.person_id, client_session_id=key.client_session_id, link_id=link.id
+            )
         )
         # Before `ready`, so that by the time the agent hears it, this socket
         # already holds the session and vouches for it to every process.

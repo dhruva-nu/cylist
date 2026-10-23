@@ -26,6 +26,7 @@ from app.auth.principal import Principal
 from app.core.ids import uuid7
 from app.db import publish_into
 from app.models.activity import Activity
+from app.realtime.events import BoardChanged, HooksQueued
 from app.services import agent_sessions, hooks
 from app.services.paging import PageRequest, Window, keyset
 
@@ -79,19 +80,15 @@ async def record(
     if project_id is not None:
         publish_into(
             session,
-            {
-                "type": "board.changed",
-                "project_id": project_id,
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "verb": verb,
-            },
+            BoardChanged(
+                project_id=project_id, entity_type=entity_type, entity_id=entity_id, verb=verb
+            ),
         )
     # And to anyone outside who asked to be told. Queued in this transaction,
     # so a change that rolls back is never announced and one that commits is
     # never lost; the courier is woken once it has.
     if await hooks.queue_for(session, entry):
-        publish_into(session, {"type": hooks.QUEUED})
+        publish_into(session, HooksQueued())
     return entry
 
 
