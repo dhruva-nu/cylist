@@ -161,11 +161,12 @@ class TestEnding:
     async def test_going_quiet_past_the_window_closes_it(
         self, signed_in: AsyncClient, token: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from datetime import timedelta
-
-        from app.realtime import routes
-
-        monkeypatch.setattr(routes, "AGENT_SOCKET_IDLE_AFTER", timedelta(milliseconds=150))
+        app = signed_in.app
+        monkeypatch.setattr(
+            app.state,
+            "settings",
+            app.state.settings.model_copy(update={"agent_socket_idle_seconds": 0.15}),
+        )
         ref = await a_card(signed_in)
 
         async with ws.connect(signed_in.app, SOCKET, headers=bearer(token)) as socket:

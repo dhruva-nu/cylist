@@ -3,13 +3,14 @@
 Services raise these; routers stay free of status codes and error shaping.
 Every error reaches the client as::
 
-    {"error": {"code": "not_found", "message": "...", "details": {...}}}
+    {"error": {"code": "not_found", "reason": null, "message": "...", "details": {...}}}
 """
 
 from __future__ import annotations
 
 import logging
 import math
+from enum import StrEnum
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -21,16 +22,66 @@ from sqlalchemy.exc import DataError, IntegrityError
 logger = logging.getLogger(__name__)
 
 
+class Reason(StrEnum):
+    """Why a request was refused, for a client that must branch on it.
+
+    ``code`` says which class of refusal this is — it follows the HTTP status,
+    and is the same for every conflict. A client that wants to tell a taken
+    name from a board at its column limit used to match on the message. The
+    reason is that distinction as a value: stable, never reworded, and null on
+    an error nobody has needed to tell apart. Add a member when a client has to
+    branch; never rename one, because clients hold the old spelling.
+    """
+
+    DUPLICATE_NAME = "duplicate_name"
+    KEY_TAKEN = "key_taken"
+    EMAIL_TAKEN = "email_taken"
+    ALREADY_HAS_ACCOUNT = "already_has_account"
+    ALREADY_INVITED = "already_invited"
+    COLUMN_LIMIT = "column_limit"
+    COLUMN_MINIMUM = "column_minimum"
+    COLUMN_NOT_EMPTY = "column_not_empty"
+    LAST_ADMIN = "last_admin"
+    LAST_SIGN_IN = "last_sign_in"
+    ROLE_PROTECTED = "role_protected"
+    ROLE_IN_USE = "role_in_use"
+    FOLDER_CYCLE = "folder_cycle"
+    FOLDER_TOO_DEEP = "folder_too_deep"
+    ROOT_FOLDER_PROTECTED = "root_folder_protected"
+    GOAL_HAS_OPEN_CARDS = "goal_has_open_cards"
+    GOAL_ACHIEVED = "goal_achieved"
+    OPEN_SUBTASKS = "open_subtasks"
+    PARENT_FINISHED = "parent_finished"
+    PROMPT_CLOSED = "prompt_closed"
+    PROMPT_NOT_WAITING = "prompt_not_waiting"
+    PROMPT_BAD_ANSWER = "prompt_bad_answer"
+    HOOK_NOT_MANUAL = "hook_not_manual"
+    HOOK_OFF = "hook_off"
+    TEMPLATE_IN_USE = "template_in_use"
+    TOPIC_NOT_EMPTY = "topic_not_empty"
+    CHANGED_CONCURRENTLY = "changed_concurrently"
+    NOT_ON_PROJECT = "not_on_project"
+    MISSING_SCOPES = "missing_scopes"
+    ROLE_FORBIDS = "role_forbids"
+
+
 class AppError(Exception):
     """Base class for expected, client-facing failures."""
 
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
     code: str = "internal_error"
 
-    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        details: dict[str, Any] | None = None,
+        reason: Reason | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.details = details or {}
+        self.reason = reason
 
     @property
     def headers(self) -> dict[str, str]:
@@ -64,9 +115,9 @@ class TooManyRequestsError(AppError):
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
     code = "rate_limited"
 
-    def __init__(self, message: str, *, retry_after: float) -> None:
+    def __init__(self, message: str, *, retry_after: float, reason: Reason | None = None) -> None:
         self.retry_after = max(1, math.ceil(retry_after))
-        super().__init__(message, details={"retry_after": self.retry_after})
+        super().__init__(message, details={"retry_after": self.retry_after}, reason=reason)
 
     @property
     def headers(self) -> dict[str, str]:
@@ -136,11 +187,24 @@ def not_on_this_project(noun: str, **details: object) -> UnprocessableRequestErr
     return UnprocessableRequestError(
         f"That {noun} is not on this project.",
         details={field: str(value) for field, value in details.items()},
+        reason=Reason.NOT_ON_PROJECT,
     )
 
 
-def _error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {"error": {"code": code, "message": message, "details": details or {}}}
+def error_body(
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    reason: Reason | None = None,
+) -> dict[str, Any]:
+    return {
+        "error": {
+            "code": code,
+            "reason": reason.value if reason else None,
+            "message": message,
+            "details": details or {},
+        }
+    }
 
 
 INTERNAL_ERROR_MESSAGE = "Something went wrong on our side. Quote the request id if you report it."
@@ -157,7 +221,7 @@ def internal_error_response() -> JSONResponse:
     """
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=_error_body("internal_error", INTERNAL_ERROR_MESSAGE),
+        content=error_body("internal_error", INTERNAL_ERROR_MESSAGE),
     )
 
 
@@ -184,7 +248,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         _log_app_error(request, exc)
         return JSONResponse(
             status_code=exc.status_code,
-            content=_error_body(exc.code, exc.message, exc.details),
+            content=error_body(exc.code, exc.message, exc.details, exc.reason),
             headers=exc.headers or None,
         )
 
@@ -198,7 +262,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content=_error_body(
+            content=error_body(
                 "validation_failed",
                 "The request body or parameters are invalid.",
                 {"fields": jsonable_encoder(_safe_validation_errors(exc))},
@@ -216,8 +280,10 @@ def register_exception_handlers(app: FastAPI) -> None:
         _log_unhandled(request, exc, "Integrity error reached the handler")
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content=_error_body(
-                "conflict", "That clashes with a change made at the same moment. Try again."
+            content=error_body(
+                "conflict",
+                "That clashes with a change made at the same moment. Try again.",
+                reason=Reason.CHANGED_CONCURRENTLY,
             ),
         )
 
@@ -226,7 +292,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         _log_unhandled(request, exc, "Data error reached the handler")
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content=_error_body("unprocessable", "A value is too long or out of range."),
+            content=error_body("unprocessable", "A value is too long or out of range."),
         )
 
     @app.exception_handler(OSError)
@@ -236,7 +302,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         _log_unhandled(request, exc, "Storage unavailable")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content=_error_body(
+            content=error_body(
                 "service_unavailable", "Storage is unavailable right now. Try again shortly."
             ),
         )

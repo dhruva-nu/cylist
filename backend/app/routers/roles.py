@@ -21,6 +21,7 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.person import Person
 from app.models.project import Project
 from app.models.role import ProjectRole
@@ -154,8 +155,8 @@ async def create_role(
     await activity.record(
         session,
         principal,
-        "role.created",
-        entity_type="role",
+        Verb.ROLE_CREATED,
+        entity_type=EntityType.ROLE,
         entity_id=role.id,
         project_id=project.id,
         payload={"name": role.name},
@@ -191,8 +192,8 @@ async def update_role(
     await activity.record(
         session,
         principal,
-        "role.updated",
-        entity_type="role",
+        Verb.ROLE_UPDATED,
+        entity_type=EntityType.ROLE,
         entity_id=updated.id,
         project_id=project.id,
         payload={
@@ -231,8 +232,8 @@ async def delete_role(
     await activity.record(
         session,
         principal,
-        "role.deleted",
-        entity_type="role",
+        Verb.ROLE_DELETED,
+        entity_type=EntityType.ROLE,
         entity_id=role_id,
         project_id=project.id,
         payload={"name": name},
@@ -270,8 +271,8 @@ async def set_member_role(
     await activity.record(
         session,
         principal,
-        "member.role_set",
-        entity_type="person",
+        Verb.MEMBER_ROLE_SET,
+        entity_type=EntityType.PERSON,
         entity_id=person.id,
         project_id=project.id,
         payload={"person": person.name, "role": role.name if role else None},

@@ -2,6 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { Announcer } from './components/Announcer'
 import { noteIfSignedOut } from './api/session'
 import { keptCurrentBySocket } from './routes/useBoardSocket'
 import { applyStoredTheme } from './theme/theme'
@@ -65,6 +66,7 @@ createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      <Announcer />
     </QueryClientProvider>
   </StrictMode>,
 )

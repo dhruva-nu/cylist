@@ -33,6 +33,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
 from app.models.file import FileItem, Folder
@@ -119,7 +120,7 @@ async def store_finished(
             details={"column": finished.name},
         )
 
-    stored_at = now or datetime.now(UTC)
+    stored_at = now or clock.now()
     data = await _csv_of(session, cards, finished, stored_at)
     folder = await files.folder_in_root(session, project, FOLDER_NAME)
     name = await _free_name(session, folder, project, stored_at)
@@ -179,7 +180,7 @@ async def restore(session: AsyncSession, task: Task) -> tuple[Task, list[FieldCh
     task.archived_at = None
     task.outcome_index = _outcome_back(task.outcome_index, finished)
     if task.finished_at is None:
-        task.finished_at = datetime.now(UTC)
+        task.finished_at = clock.now()
     await session.flush()
     await session.refresh(task, ["column"])
     return task, [field_change("column", "column", None, finished.name)]
