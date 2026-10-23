@@ -321,6 +321,20 @@ class TestFolderContents:
             "2025",
         ]
 
+    async def test_gives_the_breadcrumb_of_the_deepest_allowed_folder(
+        self, project: AsyncClient
+    ) -> None:
+        """The chain above a folder is read in one query, and comes back in order."""
+        parent: str | None = None
+        names: list[str] = []
+        for level in range(MAX_DEPTH - 1):
+            names.append(f"level-{level}")
+            parent = await make_folder(project, names[-1], parent)
+
+        body = (await project.get(f"/folders/{parent}/children")).json()
+
+        assert [crumb["name"] for crumb in body["path"]] == [ATLAS["name"], *names]
+
     async def test_an_unknown_folder_is_a_clean_404(self, project: AsyncClient) -> None:
         response = await project.get(f"/folders/{UNKNOWN_ID}/children")
 
