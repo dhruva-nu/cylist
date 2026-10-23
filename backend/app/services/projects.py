@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.palette import colour_for
 from app.db import lock_row
 from app.models.person import Person, PersonKind
@@ -113,6 +113,7 @@ async def _flush_claiming_key(session: AsyncSession, key: str) -> None:
         raise ConflictError(
             f"The key {key} is already used by another project.",
             details={"key": key},
+            reason=Reason.KEY_TAKEN,
         ) from exc
 
 

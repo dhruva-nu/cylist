@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, UnprocessableRequestError
+from app.core.errors import ConflictError, Reason, UnprocessableRequestError
 from app.models.doc import Doc, DocTopic
 from app.models.project import Project
 from app.schemas.docs import BODY_MAX_LENGTH, DocCreate, DocWrite
@@ -82,6 +82,7 @@ async def write(
             f"{topic.name!r} already has a doc called {existing.title!r}. "
             "Set append to add to it, or edit it by its id.",
             details={"doc_id": str(existing.id), "topic_id": str(topic.id)},
+            reason=Reason.DUPLICATE_NAME,
         )
     # Read now and not with the titles: only the doc being appended to needs
     # its body, and the topic's others may be long.

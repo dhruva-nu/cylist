@@ -60,6 +60,7 @@ from app.core.crypto import HOOK_SECRET_DOMAIN, VaultCipher
 from app.core.errors import (
     ConflictError,
     NotFoundError,
+    Reason,
     UnprocessableRequestError,
     not_on_this_project,
 )
@@ -701,11 +702,13 @@ def refuse_unless_fireable(project: Project, hook: Hook) -> None:
             f"The hook {hook.name!r} fires on {project.key}'s changes, not by hand. "
             "Send it a test instead, or make it a manual hook.",
             details={"hook_id": str(hook.id)},
+            reason=Reason.HOOK_NOT_MANUAL,
         )
     if not hook.enabled:
         raise ConflictError(
             f"The hook {hook.name!r} is off. Switch it on to fire it.",
             details={"hook_id": str(hook.id)},
+            reason=Reason.HOOK_OFF,
         )
 
 
@@ -835,7 +838,9 @@ async def _refuse_taken_name(session: AsyncSession, project: Project, name: str)
 
 def _taken_name(project: Project, name: str) -> ConflictError:
     return ConflictError(
-        f"{project.key} already has a hook called {name!r}.", details={"name": name}
+        f"{project.key} already has a hook called {name!r}.",
+        details={"name": name},
+        reason=Reason.DUPLICATE_NAME,
     )
 
 

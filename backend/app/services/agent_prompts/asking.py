@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.clock import now as clock_now
-from app.core.errors import ConflictError, ForbiddenError
+from app.core.errors import ConflictError, ForbiddenError, Reason
 from app.models.activity import Channel
 from app.models.agent_session import (
     AgentPrompt,
@@ -133,7 +133,8 @@ async def _asking_session(
         raise ConflictError(
             f"No session of yours is open on {task.reference}, so nobody would see the "
             f"question there. Bind the session first (/work {task.reference}), or ask "
-            "in the terminal."
+            "in the terminal.",
+            reason=Reason.PROMPT_NOT_WAITING,
         )
     return row
 

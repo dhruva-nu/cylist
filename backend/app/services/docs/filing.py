@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.models.doc import SECTION_ORDER, Doc, DocSection, DocTopic
 from app.models.project import Project
 from app.schemas.docs import DocCreate, DocTopicCreate, DocUpdate
@@ -126,6 +126,7 @@ async def _refuse_taken_name(
         raise ConflictError(
             f"{section.label} already has a topic called {clash.name!r}.",
             details={"topic_id": str(clash.id)},
+            reason=Reason.DUPLICATE_NAME,
         )
 
 
@@ -193,6 +194,7 @@ async def delete_topic(session: AsyncSession, topic: DocTopic) -> None:
             f"{topic.name!r} still has {held} doc{'s' if held != 1 else ''} in it. "
             "Move or delete them first.",
             details={"doc_count": held},
+            reason=Reason.TOPIC_NOT_EMPTY,
         )
     project_id, section = topic.project_id, topic.section
     await session.delete(topic)

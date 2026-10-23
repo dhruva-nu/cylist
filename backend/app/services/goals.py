@@ -35,6 +35,7 @@ from app.core import clock
 from app.core.errors import (
     ConflictError,
     NotFoundError,
+    Reason,
     UnprocessableRequestError,
     not_on_this_project,
 )
@@ -429,6 +430,7 @@ async def refuse_open_card_on_achieved(
         f"{goal.reference} ({goal.name}) is achieved, so {card} cannot be open on it. "
         f"Reopen {goal.reference} first, or take the card off it, before {act}.",
         details={"goal": goal.reference},
+        reason=Reason.GOAL_ACHIEVED,
     )
 
 
@@ -470,6 +472,7 @@ async def _refuse_open_cards(session: AsyncSession, goal: Goal) -> None:
         f"Finish or cancel each of them — or unlink it from the goal — before "
         f"marking {goal.name} achieved.",
         details={"open_tasks": references, "column": finished.name},
+        reason=Reason.GOAL_HAS_OPEN_CARDS,
     )
 
 
@@ -484,6 +487,7 @@ async def _refuse_duplicate(session: AsyncSession, project_id: UUID, name: str) 
         raise ConflictError(
             f"This project already has a goal called {existing.name!r}.",
             details={"name": existing.name, "reference": existing.reference},
+            reason=Reason.DUPLICATE_NAME,
         )
 
 
@@ -492,7 +496,9 @@ def _duplicate(name: str) -> ConflictError:
     then lost the race to the index — which knows the name but not the goal
     that took it."""
     return ConflictError(
-        f"This project already has a goal called {name!r}.", details={"name": name}
+        f"This project already has a goal called {name!r}.",
+        details={"name": name},
+        reason=Reason.DUPLICATE_NAME,
     )
 
 
