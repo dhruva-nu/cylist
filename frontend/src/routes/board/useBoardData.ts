@@ -37,10 +37,11 @@ export function useBoardData(projectKey: string) {
   const queryClient = useQueryClient()
   const tasks = useQuery({
     queryKey: queryKeys.tasks(projectKey),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchBoardCards(
         projectKey,
         queryClient.getQueryData<BoardCards>(queryKeys.tasks(projectKey)),
+        signal,
       ),
     refetchInterval: (query) =>
       fallbackPollInterval(socket.connected, query.state.data?.tasks ?? []),

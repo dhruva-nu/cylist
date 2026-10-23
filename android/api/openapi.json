@@ -3,7 +3,7 @@
   "info": {
     "title": "Cylist",
     "description": "Cylist keeps a project's **board**, **files**, **vault** and **people** in one\nplace — for you in the browser, and for your agents over the same HTTP API.\n\nAuthenticate with either an `Authorization: Bearer cyl_…` header or the\nsession cookie set by `POST /auth/login`. Tokens carry scopes; read each\nendpoint's description to see which one it needs.",
-    "version": "0.4.4"
+    "version": "0.4.5"
   },
   "paths": {
     "/api/v1/health": {
@@ -14920,6 +14920,28 @@
           "status_5xx": {
             "type": "integer",
             "title": "Status 5Xx"
+          },
+          "unhandled_500s": {
+            "type": "integer",
+            "title": "Unhandled 500S"
+          },
+          "deliveries_failed": {
+            "type": "integer",
+            "title": "Deliveries Failed"
+          },
+          "auth_refusals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Auth Refusals"
+          },
+          "rate_limit_hits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Rate Limit Hits"
           }
         },
         "type": "object",
@@ -14929,7 +14951,11 @@
           "status_2xx",
           "status_3xx",
           "status_4xx",
-          "status_5xx"
+          "status_5xx",
+          "unhandled_500s",
+          "deliveries_failed",
+          "auth_refusals",
+          "rate_limit_hits"
         ],
         "title": "RequestCounts"
       },

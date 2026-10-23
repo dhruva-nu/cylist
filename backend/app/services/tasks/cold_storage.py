@@ -33,11 +33,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.errors import UnprocessableRequestError
 from app.models.board import BoardColumn
 from app.models.file import FileItem, Folder
 from app.models.project import Project
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.services import columns, files, templates
 from app.services.paging import PageRequest, Window, keyset
 from app.services.tasks.history import FieldChange, field_change
@@ -119,7 +120,7 @@ async def store_finished(
             details={"column": finished.name},
         )
 
-    stored_at = now or datetime.now(UTC)
+    stored_at = now or clock.now()
     data = await _csv_of(session, cards, finished, stored_at)
     folder = await files.folder_in_root(session, project, FOLDER_NAME)
     name = await _free_name(session, folder, project, stored_at)
@@ -179,7 +180,7 @@ async def restore(session: AsyncSession, task: Task) -> tuple[Task, list[FieldCh
     task.archived_at = None
     task.outcome_index = _outcome_back(task.outcome_index, finished)
     if task.finished_at is None:
-        task.finished_at = datetime.now(UTC)
+        task.finished_at = clock.now()
     await session.flush()
     await session.refresh(task, ["column"])
     return task, [field_change("column", "column", None, finished.name)]
@@ -195,7 +196,9 @@ async def stored_page(session: AsyncSession, project: Project, page: PageRequest
     """
     return await keyset(
         session,
-        select(Task).where(Task.project_id == project.id, Task.archived_at.is_not(None)),
+        select(Task)
+        .options(*card_loads())
+        .where(Task.project_id == project.id, Task.archived_at.is_not(None)),
         keys=(Task.finished_at, Task.id),
         page=page,
         descending=True,
@@ -287,7 +290,10 @@ async def _csv_of(
 async def _subtasks_of(session: AsyncSession, card_ids: list[UUID]) -> dict[UUID, list[Task]]:
     """Every card's sub-tasks, in one query rather than one per card."""
     rows = await session.scalars(
-        select(Task).where(Task.parent_id.in_(card_ids)).order_by(Task.sub_number)
+        select(Task)
+        .options(*card_loads())
+        .where(Task.parent_id.in_(card_ids))
+        .order_by(Task.sub_number)
     )
     by_card: dict[UUID, list[Task]] = defaultdict(list)
     for sub in rows:

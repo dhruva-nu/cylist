@@ -4,6 +4,7 @@ import { ApiError, api, type ProjectInput } from '../../api/client'
 import { queryKeys } from '../../api/queries'
 import { DialogActions, Field, Modal, ModalBody } from '../../components/Modal'
 import { ErrorNotice } from '../../components/ui'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** Starting a project: its key, its name, and what it is for. */
 export function NewProjectDialog({
@@ -17,6 +18,7 @@ export function NewProjectDialog({
   const [form, setForm] = useState<ProjectInput>({ key: '', name: '', description: '' })
 
   const create = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (input: ProjectInput) => api.createProject(input),
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects })

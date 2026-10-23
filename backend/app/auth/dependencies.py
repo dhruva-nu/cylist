@@ -39,9 +39,10 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope, parse_scopes
 from app.auth.tokens import hash_token, looks_like_token
 from app.config import SESSION_COOKIE as SESSION_COOKIE  # re-exported; it lived here
-from app.config import Settings
+from app.config import settings_of
 from app.core.clock import now
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, Reason, UnauthorizedError
+from app.core.metrics import live
 from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import ApiToken, TokenKind
@@ -66,7 +67,7 @@ def _presented_credential(connection: HTTPConnection) -> tuple[str, Channel] | N
 
     # Only this deployment's own cookie: a dev slot shares its host with
     # staging and the other slots, and the browser sends it all of theirs.
-    settings: Settings = connection.app.state.settings
+    settings = settings_of(connection)
     cookie = connection.cookies.get(settings.session_cookie_name)
     if cookie:
         return cookie, Channel.WEB
@@ -137,7 +138,6 @@ async def resolve_principal(
             "revoked or expired credential",
             channel=channel.value,
             token_id=str(token.id),
-            label=token.name,
         )
         raise UnauthorizedError("That credential is not valid.")
 
@@ -175,9 +175,9 @@ def require(*scopes: Scope) -> Callable[[Principal], Awaitable[Principal]]:
     async def dependency(principal: Principal = Depends(current_principal)) -> Principal:
         missing = principal.missing(required)
         if missing:
+            live().auth_refusals["missing_scope"] += 1
             logger.warning(
-                "Token %r lacks the scopes for this endpoint",
-                principal.label,
+                "Token lacks the scopes for this endpoint",
                 extra={
                     "context": {
                         "token_id": str(principal.token_id),
@@ -188,6 +188,7 @@ def require(*scopes: Scope) -> Callable[[Principal], Awaitable[Principal]]:
             raise ForbiddenError(
                 "This token is not allowed to perform that action.",
                 details={"missing_scopes": sorted(scope.value for scope in missing)},
+                reason=Reason.MISSING_SCOPES,
             )
         return principal
 
@@ -207,6 +208,7 @@ def _refused(connection: HTTPConnection, reason: str, **context: object) -> None
     very string the database is searched by. Neither belongs in a file that
     gets pasted into bug reports.
     """
+    live().auth_refusals[reason.replace(" ", "_")] += 1
     logger.warning(
         "Authentication refused: %s",
         reason,

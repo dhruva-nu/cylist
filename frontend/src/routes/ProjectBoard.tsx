@@ -24,7 +24,7 @@ import type { Board, BoardColumn, Goal, Person, Task, Template } from '../api/cl
 import { useIdentity, useLoadMoreCards, type ColumnCards } from '../api/queries'
 import { TaskDialog } from '../components/TaskDialog'
 import { TemplateDialog } from '../components/TemplateDialog'
-import { EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../components/ui'
+import { EmptyState, ErrorNotice, useAnnouncer } from '../components/ui'
 import { readStored, writeStored } from '../storage'
 import { anyAgentCounted } from './agentState'
 import { hidesHold } from './boardHiding'
@@ -135,7 +135,7 @@ function LoadedBoard({
   live: boolean
 }) {
   const may = usePermissions(projectKey)
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
   const view = useBoardView(projectKey)
   const { refresh, moveTask, moveSubStatus, setAssignee, reorderColumns } = useBoardMutations(
     projectKey,
@@ -330,7 +330,6 @@ function LoadedBoard({
           keyboard's share of it is the part that is not self-evident, and that
           is spoken by SCREEN_READER_INSTRUCTIONS to the people it is for. */}
       <ErrorNotice error={moveTask.error} />
-      <LiveRegion message={message} />
 
       <BoardToolbar
         board={board}

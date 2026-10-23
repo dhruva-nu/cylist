@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { api, type Person, type PersonInput, type PersonKind } from '../api/client'
 import { DialogActions, Field, FieldPair, Modal, ModalBody } from './Modal'
 import { ErrorNotice } from './ui'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 const EMPTY_PERSON: PersonInput = {
   name: '',
@@ -58,6 +59,7 @@ export function PersonDialog({
   )
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async (input: PersonInput) => {
       const payload = { ...input, email: input.email?.trim() ? input.email.trim() : null }
       if (person) {

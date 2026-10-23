@@ -9,7 +9,7 @@ from typing import cast
 from jevdocs import Route
 
 from app.models.project import Project
-from app.schemas.docs import AnswerStatus
+from app.services.commands.docs import AnswerStatus
 from app.services.doc_corpus import FiledDoc, ProjectCorpus
 from app.services.doc_engine import DocEngine, EngineUnavailableError
 

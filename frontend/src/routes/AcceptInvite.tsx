@@ -18,6 +18,7 @@ import { MIN_PASSWORD_LENGTH, api } from '../api/client'
 import { queryKeys } from '../api/queries'
 import { Button, ErrorBanner, ErrorNotice } from '../components/ui'
 import styles from './SignIn.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 export function AcceptInvite({ token }: { token: string }) {
   const queryClient = useQueryClient()
@@ -29,6 +30,7 @@ export function AcceptInvite({ token }: { token: string }) {
   const ready = password.length >= MIN_PASSWORD_LENGTH && repeated === password
 
   const accept = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async () => {
       await api.acceptInvite(token, password)
       await queryClient.invalidateQueries({ queryKey: queryKeys.identity })

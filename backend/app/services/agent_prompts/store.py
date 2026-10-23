@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
 from app.db import publish_into
+from app.models.activity import EntityType, Verb
 from app.models.agent_session import (
     AgentPrompt,
     AgentPromptKind,
@@ -24,10 +25,11 @@ from app.models.agent_session import (
     AgentSessionReason,
     AgentSessionState,
 )
-from app.models.task import Task
+from app.models.task import Task, card_loads
 from app.realtime import protocol
-from app.schemas.agent_sessions import NOTE_MAX
+from app.realtime.events import PromptChanged
 from app.services import activity, agent_sessions
+from app.services.commands.agent_sessions import NOTE_MAX
 
 ANSWERED_IN_TERMINAL = "answered_in_terminal"
 """A permission's ``closed_reason`` when the terminal's own dialog won."""
@@ -94,13 +96,13 @@ async def expire_if_due(
         return None
     row = await close(session, prompt, AgentPromptStatus.EXPIRED, now, reason=None)
     if row is not None:
-        task = await session.get(Task, prompt.task_id)
+        task = await session.get(Task, prompt.task_id, options=card_loads())
         if task is not None:
             await activity.record(
                 session,
                 agent_sessions.acting_principal(row),
-                "agent_session.unanswered",
-                entity_type="task",
+                Verb.AGENT_SESSION_UNANSWERED,
+                entity_type=EntityType.TASK,
                 entity_id=task.id,
                 project_id=task.project_id,
                 payload={"kind": prompt.kind.value, "text": prompt.text},
@@ -207,15 +209,14 @@ def announce(
     key = row.key if row is not None else None
     publish_into(
         session,
-        {
-            "type": protocol.PROMPT_CHANGED,
-            "project_id": task.project_id,
-            "task_id": task.id,
-            "prompt_id": prompt.id,
-            "person_id": key.person_id if key else None,
-            "client_session_id": key.client_session_id if key else None,
-            "deliver": deliver,
-        },
+        PromptChanged(
+            project_id=task.project_id,
+            task_id=task.id,
+            prompt_id=prompt.id,
+            person_id=key.person_id if key else None,
+            client_session_id=key.client_session_id if key else None,
+            deliver=deliver,
+        ),
     )
 
 

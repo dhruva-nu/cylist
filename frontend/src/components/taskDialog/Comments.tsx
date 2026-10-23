@@ -12,6 +12,7 @@ import { MentionBox } from '../Mentions'
 import { Avatar, Button, ErrorNotice, Tagged } from '../ui'
 import type { CommentDeleting } from './useCommentDeleting'
 import styles from './Comments.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * What has been said about the card, and a box to say something.
@@ -176,6 +177,7 @@ function useEarlierComments(task: TaskDetail | null) {
   if (read.shown !== shown) setRead({ shown, older: [], next: task?.comments_next })
 
   const earlier = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (after: string) => api.listComments(task?.reference ?? '', after),
     onSuccess: (page) =>
       setRead((current) => ({

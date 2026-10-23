@@ -33,7 +33,6 @@ import {
   ErrorBanner,
   ErrorNotice,
   Eyebrow,
-  LiveRegion,
   useAnnouncer,
 } from '../../components/ui'
 import { EVERYONE } from '../board/boardPeople'
@@ -43,6 +42,7 @@ import { GoalAside, REFUSAL_ID } from './GoalAside'
 import { COLD_STORAGE, Filters, GoalCardRow, placeOf } from './GoalCards'
 import styles from './GoalPage.module.css'
 import { LinkCardsDialog } from './LinkCardsDialog'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** One page of a goal's cards — the first carrying the goal itself. */
 interface GoalCardsPage {
@@ -56,7 +56,7 @@ export function GoalPage() {
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
   const navigate = useNavigate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
   const [editing, setEditing] = useState(false)
   const [linking, setLinking] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
@@ -71,12 +71,12 @@ export function GoalPage() {
   // board, the top first.
   const goal = useInfiniteQuery({
     queryKey: queryKeys.goal(goalRef),
-    queryFn: async ({ pageParam }): Promise<GoalCardsPage> => {
+    queryFn: async ({ pageParam, signal }): Promise<GoalCardsPage> => {
       if (pageParam === null) {
-        const detail = await api.getGoal(goalRef)
+        const detail = await api.getGoal(goalRef, signal)
         return { detail, items: detail.tasks, next: detail.tasks_next }
       }
-      const page = await api.listGoalTasks(goalRef, pageParam)
+      const page = await api.listGoalTasks(goalRef, pageParam, signal)
       return { detail: null, ...page }
     },
     initialPageParam: null as string | null,
@@ -98,6 +98,7 @@ export function GoalPage() {
   }
 
   const unlink = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (task: Task) => api.updateTask(task.reference, { goal_id: null }),
     onSuccess: async (task) => {
       await refresh()
@@ -115,6 +116,7 @@ export function GoalPage() {
    * ticking a goal off.
    */
   const close = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async (closure: GoalClosure) => {
       await api.updateGoal(goalRef, { status: closure.next })
       return closure
@@ -205,8 +207,6 @@ export function GoalPage() {
           </>
         }
       />
-
-      <LiveRegion message={message} />
       <ErrorNotice error={unlink.error} />
       {/* The button holds itself shut over open cards, so this is for what the
           page could not know: a card finished in another tab, or a role the

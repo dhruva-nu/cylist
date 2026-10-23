@@ -81,6 +81,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 from app.core.clock import now
 from app.models.agent_session import AgentPromptStatus, AgentSessionReason
+from app.realtime.events import BoardChanged
 from app.schemas.agent_sessions import AgentFeedEntryIn, AgentSessionPut, AgentSessionRead
 from app.schemas.common import Schema
 
@@ -231,23 +232,54 @@ def answer(
     }
 
 
-PROMPT_CHANGED = "agent.prompt"
-"""The event a prompt opening or closing is published as. Rings the board's
-doorbell, wakes long-polls, and carries a permission's answer to its agent —
-see :mod:`app.realtime.hub`. Never sent down a socket under this name."""
-
 FEED_CHANGED = "agent.feed"
 """The event type a new feed line is published as, and the doorbell it rings."""
 
-AGENT_CONNECTED = "agent.connected"
-"""The event a new agent socket is published as, so that whichever process
-holds an older socket for the same session lets go of it — see
-:meth:`app.realtime.hub.Hub.register_agent`. Never sent down a socket."""
+
+CHANGED_MAX = 25
+"""The most things a ``board.changed`` names before it stops naming them. A
+burst past this is a bulk change, and the honest hint for one is "anything"."""
 
 
-def board_changed() -> dict[str, object]:
-    """The board socket's doorbell: something on this board committed."""
-    return {"type": "board.changed", "at": now().isoformat()}
+def board_changed(changed: list[dict[str, str]] | None = None) -> dict[str, object]:
+    """The board socket's doorbell: something on this board committed.
+
+    ``changed`` says *what*, as ``{"entity_type", "entity_id"}`` references
+    and nothing more — no field, no value — so a browser can refetch the one
+    list that is out of date instead of all of them, while the doorbell stays
+    a doorbell: the data still comes from the HTTP read that builds it. ``None``
+    means "something, and no word on what", which is also what a burst bigger
+    than :data:`CHANGED_MAX` becomes; a browser must then read everything.
+    """
+    return {"type": "board.changed", "at": now().isoformat(), "changed": changed}
+
+
+def merge_changed(first: dict[str, object], second: dict[str, object]) -> dict[str, object]:
+    """One ``board.changed`` standing for two, for a watcher that has not read the first.
+
+    Their hints are joined, without repeats; if either says "anything", so
+    does the result, and so does one that has grown past :data:`CHANGED_MAX`.
+    """
+    left, right = first.get("changed"), second.get("changed")
+    if not isinstance(left, list) or not isinstance(right, list):
+        return {**first, "changed": None}
+    joined = list(left)
+    for ref in right:
+        if ref not in joined:
+            joined.append(ref)
+    return {**first, "changed": joined if len(joined) <= CHANGED_MAX else None}
+
+
+def changed_ref(event: BoardChanged) -> list[dict[str, str]] | None:
+    """The hint a published event gives, or ``None`` where it names nothing."""
+    if event.entity_type is None:
+        return None
+    return [
+        {
+            "entity_type": str(event.entity_type),
+            "entity_id": str(event.entity_id) if event.entity_id else "",
+        }
+    ]
 
 
 def feed_changed(task_id: str) -> dict[str, object]:

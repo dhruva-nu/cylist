@@ -21,6 +21,16 @@
 import { BASE_PATH, withBase } from './basePath'
 
 /**
+ * One thing that changed: what kind, and which. No field and no value — a
+ * `board.changed` is still only a doorbell, and what the thing is now comes
+ * from reading it. An empty `entity_id` is a kind of thing with no row to name.
+ */
+export interface ChangedRef {
+  entity_type: string
+  entity_id: string
+}
+
+/**
  * What the server may send down a board socket.
  *
  * An agent's question or permission prompt opening or closing (CYLIST-85,
@@ -36,7 +46,7 @@ import { BASE_PATH, withBase } from './basePath'
  */
 export type BoardEvent =
   | { type: 'ready' }
-  | { type: 'board.changed'; at: string }
+  | { type: 'board.changed'; at: string; changed: ChangedRef[] | null }
   | { type: 'agent.feed'; task_id: string; at: string }
   | { type: 'error'; code: string; message: string }
 
@@ -101,8 +111,12 @@ export function parseEvent(data: unknown): BoardEvent | null {
   const type = (parsed as { type?: unknown }).type
   if (type === 'ready') return { type: 'ready' }
   if (type === 'board.changed') {
-    const at = (parsed as { at?: unknown }).at
-    return { type: 'board.changed', at: typeof at === 'string' ? at : '' }
+    const { at, changed } = parsed as { at?: unknown; changed?: unknown }
+    return {
+      type: 'board.changed',
+      at: typeof at === 'string' ? at : '',
+      changed: parseChanged(changed),
+    }
   }
   if (type === 'agent.feed') {
     const { task_id: taskId, at } = parsed as { task_id?: unknown; at?: unknown }
@@ -119,4 +133,24 @@ export function parseEvent(data: unknown): BoardEvent | null {
     }
   }
   return null
+}
+
+/**
+ * The `changed` hint off the wire. Anything but a list of well-formed
+ * references is "anything": a hint a client cannot trust is no hint, and a
+ * server that sends none (an older one) is read the same way.
+ */
+function parseChanged(raw: unknown): ChangedRef[] | null {
+  if (!Array.isArray(raw)) return null
+  const refs: ChangedRef[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) return null
+    const { entity_type: type, entity_id: id } = item as {
+      entity_type?: unknown
+      entity_id?: unknown
+    }
+    if (typeof type !== 'string' || !type) return null
+    refs.push({ entity_type: type, entity_id: typeof id === 'string' ? id : '' })
+  }
+  return refs
 }

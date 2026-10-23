@@ -9,23 +9,9 @@ from pydantic import Field
 
 from app.models.device import DevicePlatform
 from app.schemas.common import Page, Schema
-
-
-class DeviceRegister(Schema):
-    fcm_token: str = Field(
-        min_length=1,
-        max_length=4096,
-        description=(
-            "The registration token Firebase Cloud Messaging gave this app install. "
-            "Registering one that is already known moves it to the caller."
-        ),
-    )
-    platform: DevicePlatform = DevicePlatform.ANDROID
-    label: str = Field(
-        min_length=1,
-        max_length=120,
-        description="What the device is called, as a person would recognise it.",
-    )
+from app.services.commands.devices import (
+    DeviceRegister as DeviceRegister,
+)
 
 
 class DeviceRead(Schema):

@@ -14,6 +14,9 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -25,11 +28,9 @@ from app.core.errors import NotFoundError
 from app.core.multipart import multipart_body
 from app.core.security_headers import DOWNLOAD_HEADERS
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.agent import Skill
 from app.models.project import Project
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
 from app.schemas.agents import (
     SkillFolderFile,
     SkillFolderRead,
@@ -222,8 +223,8 @@ async def upload_skill(
     await activity.record(
         session,
         principal,
-        "skill.replaced" if replaced else "skill.uploaded",
-        entity_type="skill",
+        Verb.SKILL_REPLACED if replaced else Verb.SKILL_UPLOADED,
+        entity_type=EntityType.SKILL,
         entity_id=skill.id,
         project_id=project.id,
         payload={"name": skill.name, "size": skill.size, "files": received.files},
@@ -252,8 +253,8 @@ async def update_skill(
     await activity.record(
         session,
         principal,
-        "skill.updated",
-        entity_type="skill",
+        Verb.SKILL_UPDATED,
+        entity_type=EntityType.SKILL,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True))},
@@ -273,8 +274,8 @@ async def delete_skill(
     await activity.record(
         session,
         principal,
-        "skill.deleted",
-        entity_type="skill",
+        Verb.SKILL_DELETED,
+        entity_type=EntityType.SKILL,
         entity_id=skill.id,
         project_id=project_id,
         payload={"name": name},

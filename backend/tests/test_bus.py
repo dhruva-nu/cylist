@@ -22,6 +22,7 @@ from app.config import Settings
 from app.models import AgentPromptStatus, AgentSession, SessionKey
 from app.realtime import protocol
 from app.realtime.bus import Bus
+from app.realtime.events import AgentConnected, BoardChanged, PromptChanged
 from app.realtime.hub import AgentLink, Hub
 from tests import ws
 from tests.test_agent_reports import SESSION_A, a_card
@@ -52,7 +53,7 @@ class TestFanOut:
         project_id = uuid4()
         async with process(settings) as (_, one), process(settings) as (other_hub, _):
             with other_hub.watch(project_id) as watcher:
-                one.publish({"type": "board.changed", "project_id": project_id})
+                one.publish(BoardChanged(project_id=project_id))
 
                 nudge = await asyncio.wait_for(watcher.next(), HEARD_WITHIN)
 
@@ -64,7 +65,7 @@ class TestFanOut:
         project_id = uuid4()
         async with process(settings) as (hub, bus):
             with hub.watch(project_id) as watcher:
-                bus.publish({"type": "board.changed", "project_id": project_id})
+                bus.publish(BoardChanged(project_id=project_id))
                 assert (await asyncio.wait_for(watcher.next(), HEARD_WITHIN))["type"]
 
                 # Long enough for the echo to have arrived, had it been let in.
@@ -81,14 +82,14 @@ class TestFanOut:
             other_hub.register_agent(link)
 
             one.publish(
-                {
-                    "type": protocol.PROMPT_CHANGED,
-                    "project_id": uuid4(),
-                    "prompt_id": uuid4(),
-                    "person_id": key.person_id,
-                    "client_session_id": key.client_session_id,
-                    "deliver": answer,
-                }
+                PromptChanged(
+                    project_id=uuid4(),
+                    task_id=uuid4(),
+                    prompt_id=uuid4(),
+                    person_id=key.person_id,
+                    client_session_id=key.client_session_id,
+                    deliver=answer,
+                )
             )
 
             assert await asyncio.wait_for(link.outbox.get(), HEARD_WITHIN) == answer
@@ -104,12 +105,11 @@ class TestFanOut:
             hub.register_agent(fresh)
 
             bus.publish(
-                {
-                    "type": protocol.AGENT_CONNECTED,
-                    "person_id": key.person_id,
-                    "client_session_id": key.client_session_id,
-                    "link_id": fresh.id,
-                }
+                AgentConnected(
+                    person_id=key.person_id,
+                    client_session_id=key.client_session_id,
+                    link_id=fresh.id,
+                )
             )
 
             await asyncio.wait_for(stale.displaced.wait(), HEARD_WITHIN)

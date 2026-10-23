@@ -18,13 +18,14 @@ plan it had, which is what its report is a record of.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.core import clock
 from app.core.errors import (
     ForbiddenError,
     NotFoundError,
@@ -33,9 +34,10 @@ from app.core.errors import (
 )
 from app.models.project import Project
 from app.models.task import ChecklistState, Task, TaskChecklistItem, TaskStatus
-from app.models.today import DayPick, Todo, TodoState
-from app.schemas.today import PickedCard, PickRead, TodoRead, TodoUpdate
+from app.models.today import DayPick, Todo, TodoState, pick_loads
 from app.services import tasks
+from app.services.commands.today import TodoUpdate
+from app.services.readmodels.today import PickedCard, PickRead, TodoRead
 
 
 def person_of(principal: Principal) -> UUID:
@@ -57,6 +59,7 @@ async def picks_for(
     return list(
         await session.scalars(
             select(DayPick)
+            .options(*pick_loads())
             .join(Task, Task.id == DayPick.task_id)
             .where(
                 DayPick.person_id == person_id,
@@ -206,9 +209,9 @@ async def _existing_pick(
     session: AsyncSession, person_id: UUID, task_id: UUID, day: date
 ) -> DayPick | None:
     found: DayPick | None = await session.scalar(
-        select(DayPick).where(
-            DayPick.person_id == person_id, DayPick.task_id == task_id, DayPick.day == day
-        )
+        select(DayPick)
+        .options(*pick_loads())
+        .where(DayPick.person_id == person_id, DayPick.task_id == task_id, DayPick.day == day)
     )
     return found
 
@@ -240,7 +243,7 @@ async def own_pick(session: AsyncSession, person_id: UUID, pick_id: UUID) -> Day
     Raises:
         NotFoundError: if there is no such pick, or it is somebody else's.
     """
-    found = await session.get(DayPick, pick_id)
+    found = await session.get(DayPick, pick_id, options=pick_loads())
     if found is None or found.person_id != person_id:
         raise NotFoundError(f"No pick matching {str(pick_id)!r}.")
     return found
@@ -332,7 +335,7 @@ async def update_todo(session: AsyncSession, todo: Todo, data: TodoUpdate) -> To
 
 def _set_state(todo: Todo, state: TodoState) -> None:
     todo.state = state
-    todo.done_at = datetime.now(UTC) if state is TodoState.DONE else None
+    todo.done_at = clock.now() if state is TodoState.DONE else None
 
 
 async def delete_todo(session: AsyncSession, todo: Todo) -> None:

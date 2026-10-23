@@ -145,15 +145,16 @@ export interface Member extends Person {
 }
 
 export const rolesApi = {
-  listMembers: (projectKey: string) =>
-    request<{ members: Member[] }>(`/projects/${projectKey}/members`),
+  listMembers: (projectKey: string, signal?: AbortSignal) =>
+    request<{ members: Member[] }>(`/projects/${projectKey}/members`, { signal }),
   setMembers: (projectKey: string, personIds: string[]) =>
     request<{ members: Member[] }>(`/projects/${projectKey}/members`, {
       method: 'PUT',
       body: jsonBody({ person_ids: personIds }),
     }),
 
-  listRoles: (projectKey: string) => fetchAllPages<RoleSummary>(`/projects/${projectKey}/roles`),
+  listRoles: (projectKey: string, signal?: AbortSignal) =>
+    fetchAllPages<RoleSummary>(`/projects/${projectKey}/roles`, signal),
   createRole: (projectKey: string, input: RoleInput) =>
     request<RoleSummary>(`/projects/${projectKey}/roles`, {
       method: 'POST',
@@ -167,8 +168,8 @@ export const rolesApi = {
       method: 'PUT',
       body: jsonBody({ role }),
     }),
-  getPermissions: (projectKey: string) =>
-    request<ProjectPermissions>(`/projects/${projectKey}/permissions`),
+  getPermissions: (projectKey: string, signal?: AbortSignal) =>
+    request<ProjectPermissions>(`/projects/${projectKey}/permissions`, { signal }),
   setRolePermissions: (projectKey: string, roleRef: string, permissions: Permission[]) =>
     request<RolePermissions>(`/projects/${projectKey}/roles/${roleRef}/permissions`, {
       method: 'PUT',

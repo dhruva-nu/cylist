@@ -12,7 +12,8 @@ import { BoardAnnounce } from '../CardPromptPopover'
 import { useCardActions } from './cardActions'
 import { ChevronIcon, OutIcon, TickIcon } from './icons'
 import { keepFromCard, stopAtCard } from './keepFromCard'
-import styles from './TaskCard.module.css'
+import styles from './CardSlotLists.module.css'
+import shared from './TaskCard.module.css'
 
 /**
  * Every stage on one line, where the bar was a picture of them: done, here,
@@ -75,11 +76,6 @@ function stageState(position: number, index: number, last: number): string {
   return ''
 }
 
-/** The card's own detail, under the key its dialog reads too. */
-function cardDetailKey(task: Task) {
-  return queryKeys.task(task.id)
-}
-
 /**
  * Finishing a card's parts from the board: a sub-task, or a tick box.
  *
@@ -92,7 +88,7 @@ function useCardParts(task: Task) {
   const { projectKey } = useCardActions()
 
   // The count on the card is the board's, so the board is out of date too.
-  const refresh = () => invalidate(cardDetailKey(task), queryKeys.tasks(projectKey))
+  const refresh = () => invalidate(queryKeys.task(task.id), queryKeys.tasks(projectKey))
 
   const finish = useMutation({
     mutationFn: ({ part, finished }: { part: Task; finished: boolean }) =>
@@ -141,8 +137,8 @@ export function SubtaskList({
   onOpenTask: ((taskId: string) => void) | undefined
 }) {
   const detail = useQuery({
-    queryKey: cardDetailKey(task),
-    queryFn: () => api.getTask(task.reference),
+    queryKey: queryKeys.task(task.id),
+    queryFn: ({ signal }) => api.getTask(task.reference, signal),
   })
   const parts = useCardParts(task)
 
@@ -252,7 +248,7 @@ export function PrList({ refs }: { refs: PrRef[] }) {
             <PrIcon state={ref.state} size={12} />
             {repo ? <span className={styles.prRepo}>{repo}</span> : null}
             <span className={styles.prNumber}>{prRefLabel(ref.url)}</span>
-            <span className={`${styles.prState} ${styles[`pr_${ref.state}`]}`}>{ref.state}</span>
+            <span className={`${shared.prState} ${shared[`pr_${ref.state}`]}`}>{ref.state}</span>
           </>
         )
         return (

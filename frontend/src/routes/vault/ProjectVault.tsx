@@ -11,28 +11,22 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type VaultNode } from '../../api/client'
-import { useInvalidate } from '../../api/queries'
+import { affects, invalidates, queryKeys, useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import {
-  Button,
-  EmptyState,
-  ErrorBanner,
-  ErrorNotice,
-  LiveRegion,
-  useAnnouncer,
-} from '../../components/ui'
+import { Button, EmptyState, ErrorBanner, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { NodeDetail, NothingSelected } from './NodeDetail'
 import styles from './ProjectVault.module.css'
 import { MoveDialog, NodeDialog, TreeDialog } from './VaultDialogs'
 import { TreeSection } from './VaultTreeNav'
 import { findNode, toggleId, withId, type Destination } from './vaultTree'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function ProjectVault() {
   const { projectKey } = useParams({ from: '/p/$projectKey/vault' })
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   /** Which trees are open. Null until the reader opens or closes one — see below. */
   const [chosenOpenTrees, setChosenOpenTrees] = useState<string[] | null>(null)
@@ -44,13 +38,14 @@ export function ProjectVault() {
   const [moving, setMoving] = useState<VaultNode | null>(null)
 
   const trees = useQuery({
-    queryKey: ['vault-trees', projectKey],
-    queryFn: () => api.listVaultTrees(projectKey),
+    queryKey: queryKeys.vaultTrees(projectKey),
+    queryFn: ({ signal }) => api.listVaultTrees(projectKey, signal),
   })
 
   const treeDetails = useQuery({
-    queryKey: ['vault-tree-details', projectKey, (trees.data ?? []).map((t) => t.id).join(',')],
-    queryFn: () => Promise.all((trees.data ?? []).map((tree) => api.getVaultTree(tree.id))),
+    queryKey: queryKeys.vaultTreeDetails(projectKey, (trees.data ?? []).map((t) => t.id).join(',')),
+    queryFn: ({ signal }) =>
+      Promise.all((trees.data ?? []).map((tree) => api.getVaultTree(tree.id, signal))),
     enabled: trees.data !== undefined,
   })
 
@@ -61,10 +56,11 @@ export function ProjectVault() {
   const openTrees = chosenOpenTrees ?? (firstTreeId ? [firstTreeId] : [])
 
   async function refresh() {
-    await invalidate(['vault-trees', projectKey], ['vault-tree-details', projectKey])
+    await invalidate(queryKeys.vaultTrees(projectKey), queryKeys.vaultTreeDetailsOf(projectKey))
   }
 
   const deleteNode = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.vault) },
     // The node rather than its id, so the announcement can name what has gone.
     mutationFn: (node: VaultNode) => api.deleteVaultNode(node.id),
     onSuccess: async (_deleted, node) => {
@@ -115,8 +111,6 @@ export function ProjectVault() {
         Multiple trees, each as deep as you like. Secrets stay masked until you reveal them, and
         every reveal is written to the activity log.
       </PageHead>
-
-      <LiveRegion message={message} />
 
       <ErrorNotice error={deleteNode.error} />
 

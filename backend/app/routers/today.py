@@ -13,6 +13,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.card_deps import may_stage_card, may_write_card
+from app.api.deps import resolved_project
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
@@ -22,9 +24,6 @@ from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import ChecklistState
 from app.models.today import Todo, TodoState
-from app.routers.projects import resolved_project
-from app.routers.tasks import acts
-from app.routers.tasks.dependencies import may_stage_card, may_write_card
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import ChecklistItemUpdate
 from app.schemas.today import (
@@ -38,6 +37,7 @@ from app.schemas.today import (
     WrapUpResult,
 )
 from app.services import reports, tasks, today
+from app.services.tasks import acts
 
 router = APIRouter(tags=["today"])
 

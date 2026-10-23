@@ -47,7 +47,7 @@ import {
   type TaskDay,
   type TaskHistoryEntry,
 } from '../api/client'
-import { usePeople } from '../api/queries'
+import { queryKeys, usePeople } from '../api/queries'
 import { dayShort, localToday, localZone, shiftDay, weekdayShort } from './dates'
 import { Modal, ModalBody } from './Modal'
 import { OpenCard } from './OpenCard'
@@ -120,8 +120,8 @@ function ReportDialog({
   const today = localToday()
 
   const report = useQuery({
-    queryKey: ['day-report', projectKey, day, zone],
-    queryFn: () => api.getDayReport(projectKey, day, zone),
+    queryKey: queryKeys.dayReport(projectKey, day, zone),
+    queryFn: ({ signal }) => api.getDayReport(projectKey, day, zone, signal),
     // The day on screen stays while the next one loads. A report that empties
     // itself between clicks makes stepping through a week unreadable.
     placeholderData: keepPreviousData,

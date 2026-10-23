@@ -27,7 +27,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import UnprocessableRequestError
+from app.core.errors import Reason, UnprocessableRequestError
 from app.models.task import Task
 
 
@@ -68,4 +68,5 @@ async def refuse_open_under_finished(session: AsyncSession, parent: Task, *, act
         f"{parent.reference} out of the board's last column first — restoring it to the "
         f"board if it is in cold storage — and then try {act} again.",
         details={"parent": parent.reference},
+        reason=Reason.PARENT_FINISHED,
     )

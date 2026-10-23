@@ -32,10 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import publish_into
 from app.models.agent_session import AgentFeedEntry, AgentSession, SessionKey
 from app.models.task import Task
-from app.realtime import protocol
-from app.schemas.agent_sessions import AgentFeedEntryIn, AgentFeedEntryRead
+from app.realtime.events import FeedChanged
 from app.services import agent_sessions
+from app.services.commands.agent_sessions import AgentFeedEntryIn
 from app.services.paging import PageRequest, keyset
+from app.services.readmodels.agent_sessions import AgentFeedEntryRead
 
 KEEP_PER_SESSION = 200
 """How many lines each session keeps. Enough to scroll back through a long
@@ -79,10 +80,7 @@ async def append(
     await session.flush()
     await _trim(session, row.id)
 
-    publish_into(
-        session,
-        {"type": protocol.FEED_CHANGED, "project_id": task.project_id, "task_id": task.id},
-    )
+    publish_into(session, FeedChanged(project_id=task.project_id, task_id=task.id))
     return len(entries)
 
 

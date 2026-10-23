@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, UnprocessableRequestError
 from app.models.task import CommentKind, Task, TaskComment
-from app.schemas.tasks import CommentCreate
 from app.services import projects
+from app.services.commands.tasks import CommentCreate
 from app.services.paging import PageRequest, Window, keyset
 
 

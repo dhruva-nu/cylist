@@ -10,7 +10,6 @@ import {
   EmptyState,
   ErrorNotice,
   Eyebrow,
-  LiveRegion,
   cardStyles,
   readableInkOn,
   useAnnouncer,
@@ -21,7 +20,7 @@ import { NewProjectDialog } from './NewProjectDialog'
 
 export function Home() {
   const [creating, setCreating] = useState(false)
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
   const projects = useProjects()
 
   return (
@@ -43,7 +42,6 @@ export function Home() {
       {projects.isPending ? <EmptyState>Loading projects…</EmptyState> : null}
 
       <ErrorNotice error={projects.error} />
-      <LiveRegion message={message} />
 
       {projects.data?.length === 0 ? (
         <EmptyState>

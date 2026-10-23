@@ -15,6 +15,10 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.files import file_item_read
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -27,11 +31,9 @@ from app.core.multipart import multipart_body
 from app.core.security_headers import DOWNLOAD_HEADERS
 from app.core.sensitivity import DEFAULT_LEVEL
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.files import (
     FiledItem,
@@ -47,7 +49,6 @@ from app.schemas.files import (
     ItemUpdate,
     LinkCreate,
 )
-from app.schemas.people import PersonRead
 from app.services import activity, blobs, files, permissions, projects
 from app.services.paging import PageRequest
 from app.storage import BlobStore, get_blob_store
@@ -95,25 +96,6 @@ def _folder_read(folder: Folder) -> FolderRead:
         is_root=folder.is_root,
         default_sensitivity=sensitivity.parse(folder.default_sensitivity, DEFAULT_LEVEL),
         created_at=folder.created_at,
-    )
-
-
-def file_item_read(item: FileItem) -> ItemRead:
-    """One item as a listing shows it. Public, because a CSV cold storage
-    writes is reported in the same shape as anything uploaded."""
-    person = item.added_by_person
-    return ItemRead(
-        id=item.id,
-        folder_id=item.folder_id,
-        kind=item.kind,
-        name=item.name,
-        sensitivity=sensitivity.parse(item.sensitivity, DEFAULT_LEVEL),
-        url=item.url,
-        source=item.source,
-        size=item.size,
-        mime=item.mime,
-        added_by=PersonRead.model_validate(person) if person is not None else None,
-        created_at=item.created_at,
     )
 
 
@@ -215,8 +197,8 @@ async def create_folder(
     await activity.record(
         session,
         principal,
-        "folder.created",
-        entity_type="folder",
+        Verb.FOLDER_CREATED,
+        entity_type=EntityType.FOLDER,
         entity_id=folder.id,
         project_id=project.id,
         payload={
@@ -318,8 +300,8 @@ async def update_folder(
     await activity.record(
         session,
         principal,
-        "folder.updated",
-        entity_type="folder",
+        Verb.FOLDER_UPDATED,
+        entity_type=EntityType.FOLDER,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
@@ -349,8 +331,8 @@ async def delete_folder(
     await activity.record(
         session,
         principal,
-        "folder.deleted",
-        entity_type="folder",
+        Verb.FOLDER_DELETED,
+        entity_type=EntityType.FOLDER,
         project_id=project_id,
         payload={"name": name},
     )
@@ -414,8 +396,8 @@ async def upload_file(
     await activity.record(
         session,
         principal,
-        "file.uploaded",
-        entity_type="item",
+        Verb.FILE_UPLOADED,
+        entity_type=EntityType.ITEM,
         entity_id=item.id,
         project_id=folder.project_id,
         payload={"name": item.name, "size": item.size, "sensitivity": item.sensitivity},
@@ -446,8 +428,8 @@ async def add_link(
     await activity.record(
         session,
         principal,
-        "link.added",
-        entity_type="item",
+        Verb.LINK_ADDED,
+        entity_type=EntityType.ITEM,
         entity_id=item.id,
         project_id=folder.project_id,
         payload={"name": item.name, "source": item.source.value},
@@ -504,8 +486,8 @@ async def update_item(
     await activity.record(
         session,
         principal,
-        "item.updated",
-        entity_type="item",
+        Verb.ITEM_UPDATED,
+        entity_type=EntityType.ITEM,
         entity_id=updated.id,
         project_id=await files.project_id_of_item(session, updated),
         payload={"fields": sorted(body.model_dump(exclude_unset=True)), "name": updated.name},
@@ -530,8 +512,8 @@ async def delete_item(
     await activity.record(
         session,
         principal,
-        "item.deleted",
-        entity_type="item",
+        Verb.ITEM_DELETED,
+        entity_type=EntityType.ITEM,
         project_id=project_id,
         payload={"name": name},
     )

@@ -4,6 +4,7 @@ import { useIdentity, usePermissionGrid } from '../../api/queries'
 import { can } from '../../routes/projectPermissions'
 import { mayDelete, type Viewer } from '../commentDelete'
 import { useRefreshTask } from './useRefreshTask'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /** What `useCommentDeleting` hands a timeline. */
 export interface CommentDeleting {
@@ -50,6 +51,7 @@ export function useCommentDeleting({
   }
 
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (entry: TaskComment) => api.deleteComment(entry.id),
     onSuccess: async (_void, entry) => {
       announce('Comment deleted.')

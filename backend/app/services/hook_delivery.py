@@ -1,10 +1,12 @@
 """Getting a queued event to a hook's URL, and trying again when it does not arrive.
 
-:func:`app.services.hooks.queue_for` writes a ``hook_delivery`` row in the
-transaction that made the change; everything after the commit happens here.
-The :class:`Courier` runs for the life of the process, woken by the outbox the
-moment a transaction that queued something commits, and on a timer otherwise
-so a retry that has come due is not left waiting for the next change.
+A write marks its change for the hooks and commits; everything after that
+happens here. The :class:`Courier` runs for the life of the process, woken by the
+outbox the moment a transaction that marked something commits, and on a timer
+otherwise so a retry that has come due is not left waiting for the next change.
+Each pass first matches the marked changes against their projects' hooks —
+:func:`app.services.hooks.match_pending`, which writes a ``hook_delivery`` row
+per match in a transaction of its own — and then sends what is due.
 
 **Each delivery goes in three steps** — claim, send, record — the first and
 last each in its own short transaction, so no row lock is held across somebody
@@ -67,9 +69,11 @@ import httpx
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.clock import now
+from app.core.clock import epoch, now
 from app.core.crypto import VaultKeys, cipher_for
+from app.core.metrics import live
 from app.db import Database
+from app.models.activity import Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.services import hooks, retention
 
@@ -152,7 +156,7 @@ SIGNATURE_HEADER = "X-Cylist-Signature"
 SIGNATURE_TOLERANCE = timedelta(minutes=5)
 
 TEST_EVENT = "hook.test"
-FIRED_EVENT = "hook.fired"
+FIRED_EVENT = Verb.HOOK_FIRED
 
 
 # --- Signing ---------------------------------------------------------------
@@ -176,7 +180,7 @@ def verify(secret: str, header: str, body: bytes, *, at: float | None = None) ->
         timestamp = int(parts["t"])
     except (KeyError, ValueError):
         return False
-    current = time.time() if at is None else at
+    current = epoch() if at is None else at
     if abs(current - timestamp) > SIGNATURE_TOLERANCE.total_seconds():
         return False
     expected = sign(secret, timestamp, body).split("v1=", 1)[1]
@@ -318,6 +322,7 @@ def record(delivery: HookDelivery, attempt: Attempt) -> None:
         # background would only fill the log with the same answer.
         delivery.state = DeliveryState.FAILED
         delivery.next_attempt_at = None
+        live().deliveries_failed += 1
         logger.warning(
             "Hook %s gave up on delivery %s of %s after attempt %d: %s",
             delivery.hook_id,
@@ -385,6 +390,7 @@ async def deliver_due(
     waiting on the slowest — but a script or a test that wants a pass to have
     finished when it returns does.
     """
+    await _match_all(database)
     parcels = await _claim(database, vault_keys, at or now(), limit=BATCH)
     outcomes = await asyncio.gather(
         *(_deliver(database, client, parcel) for parcel in parcels), return_exceptions=True
@@ -393,6 +399,12 @@ async def deliver_due(
         if isinstance(outcome, BaseException):
             logger.error("Recording hook delivery %s failed", parcel.delivery_id, exc_info=outcome)
     return len(parcels)
+
+
+async def _match_all(database: Database) -> None:
+    """Match every change that is waiting, a batch at a time, before anything is sent."""
+    while await hooks.match_pending(database) >= hooks.MATCH_BATCH:
+        pass
 
 
 async def _deliver(database: Database, client: httpx.AsyncClient, parcel: _Parcel) -> None:
@@ -564,6 +576,7 @@ class Courier:
                     # earns another pass rather than being swallowed.
                     self._wake.clear()
                     try:
+                        await _match_all(database)
                         parcels = await _claim(
                             database,
                             vault_keys,

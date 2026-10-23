@@ -41,6 +41,7 @@ import {
 import { useCommentAuthor } from './useCommentAuthor'
 import { useCommentDeleting } from './useCommentDeleting'
 import styles from './TaskForm.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function TaskForm({
   projectKey,
@@ -147,6 +148,7 @@ export function TaskForm({
   }
 
   const save = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: async () => {
       const payload = taskPayload(form, onBoard ? columnDueDatesInput(stages, columnDates) : null)
       // Top of the column rather than the bottom: a card moved from a dialog
@@ -185,6 +187,7 @@ export function TaskForm({
 
   const queryClient = useQueryClient()
   const remove = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (existing: TaskDetail) => api.deleteTask(existing.id),
     onSuccess: async (_deleted, existing) => {
       announce(`${existing.reference} deleted.`)

@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import project_admin, resolved_project, resolved_role
 from app.auth.dependencies import require
 from app.auth.permissions import CATALOGUE, Permission
 from app.auth.principal import Principal
@@ -27,12 +28,11 @@ from app.core.errors import UnprocessableRequestError
 from app.core.sensitivity import CATALOGUE as SENSITIVITY_CATALOGUE
 from app.core.sensitivity import DEFAULT_CLEARANCE, Sensitivity
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.board import BoardColumn
 from app.models.permission import EVERYONE_ELSE
 from app.models.project import Project
 from app.models.role import ProjectRole
-from app.routers.projects import resolved_project
-from app.routers.roles import project_admin, resolved_role
 from app.schemas.permissions import (
     ClearanceUpdate,
     ColumnRule,
@@ -240,8 +240,8 @@ async def set_role_permissions(
     await activity.record(
         session,
         principal,
-        "role.permissions_set",
-        entity_type="role",
+        Verb.ROLE_PERMISSIONS_SET,
+        entity_type=EntityType.ROLE,
         entity_id=role.id,
         project_id=project.id,
         payload={"name": role.name, "permissions": sorted(wanted)},
@@ -277,8 +277,8 @@ async def set_baseline_permissions(
     await activity.record(
         session,
         principal,
-        "role.permissions_set",
-        entity_type="project",
+        Verb.ROLE_PERMISSIONS_SET,
+        entity_type=EntityType.PROJECT,
         entity_id=project.id,
         project_id=project.id,
         payload={"name": EVERYONE_ELSE_NAME, "permissions": sorted(wanted)},
@@ -449,8 +449,8 @@ async def _record_columns(
     await activity.record(
         session,
         principal,
-        "role.columns_set",
-        entity_type="role" if role_id else "project",
+        Verb.ROLE_COLUMNS_SET,
+        entity_type=EntityType.ROLE if role_id else EntityType.PROJECT,
         entity_id=role_id or project.id,
         project_id=project.id,
         payload={"name": name, "restricted_column_ids": restricted},
@@ -468,8 +468,8 @@ async def _record_clearance(
     await activity.record(
         session,
         principal,
-        "role.clearance_set",
-        entity_type="role" if role_id else "project",
+        Verb.ROLE_CLEARANCE_SET,
+        entity_type=EntityType.ROLE if role_id else EntityType.PROJECT,
         entity_id=role_id or project.id,
         project_id=project.id,
         payload={"name": name, "clearance": clearance.value},

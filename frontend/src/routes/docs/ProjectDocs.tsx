@@ -26,9 +26,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type Doc, type DocTopicWithDocs, type DocTree } from '../../api/client'
-import { useInvalidate } from '../../api/queries'
+import { queryKeys, useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import { EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../../components/ui'
+import { EmptyState, ErrorBanner, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { AnswerView } from './AnswerView'
 import { DocEditor } from './DocEditor'
@@ -46,7 +46,7 @@ export function ProjectDocs() {
   const navigate = useNavigate({ from: '/p/$projectKey/docs' })
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   // Opening a different doc, or asking something, leaves whatever was being
   // edited or written. So a mode remembers the address it was entered at, and
@@ -62,13 +62,13 @@ export function ProjectDocs() {
   const setMode = (next: Mode) => setEntered({ mode: next, address })
 
   const tree = useQuery({
-    queryKey: ['docs', projectKey],
-    queryFn: () => api.getDocTree(projectKey),
+    queryKey: queryKeys.docTree(projectKey),
+    queryFn: ({ signal }) => api.getDocTree(projectKey, signal),
   })
 
   const open = useQuery({
-    queryKey: ['doc', openId],
-    queryFn: () => api.getDoc(openId ?? ''),
+    queryKey: queryKeys.doc(openId),
+    queryFn: ({ signal }) => api.getDoc(openId ?? '', signal),
     enabled: Boolean(openId),
   })
 
@@ -76,7 +76,7 @@ export function ProjectDocs() {
   // asked again whenever the window regains focus; an edit to the docs is what
   // makes it stale, and `refresh` says so.
   const answer = useQuery({
-    queryKey: ['doc-answer', projectKey, ask],
+    queryKey: queryKeys.docAnswer(projectKey, ask),
     queryFn: () => api.askDocs(projectKey, ask ?? ''),
     enabled: Boolean(ask),
     staleTime: 5 * 60_000,
@@ -100,9 +100,9 @@ export function ProjectDocs() {
 
   async function refresh(docId?: string) {
     await invalidate(
-      ['docs', projectKey],
-      ['doc-answer', projectKey],
-      ...(docId ? [['doc', docId]] : []),
+      queryKeys.docTree(projectKey),
+      queryKeys.docAnswers(projectKey),
+      ...(docId ? [queryKeys.doc(docId)] : []),
     )
   }
 
@@ -193,8 +193,6 @@ export function ProjectDocs() {
         What this project knows about itself, in markdown — most of it written by the agents that
         work on it. Filed under Product or Engineering, then by topic.
       </PageHead>
-
-      <LiveRegion message={message} />
 
       <div className={styles.layout}>
         <DocNav

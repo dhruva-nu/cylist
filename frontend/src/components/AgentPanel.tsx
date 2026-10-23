@@ -45,6 +45,7 @@ import { feedClock, feedLabel, isCodeLike } from './agentFeed'
 import { AgentPromptAnswer } from './AgentPromptAnswer'
 import { Button, ErrorNotice } from './ui'
 import styles from './AgentPanel.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 export function AgentPanel({
   taskRef,
@@ -62,12 +63,13 @@ export function AgentPanel({
   const live = sessions.length > finished.length
 
   const dismiss = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.dismissAgentSessions(taskRef),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.task(taskId) }),
-        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
-        queryClient.invalidateQueries({ queryKey: ['board'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.allBoardCards }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.allBoards }),
       ])
     },
   })
@@ -203,8 +205,8 @@ const FEED_POLL_MS = 10_000
  */
 function AgentFeed({ taskRef, taskId, live }: { taskRef: string; taskId: string; live: boolean }) {
   const feed = useQuery({
-    queryKey: ['agent-feed', taskId],
-    queryFn: () => api.getAgentFeed(taskRef),
+    queryKey: queryKeys.agentFeed(taskId),
+    queryFn: ({ signal }) => api.getAgentFeed(taskRef, undefined, signal),
     // Opened from Today or a goal's page there is no board socket to ring,
     // so while an agent is still on the card the feed asks for itself — at
     // the board's own fallback pace, and not at all once every session is over.

@@ -9,18 +9,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.tasks import read_tasks
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import NotFoundError
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.goal import Goal
 from app.models.project import Project
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.tasks import read_tasks
 from app.schemas.common import Acknowledged
 from app.schemas.goals import (
     GoalCreate,
@@ -181,8 +182,8 @@ async def create_goal(
     await activity.record(
         session,
         principal,
-        "goal.created",
-        entity_type="goal",
+        Verb.GOAL_CREATED,
+        entity_type=EntityType.GOAL,
         entity_id=goal.id,
         project_id=project.id,
         payload={"reference": goal.reference, "name": goal.name},
@@ -251,8 +252,8 @@ async def update_goal(
     await activity.record(
         session,
         principal,
-        "goal.updated",
-        entity_type="goal",
+        Verb.GOAL_UPDATED,
+        entity_type=EntityType.GOAL,
         entity_id=updated.id,
         project_id=updated.project_id,
         payload={
@@ -282,8 +283,8 @@ async def delete_goal(
     await activity.record(
         session,
         principal,
-        "goal.deleted",
-        entity_type="goal",
+        Verb.GOAL_DELETED,
+        entity_type=EntityType.GOAL,
         entity_id=None,
         project_id=project_id,
         payload={"reference": reference, "name": name},

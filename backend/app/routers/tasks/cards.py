@@ -5,18 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require
-from app.auth.principal import Principal
-from app.auth.scopes import Scope
-from app.db import SessionDependency
-from app.models.board import BoardColumn
-from app.models.project import Project
-from app.models.task import Task
-from app.routers.columns import resolved_column
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.tasks import acts
-from app.routers.tasks.dependencies import (
+from app.api.card_deps import (
     WRITE_THIS_CARD,
     may_add_card,
     may_move_this_card,
@@ -24,8 +13,17 @@ from app.routers.tasks.dependencies import (
     may_write_this_card,
     resolved_task,
 )
-from app.routers.tasks.recording import record_on_card
-from app.routers.tasks.views import read_tasks, task_detail
+from app.api.deps import resolved_column, resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.tasks import read_tasks, task_detail
+from app.auth.dependencies import require
+from app.auth.principal import Principal
+from app.auth.scopes import Scope
+from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
+from app.models.board import BoardColumn
+from app.models.project import Project
+from app.models.task import Task
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import (
     BoardTasks,
@@ -43,6 +41,8 @@ from app.schemas.tasks import (
 )
 from app.services import activity, columns, tasks
 from app.services.paging import DEFAULT_LIMIT, MAX_LIMIT, PageRequest
+from app.services.tasks import acts
+from app.services.tasks.recording import record_on_card
 
 router = APIRouter(tags=["tasks"])
 
@@ -154,7 +154,7 @@ async def create_task(
     is the writer's until they hand it on, which `PATCH /tasks/{ref}` does.
     """
     task = await tasks.create(session, project, body, creator_id=principal.person_id)
-    await record_on_card(session, principal, "task.created", task, {"title": task.title})
+    await record_on_card(session, principal, Verb.TASK_CREATED, task, {"title": task.title})
     return await task_detail(session, task)
 
 
@@ -238,7 +238,7 @@ async def update_task(
     which is the only path that can insist on a reason.
     """
     updated, changes = await tasks.update(session, task, body)
-    await record_on_card(session, principal, "task.updated", updated, {"changes": changes})
+    await record_on_card(session, principal, Verb.TASK_UPDATED, updated, {"changes": changes})
     return await task_detail(session, updated)
 
 
@@ -260,8 +260,8 @@ async def delete_task(
     await activity.record(
         session,
         principal,
-        "task.deleted",
-        entity_type="task",
+        Verb.TASK_DELETED,
+        entity_type=EntityType.TASK,
         project_id=project_id,
         payload={"reference": reference},
     )
@@ -306,7 +306,7 @@ async def move_task(
     await record_on_card(
         session,
         principal,
-        "task.moved",
+        Verb.TASK_MOVED,
         moved,
         {
             "column_id": str(moved.column_id),
@@ -398,7 +398,7 @@ async def change_status(
     await record_on_card(
         session,
         principal,
-        "task.status_changed",
+        Verb.TASK_STATUS_CHANGED,
         updated,
         {**entry.meta, "changes": [status_change]},
     )
@@ -468,7 +468,7 @@ async def create_subtask(
     await record_on_card(
         session,
         principal,
-        "task.subtask_created",
+        Verb.TASK_SUBTASK_CREATED,
         subtask,
         {"parent": task.reference, "title": subtask.title},
     )

@@ -14,10 +14,11 @@ import {
   type LinkInput,
   type Sensitivity,
 } from '../../api/client'
-import { useMembers } from '../../api/queries'
+import { affects, invalidates, useMembers } from '../../api/queries'
 import { DialogActions, Field, FieldPair, Modal, ModalBody } from '../../components/Modal'
 import { ErrorNotice, LevelPicker } from '../../components/ui'
 import { extensionWarning, renameIsAChange, renameProblem } from './fileRename'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 export function NewFolderDialog({
   projectKey,
@@ -36,6 +37,7 @@ export function NewFolderDialog({
   const [level, setLevel] = useState<Sensitivity | ''>('')
 
   const create = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: () =>
       api.createFolder(projectKey, {
         name,
@@ -111,6 +113,7 @@ export function RenameDialog({
   const [name, setName] = useState(item.name)
 
   const rename = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: () => api.updateItem(item.id, { name: name.trim() }),
     onSuccess: async (renamed) => {
       await onDone(item.name, renamed.name)
@@ -248,6 +251,7 @@ export function LinkDialog({
   const [form, setForm] = useState<LinkInput>(EMPTY_LINK)
 
   const add = useMutation({
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: () => api.addLink(folderId, form),
     onSuccess: async (item) => {
       await onDone(`Link ${item.name}`)

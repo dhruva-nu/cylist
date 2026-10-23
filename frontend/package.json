@@ -2,7 +2,7 @@
   "name": "cylist-frontend",
   "private": true,
   "type": "module",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -11,7 +11,8 @@
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "api:types": "openapi-typescript http://localhost:8000/api/v1/openapi.json -o src/api/schema.d.ts"
+    "api:types": "openapi-typescript ../android/api/openapi.json -o src/api/schema.d.ts",
+    "api:types:check": "openapi-typescript ../android/api/openapi.json -o src/api/schema.d.ts --check"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -24,12 +25,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "^22.20.1",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
+    "jsdom": "^30.1.3",
     "openapi-typescript": "^7.4.4",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",

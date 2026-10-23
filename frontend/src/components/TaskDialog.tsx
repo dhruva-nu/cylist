@@ -53,7 +53,7 @@ export function TaskDialog(props: TaskDialogProps) {
 
   const task = useQuery({
     queryKey: queryKeys.task(taskId),
-    queryFn: () => api.getTask(taskId ?? ''),
+    queryFn: ({ signal }) => api.getTask(taskId ?? '', signal),
     enabled: taskId !== null,
   })
   const members = useMembers(projectKey)

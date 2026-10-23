@@ -13,13 +13,13 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, UnprocessableRequestError
+from app.core.errors import ConflictError, Reason, UnprocessableRequestError
 from app.db import flush_or_refuse, lock_row
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task, TaskColumnDueDate
-from app.schemas.tasks import ColumnDueDateInput
 from app.services import columns
+from app.services.commands.tasks import ColumnDueDateInput
 from app.services.tasks.history import FieldChange, field_change
 
 
@@ -105,7 +105,10 @@ async def set_column_due_dates(
     # for what it is rather than as the foreign key's 500.
     await flush_or_refuse(
         session,
-        ConflictError("The board changed while those dates were being saved. Try again."),
+        ConflictError(
+            "The board changed while those dates were being saved. Try again.",
+            reason=Reason.CHANGED_CONCURRENTLY,
+        ),
     )
 
 

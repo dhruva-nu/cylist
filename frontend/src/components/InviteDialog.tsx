@@ -20,6 +20,7 @@ import { api, type InviteIssued, type Person } from '../api/client'
 import { Modal, ModalBody } from './Modal'
 import { Button, ErrorNotice } from './ui'
 import styles from './InviteDialog.module.css'
+import { handlesOwnErrors } from '../api/mutationErrors'
 
 export function InviteDialog({
   person,
@@ -35,6 +36,7 @@ export function InviteDialog({
   const [copied, setCopied] = useState(false)
 
   const invite = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (): Promise<InviteIssued> => api.invitePerson(person.id),
     // The link carries a token that is shown once, here; once the dialog has
     // gone, react-query has no business keeping it.
@@ -46,6 +48,7 @@ export function InviteDialog({
   })
 
   const withdraw = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.withdrawInvite(person.id),
     onSuccess: async () => {
       await onDone()

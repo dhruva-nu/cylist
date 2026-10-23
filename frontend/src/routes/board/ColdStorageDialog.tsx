@@ -6,6 +6,7 @@ import { formatStamp } from '../../components/format'
 import { Modal, ModalBody } from '../../components/Modal'
 import { Avatar, Button, EmptyState, ErrorNotice } from '../../components/ui'
 import styles from './ColdStorageDialog.module.css'
+import { handlesOwnErrors } from '../../api/mutationErrors'
 
 /**
  * Cold storage (CYLIST-70): where the board's finished cards go once nobody
@@ -51,24 +52,26 @@ export function ColdStorageDialog({
   // and the cards worth finding in it are nearly always the latest.
   const stored = useInfiniteQuery({
     queryKey: queryKeys.coldStorage(projectKey),
-    queryFn: ({ pageParam }) => api.listColdStorage(projectKey, pageParam),
+    queryFn: ({ pageParam, signal }) => api.listColdStorage(projectKey, pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next,
   })
 
   const store = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: () => api.storeFinished(projectKey),
     onSuccess: async (run) => {
       announce(`${cardsWord(run.references.length)} moved to cold storage, in ${run.file.name}.`)
       await Promise.all([
         onDone(),
         // The CSV is a new file, and the files page may be cached from before.
-        invalidate(['folder-tree', projectKey], ['folder-children']),
+        invalidate(queryKeys.folderTree(projectKey), queryKeys.allFolderChildren),
       ])
     },
   })
 
   const restore = useMutation({
+    meta: handlesOwnErrors,
     mutationFn: (task: Task) => api.restoreTask(task.reference),
     onSuccess: async (restored) => {
       announce(`${restored.reference} restored to ${column.name}.`)

@@ -2,7 +2,7 @@
 
 A card should read identically wherever it is listed — on its board, on a
 goal's page, under its parent — which it only does if one function is drawing
-it. :func:`read_tasks` is that function, and the goals router borrows it.
+it. :func:`read_tasks` is that function, and every route that lists cards uses it.
 """
 
 from __future__ import annotations

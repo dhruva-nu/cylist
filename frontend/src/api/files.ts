@@ -88,7 +88,8 @@ export interface LinkInput {
 
 export const filesApi = {
   /** The project's root folder, with the whole tree nested inside it. */
-  getTree: (projectKey: string) => request<FolderNode>(`/projects/${projectKey}/tree`),
+  getTree: (projectKey: string, signal?: AbortSignal) =>
+    request<FolderNode>(`/projects/${projectKey}/tree`, { signal }),
   createFolder: (
     projectKey: string,
     input: {
@@ -101,14 +102,14 @@ export const filesApi = {
     request<Folder>(`/projects/${projectKey}/folders`, { method: 'POST', body: jsonBody(input) }),
   deleteFolder: (id: string) => request<{ ok: boolean }>(`/folders/${id}`, { method: 'DELETE' }),
   /** What a folder holds: its subfolders whole, and a page of its items from `after`. */
-  getFolderChildren: (id: string, after: string | null = null) =>
-    request<FolderChildren>(pagePath(`/folders/${id}/children`, after)),
+  getFolderChildren: (id: string, after: string | null = null, signal?: AbortSignal) =>
+    request<FolderChildren>(pagePath(`/folders/${id}/children`, after), { signal }),
   /**
    * Every file and link in the project, flat — what a `>` tag is completed
    * from, and what one is recognised against when prose is read back.
    */
-  listProjectItems: (projectKey: string) =>
-    fetchAllPages<FiledItem>(`/projects/${projectKey}/items`),
+  listProjectItems: (projectKey: string, signal?: AbortSignal) =>
+    fetchAllPages<FiledItem>(`/projects/${projectKey}/items`, signal),
 
   uploadFile: (
     folderId: string,

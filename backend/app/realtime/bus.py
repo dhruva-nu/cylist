@@ -31,23 +31,18 @@ import asyncio
 import json
 import logging
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import asyncpg
 from asyncpg.pool import PoolConnectionProxy
 from sqlalchemy.engine import make_url
 
+from app.realtime.events import BoardChanged, Event, decode
 from app.realtime.hub import Hub
 
 logger = logging.getLogger(__name__)
 
 CHANNEL = "cylist_events"
-
-_UUID_FIELDS = frozenset(
-    {"project_id", "task_id", "entity_id", "prompt_id", "person_id", "link_id"}
-)
-"""The fields that are UUIDs in an event and strings on the wire, turned back
-on arrival so the hub sees exactly what a local publish would have handed it."""
 
 _ORIGIN = "origin"
 
@@ -77,14 +72,16 @@ class Bus:
         self.listening = asyncio.Event()
         """Set while the line is up and other processes' news is arriving."""
 
-    def publish(self, event: dict[str, Any]) -> None:
+    def publish(self, event: Event) -> None:
         """Tell this process now, and every other once the line carries it.
 
         Synchronous and never awaits, like :meth:`Hub.publish`: it is called
         just after a commit, and the request is not waiting on the network.
+        An event that is for this process alone (``wire = False``) goes no
+        further than its hub.
         """
         self._hub.publish(event)
-        if self._outgoing is None:
+        if self._outgoing is None or not event.wire:
             return
         if self._outgoing.full():
             self._outgoing.get_nowait()
@@ -112,7 +109,7 @@ class Bus:
 
     async def _serve(self, dsn: str, outgoing: asyncio.Queue[str], *, resync: bool) -> None:
         """Listen and send on one connection until it closes."""
-        connection = await asyncpg.connect(dsn)
+        connection = await _connect(dsn)
         closed = asyncio.Event()
         connection.add_termination_listener(lambda _: closed.set())
         try:
@@ -144,15 +141,42 @@ class Bus:
             return
         if not isinstance(decoded, dict) or decoded.pop(_ORIGIN, None) == self._origin:
             return
-        self._hub.publish(_with_uuids(decoded))
+        event = decode(decoded)
+        if event is None:
+            logger.warning("Ignored an event of a kind this process cannot read")
+            return
+        self._hub.publish(event)
 
-    def _encode(self, event: dict[str, Any]) -> str:
+    def _encode(self, event: Event) -> str:
         """An event as a notification, or its bare doorbell if it is too big."""
-        payload = json.dumps({**event, _ORIGIN: self._origin}, default=str)
+        payload = json.dumps({**event.to_wire(), _ORIGIN: self._origin}, default=str)
         if len(payload.encode()) <= _PAYLOAD_MAX:
             return payload
-        doorbell = {"type": "board.changed", "project_id": event.get("project_id")}
-        return json.dumps({**doorbell, _ORIGIN: self._origin}, default=str)
+        doorbell = BoardChanged(project_id=getattr(event, "project_id", None))
+        return json.dumps({**doorbell.to_wire(), _ORIGIN: self._origin}, default=str)
+
+
+async def _connect(dsn: str) -> asyncpg.Connection[Any]:
+    """Open the line, and leave nothing open if whoever is waiting for it is cancelled.
+
+    A connection that finishes opening just as its owner is cancelled — the
+    process is shutting down, or a test built an app and tore it down again —
+    has no owner left to close it, and is closed only when it is garbage
+    collected, with a warning. So the connect runs on its own, and if it
+    outlives the wait it is torn down the moment it completes.
+    """
+    opening = asyncio.ensure_future(asyncpg.connect(dsn))
+    try:
+        return await asyncio.shield(opening)
+    except asyncio.CancelledError:
+        opening.add_done_callback(_terminate_if_open)
+        opening.cancel()
+        raise
+
+
+def _terminate_if_open(opening: asyncio.Future[asyncpg.Connection[Any]]) -> None:
+    if not opening.cancelled() and opening.exception() is None:
+        opening.result().terminate()
 
 
 async def _send_until(
@@ -170,18 +194,3 @@ async def _send_until(
             await connection.execute("SELECT pg_notify($1, $2)", CHANNEL, queued.result())
     finally:
         ended.cancel()
-
-
-def _with_uuids(event: dict[str, Any]) -> dict[str, Any]:
-    """An event off the wire, its ids made UUIDs again. One that is not a UUID
-    is dropped rather than passed on as a string the hub would misread."""
-    restored: dict[str, Any] = {}
-    for name, value in event.items():
-        if name in _UUID_FIELDS and isinstance(value, str):
-            try:
-                restored[name] = UUID(value)
-            except ValueError:
-                continue
-        else:
-            restored[name] = value
-    return restored
