@@ -64,7 +64,7 @@ from app.core.errors import (
     not_on_this_project,
 )
 from app.core.ids import uuid7
-from app.db import flush_or_refuse
+from app.db import flush_or_refuse, publish_into
 from app.models.activity import Activity
 from app.models.board import BoardColumn
 from app.models.hook import Hook, HookDelivery
@@ -72,7 +72,9 @@ from app.models.person import Person
 from app.models.project import Project
 from app.models.task import Task, TaskType
 from app.models.template import TaskTemplate
+from app.realtime.events import HooksQueued
 from app.services import projects
+from app.services.activity import Recorded
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -217,6 +219,17 @@ class _Card:
     """Whether the card's owner, after the change, is the agent."""
     mentioned: frozenset[UUID] = frozenset()
     """Who the comment tagged, on a ``task.commented``. Empty on anything else."""
+
+
+async def on_recorded(session: AsyncSession, recorded: Recorded) -> None:
+    """The activity trail's subscriber: queue a delivery to every hook the change matches.
+
+    Queued in the transaction that made the change, so one that rolls back is
+    never announced and one that commits is never lost; the courier is woken once
+    it has committed.
+    """
+    if await queue_for(session, recorded.entry):
+        publish_into(session, HooksQueued())
 
 
 async def queue_for(session: AsyncSession, entry: Activity) -> int:

@@ -12,15 +12,18 @@ and the rest: which half a function lives in is this package's business.
 from __future__ import annotations
 
 from app.services.activity.trail import (
+    Recorded,
     between,
     changed_something,
     for_entity,
     recent,
     record,
+    subscribe,
 )
 from app.services.activity.wording import describe, entry_of, excerpt, moved
 
 __all__ = [
+    "Recorded",
     "between",
     "changed_something",
     "describe",
@@ -30,4 +33,5 @@ __all__ = [
     "moved",
     "recent",
     "record",
+    "subscribe",
 ]
