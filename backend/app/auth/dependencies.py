@@ -41,7 +41,7 @@ from app.auth.tokens import hash_token, looks_like_token
 from app.config import SESSION_COOKIE as SESSION_COOKIE  # re-exported; it lived here
 from app.config import Settings
 from app.core.clock import now
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, Reason, UnauthorizedError
 from app.db import SessionDependency
 from app.models.activity import Channel
 from app.models.api_token import ApiToken, TokenKind
@@ -188,6 +188,7 @@ def require(*scopes: Scope) -> Callable[[Principal], Awaitable[Principal]]:
             raise ForbiddenError(
                 "This token is not allowed to perform that action.",
                 details={"missing_scopes": sorted(scope.value for scope in missing)},
+                reason=Reason.MISSING_SCOPES,
             )
         return principal
 

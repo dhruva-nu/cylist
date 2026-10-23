@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import multipart
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.sensitivity import Sensitivity
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.person import Person
@@ -634,7 +634,11 @@ async def _flush_refusing_duplicate(session: AsyncSession, name: str) -> None:
 
 
 def _duplicate_name(name: str) -> ConflictError:
-    return ConflictError(f"Something called {name!r} is already here.", details={"name": name})
+    return ConflictError(
+        f"Something called {name!r} is already here.",
+        details={"name": name},
+        reason=Reason.DUPLICATE_NAME,
+    )
 
 
 async def _ensure_name_is_free(session: AsyncSession, folder: Folder, name: str) -> None:
@@ -670,6 +674,7 @@ def _ensure_not_the_root(folder: Folder, attempted: str) -> None:
             "Rename the project to change what it is called, or delete the folders "
             "inside it to empty it.",
             details={"folder_id": str(folder.id), "project_id": str(folder.project_id)},
+            reason=Reason.ROOT_FOLDER_PROTECTED,
         )
 
 
@@ -725,6 +730,7 @@ async def _ancestors(session: AsyncSession, folder: Folder) -> list[Folder]:
             raise UnprocessableRequestError(
                 f"That folder is nested more than {MAX_DEPTH} deep.",
                 details={"folder_id": str(folder.id)},
+                reason=Reason.FOLDER_TOO_DEEP,
             )
         parent = await get_folder(session, cursor)
         chain.append(parent)
@@ -744,6 +750,7 @@ async def _ensure_not_inside_itself(session: AsyncSession, folder: Folder, paren
         raise UnprocessableRequestError(
             "A folder cannot be moved inside itself.",
             details={"folder_id": str(folder.id), "parent_id": str(parent.id)},
+            reason=Reason.FOLDER_CYCLE,
         )
 
 
@@ -752,6 +759,7 @@ async def _ensure_depth_allows_a_child(session: AsyncSession, parent: Folder) ->
         raise UnprocessableRequestError(
             f"Folders cannot be nested more than {MAX_DEPTH} deep.",
             details={"parent_id": str(parent.id)},
+            reason=Reason.FOLDER_TOO_DEEP,
         )
 
 

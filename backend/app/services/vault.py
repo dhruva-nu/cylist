@@ -24,7 +24,7 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import VaultCipher
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.ids import uuid7
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.models.project import Project
@@ -460,6 +460,7 @@ async def _refuse_taken_tree_name(
         raise ConflictError(
             f"This project already has a vault tree called {name!r}.",
             details={"name": name},
+            reason=Reason.DUPLICATE_NAME,
         )
 
 
@@ -618,7 +619,9 @@ async def _siblings(
 def _refuse_duplicate_name(siblings: list[VaultNode], name: str) -> None:
     if any(sibling.name == name for sibling in siblings):
         raise ConflictError(
-            f"There is already something called {name!r} here.", details={"name": name}
+            f"There is already something called {name!r} here.",
+            details={"name": name},
+            reason=Reason.DUPLICATE_NAME,
         )
 
 

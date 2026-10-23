@@ -33,7 +33,7 @@ from starlette.routing import BaseRoute, compile_path
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.base_path import route_path
-from app.core.errors import PayloadTooLargeError
+from app.core.errors import PayloadTooLargeError, error_body
 
 FORM_OVERHEAD_BYTES: Final = 1024 * 1024
 """What an upload route allows beyond the file itself: the multipart
@@ -162,7 +162,7 @@ def _refuse(limit: int) -> JSONResponse:
     )
     return JSONResponse(
         status_code=error.status_code,
-        content={"error": {"code": error.code, "message": error.message, "details": error.details}},
+        content=error_body(error.code, error.message, error.details),
         # The rest of the body is still on its way, and nothing is going to
         # read it: closing is cheaper than draining it to keep the line open.
         headers={"Connection": "close"},

@@ -21,7 +21,7 @@ from app.auth.passwords import dummy_hash, hash_password, needs_rehash, verify_p
 from app.auth.principal import Principal
 from app.auth.tokens import hash_token
 from app.core.clock import now
-from app.core.errors import ConflictError, NotFoundError, UnprocessableRequestError
+from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.palette import colour_for
 from app.db import flush_or_refuse
 from app.models.activity import Channel
@@ -202,6 +202,7 @@ async def _require_another_way_in(session: AsyncSession, person: Person) -> None
             f"{person.name} is the last person who can sign in, and archiving them "
             "would lock everybody out. Open an account for somebody else first.",
             details={"person_id": str(person.id)},
+            reason=Reason.LAST_SIGN_IN,
         )
 
 
@@ -353,7 +354,9 @@ async def invite(session: AsyncSession, person_id: UUID) -> tuple[Person, str]:
             "Give them an email address first — it is what they sign in with."
         )
     if person.password_hash is not None:
-        raise ConflictError(f"{person.name} already has an account.")
+        raise ConflictError(
+            f"{person.name} already has an account.", reason=Reason.ALREADY_HAS_ACCOUNT
+        )
 
     await _require_email_free(session, person.email, excluding=person.id)
 
@@ -474,6 +477,7 @@ def _email_taken(email: str | None) -> ConflictError:
     return ConflictError(
         f"{email} was just taken as somebody else's sign-in address.",
         details={"email": email},
+        reason=Reason.EMAIL_TAKEN,
     )
 
 
@@ -510,6 +514,7 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
             raise ConflictError(
                 f"{email} is already the sign-in address for {clash.name}.",
                 details={"email": email},
+                reason=Reason.EMAIL_TAKEN,
             )
         if clash.invite_is_pending:
             # Said as an invitation, because the usual way here is somebody
@@ -519,6 +524,7 @@ async def _require_email_free(session: AsyncSession, email: str | None, *, exclu
                 f"{clash.name} has already been invited at {email}, and the invitation "
                 "has not expired yet. Withdraw it, or re-invite them instead.",
                 details={"email": email},
+                reason=Reason.ALREADY_INVITED,
             )
         _clear_invitation(clash)
         lapsed = True

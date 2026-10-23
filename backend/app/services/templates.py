@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import (
     ConflictError,
     NotFoundError,
+    Reason,
     UnprocessableRequestError,
     not_on_this_project,
 )
@@ -54,7 +55,7 @@ async def list_templates(
 async def get_template(session: AsyncSession, template_id: UUID) -> TaskTemplate:
     template = await session.get(TaskTemplate, template_id)
     if template is None:
-        raise NotFoundError("No template with that id.")
+        raise NotFoundError("No template with that id.", reason=Reason.TEMPLATE_IN_USE)
     return template
 
 
@@ -128,6 +129,7 @@ async def delete_template(session: AsyncSession, template: TaskTemplate) -> None
             f"{held} {'card was' if held == 1 else 'cards were'} created from "
             f"{template.name!r}. Change their template before deleting it.",
             details={"task_count": held},
+            reason=Reason.TEMPLATE_IN_USE,
         )
     await session.delete(template)
     await session.flush()
@@ -361,11 +363,14 @@ async def _refuse_duplicate_template(session: AsyncSession, project_id: UUID, na
         raise ConflictError(
             f"This project already has a template called {existing.name!r}.",
             details={"template_id": str(existing.id)},
+            reason=Reason.DUPLICATE_NAME,
         )
 
 
 def _duplicate_template(name: str) -> ConflictError:
     """The refusal for a name that passed the check and then lost to the index."""
     return ConflictError(
-        f"This project already has a template called {name!r}.", details={"name": name}
+        f"This project already has a template called {name!r}.",
+        details={"name": name},
+        reason=Reason.DUPLICATE_NAME,
     )
