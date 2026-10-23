@@ -24,13 +24,14 @@ whoever achieved it: see :func:`refuse_open_card_on_achieved`.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy import Numeric, Select, case, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
+from app.core import clock
 from app.core.errors import (
     ConflictError,
     NotFoundError,
@@ -368,7 +369,7 @@ async def _set_status(session: AsyncSession, goal: Goal, status: GoalStatus) -> 
     """
     if status is GoalStatus.ACHIEVED:
         await _refuse_open_cards(session, goal)
-        goal.achieved_at = datetime.now(UTC)
+        goal.achieved_at = clock.now()
     else:
         # Reopening or dropping clears it: a goal that is not achieved has no
         # moment at which it was.

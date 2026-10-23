@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import Select, delete, func, literal, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -722,20 +722,35 @@ def _paths_of(folders: list[Folder]) -> dict[UUID, str]:
 
 
 async def _ancestors(session: AsyncSession, folder: Folder) -> list[Folder]:
-    """Every folder above this one, nearest first."""
-    chain: list[Folder] = []
-    cursor = folder.parent_id
-    while cursor is not None:
-        if len(chain) >= MAX_DEPTH:
-            raise UnprocessableRequestError(
-                f"That folder is nested more than {MAX_DEPTH} deep.",
-                details={"folder_id": str(folder.id)},
-                reason=Reason.FOLDER_TOO_DEEP,
-            )
-        parent = await get_folder(session, cursor)
-        chain.append(parent)
-        cursor = parent.parent_id
-    return chain
+    """Every folder above this one, nearest first.
+
+    One query however deep the tree is: climbing a row at a time costs a round
+    trip per level, which at :data:`MAX_DEPTH` is a request's worth of latency
+    spent on every move and every create. The climb is cut one level past the
+    limit, so a ring in the data is refused here rather than followed forever.
+    """
+    chain = (
+        select(Folder.id, Folder.parent_id, literal(1).label("level"))
+        .where(Folder.id == folder.parent_id)
+        .cte("chain", recursive=True)
+    )
+    chain = chain.union_all(
+        select(Folder.id, Folder.parent_id, chain.c.level + 1)
+        .join(chain, Folder.id == chain.c.parent_id)
+        .where(chain.c.level <= MAX_DEPTH)
+    )
+    ancestors = list(
+        await session.scalars(
+            select(Folder).join(chain, Folder.id == chain.c.id).order_by(chain.c.level)
+        )
+    )
+    if len(ancestors) > MAX_DEPTH:
+        raise UnprocessableRequestError(
+            f"That folder is nested more than {MAX_DEPTH} deep.",
+            details={"folder_id": str(folder.id)},
+            reason=Reason.FOLDER_TOO_DEEP,
+        )
+    return ancestors
 
 
 async def _ensure_not_inside_itself(session: AsyncSession, folder: Folder, parent: Folder) -> None:
