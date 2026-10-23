@@ -67,7 +67,7 @@ from app.services.hooks.crud import (
     secret_of,
     update,
 )
-from app.services.hooks.matching import matches, queue_for
+from app.services.hooks.matching import matches, on_recorded, queue_for
 from app.services.hooks.payload import fired_body, sample_body
 
 __all__ = [
@@ -91,6 +91,7 @@ __all__ = [
     "labels_for",
     "list_hooks",
     "matches",
+    "on_recorded",
     "queue_for",
     "refuse_unless_fireable",
     "rotate_secret",

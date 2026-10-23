@@ -34,11 +34,12 @@ from app.core.request_log import RequestLogMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.db import Database
 from app.mcp import mount_mcp
+from app.realtime import doorbell
 from app.realtime.bus import Bus
 from app.realtime.events import Event, HooksQueued, PushQueued
 from app.realtime.hub import Hub
 from app.routers import api_router
-from app.services import agent_prompts, agent_reports, blobs
+from app.services import activity, agent_prompts, agent_reports, agent_sessions, blobs, hooks
 from app.services.doc_engine import engine_for
 from app.services.docs import CorpusCache
 from app.services.hook_delivery import Courier
@@ -246,6 +247,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Set eagerly, not in the lifespan: tests build an app without running the
     # lifespan, and every request needs to reach this configuration.
+    # What a recorded change means beyond its row, said once, here. The trail
+    # imports none of it, which is what lets each of these import the trail.
+    activity.subscribe(agent_sessions.on_recorded)
+    activity.subscribe(doorbell.ring)
+    activity.subscribe(hooks.on_recorded)
+
     app.state.settings = settings
 
     # Beside the metrics, and for the same reason — but the reason is sharper

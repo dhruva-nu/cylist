@@ -8,14 +8,28 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now
+from app.db import publish_into
 from app.models.activity import Activity, EntityType, Verb
 from app.models.hook import Hook, HookDelivery
 from app.models.person import Person
 from app.models.task import Task
+from app.realtime.events import HooksQueued
+from app.services.activity import Recorded
 from app.services.hooks.catalogue import EVENTS
 from app.services.hooks.payload import Card, event_body
 
 # --- Matching a change -----------------------------------------------------
+
+
+async def on_recorded(session: AsyncSession, recorded: Recorded) -> None:
+    """The activity trail's subscriber: queue a delivery to every hook the change matches.
+
+    Queued in the transaction that made the change, so one that rolls back is
+    never announced and one that commits is never lost; the courier is woken once
+    it has committed.
+    """
+    if await queue_for(session, recorded.entry):
+        publish_into(session, HooksQueued())
 
 
 async def queue_for(session: AsyncSession, entry: Activity) -> int:

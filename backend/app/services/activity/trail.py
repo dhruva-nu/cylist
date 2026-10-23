@@ -15,6 +15,8 @@ answers "who touched what". Turning a row into words is
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -24,11 +26,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.ids import uuid7
-from app.db import publish_into
 from app.models.activity import Activity, EntityType, Verb
-from app.realtime.events import BoardChanged, HooksQueued
-from app.services import agent_sessions, hooks
 from app.services.paging import PageRequest, Window, keyset
+
+
+@dataclass(frozen=True)
+class Recorded:
+    """What :func:`record` announces to its subscribers: who did it, and the row."""
+
+    principal: Principal
+    entry: Activity
+
+
+Subscriber = Callable[[AsyncSession, Recorded], Awaitable[None]]
+"""Something that wants to know of every change, inside the transaction that made it."""
+
+_subscribers: list[Subscriber] = []
+
+
+def subscribe(subscriber: Subscriber) -> None:
+    """Have ``subscriber`` told of every entry recorded from now on.
+
+    Registered once, by the app's factory (``create_app``), rather than found by
+    this module: it used to import the agent sessions, the hooks and the
+    realtime layer itself, which is why it could not be imported by any of them.
+    A subscriber that is already registered is not registered twice, so
+    building the app more than once is harmless. It runs in the recording
+    transaction, in the order registered, and an exception it raises fails the
+    write — a change that cannot be announced to hooks is not one to commit.
+    """
+    if subscriber not in _subscribers:
+        _subscribers.append(subscriber)
 
 
 async def record(
@@ -43,6 +71,9 @@ async def record(
 ) -> Activity:
     """Append one entry to the audit trail.
 
+    Writes the row and tells the subscribers, nothing more — see
+    :func:`subscribe` for who they are.
+
     Args:
         verb: Dotted past-tense event name, e.g. ``"token.issued"``.
         entity_type: The kind of thing that changed, e.g. ``"task"``.
@@ -53,8 +84,8 @@ async def record(
             ``read`` scope alone.
     """
     entry = Activity(
-        # Drawn now rather than at the flush: a hook delivery queued below
-        # names this row, and has to be able to before either is written.
+        # Drawn now rather than at the flush: a hook delivery a subscriber
+        # queues names this row, and has to be able to before either is written.
         id=uuid7(),
         actor_token_id=principal.token_id,
         actor_person_id=principal.person_id,
@@ -67,28 +98,10 @@ async def record(
         payload=payload or {},
     )
     session.add(entry)
-    # A write to a card is also news about the agents on it: an agent's own
-    # write is proof it is alive, a person's write clears the finished ones.
-    # Done here because this is the one place every mutation already passes.
-    await agent_sessions.touch_from_activity(
-        session, principal, verb, entity_type=entity_type, entity_id=entity_id
-    )
-    # And it is news to anyone watching the board. Here for the same reason:
-    # a board goes stale for *any* change, not only for the agent ones, and a
-    # push wired to presence alone would quietly stop showing a card that an
-    # MCP `move_task` had moved. The 10s poll used to carry those too.
-    if project_id is not None:
-        publish_into(
-            session,
-            BoardChanged(
-                project_id=project_id, entity_type=entity_type, entity_id=entity_id, verb=verb
-            ),
-        )
-    # And to anyone outside who asked to be told. Queued in this transaction,
-    # so a change that rolls back is never announced and one that commits is
-    # never lost; the courier is woken once it has.
-    if await hooks.queue_for(session, entry):
-        publish_into(session, HooksQueued())
+    # Everything else a write means is for the subscribers, who say so once.
+    recorded = Recorded(principal=principal, entry=entry)
+    for subscriber in _subscribers:
+        await subscriber(session, recorded)
     return entry
 
 

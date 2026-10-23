@@ -44,6 +44,7 @@ from app.schemas.agent_sessions import (
     AgentSessionRead,
     PresenceState,
 )
+from app.services.activity import Recorded
 from app.services.paging import PageRequest, Window, keyset
 
 # For its side effect: every change to an agent session below — and in the
@@ -391,18 +392,30 @@ async def dismiss(session: AsyncSession, task: Task) -> int:
     return len(dismissed.all())
 
 
+async def on_recorded(session: AsyncSession, recorded: Recorded) -> None:
+    """The activity trail's subscriber: a write to a card is news about its agents."""
+    entry = recorded.entry
+    await touch_from_activity(
+        session,
+        recorded.principal,
+        entry.verb,
+        entity_type=entry.entity_type,
+        entity_id=entry.entity_id,
+    )
+
+
 async def touch_from_activity(
     session: AsyncSession,
     principal: Principal,
-    verb: Verb,
+    verb: str,
     *,
-    entity_type: EntityType,
+    entity_type: str,
     entity_id: UUID | None,
 ) -> None:
     """What a write to a card means for the sessions on it.
 
-    Called from :func:`app.services.activity.record` for every mutation, so it
-    is kept to one UPDATE and no reads. An agent's own write to its card is a
+    Run for every mutation, through :func:`on_recorded`, so it is kept to one
+    UPDATE and no reads. An agent's own write to its card is a
     heartbeat — real work is better evidence of life than a hook — and a
     person's write from the browser dismisses whatever has finished there,
     which is the agreed rule for how a green border clears itself.
