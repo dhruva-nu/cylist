@@ -7,7 +7,7 @@ import { Button, ErrorNotice, cardStyles } from '../../components/ui'
 import styles from './ProjectHooks.module.css'
 import { STATE_WORDS, attemptTime, deliveryOutcome, describeRule, isDangling } from './projectHooks'
 import { handlesOwnErrors } from '../../api/mutationErrors'
-import { queryKeys } from '../../api/queries'
+import { affects, invalidates, queryKeys } from '../../api/queries'
 
 /** How long after a redelivery is queued the log looks again: the courier sends it within moments. */
 const REDELIVERY_SETTLES_MS = 2_000
@@ -48,12 +48,12 @@ export function HookDetail({
   useEffect(() => () => window.clearTimeout(lookAgain.current), [])
 
   const toggle = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: (enabled: boolean) => api.updateHook(projectKey, hook.id, { enabled }),
     onSuccess: (saved) => onChanged(`${saved.name} is ${saved.enabled ? 'on' : 'off'}.`),
   })
   const test = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: () => api.testHook(projectKey, hook.id),
     onSuccess: async (sent) => {
       await refreshLog()
@@ -61,7 +61,7 @@ export function HookDetail({
     },
   })
   const fire = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: () => api.fireHook(projectKey, hook.id, message),
     onSuccess: async (sent) => {
       setMessage('')
@@ -70,7 +70,7 @@ export function HookDetail({
     },
   })
   const rotate = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: () => api.rotateHookSecret(projectKey, hook.id),
     // The new secret is shown once, by the dialog it is handed to; it is not
     // kept in react-query's cache for the minutes after.
@@ -81,12 +81,12 @@ export function HookDetail({
     },
   })
   const remove = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: () => api.deleteHook(projectKey, hook.id),
     onSuccess: () => onChanged(`${hook.name} deleted.`),
   })
   const redeliver = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: (delivery: HookDelivery) => api.redeliverHook(projectKey, hook.id, delivery.id),
     onSuccess: async () => {
       await refreshLog()

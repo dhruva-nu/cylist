@@ -87,6 +87,20 @@ export const queryKeys = {
   allBoardCards: ['tasks'],
   /** Every project's columns. */
   allBoards: ['board'],
+  /** Every project's hooks, and every hook's delivery log. */
+  allHooks: ['hooks'],
+  allHookDeliveries: ['hook-deliveries'],
+  /** Every project's vault: its trees, and what is in them. */
+  allVaultTrees: ['vault-trees'],
+  allVaultTreeDetails: ['vault-tree-details'],
+  /** Every project's docs: the tree, any one doc, and the answers drawn from them. */
+  allDocTrees: ['docs'],
+  allDocs: ['doc'],
+  allDocAnswers: ['doc-answer'],
+  allSkills: ['skills'],
+  /** Every project's folders, and what is in them, and the flat list of its files. */
+  allFolderTrees: ['folder-tree'],
+  allProjectItems: ['project-items'],
   goals: (projectKey: string) => ['goals', projectKey],
   /** Every goal's page, whichever project it is on. */
   allGoals: ['goal'],
@@ -100,6 +114,37 @@ export const queryKeys = {
  * forgets is a list that stays stale until a reload.
  */
 export const refreshesItself = { refreshesItself: true } as const
+
+/**
+ * A mutation's `meta` for one that says what it changes: only those queries are
+ * read again, instead of every one on screen (`main.tsx`).
+ *
+ * Narrower than `refreshesItself`, which leaves the refetch to the write's own
+ * code and so cannot be checked in one place. Where the keys are listed here,
+ * a write to the hooks cannot cost the board its cards. Give it nothing for a
+ * write that changes nothing anybody has cached — a secret revealed, a line
+ * copied.
+ */
+export function invalidates(...keys: QueryKey[]) {
+  return { invalidates: keys } as const
+}
+
+/**
+ * What each area of the app caches, for a write there to name.
+ *
+ * Whole areas rather than the one project or row a write was made on: only a
+ * query somebody is looking at is read again, so the width costs nothing, and a
+ * write made from a dialog that does not know its project still reaches every
+ * reader. An area's writes never touch the board's cards or the directory;
+ * that is what puts them here rather than on the blanket refetch.
+ */
+export const affects = {
+  hooks: [queryKeys.allHooks, queryKeys.allHookDeliveries],
+  vault: [queryKeys.allVaultTrees, queryKeys.allVaultTreeDetails],
+  docs: [queryKeys.allDocTrees, queryKeys.allDocs, queryKeys.allDocAnswers],
+  skills: [queryKeys.allSkills],
+  files: [queryKeys.allFolderTrees, queryKeys.allFolderChildren, queryKeys.allProjectItems],
+} as const satisfies Record<string, readonly QueryKey[]>
 
 /**
  * How long a list that hardly ever changes counts as fresh: who you are, what

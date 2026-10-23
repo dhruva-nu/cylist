@@ -4,6 +4,7 @@ import { Markdown } from '../../components/Markdown'
 import { Button, ErrorNotice } from '../../components/ui'
 import styles from './ProjectDocs.module.css'
 import { handlesOwnErrors } from '../../api/mutationErrors'
+import { invalidates, affects } from '../../api/queries'
 
 /** What the editor writes: a title, and the markdown under it. */
 export interface DocDraft {
@@ -34,7 +35,7 @@ export function DocEditor({
   const [body, setBody] = useState(initial.body)
   const [preview, setPreview] = useState(false)
   const save = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.docs) },
     mutationFn: onSave,
   })
 

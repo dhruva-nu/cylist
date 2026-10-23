@@ -29,6 +29,7 @@ import {
   type HookDraft,
 } from './projectHooks'
 import { handlesOwnErrors } from '../../api/mutationErrors'
+import { invalidates, affects } from '../../api/queries'
 
 const TYPES: { value: TaskType; label: string }[] = [
   { value: 'feature', label: 'Feature' },
@@ -62,7 +63,7 @@ export function HookDialog({
   const set = (patch: Partial<HookDraft>) => setDraft((current) => ({ ...current, ...patch }))
 
   const save = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.hooks) },
     mutationFn: async () => {
       if (hook === null) {
         const created = await api.createHook(projectKey, inputOf(draft, true))

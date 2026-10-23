@@ -16,7 +16,7 @@ import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api, type FileItem, type Sensitivity } from '../../api/client'
-import { queryKeys, useInvalidate, useProject } from '../../api/queries'
+import { affects, invalidates, queryKeys, useInvalidate, useProject } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
 import { Button, ErrorBanner, ErrorNotice, LiveRegion, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
@@ -99,7 +99,7 @@ export function ProjectFiles() {
   const folderName = contents.data?.folder.name ?? project.data?.name ?? projectKey
 
   const upload = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: async ({
       files,
       addedBy,
@@ -120,13 +120,13 @@ export function ProjectFiles() {
   })
 
   const deleteItem = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: (item: Named) => api.deleteItem(item.id),
     onSuccess: (_deleted, item) => refreshAndSay(`${item.name} deleted.`),
   })
 
   const deleteFolder = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.files) },
     mutationFn: (folder: Named) => api.deleteFolder(folder.id),
     onSuccess: (_deleted, folder) => refreshAndSay(`Folder ${folder.name} deleted.`),
   })

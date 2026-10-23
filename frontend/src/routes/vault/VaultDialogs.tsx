@@ -21,6 +21,7 @@ import { SegmentedChoice } from '../../components/SegmentedChoice'
 import { ErrorNotice, LevelPicker } from '../../components/ui'
 import { branchesOutside, type Destination } from './vaultTree'
 import { handlesOwnErrors } from '../../api/mutationErrors'
+import { invalidates, affects } from '../../api/queries'
 
 export function TreeDialog({
   projectKey,
@@ -35,7 +36,7 @@ export function TreeDialog({
   const [level, setLevel] = useState<Sensitivity | ''>('')
 
   const save = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.vault) },
     mutationFn: () => api.createVaultTree(projectKey, name.trim(), level || null),
     onSuccess: async () => {
       await onDone(name.trim())
@@ -147,7 +148,7 @@ export function NodeDialog({
   const [level, setLevel] = useState<Sensitivity | ''>(node?.sensitivity ?? '')
 
   const save = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.vault) },
     mutationFn: async () => {
       const secret = secretInputFrom(form)
       if (node) {
@@ -307,7 +308,7 @@ export function MoveDialog({
   const [position, setPosition] = useState(0)
 
   const save = useMutation({
-    meta: handlesOwnErrors,
+    meta: { ...handlesOwnErrors, ...invalidates(...affects.vault) },
     mutationFn: () => api.moveVaultNode(node.id, parentId || null, position),
     onSuccess: async () => {
       await onDone(node.name)
