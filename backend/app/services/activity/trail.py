@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
 from app.core.ids import uuid7
-from app.models.activity import Activity
+from app.models.activity import Activity, EntityType, Verb
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -62,9 +62,9 @@ def subscribe(subscriber: Subscriber) -> None:
 async def record(
     session: AsyncSession,
     principal: Principal,
-    verb: str,
+    verb: Verb,
     *,
-    entity_type: str,
+    entity_type: EntityType,
     entity_id: UUID | None = None,
     project_id: UUID | None = None,
     payload: dict[str, Any] | None = None,

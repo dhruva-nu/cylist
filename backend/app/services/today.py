@@ -18,13 +18,14 @@ plan it had, which is what its report is a record of.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.principal import Principal
+from app.core import clock
 from app.core.errors import (
     ForbiddenError,
     NotFoundError,
@@ -333,7 +334,7 @@ async def update_todo(session: AsyncSession, todo: Todo, data: TodoUpdate) -> To
 
 def _set_state(todo: Todo, state: TodoState) -> None:
     todo.state = state
-    todo.done_at = datetime.now(UTC) if state is TodoState.DONE else None
+    todo.done_at = clock.now() if state is TodoState.DONE else None
 
 
 async def delete_todo(session: AsyncSession, todo: Todo) -> None:

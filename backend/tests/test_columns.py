@@ -122,6 +122,7 @@ class TestAdding:
 
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "conflict"
+        assert response.json()["error"]["reason"] == "column_limit"
         assert response.json()["error"]["details"] == {"column_count": 8, "max_columns": 8}
 
     async def test_a_refused_ninth_column_is_not_half_written(self, signed_in: AsyncClient) -> None:

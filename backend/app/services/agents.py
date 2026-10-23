@@ -34,8 +34,8 @@ from app.models.agent import Skill
 from app.models.file import Blob
 from app.models.project import Project
 from app.schemas.agents import SkillUpdate
-from app.services import blobs, skill_folders
-from app.services.files import ensure_person_exists, filename_of
+from app.services import blobs, people, skill_folders
+from app.services.files import filename_of
 from app.services.paging import PageRequest, Window, keyset
 from app.services.skill_folders import MAX_UNPACKED_BYTES
 from app.storage import BlobStore
@@ -113,7 +113,7 @@ async def upload_skill(
             the parts are not a skill's folder, or if ``added_by`` names
             nobody in the directory.
     """
-    await ensure_person_exists(session, added_by)
+    await people.ensure_person_exists(session, added_by)
 
     received = await _received(session, store, form, max_bytes=max_bytes)
     name, blob, mime, description = (

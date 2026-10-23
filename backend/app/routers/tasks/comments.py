@@ -9,6 +9,7 @@ from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.db import SessionDependency
+from app.models.activity import Verb
 from app.models.task import Task, TaskComment
 from app.routers.paging import PageQuery
 from app.routers.tasks.dependencies import (
@@ -72,7 +73,7 @@ async def add_comment(
     await record_on_card(
         session,
         principal,
-        "task.commented",
+        Verb.TASK_COMMENTED,
         task,
         {
             "comment_id": str(entry.id),
@@ -112,7 +113,7 @@ async def delete_comment(
     await record_on_card(
         session,
         principal,
-        "task.comment_deleted",
+        Verb.TASK_COMMENT_DELETED,
         task,
         {"comment_id": str(comment_id), "comment": activity.excerpt(said)},
     )

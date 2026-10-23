@@ -21,14 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.throttle import SignInThrottle
 from app.config import (
-    AGENT_QUIET_AFTER,
-    AGENT_SOCKET_WITNESSES_FOR,
-    REAP_EVERY,
     Settings,
     get_settings,
 )
 from app.core.base_path import BasePathMiddleware
 from app.core.body_limit import BodyLimitMiddleware
+from app.core.crypto import configured_cipher
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
@@ -181,16 +179,17 @@ async def _reap_forever(app: FastAPI) -> None:
     the loop carries on, because the alternative is a task that quietly stops
     and a board that quietly stops being right.
     """
+    settings: Settings = app.state.settings
     while True:
-        await asyncio.sleep(REAP_EVERY.total_seconds())
+        await asyncio.sleep(settings.agent_reap_every.total_seconds())
         try:
             async with app.state.database.session() as session:
                 if not await agent_reports.take_reaper_lease(session):
                     continue
                 await agent_reports.reap_unwitnessed(
                     session,
-                    quiet_after=AGENT_QUIET_AFTER,
-                    witnessed_for=AGENT_SOCKET_WITNESSES_FOR,
+                    quiet_after=settings.agent_quiet_after,
+                    witnessed_for=settings.agent_socket_witnesses_for,
                 )
                 # Questions and permissions whose time ran out with nobody
                 # looking, and questions whose tool is no longer polling.
@@ -209,11 +208,14 @@ async def _sweep_blobs_forever(app: FastAPI) -> None:
     any upload abandoned part-way. One process sweeps a pass; the rest find
     the lease taken. Never dies of one bad pass, for the reaper's reason.
     """
-    store = LocalBlobStore(app.state.settings.blob_dir)
+    settings: Settings = app.state.settings
+    store = LocalBlobStore(settings.blob_dir)
     while True:
-        await asyncio.sleep(blobs.SWEEP_EVERY.total_seconds())
+        await asyncio.sleep(settings.blob_sweep_every.total_seconds())
         try:
-            await blobs.sweep_if_first(app.state.database, store)
+            await blobs.sweep_if_first(
+                app.state.database, store, idle_for=settings.blob_sweep_idle_for
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -268,6 +270,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # real network — except in a test, which answers in a receiver's place.
     app.state.courier = Courier(Retention.of(settings))
     app.state.hook_transport = None
+
+    # One cipher for the process, so no request pays to expand the keys. Or the
+    # reason there is none: the vault refuses, the rest of the app does not.
+    app.state.vault_cipher = configured_cipher(settings.vault_keyring)
 
     # For the courier's reason: the publisher hands it pushes from the first
     # commit, and its loop starts in the lifespan. The sender is None — built

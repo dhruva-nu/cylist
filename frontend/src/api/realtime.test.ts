@@ -1,3 +1,4 @@
+import frames from './fixtures/board-frames.json'
 import { describe, expect, it } from 'vitest'
 import { backoffDelay, boardSocketUrl, CLOSE, isFinal, parseEvent } from './realtime'
 
@@ -83,5 +84,46 @@ describe('parseEvent', () => {
     expect(parseEvent('not json')).toBeNull()
     expect(parseEvent('null')).toBeNull()
     expect(parseEvent(new Blob())).toBeNull()
+  })
+})
+
+describe('the frames the server sends', () => {
+  // `backend/tests/test_board_frames.py` holds the server to this file, so what
+  // is parsed here is what is actually sent.
+  const sent = frames as Record<string, Record<string, unknown>>
+
+  it.each(Object.entries(sent))('parses %s', (_name, frame) => {
+    const parsed = parseEvent(JSON.stringify(frame))
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.type).toBe(frame.type)
+  })
+
+  it('reads the hint a changed frame names', () => {
+    const parsed = parseEvent(JSON.stringify(sent['changed, naming two things']))
+
+    expect(parsed).toMatchObject({
+      type: 'board.changed',
+      changed: [
+        { entity_type: 'task', entity_id: 'a' },
+        { entity_type: 'goal', entity_id: 'b' },
+      ],
+    })
+  })
+
+  it('reads a changed frame that names nothing as "anything"', () => {
+    expect(parseEvent(JSON.stringify(sent['changed, naming nothing']))).toMatchObject({
+      changed: null,
+    })
+  })
+
+  it.each([
+    ['not JSON', 'ready'],
+    ['not an object', '"ready"'],
+    ['no type', '{"at":"now"}'],
+    ['an unknown type', '{"type":"board.exploded"}'],
+    ['a feed doorbell for no card', '{"type":"agent.feed","at":"now"}'],
+  ])('drops a frame that is %s', (_name, data) => {
+    expect(parseEvent(data)).toBeNull()
   })
 })
