@@ -245,9 +245,46 @@ holds an older socket for the same session lets go of it — see
 :meth:`app.realtime.hub.Hub.register_agent`. Never sent down a socket."""
 
 
-def board_changed() -> dict[str, object]:
-    """The board socket's doorbell: something on this board committed."""
-    return {"type": "board.changed", "at": now().isoformat()}
+CHANGED_MAX = 25
+"""The most things a ``board.changed`` names before it stops naming them. A
+burst past this is a bulk change, and the honest hint for one is "anything"."""
+
+
+def board_changed(changed: list[dict[str, str]] | None = None) -> dict[str, object]:
+    """The board socket's doorbell: something on this board committed.
+
+    ``changed`` says *what*, as ``{"entity_type", "entity_id"}`` references
+    and nothing more — no field, no value — so a browser can refetch the one
+    list that is out of date instead of all of them, while the doorbell stays
+    a doorbell: the data still comes from the HTTP read that builds it. ``None``
+    means "something, and no word on what", which is also what a burst bigger
+    than :data:`CHANGED_MAX` becomes; a browser must then read everything.
+    """
+    return {"type": "board.changed", "at": now().isoformat(), "changed": changed}
+
+
+def merge_changed(first: dict[str, object], second: dict[str, object]) -> dict[str, object]:
+    """One ``board.changed`` standing for two, for a watcher that has not read the first.
+
+    Their hints are joined, without repeats; if either says "anything", so
+    does the result, and so does one that has grown past :data:`CHANGED_MAX`.
+    """
+    left, right = first.get("changed"), second.get("changed")
+    if not isinstance(left, list) or not isinstance(right, list):
+        return {**first, "changed": None}
+    joined = list(left)
+    for ref in right:
+        if ref not in joined:
+            joined.append(ref)
+    return {**first, "changed": joined if len(joined) <= CHANGED_MAX else None}
+
+
+def changed_ref(event: dict[str, object]) -> list[dict[str, str]] | None:
+    """The hint a published event gives, or ``None`` where it names nothing."""
+    entity_type, entity_id = event.get("entity_type"), event.get("entity_id")
+    if not isinstance(entity_type, str):
+        return None
+    return [{"entity_type": entity_type, "entity_id": str(entity_id) if entity_id else ""}]
 
 
 def feed_changed(task_id: str) -> dict[str, object]:

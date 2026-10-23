@@ -15,13 +15,16 @@ was a complete answer for one worker and a wrong one for two; it is now a
 column the holding process writes (``agent_session.socket_seen_at``).
 
 **Everything published is a doorbell.** A ``board.changed`` says the board
-changed; it does not say what to, and a client answers it by refetching. That
-one property is what makes the rest of this module simple enough to trust:
+changed, and at most *which things* — ``{entity_type, entity_id}`` references,
+so a client can refetch the one list that is out of date rather than all of
+them; it never says what they changed to, and a client answers by refetching.
+That one property is what makes the rest of this module simple enough to trust:
 
 * :meth:`Hub.publish` never awaits a socket, so a browser on a bad connection
   cannot slow down the transaction that is telling it something.
 * A nudge already waiting is not queued again, because a second "the board
-  changed" adds nothing to the first.
+  changed" adds nothing to the first but what it was about — which is joined to
+  the first's hint, so a burst is one nudge that names everything in it.
 * A dropped event costs a refetch that the next event will trigger anyway.
 
 The cost is one HTTP round trip per nudge. The thing it buys is that there is
@@ -89,7 +92,12 @@ class Watcher:
 
     def offer(self, key: str, nudge: dict[str, Any]) -> None:
         """Queue a nudge unless one like it is already waiting. Never blocks."""
-        if key in self._pending:
+        waiting = self._pending.get(key)
+        if waiting is not None:
+            # A board doorbell already waiting has everything this one would
+            # say, bar what it is about — so that is added to it, not dropped.
+            if key == BOARD_CHANGED:
+                self._pending[key] = protocol.merge_changed(waiting, nudge)
             return
         if key != BOARD_CHANGED and len(self._pending) >= _PENDING:
             return
@@ -184,7 +192,7 @@ class Hub:
             nudge = protocol.feed_changed(str(task_id))
         else:
             key = BOARD_CHANGED
-            nudge = protocol.board_changed()
+            nudge = protocol.board_changed(protocol.changed_ref(event))
         for watcher in watchers:
             # A watcher with one waiting already has everything this would say.
             watcher.offer(key, nudge)
