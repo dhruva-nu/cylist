@@ -67,7 +67,7 @@ import httpx
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.clock import now
+from app.core.clock import epoch, now
 from app.core.crypto import VaultKeys, cipher_for
 from app.db import Database
 from app.models.activity import Verb
@@ -177,7 +177,7 @@ def verify(secret: str, header: str, body: bytes, *, at: float | None = None) ->
         timestamp = int(parts["t"])
     except (KeyError, ValueError):
         return False
-    current = time.time() if at is None else at
+    current = epoch() if at is None else at
     if abs(current - timestamp) > SIGNATURE_TOLERANCE.total_seconds():
         return False
     expected = sign(secret, timestamp, body).split("v1=", 1)[1]

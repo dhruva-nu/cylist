@@ -22,7 +22,7 @@ import { useState } from 'react'
 import { ApiError, api, type Hook } from '../../api/client'
 import { queryKeys, useBoard, useInvalidate, useMembers, useTemplates } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import { Button, EmptyState, ErrorNotice, LiveRegion, useAnnouncer } from '../../components/ui'
+import { Button, EmptyState, ErrorNotice, useAnnouncer } from '../../components/ui'
 import { HookDetail } from './HookDetail'
 import { HookDialog } from './HookDialog'
 import styles from './ProjectHooks.module.css'
@@ -36,7 +36,7 @@ function isForbidden(error: unknown): boolean {
 export function ProjectHooks() {
   const { projectKey } = useParams({ from: '/p/$projectKey/hooks' })
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
   const [chosenId, setChosenId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Hook | 'new' | null>(null)
   const [shownSecret, setShownSecret] = useState<{ name: string; secret: string } | null>(null)
@@ -96,7 +96,6 @@ export function ProjectHooks() {
   return (
     <>
       {head}
-      <LiveRegion message={message} />
       {selected === undefined ? (
         <EmptyState>
           No hooks yet. Add one to have a change on this board — a card moved into a column, say —
