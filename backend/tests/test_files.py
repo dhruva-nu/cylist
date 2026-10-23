@@ -324,7 +324,7 @@ class TestFolderContents:
     async def test_gives_the_breadcrumb_of_the_deepest_allowed_folder(
         self, project: AsyncClient
     ) -> None:
-        """The whole chain comes back in order, however far down the folder sits."""
+        """The chain above a folder is read in one query, and comes back in order."""
         parent: str | None = None
         names: list[str] = []
         for level in range(MAX_DEPTH - 1):

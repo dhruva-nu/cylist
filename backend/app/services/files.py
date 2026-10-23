@@ -23,17 +23,17 @@ from collections.abc import Mapping
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import Select, delete, func, literal, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import multipart
+from app.core import multipart, tree
 from app.core.errors import ConflictError, NotFoundError, Reason, UnprocessableRequestError
 from app.core.sensitivity import Sensitivity
 from app.db import flush_or_refuse
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.project import Project
 from app.schemas.files import FolderCreate, FolderUpdate, ItemUpdate, LinkCreate, clean_name
-from app.services import blobs, names, people, permissions
+from app.services import blobs, names, people, permissions, trees
 from app.services.paging import PageRequest, Window, keyset
 from app.storage import BlobStore
 
@@ -686,48 +686,24 @@ def _paths_of(folders: list[Folder]) -> dict[UUID, str]:
     paths: dict[UUID, str] = {}
 
     for folder in folders:
-        names: list[str] = []
-        current: Folder | None = folder
-        for _ in range(MAX_DEPTH):
-            if current is None or current.parent_id is None:
-                break
-            names.append(current.name)
-            current = by_id.get(current.parent_id)
-        paths[folder.id] = "/".join(reversed(names))
+        lineage = [folder, *tree.ancestors(by_id, folder, limit=MAX_DEPTH - 1)]
+        # The root stands for the project itself, so it is not in anybody's path.
+        parts = [above.name for above in lineage if above.parent_id is not None]
+        paths[folder.id] = "/".join(reversed(parts))
 
     return paths
 
 
 async def _ancestors(session: AsyncSession, folder: Folder) -> list[Folder]:
-    """Every folder above this one, nearest first.
-
-    One query however deep the tree is: climbing a row at a time costs a round
-    trip per level, which at :data:`MAX_DEPTH` is a request's worth of latency
-    spent on every move and every create. The climb is cut one level past the
-    limit, so a ring in the data is refused here rather than followed forever.
-    """
-    chain = (
-        select(Folder.id, Folder.parent_id, literal(1).label("level"))
-        .where(Folder.id == folder.parent_id)
-        .cte("chain", recursive=True)
-    )
-    chain = chain.union_all(
-        select(Folder.id, Folder.parent_id, chain.c.level + 1)
-        .join(chain, Folder.id == chain.c.parent_id)
-        .where(chain.c.level <= MAX_DEPTH)
-    )
-    ancestors = list(
-        await session.scalars(
-            select(Folder).join(chain, Folder.id == chain.c.id).order_by(chain.c.level)
-        )
-    )
-    if len(ancestors) > MAX_DEPTH:
+    """Every folder above this one, nearest first."""
+    above = await trees.ancestors(session, Folder, folder.parent_id, limit=MAX_DEPTH)
+    if len(above) > MAX_DEPTH:
         raise UnprocessableRequestError(
             f"That folder is nested more than {MAX_DEPTH} deep.",
             details={"folder_id": str(folder.id)},
             reason=Reason.FOLDER_TOO_DEEP,
         )
-    return ancestors
+    return above
 
 
 async def _ensure_not_inside_itself(session: AsyncSession, folder: Folder, parent: Folder) -> None:
@@ -755,19 +731,12 @@ async def _ensure_depth_allows_a_child(session: AsyncSession, parent: Folder) ->
         )
 
 
-def _subtree_of(folder: Folder) -> Select[tuple[UUID]]:
-    """Select the ids of a folder and every folder beneath it."""
-    subtree = select(Folder.id).where(Folder.id == folder.id).cte("subtree", recursive=True)
-    subtree = subtree.union_all(select(Folder.id).join(subtree, Folder.parent_id == subtree.c.id))
-    return select(subtree.c.id)
-
-
 async def _blob_ids_under(session: AsyncSession, folder: Folder) -> set[UUID]:
     """Which blobs the folder's subtree refers to, before it is deleted."""
     return set(
         await session.scalars(
             select(FileItem.blob_id).where(
-                FileItem.folder_id.in_(_subtree_of(folder)),
+                FileItem.folder_id.in_(trees.subtree_ids(Folder, folder.id)),
                 FileItem.blob_id.is_not(None),
             )
         )
