@@ -39,8 +39,13 @@ export function pagePath(path: string, after: string | null, limit = MAX_PAGE): 
 }
 
 /** One page of the list at `path`. */
-export function fetchPage<T>(path: string, after: string | null = null, limit = MAX_PAGE) {
-  return request<Page<T>>(pagePath(path, after, limit))
+export function fetchPage<T>(
+  path: string,
+  after: string | null = null,
+  limit = MAX_PAGE,
+  signal?: AbortSignal,
+) {
+  return request<Page<T>>(pagePath(path, after, limit), { signal })
 }
 
 /**
@@ -49,11 +54,11 @@ export function fetchPage<T>(path: string, after: string | null = null, limit = 
  * For the lists that are a set of choices, which are short in practice and
  * wrong if cut short.
  */
-export async function fetchAllPages<T>(path: string): Promise<T[]> {
+export async function fetchAllPages<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   const rows: T[] = []
   let after: string | null = null
   do {
-    const page: Page<T> = await fetchPage<T>(path, after)
+    const page: Page<T> = await fetchPage<T>(path, after, MAX_PAGE, signal)
     rows.push(...page.items)
     after = page.next
   } while (after)

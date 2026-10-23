@@ -17,7 +17,8 @@ export interface Skill {
 }
 
 export const skillsApi = {
-  listSkills: (projectKey: string) => fetchAllPages<Skill>(`/projects/${projectKey}/skills`),
+  listSkills: (projectKey: string, signal?: AbortSignal) =>
+    fetchAllPages<Skill>(`/projects/${projectKey}/skills`, signal),
   /** Filed under whoever is signed in: the server takes the uploader from the session. */
   uploadSkill: (projectKey: string, file: File, description?: string) => {
     const form = new FormData()

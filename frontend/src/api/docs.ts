@@ -97,7 +97,8 @@ export interface DocUpdate {
 }
 
 export const docsApi = {
-  getDocTree: (projectKey: string) => request<DocTree>(`/projects/${projectKey}/docs`),
+  getDocTree: (projectKey: string, signal?: AbortSignal) =>
+    request<DocTree>(`/projects/${projectKey}/docs`, { signal }),
   createDocTopic: (projectKey: string, section: DocSection, name: string) =>
     request<DocTopic>(`/projects/${projectKey}/doc-topics`, {
       method: 'POST',
@@ -112,7 +113,7 @@ export const docsApi = {
       method: 'PUT',
       body: jsonBody({ section, topic_ids: topicIds }),
     }),
-  getDoc: (docId: string) => request<Doc>(`/docs/${docId}`),
+  getDoc: (docId: string, signal?: AbortSignal) => request<Doc>(`/docs/${docId}`, { signal }),
   askDocs: (projectKey: string, question: string) =>
     request<DocAnswer>(`/projects/${projectKey}/docs/ask`, {
       method: 'POST',

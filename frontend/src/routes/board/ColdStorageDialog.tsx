@@ -51,7 +51,7 @@ export function ColdStorageDialog({
   // and the cards worth finding in it are nearly always the latest.
   const stored = useInfiniteQuery({
     queryKey: queryKeys.coldStorage(projectKey),
-    queryFn: ({ pageParam }) => api.listColdStorage(projectKey, pageParam),
+    queryFn: ({ pageParam, signal }) => api.listColdStorage(projectKey, pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next,
   })

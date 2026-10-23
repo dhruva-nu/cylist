@@ -61,9 +61,10 @@ export interface WrapUpResult {
 }
 
 export const todayApi = {
-  getToday: (projectKey: string, day: string, timezone: string) =>
+  getToday: (projectKey: string, day: string, timezone: string, signal?: AbortSignal) =>
     request<TodayPlan>(
       `/projects/${projectKey}/today?${new URLSearchParams({ date: day, timezone })}`,
+      { signal },
     ),
   /** Put a card on a day. Picking one already there hands the same pick back. */
   pickCard: (projectKey: string, task: string, day: string) =>

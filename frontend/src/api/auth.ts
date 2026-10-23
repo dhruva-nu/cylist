@@ -61,7 +61,7 @@ export interface InviteIssued {
 
 export const authApi = {
   /** What this deployment is, and whether anybody can sign in to it yet. */
-  setup: () => request<SetupInfo>('/setup'),
+  setup: (signal?: AbortSignal) => request<SetupInfo>('/setup', { signal }),
 
   signIn: (email: string, password: string) =>
     request<Identity>('/auth/login', { method: 'POST', body: jsonBody({ email, password }) }),
@@ -72,7 +72,7 @@ export const authApi = {
    */
   bootstrapSignIn: (password: string) =>
     request<Identity>('/auth/login', { method: 'POST', body: jsonBody({ password }) }),
-  me: () => request<Identity>('/me'),
+  me: (signal?: AbortSignal) => request<Identity>('/me', { signal }),
   /** Revoke this browser's session and clear its cookie. */
   signOut: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 

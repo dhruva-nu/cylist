@@ -170,8 +170,8 @@ export interface AgentPresence {
 
 export const agentsApi = {
   /** What the agents on a card have been doing, newest first. */
-  getAgentFeed: async (taskRef: string, limit = MAX_PAGE) =>
-    (await fetchPage<AgentFeedEntry>(`/tasks/${taskRef}/agent-feed`, null, limit)).items,
+  getAgentFeed: async (taskRef: string, limit = MAX_PAGE, signal?: AbortSignal) =>
+    (await fetchPage<AgentFeedEntry>(`/tasks/${taskRef}/agent-feed`, null, limit, signal)).items,
   /** What the agents on a card have asked, open or not, newest first. */
   listAgentPrompts: async (taskRef: string, limit = 20) =>
     (await fetchPage<AgentPrompt>(`/tasks/${taskRef}/agent-prompts`, null, limit)).items,

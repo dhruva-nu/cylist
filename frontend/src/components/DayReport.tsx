@@ -121,7 +121,7 @@ function ReportDialog({
 
   const report = useQuery({
     queryKey: ['day-report', projectKey, day, zone],
-    queryFn: () => api.getDayReport(projectKey, day, zone),
+    queryFn: ({ signal }) => api.getDayReport(projectKey, day, zone, signal),
     // The day on screen stays while the next one loads. A report that empties
     // itself between clicks makes stepping through a week unreadable.
     placeholderData: keepPreviousData,

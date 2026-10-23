@@ -142,7 +142,7 @@ export function SubtaskList({
 }) {
   const detail = useQuery({
     queryKey: cardDetailKey(task),
-    queryFn: () => api.getTask(task.reference),
+    queryFn: ({ signal }) => api.getTask(task.reference, signal),
   })
   const parts = useCardParts(task)
 

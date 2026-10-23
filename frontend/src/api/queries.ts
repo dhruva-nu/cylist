@@ -72,7 +72,7 @@ const SETTLED_MS = 5 * 60_000
 export function useIdentity() {
   return useQuery({
     queryKey: queryKeys.identity,
-    queryFn: api.me,
+    queryFn: ({ signal }) => api.me(signal),
     staleTime: SETTLED_MS,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.isUnauthenticated) && failureCount < 2,
@@ -81,13 +81,13 @@ export function useIdentity() {
 
 /** What this deployment is, and whether anybody can sign in to it yet. */
 export function useSetup() {
-  return useQuery({ queryKey: queryKeys.setup, queryFn: api.setup })
+  return useQuery({ queryKey: queryKeys.setup, queryFn: ({ signal }) => api.setup(signal) })
 }
 
 export function useProjects() {
   return useQuery({
     queryKey: queryKeys.projects,
-    queryFn: api.listProjects,
+    queryFn: ({ signal }) => api.listProjects(signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -95,20 +95,20 @@ export function useProjects() {
 export function useProject(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.project(projectKey),
-    queryFn: () => api.getProject(projectKey),
+    queryFn: ({ signal }) => api.getProject(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
 
 /** The whole directory, every project's people together. */
 export function usePeople() {
-  return useQuery({ queryKey: queryKeys.people, queryFn: api.listPeople })
+  return useQuery({ queryKey: queryKeys.people, queryFn: ({ signal }) => api.listPeople(signal) })
 }
 
 export function useMembers(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.members(projectKey),
-    queryFn: () => api.listMembers(projectKey),
+    queryFn: ({ signal }) => api.listMembers(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -117,7 +117,7 @@ export function useMembers(projectKey: string) {
 export function useRoles(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.roles(projectKey),
-    queryFn: () => api.listRoles(projectKey),
+    queryFn: ({ signal }) => api.listRoles(projectKey, signal),
   })
 }
 
@@ -128,7 +128,7 @@ export function useRoles(projectKey: string) {
 export function usePermissionGrid(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.permissions(projectKey),
-    queryFn: () => api.getPermissions(projectKey),
+    queryFn: ({ signal }) => api.getPermissions(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -137,14 +137,14 @@ export function usePermissionGrid(projectKey: string) {
 export function useBoard(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.board(projectKey),
-    queryFn: () => api.listColumns(projectKey),
+    queryFn: ({ signal }) => api.listColumns(projectKey, signal),
   })
 }
 
 export function useTemplates(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.templates(projectKey),
-    queryFn: () => api.listTemplates(projectKey),
+    queryFn: ({ signal }) => api.listTemplates(projectKey, signal),
     staleTime: SETTLED_MS,
   })
 }
@@ -184,8 +184,9 @@ export interface BoardCards {
 export async function fetchBoardCards(
   projectKey: string,
   previous?: BoardCards,
+  signal?: AbortSignal,
 ): Promise<BoardCards> {
-  const board = await api.listTasks(projectKey)
+  const board = await api.listTasks(projectKey, undefined, signal)
   const tasks: Task[] = []
   const columns: ColumnCards[] = []
   for (const column of board.columns) {
@@ -195,7 +196,7 @@ export async function fetchBoardCards(
     tasks.push(...column.items)
     while (next && pages < wanted) {
       try {
-        const page = await api.listColumnTasks(column.column_id, next)
+        const page = await api.listColumnTasks(column.column_id, next, undefined, signal)
         tasks.push(...page.items)
         next = page.next
         pages += 1
@@ -214,10 +215,11 @@ export function useTasks(projectKey: string) {
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: queryKeys.tasks(projectKey),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchBoardCards(
         projectKey,
         queryClient.getQueryData<BoardCards>(queryKeys.tasks(projectKey)),
+        signal,
       ),
   })
 }
@@ -265,7 +267,7 @@ export function useLoadMoreCards(projectKey: string) {
 export function useGoals(projectKey: string) {
   return useQuery({
     queryKey: queryKeys.goals(projectKey),
-    queryFn: () => api.listGoals(projectKey),
+    queryFn: ({ signal }) => api.listGoals(projectKey, undefined, signal),
   })
 }
 

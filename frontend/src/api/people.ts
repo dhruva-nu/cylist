@@ -71,7 +71,7 @@ export const peopleApi = {
     }),
   withdrawInvite: (id: string) =>
     request<{ ok: boolean }>(`/people/${id}/invite`, { method: 'DELETE' }),
-  listPeople: () => fetchAllPages<Person>('/people'),
+  listPeople: (signal?: AbortSignal) => fetchAllPages<Person>('/people', signal),
   createPerson: (input: PersonInput) =>
     request<Person>('/people', { method: 'POST', body: jsonBody(input) }),
   updatePerson: (id: string, input: Partial<PersonInput>) =>

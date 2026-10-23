@@ -55,7 +55,7 @@ export function ProjectFiles() {
   const project = useProject(projectKey)
   const tree = useQuery({
     queryKey: ['folder-tree', projectKey],
-    queryFn: () => api.getTree(projectKey),
+    queryFn: ({ signal }) => api.getTree(projectKey, signal),
   })
 
   const folderTree = useFolderTree(tree.data ?? null)
@@ -65,7 +65,8 @@ export function ProjectFiles() {
   // thousands of exports should open on its first hundred, not hang.
   const pages = useInfiniteQuery({
     queryKey: ['folder-children', selectedId],
-    queryFn: ({ pageParam }) => api.getFolderChildren(selectedId as string, pageParam),
+    queryFn: ({ pageParam, signal }) =>
+      api.getFolderChildren(selectedId as string, pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next,
     enabled: selectedId !== null,

@@ -77,7 +77,7 @@ function useProjectKey(): string | null {
 function usePlan(projectKey: string | null, day: string) {
   return useQuery({
     queryKey: planKey(projectKey ?? '', day),
-    queryFn: () => api.getToday(projectKey ?? '', day, localZone()),
+    queryFn: ({ signal }) => api.getToday(projectKey ?? '', day, localZone(), signal),
     enabled: projectKey !== null,
     // Off by one person's session — the bootstrap login has no plan, and
     // asking again will not give it one.
@@ -97,16 +97,17 @@ function useBoardCards(projectKey: string | null) {
   // board is read as far here, and the two never hold different shapes.
   const tasks = useQuery({
     queryKey: ['tasks', projectKey],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchBoardCards(
         projectKey ?? '',
         queryClient.getQueryData<BoardCards>(['tasks', projectKey]),
+        signal,
       ),
     enabled,
   })
   const board = useQuery({
     queryKey: ['board', projectKey],
-    queryFn: () => api.listColumns(projectKey ?? ''),
+    queryFn: ({ signal }) => api.listColumns(projectKey ?? '', signal),
     enabled,
   })
   return { tasks: tasks.data?.tasks, columns: board.data?.columns, readAt: tasks.dataUpdatedAt }

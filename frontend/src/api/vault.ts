@@ -77,14 +77,15 @@ export interface RevealedSecret {
 }
 
 export const vaultApi = {
-  listVaultTrees: (projectKey: string) =>
-    fetchAllPages<VaultTree>(`/projects/${projectKey}/vault/trees`),
+  listVaultTrees: (projectKey: string, signal?: AbortSignal) =>
+    fetchAllPages<VaultTree>(`/projects/${projectKey}/vault/trees`, signal),
   createVaultTree: (projectKey: string, name: string, defaultSensitivity?: Sensitivity | null) =>
     request<VaultTree>(`/projects/${projectKey}/vault/trees`, {
       method: 'POST',
       body: jsonBody({ name, default_sensitivity: defaultSensitivity ?? null }),
     }),
-  getVaultTree: (treeId: string) => request<VaultTreeDetail>(`/vault/trees/${treeId}`),
+  getVaultTree: (treeId: string, signal?: AbortSignal) =>
+    request<VaultTreeDetail>(`/vault/trees/${treeId}`, { signal }),
 
   createVaultNode: (input: VaultNodeInput) =>
     request<VaultNode>('/vault/nodes', { method: 'POST', body: jsonBody(input) }),
