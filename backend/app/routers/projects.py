@@ -15,6 +15,7 @@ from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core.errors import ForbiddenError
 from app.db import SessionDependency
+from app.models.activity import EntityType, Verb
 from app.models.person import Person, PersonKind
 from app.models.project import Project
 from app.models.role import ADMIN_ROLE_NAME
@@ -148,8 +149,8 @@ async def create_project(
     await activity.record(
         session,
         principal,
-        "project.created",
-        entity_type="project",
+        Verb.PROJECT_CREATED,
+        entity_type=EntityType.PROJECT,
         entity_id=project.id,
         project_id=project.id,
         payload={"key": project.key, "name": project.name},
@@ -239,8 +240,8 @@ async def update_project(
         await activity.record(
             session,
             principal,
-            "project.updated",
-            entity_type="project",
+            Verb.PROJECT_UPDATED,
+            entity_type=EntityType.PROJECT,
             entity_id=updated.id,
             project_id=updated.id,
             payload={"fields": described},
@@ -249,8 +250,8 @@ async def update_project(
         await activity.record(
             session,
             principal,
-            "project.archived" if body.archived else "project.restored",
-            entity_type="project",
+            Verb.PROJECT_ARCHIVED if body.archived else Verb.PROJECT_RESTORED,
+            entity_type=EntityType.PROJECT,
             entity_id=updated.id,
             project_id=updated.id,
             payload={"key": updated.key},
@@ -293,8 +294,8 @@ async def delete_project(
     await activity.record(
         session,
         principal,
-        "project.deleted",
-        entity_type="project",
+        Verb.PROJECT_DELETED,
+        entity_type=EntityType.PROJECT,
         entity_id=project_id,
         # Not `project_id`: the row it would point at has just gone, and the
         # foreign key would null the column out from under this entry anyway.
@@ -381,8 +382,8 @@ async def set_members(
     await activity.record(
         session,
         principal,
-        "project.members_changed",
-        entity_type="project",
+        Verb.PROJECT_MEMBERS_CHANGED,
+        entity_type=EntityType.PROJECT,
         entity_id=project.id,
         project_id=project.id,
         payload={
@@ -398,8 +399,8 @@ async def set_members(
         await activity.record(
             session,
             principal,
-            "member.role_set",
-            entity_type="person",
+            Verb.MEMBER_ROLE_SET,
+            entity_type=EntityType.PERSON,
             entity_id=change.promoted.id,
             project_id=project.id,
             payload={"person": change.promoted.name, "role": ADMIN_ROLE_NAME},

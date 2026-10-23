@@ -2,6 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { Announcer } from './components/Announcer'
 import { reportFailure } from './api/mutationErrors'
 import { refreshAfterWrite } from './api/refresh'
 import { noteIfSignedOut } from './api/session'
@@ -55,6 +56,7 @@ createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      <Announcer />
       <Toasts />
     </QueryClientProvider>
   </StrictMode>,

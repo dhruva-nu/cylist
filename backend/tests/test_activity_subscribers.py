@@ -99,7 +99,7 @@ class TestSubscribing:
         assert names >= {
             "app.services.agent_sessions.on_recorded",
             "app.realtime.doorbell.ring",
-            "app.services.hooks.on_recorded",
+            "app.services.hooks.matching.on_recorded",
         }
 
 
