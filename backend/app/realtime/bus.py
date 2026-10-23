@@ -109,7 +109,7 @@ class Bus:
 
     async def _serve(self, dsn: str, outgoing: asyncio.Queue[str], *, resync: bool) -> None:
         """Listen and send on one connection until it closes."""
-        connection = await asyncpg.connect(dsn)
+        connection = await _connect(dsn)
         closed = asyncio.Event()
         connection.add_termination_listener(lambda _: closed.set())
         try:
@@ -154,6 +154,29 @@ class Bus:
             return payload
         doorbell = BoardChanged(project_id=getattr(event, "project_id", None))
         return json.dumps({**doorbell.to_wire(), _ORIGIN: self._origin}, default=str)
+
+
+async def _connect(dsn: str) -> asyncpg.Connection[Any]:
+    """Open the line, and leave nothing open if whoever is waiting for it is cancelled.
+
+    A connection that finishes opening just as its owner is cancelled — the
+    process is shutting down, or a test built an app and tore it down again —
+    has no owner left to close it, and is closed only when it is garbage
+    collected, with a warning. So the connect runs on its own, and if it
+    outlives the wait it is torn down the moment it completes.
+    """
+    opening = asyncio.ensure_future(asyncpg.connect(dsn))
+    try:
+        return await asyncio.shield(opening)
+    except asyncio.CancelledError:
+        opening.add_done_callback(_terminate_if_open)
+        opening.cancel()
+        raise
+
+
+def _terminate_if_open(opening: asyncio.Future[asyncpg.Connection[Any]]) -> None:
+    if not opening.cancelled() and opening.exception() is None:
+        opening.result().terminate()
 
 
 async def _send_until(
