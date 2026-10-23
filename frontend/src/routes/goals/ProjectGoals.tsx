@@ -20,7 +20,7 @@ import { GoalDialog } from '../../components/GoalDialog'
 import { useProjectFiles } from '../../components/projectFiles'
 import { PageHead } from '../../components/Shell'
 import { SegmentedChoice } from '../../components/SegmentedChoice'
-import { Button, EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../../components/ui'
+import { Button, EmptyState, ErrorBanner, useAnnouncer } from '../../components/ui'
 import { readStored, writeStored } from '../../storage'
 import { usePermissions } from '../usePermissions'
 import { GoalCalendar } from './GoalCalendar'
@@ -75,7 +75,7 @@ export function ProjectGoals() {
   const { projectKey } = useParams({ from: '/p/$projectKey/goals' })
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
   const { view, setView } = useGoalView(projectKey)
 
@@ -122,8 +122,6 @@ export function ProjectGoals() {
         What the board's cards are work towards. A card wears its goal's colour on the rail down its
         left-hand side, so a column shows which goals it is made of before a word of it is read.
       </PageHead>
-
-      <LiveRegion message={message} />
 
       {allGoals.length === 0 ? (
         <EmptyState>

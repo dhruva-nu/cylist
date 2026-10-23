@@ -6,9 +6,14 @@
  *
  * Dialogs nest. A card opened from the day report is one over the other, and
  * only the innermost of them answers the keyboard — see `stack` below.
+ *
+ * It is drawn in the overlay beside the app rather than inside it, so that the
+ * app can be made `inert` while any dialog is open — see `modalInert`.
  */
 
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { SCRIM_ATTRIBUTE, syncInert } from './modalInert'
+import { Overlay } from './Overlay'
 import { Button } from './ui'
 import styles from './Modal.module.css'
 
@@ -77,6 +82,7 @@ export function Modal({
   const panel = useRef<HTMLDivElement>(null)
   const opener = useRef<Element | null>(null)
   const stackToken = useRef(Symbol('dialog'))
+  const titleId = useId()
 
   /**
    * Opening and closing: the stack, the page's scroll, and where focus goes.
@@ -101,6 +107,9 @@ export function Modal({
     // otherwise leave focus on the page behind it, where Tab has nothing to
     // come back to.
     if (dialog) (tabbableIn(dialog)[0] ?? dialog).focus()
+    // After focus has moved in: an element that is inert cannot hold it, so
+    // making the page inert first would drop focus on the body.
+    syncInert()
 
     return () => {
       const position = stack.lastIndexOf(token)
@@ -109,6 +118,8 @@ export function Modal({
       // put back here is `hidden` too, and the page stays still until the last
       // dialog goes.
       document.body.style.overflow = overflow
+      // Before focus goes back: the opener is on the page this just woke up.
+      syncInert()
       if (opener.current instanceof HTMLElement) opener.current.focus()
     }
   }, [])
@@ -156,35 +167,38 @@ export function Modal({
   }, [onClose])
 
   return (
-    <div
-      className={styles.scrim}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
+    <Overlay>
       <div
-        ref={panel}
-        className={[styles.modal, wide && styles.wide, widest && styles.widest]
-          .filter(Boolean)
-          .join(' ')}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
+        className={styles.scrim}
+        {...{ [SCRIM_ATTRIBUTE]: '' }}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) onClose()
+        }}
       >
-        <div className={styles.header}>
-          <h2>{title}</h2>
-          <div className={styles.headerActions}>
-            {headerActions}
-            <Button variant="ghost" small onClick={onClose} aria-label="Close">
-              ✕
-            </Button>
+        <div
+          ref={panel}
+          className={[styles.modal, wide && styles.wide, widest && styles.widest]
+            .filter(Boolean)
+            .join(' ')}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+        >
+          <div className={styles.header}>
+            <h2 id={titleId}>{title}</h2>
+            <div className={styles.headerActions}>
+              {headerActions}
+              <Button variant="ghost" small onClick={onClose} aria-label="Close">
+                ✕
+              </Button>
+            </div>
           </div>
+          {children}
+          <div className={styles.footer}>{footer}</div>
         </div>
-        {children}
-        <div className={styles.footer}>{footer}</div>
       </div>
-    </div>
+    </Overlay>
   )
 }
 

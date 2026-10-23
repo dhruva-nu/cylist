@@ -28,7 +28,7 @@ import { useState } from 'react'
 import { api, type Doc, type DocTopicWithDocs, type DocTree } from '../../api/client'
 import { useInvalidate } from '../../api/queries'
 import { PageHead } from '../../components/Shell'
-import { EmptyState, ErrorBanner, LiveRegion, useAnnouncer } from '../../components/ui'
+import { EmptyState, ErrorBanner, useAnnouncer } from '../../components/ui'
 import { usePermissions } from '../usePermissions'
 import { AnswerView } from './AnswerView'
 import { DocEditor } from './DocEditor'
@@ -46,7 +46,7 @@ export function ProjectDocs() {
   const navigate = useNavigate({ from: '/p/$projectKey/docs' })
   const may = usePermissions(projectKey)
   const invalidate = useInvalidate()
-  const { message, announce } = useAnnouncer()
+  const { announce } = useAnnouncer()
 
   // Opening a different doc, or asking something, leaves whatever was being
   // edited or written. So a mode remembers the address it was entered at, and
@@ -193,8 +193,6 @@ export function ProjectDocs() {
         What this project knows about itself, in markdown — most of it written by the agents that
         work on it. Filed under Product or Engineering, then by topic.
       </PageHead>
-
-      <LiveRegion message={message} />
 
       <div className={styles.layout}>
         <DocNav
