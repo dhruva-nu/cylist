@@ -37,11 +37,7 @@ async def resolved_task(
 ) -> Task:
     """Turn the path segment into a task, 404-ing if nothing matches — or if
     it is on a project the caller is not a member of."""
-    task = await tasks.resolve(session, task_ref)
-    await projects.require_reachable(
-        session, task.project_id, principal, NotFoundError(f"No task matching {task_ref!r}.")
-    )
-    return task
+    return await tasks.resolve_reachable(session, principal, task_ref)
 
 
 async def resolved_checklist_item(

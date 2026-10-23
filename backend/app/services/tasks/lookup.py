@@ -9,11 +9,12 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, defer
 
+from app.auth.principal import Principal
 from app.core.errors import NotFoundError, not_on_this_project
 from app.models.board import BoardColumn
 from app.models.project import Project
 from app.models.task import Task
-from app.services import columns, references
+from app.services import columns, projects, references
 from app.services.paging import PageRequest, Window, keyset
 
 
@@ -37,6 +38,24 @@ async def resolve(session: AsyncSession, reference: str) -> Task:
     task = await session.scalar(statement)
     if task is None:
         raise NotFoundError(f"No task matching {reference!r}.")
+    return task
+
+
+async def resolve_reachable(session: AsyncSession, principal: Principal, reference: str) -> Task:
+    """A task by id or reference, if the caller may see its project.
+
+    The one way a request or a socket message turns what it names into a card.
+    A card on a project the caller is not a member of reads exactly like one
+    that does not exist — and an agent token sees what the person who minted it
+    sees.
+
+    Raises:
+        NotFoundError: if nothing matches, or the card is out of reach.
+    """
+    task = await resolve(session, reference)
+    await projects.require_reachable(
+        session, task.project_id, principal, NotFoundError(f"No task matching {reference!r}.")
+    )
     return task
 
 
