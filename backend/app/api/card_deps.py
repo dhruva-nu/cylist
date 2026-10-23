@@ -11,6 +11,8 @@ from uuid import UUID
 from fastapi import Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -19,8 +21,6 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.db import SessionDependency
 from app.models.project import Project
 from app.models.task import Task, TaskChecklistItem, TaskComment
-from app.routers import guards
-from app.routers.projects import resolved_project
 from app.schemas.tasks import TaskCreate, TaskMove, TaskUpdate
 from app.services import columns, permissions, projects, roles, tasks, templates
 

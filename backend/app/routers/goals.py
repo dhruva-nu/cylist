@@ -9,6 +9,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.tasks import read_tasks
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -18,10 +22,6 @@ from app.db import SessionDependency
 from app.models.activity import EntityType, Verb
 from app.models.goal import Goal
 from app.models.project import Project
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.tasks import read_tasks
 from app.schemas.common import Acknowledged
 from app.schemas.goals import (
     GoalCreate,

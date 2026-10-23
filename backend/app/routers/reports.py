@@ -12,13 +12,13 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import resolved_project
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core import timezones
 from app.db import SessionDependency
 from app.models.project import Project
-from app.routers.projects import resolved_project
 from app.schemas.reports import DayReport
 from app.services import reports
 

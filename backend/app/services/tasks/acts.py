@@ -6,10 +6,9 @@ too. Each is written here once, change and history line together, so the two
 paths cannot drift: a to-do ticked is the card changed exactly as the board
 would change it, and recorded the same way.
 
-None of these checks who may: the caller does, with
-:func:`app.routers.tasks.dependencies.may_write_card` or
-:func:`~app.routers.tasks.dependencies.may_stage_card`, which are the rules
-the board's guards apply.
+None of these checks who may: the caller does — the route with its guard, and
+the day's plan with the same rules (``may_write_card``, ``may_stage_card``) the
+board's guards apply.
 """
 
 from __future__ import annotations
@@ -19,9 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.principal import Principal
 from app.models.activity import Verb
 from app.models.task import Task, TaskChecklistItem
-from app.routers.tasks.recording import record_on_card
 from app.schemas.tasks import ChecklistItemUpdate
 from app.services import tasks
+from app.services.tasks.recording import record_on_card
 
 
 async def finish(

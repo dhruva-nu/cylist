@@ -15,6 +15,9 @@ import httpx
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project, vault_cipher
+from app.api.paging import PageQuery
 from app.auth.dependencies import require
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
@@ -27,10 +30,6 @@ from app.models.activity import EntityType, Verb
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.project import Project
 from app.realtime.events import HooksQueued
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
-from app.routers.vault import vault_cipher
 from app.schemas.hooks import (
     DeliverySummary,
     HookCreate,

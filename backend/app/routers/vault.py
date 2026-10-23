@@ -19,25 +19,25 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project, vault_cipher
+from app.api.paging import PageQuery
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
 from app.auth.scopes import Scope
 from app.core import sensitivity as sensitivity_of
 from app.core.clock import now
-from app.core.crypto import VaultCipher, VaultUnavailableError
+from app.core.crypto import VaultCipher
 from app.core.errors import NotFoundError
 from app.core.sensitivity import DEFAULT_LEVEL, Sensitivity
 from app.db import SessionDependency
 from app.models.activity import EntityType, Verb
 from app.models.project import Project
 from app.models.vault import VaultNode, VaultTree
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.vault import (
     SecretRead,
@@ -61,20 +61,6 @@ REVEAL = require(Scope.VAULT_REVEAL)
 
 project_router = APIRouter(prefix="/projects", tags=["vault"])
 router = APIRouter(prefix="/vault", tags=["vault"])
-
-
-def vault_cipher(request: Request) -> VaultCipher:
-    """The cipher this deployment's vault keys configure.
-
-    Built once when the app is, so no request pays to expand the keys. A
-    deployment with no key, or a malformed one, still boots and still serves
-    everything outside the vault — and fails loudly, here, the moment a
-    credential is involved.
-    """
-    cipher: VaultCipher | VaultUnavailableError = request.app.state.vault_cipher
-    if isinstance(cipher, VaultUnavailableError):
-        raise cipher
-    return cipher
 
 
 async def resolved_tree(

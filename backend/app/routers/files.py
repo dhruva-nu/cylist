@@ -15,6 +15,10 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
+from app.api.presenters.files import file_item_read
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -30,9 +34,6 @@ from app.db import SessionDependency
 from app.models.activity import EntityType, Verb
 from app.models.file import FileItem, Folder, ItemKind
 from app.models.project import Project
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.files import (
     FiledItem,
@@ -48,7 +49,6 @@ from app.schemas.files import (
     ItemUpdate,
     LinkCreate,
 )
-from app.schemas.people import PersonRead
 from app.services import activity, blobs, files, permissions, projects
 from app.services.paging import PageRequest
 from app.storage import BlobStore, get_blob_store
@@ -96,25 +96,6 @@ def _folder_read(folder: Folder) -> FolderRead:
         is_root=folder.is_root,
         default_sensitivity=sensitivity.parse(folder.default_sensitivity, DEFAULT_LEVEL),
         created_at=folder.created_at,
-    )
-
-
-def file_item_read(item: FileItem) -> ItemRead:
-    """One item as a listing shows it. Public, because a CSV cold storage
-    writes is reported in the same shape as anything uploaded."""
-    person = item.added_by_person
-    return ItemRead(
-        id=item.id,
-        folder_id=item.folder_id,
-        kind=item.kind,
-        name=item.name,
-        sensitivity=sensitivity.parse(item.sensitivity, DEFAULT_LEVEL),
-        url=item.url,
-        source=item.source,
-        size=item.size,
-        mime=item.mime,
-        added_by=PersonRead.model_validate(person) if person is not None else None,
-        created_at=item.created_at,
     )
 
 

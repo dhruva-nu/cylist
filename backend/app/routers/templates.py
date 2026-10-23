@@ -8,6 +8,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import guards
+from app.api.deps import resolved_project
+from app.api.paging import PageQuery
 from app.auth.dependencies import current_principal, require
 from app.auth.permissions import Permission
 from app.auth.principal import Principal
@@ -17,9 +20,6 @@ from app.db import SessionDependency
 from app.models.activity import EntityType, Verb
 from app.models.project import Project
 from app.models.template import TaskTemplate
-from app.routers import guards
-from app.routers.paging import PageQuery
-from app.routers.projects import resolved_project
 from app.schemas.common import Acknowledged
 from app.schemas.templates import (
     StageInput,

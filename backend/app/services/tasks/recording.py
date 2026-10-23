@@ -1,7 +1,7 @@
 """Writing what happened to a card into the audit trail.
 
-Nearly every write in this router ends the same way — an activity entry about
-one card, naming it by reference — so the shape of that entry is written once.
+Nearly every write to a card ends the same way — an activity entry about one
+card, naming it by reference — so the shape of that entry is written once.
 """
 
 from __future__ import annotations
