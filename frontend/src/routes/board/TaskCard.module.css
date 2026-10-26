@@ -150,11 +150,12 @@
    block above them would silently switch the border off on every held card
    an agent picks up.
 
-   `border-color` and a ring together, because a card's surface may already be
-   amber or red and a thin line in one colour is not enough to read on every
-   tint it lands on. The hover rules repeat the selectors under `.task:hover`
-   because that one sets `border-color` with a higher weight and used to wipe
-   the border out whenever the pointer was over the card. */
+   The border alone, in a muted colour, and still: a ring that breathed made
+   every card with an agent on it the loudest thing on the board, which is
+   the opposite of what an agent getting on with it deserves.
+
+   The hover selectors are there because `.task:hover` sets `border-color` with
+   a higher weight and wiped the agent border out under the pointer. */
 
 .agentWorking,
 .agentWaiting,
@@ -166,36 +167,8 @@
 .task.agentStale:hover {
   --agent-ring: var(--agent);
 
-  border-width: 2px;
-  border-color: var(--agent-ring);
-  box-shadow: 0 0 0 2px var(--agent-ring);
-}
-
-/* Working breathes. The ring's alpha rises and falls rather than the border
-   itself moving, so nothing on the board changes size or position — the card
-   is only ever brighter or dimmer. */
-
-.agentWorking {
-  animation: agent-pulse 2.4s ease-in-out infinite;
-}
-
-@keyframes agent-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px var(--agent-ring);
-  }
-
-  50% {
-    box-shadow:
-      0 0 0 7px transparent,
-      0 0 0 2px var(--agent-ring);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agentWorking {
-    animation: none;
-  }
+  border-width: 3px;
+  border-color: color-mix(in srgb, var(--agent-ring) 60%, var(--line));
 }
 
 /* Waiting is the amber the board already uses for "somebody has to do
