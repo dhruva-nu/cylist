@@ -35,6 +35,15 @@
   letter-spacing: 0;
 }
 
+/* The rail's count as a button: the chip itself is the face, so the button
+   adds nothing of its own but the pointer. */
+.countButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
 /* A late card of yours that is not on the day turns the count's ink. The ink
    only — the grey ground stays, so the count is the same shape either way. */
 .countLate {
