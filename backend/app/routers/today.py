@@ -27,6 +27,7 @@ from app.models.today import Todo, TodoState
 from app.schemas.common import Acknowledged
 from app.schemas.tasks import ChecklistItemUpdate
 from app.schemas.today import (
+    FreeTodoCreate,
     PickCreate,
     PickRead,
     TodayPlan,
@@ -69,12 +70,15 @@ async def get_plan(
     if on >= reports.today_in(zone):
         await today.sync_day(session, project, person_id, on)
     picks = await today.picks_for(session, project, person_id, on)
+    free = await today.free_pick(session, project, person_id, on)
     todos = [todo for picked in picks for todo in picked.todos]
+    todos += free.todos if free else []
     return TodayPlan(
         project_key=project.key,
         day=on,
         timezone=str(zone),
         picks=[today.pick_read(picked) for picked in picks],
+        free_todos=today.free_todos_read(free),
         open_count=sum(todo.state is TodoState.OPEN for todo in todos),
         done_count=sum(todo.state is TodoState.DONE for todo in todos),
     )
@@ -101,6 +105,29 @@ async def add_pick(
     picked = await today.pick(session, project, today.person_of(principal), task, body.day)
     await session.refresh(picked, ["todos"])
     return today.pick_read(picked)
+
+
+@router.post(
+    "/projects/{project_ref}/today/todos",
+    response_model=TodoRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a to-do that is about no card",
+)
+async def add_free_todo(
+    body: FreeTodoCreate,
+    project: Project = Depends(resolved_project),
+    principal: Principal = Depends(require(Scope.WRITE)),
+    session: AsyncSession = SessionDependency,
+) -> TodoRead:
+    """Add a to-do to a day without tying it to a card. Tag people with `@` and files with `>`.
+
+    It is ticked, reworded, deleted and wrapped up like any other to-do.
+    """
+    picked = await today.free_pick(
+        session, project, today.person_of(principal), body.day, create=True
+    )
+    assert picked is not None
+    return today.todo_read(await today.add_todo(session, picked, body.text))
 
 
 @router.delete(
@@ -185,6 +212,8 @@ async def _tick_on_card(
     kind, ident = today.parse_source(todo.source)
     picked = await today.own_pick(session, today.person_of(principal), todo.pick_id)
     card = picked.task
+    if card is None:
+        return  # the free pick: nothing on a card to tick
 
     if kind == "subtask":
         try:

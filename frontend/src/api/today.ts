@@ -49,6 +49,8 @@ export interface TodayPlan {
   timezone: string
   /** In the order the cards were picked. */
   picks: DayPick[]
+  /** To-dos about no card in particular, in the order written. */
+  free_todos: Todo[]
   open_count: number
   done_count: number
 }
@@ -77,6 +79,12 @@ export const todayApi = {
     request<{ ok: boolean }>(`/today/picks/${pickId}`, { method: 'DELETE' }),
   addTodo: (pickId: string, text: string) =>
     request<Todo>(`/today/picks/${pickId}/todos`, { method: 'POST', body: jsonBody({ text }) }),
+  /** Add a to-do to a day without tying it to a card. */
+  addFreeTodo: (projectKey: string, day: string, text: string) =>
+    request<Todo>(`/projects/${projectKey}/today/todos`, {
+      method: 'POST',
+      body: jsonBody({ day, text }),
+    }),
   updateTodo: (todoId: string, change: { text?: string; state?: 'open' | 'done' | 'not_done' }) =>
     request<Todo>(`/today/todos/${todoId}`, { method: 'PATCH', body: jsonBody(change) }),
   deleteTodo: (todoId: string) =>

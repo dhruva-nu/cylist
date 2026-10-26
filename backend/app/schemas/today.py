@@ -30,7 +30,12 @@ class TodayPlan(Schema):
     day: date
     timezone: str
     picks: list[PickRead] = Field(description="In the order the cards were picked.")
-    open_count: int = Field(description="To-dos still open on the day.")
+    free_todos: list[TodoRead] = Field(
+        description="To-dos about no card in particular, in the order written."
+    )
+    open_count: int = Field(
+        description="To-dos still open on the day, those about no card included."
+    )
     done_count: int
 
 
@@ -41,6 +46,10 @@ class PickCreate(BaseModel):
 
 class TodoCreate(BaseModel):
     text: str = Field(min_length=1, max_length=TEXT_MAX_LENGTH)
+
+
+class FreeTodoCreate(TodoCreate):
+    day: date = Field(description="Which day it is for, as `YYYY-MM-DD`.")
 
 
 class WrapUp(BaseModel):

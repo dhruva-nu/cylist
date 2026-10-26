@@ -55,16 +55,19 @@ def person_of(principal: Principal) -> UUID:
 async def picks_for(
     session: AsyncSession, project: Project, person_id: UUID, day: date
 ) -> list[DayPick]:
-    """One person's picks on one project for one day, in the order picked."""
+    """One person's card picks on one project for one day, in the order picked.
+
+    The free pick, which has no card, is not among them — see :func:`free_pick`.
+    """
     return list(
         await session.scalars(
             select(DayPick)
             .options(*pick_loads())
-            .join(Task, Task.id == DayPick.task_id)
             .where(
                 DayPick.person_id == person_id,
                 DayPick.day == day,
-                Task.project_id == project.id,
+                DayPick.project_id == project.id,
+                DayPick.task_id.is_not(None),
             )
             .order_by(DayPick.position, DayPick.created_at)
             # A pick already in this session may be holding a to-do list from
@@ -72,6 +75,31 @@ async def picks_for(
             .execution_options(populate_existing=True)
         )
     )
+
+
+async def free_pick(
+    session: AsyncSession, project: Project, person_id: UUID, day: date, *, create: bool = False
+) -> DayPick | None:
+    """The pick that holds a person's to-dos for the day that are about no card.
+
+    None when there is none yet, unless ``create`` — reading a plan does not
+    make one.
+    """
+    found: DayPick | None = await session.scalar(
+        select(DayPick)
+        .options(*pick_loads())
+        .where(
+            DayPick.person_id == person_id,
+            DayPick.project_id == project.id,
+            DayPick.day == day,
+            DayPick.task_id.is_(None),
+        )
+        # See picks_for: read the to-do list afresh.
+        .execution_options(populate_existing=True)
+    )
+    if found is None and create:
+        return await _pick_on(session, person_id, project.id, None, day)
+    return found
 
 
 async def pick(
@@ -102,7 +130,7 @@ async def pick(
     if existing is not None:
         return existing
 
-    picked = await _pick_on(session, person_id, task.id, day)
+    picked = await _pick_on(session, person_id, project.id, task.id, day)
     await sync(session, picked)
     return picked
 
@@ -180,6 +208,8 @@ async def sync(session: AsyncSession, picked: DayPick) -> None:
         for todo in picked.todos
         if todo.source is None and todo.state in (TodoState.OPEN, TodoState.DONE)
     }
+    if picked.task is None:
+        return  # the free pick: there is no card to follow
     for item in await card_items(session, picked.task):
         text = _clean(item.text)
         todo = linked.get(item.source)
@@ -216,9 +246,26 @@ async def _existing_pick(
     return found
 
 
-async def _pick_on(session: AsyncSession, person_id: UUID, task_id: UUID, day: date) -> DayPick:
-    """The person's pick of this card on this day, made if there is none yet."""
-    existing = await _existing_pick(session, person_id, task_id, day)
+async def _pick_on(
+    session: AsyncSession, person_id: UUID, project_id: UUID, task_id: UUID | None, day: date
+) -> DayPick:
+    """The person's pick of this card on this day, made if there is none yet.
+
+    With no card, the free pick.
+    """
+    if task_id is None:
+        existing: DayPick | None = await session.scalar(
+            select(DayPick)
+            .options(*pick_loads())
+            .where(
+                DayPick.person_id == person_id,
+                DayPick.project_id == project_id,
+                DayPick.day == day,
+                DayPick.task_id.is_(None),
+            )
+        )
+    else:
+        existing = await _existing_pick(session, person_id, task_id, day)
     if existing is not None:
         return existing
 
@@ -227,6 +274,7 @@ async def _pick_on(session: AsyncSession, person_id: UUID, task_id: UUID, day: d
     )
     picked = DayPick(
         person_id=person_id,
+        project_id=project_id,
         task_id=task_id,
         day=day,
         position=0 if last is None else last + 1,
@@ -266,7 +314,14 @@ async def own_todo(session: AsyncSession, person_id: UUID, todo_id: UUID) -> Tod
 
 
 async def unpick(session: AsyncSession, picked: DayPick) -> None:
-    """Take a card off the day, and its to-dos with it."""
+    """Take a card off the day, and its to-dos with it.
+
+    Raises:
+        UnprocessableRequestError: for the free pick, which is not a card on
+            the day. Its to-dos are deleted one by one.
+    """
+    if picked.task_id is None:
+        raise UnprocessableRequestError("To-dos about no card are not a card to take off the day.")
     await session.delete(picked)
     await session.flush()
 
@@ -403,6 +458,9 @@ async def wrap_up(
         raise UnprocessableRequestError("To-dos can only be moved on to a later day.")
 
     picks = await picks_for(session, project, person_id, day)
+    free = await free_pick(session, project, person_id, day)
+    if free is not None:
+        picks.append(free)
     open_todos = {
         todo.id: (picked, todo)
         for picked in picks
@@ -420,7 +478,7 @@ async def wrap_up(
     moved = left = 0
     for todo_id, (picked, todo) in open_todos.items():
         if todo_id in chosen:
-            onward = await _pick_on(session, person_id, picked.task_id, to_day)
+            onward = await _pick_on(session, person_id, project.id, picked.task_id, to_day)
             # A card already on that day, kept in step with its card, may hold
             # this very item already; then there is nothing to carry.
             already = todo.source is not None and await session.scalar(
@@ -469,6 +527,7 @@ def todo_read(todo: Todo) -> TodoRead:
 
 def pick_read(picked: DayPick) -> PickRead:
     task = picked.task
+    assert task is not None, "the free pick is read with free_todos, not as a card"
     return PickRead(
         id=picked.id,
         day=picked.day,
@@ -480,3 +539,8 @@ def pick_read(picked: DayPick) -> PickRead:
         ),
         todos=[todo_read(todo) for todo in picked.todos],
     )
+
+
+def free_todos_read(picked: DayPick | None) -> list[TodoRead]:
+    """The to-dos about no card, as the plan lists them."""
+    return [] if picked is None else [todo_read(todo) for todo in picked.todos]

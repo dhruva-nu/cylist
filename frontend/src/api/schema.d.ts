@@ -665,6 +665,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_ref}/today/todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a to-do that is about no card
+         * @description Add a to-do to a day without tying it to a card. Tag people with `@` and files with `>`.
+         *
+         *     It is ticked, reworded, deleted and wrapped up like any other to-do.
+         */
+        post: operations["add_free_todo_api_v1_projects__project_ref__today_todos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/today/picks/{pick_id}": {
         parameters: {
             query?: never;
@@ -3564,13 +3586,16 @@ export interface components {
          * @description One card on the asker's plan, with what they meant to do about it.
          */
         CardTodos: {
-            /** Reference */
-            reference: string;
+            /**
+             * Reference
+             * @description The card's reference. Null for the to-dos that were about no card, which come last and are titled `Other to-dos`.
+             */
+            reference: string | null;
             /** Title */
             title: string;
             /**
              * Column
-             * @description Where the card sits now; null in cold storage.
+             * @description Where the card sits now; null in cold storage, and for no card.
              */
             column: string | null;
             /** Todos */
@@ -4678,6 +4703,17 @@ export interface components {
             /** Parent Id */
             parent_id?: string | null;
             default_sensitivity?: components["schemas"]["Sensitivity"] | null;
+        };
+        /** FreeTodoCreate */
+        FreeTodoCreate: {
+            /** Text */
+            text: string;
+            /**
+             * Day
+             * Format: date
+             * @description Which day it is for, as `YYYY-MM-DD`.
+             */
+            day: string;
         };
         /** GoalCreate */
         GoalCreate: {
@@ -7458,8 +7494,13 @@ export interface components {
              */
             picks: components["schemas"]["PickRead"][];
             /**
+             * Free Todos
+             * @description To-dos about no card in particular, in the order written.
+             */
+            free_todos: components["schemas"]["TodoRead"][];
+            /**
              * Open Count
-             * @description To-dos still open on the day.
+             * @description To-dos still open on the day, those about no card included.
              */
             open_count: number;
             /** Done Count */
@@ -8904,6 +8945,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PickRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_free_todo_api_v1_projects__project_ref__today_todos_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's id, or its key such as `ATL` (case-insensitive). */
+                project_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FreeTodoCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoRead"];
                 };
             };
             /** @description Validation Error */
