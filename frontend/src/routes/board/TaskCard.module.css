@@ -160,6 +160,7 @@
 .agentStale {
   --agent-ring: var(--agent);
 
+  border-width: 2px;
   border-color: color-mix(in srgb, var(--agent-ring) 60%, var(--line));
 }
 
