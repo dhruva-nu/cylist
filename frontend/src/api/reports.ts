@@ -42,9 +42,10 @@ export interface DayTodo {
 
 /** One card on your plan for the day, with what you meant to do about it. */
 export interface CardTodos {
-  reference: string
+  /** Null for the to-dos that were about no card, which come last. */
+  reference: string | null
   title: string
-  /** Where the card sits now; null in cold storage. */
+  /** Where the card sits now; null in cold storage, and for no card. */
   column: string | null
   todos: DayTodo[]
 }

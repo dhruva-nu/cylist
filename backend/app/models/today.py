@@ -14,6 +14,9 @@ Three choices are worth stating outright:
 * **A to-do hangs off a pick, never off a card directly.** "This card is on my
   Friday" is a fact of its own (:class:`DayPick`), and it can be true with no
   to-dos under it yet. Taking the card off the day takes its to-dos with it.
+  A to-do about no card in particular hangs off the person's *free* pick for
+  the day — a pick with no card, at most one per person, project and day,
+  which the API never lists among the cards and which cannot be taken off.
 * **Tags are in the text.** A to-do is written with the same ``@person`` and
   ``>file`` tags a comment is, and recognised the same way when it is read —
   see ``frontend/src/components/mentions.ts``. Nothing beside the text says
@@ -74,12 +77,21 @@ class TodoState(StrEnum):
 
 
 class DayPick(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """One card on one person's plan for one day."""
+    """One card on one person's plan for one day — or, with no card, the
+    place to-dos that are about no card are kept."""
 
     __tablename__ = "day_pick"
     __table_args__ = (
         Index("ix_day_pick_person_id_task_id_day", "person_id", "task_id", "day", unique=True),
         Index("ix_day_pick_person_id_day", "person_id", "day"),
+        Index(
+            "ix_day_pick_free",
+            "person_id",
+            "project_id",
+            "day",
+            unique=True,
+            postgresql_where=sql_text("task_id IS NULL"),
+        ),
     )
 
     person_id: Mapped[UUID] = mapped_column(
@@ -87,12 +99,19 @@ class DayPick(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("person.id", ondelete="CASCADE"),
         nullable=False,
     )
-    task_id: Mapped[UUID] = mapped_column(
+    project_id: Mapped[UUID] = mapped_column(
         postgresql.UUID(as_uuid=True),
-        ForeignKey("task.id", ondelete="CASCADE"),
+        ForeignKey("project.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
+    task_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True),
+        ForeignKey("task.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    """The card. Null for the free pick, whose to-dos are about no card."""
     day: Mapped[date] = mapped_column(Date, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     """Order on the day: the order the cards were picked in, until rearranged."""
@@ -105,7 +124,7 @@ class DayPick(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """The ``source`` of every imported to-do deleted from this pick, so that
     keeping the pick in step with its card does not bring it back."""
 
-    task: Mapped[Task] = relationship(lazy="joined")
+    task: Mapped[Task | None] = relationship(lazy="joined")
     todos: Mapped[list[Todo]] = relationship(
         back_populates="pick",
         order_by="Todo.position",

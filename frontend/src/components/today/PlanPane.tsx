@@ -34,13 +34,15 @@ export function PlanPane({
 }) {
   const people = (usePeople().data ?? []).filter((person) => person.archived_at === null)
   const files = useProjectFiles(projectKey)
-  const total = plan?.picks.reduce((sum, pick) => sum + pick.todos.length, 0) ?? 0
+  const total =
+    (plan?.picks.reduce((sum, pick) => sum + pick.todos.length, 0) ?? 0) +
+    (plan?.free_todos.length ?? 0)
 
   return (
     <section className={styles.planPane} aria-label="Plan for the day">
       <div className={styles.paneHead}>
         <h3>{day === localToday() ? 'Plan for today' : `Plan for ${dayLong(day)}`}</h3>
-        {plan?.picks.length ? (
+        {plan?.picks.length || plan?.free_todos.length ? (
           <span className={styles.paneNote}>
             {plan.picks.length} {plan.picks.length === 1 ? 'card' : 'cards'}, {total}{' '}
             {total === 1 ? 'to-do' : 'to-dos'}
@@ -48,10 +50,10 @@ export function PlanPane({
         ) : null}
       </div>
       <div className={styles.planList}>
-        {plan === undefined ? null : plan.picks.length === 0 ? (
+        {plan === undefined ? null : plan.picks.length === 0 && plan.free_todos.length === 0 ? (
           <EmptyState>
             Pick a card from the open cards to plan the day around it. Its to-dos go under it here:
-            type @ to tag a person, &gt; to tag a file.
+            type @ to tag a person, &gt; to tag a file. Or add a to-do below that is about no card.
           </EmptyState>
         ) : (
           plan.picks.map((pick) => (
@@ -65,6 +67,15 @@ export function PlanPane({
               onOpenCard={onOpenCard}
             />
           ))
+        )}
+        {plan === undefined ? null : (
+          <FreeBlock
+            projectKey={projectKey}
+            day={day}
+            todos={plan.free_todos}
+            people={people}
+            files={files}
+          />
         )}
       </div>
     </section>
@@ -187,6 +198,77 @@ function PickBlock({
   )
 }
 
+/** The to-dos about no card, and the box to add another. Always there. */
+function FreeBlock({
+  projectKey,
+  day,
+  todos,
+  people,
+  files,
+}: {
+  projectKey: string
+  day: string
+  todos: Todo[]
+  people: Person[]
+  files: readonly FiledItem[]
+}) {
+  const refresh = useRefreshPlans(projectKey)
+  const [draft, setDraft] = useState('')
+
+  const add = useMutation({
+    meta: handlesOwnErrors,
+    mutationFn: (text: string) => api.addFreeTodo(projectKey, day, text),
+    onSuccess: () => setDraft(''),
+    onSettled: refresh,
+  })
+
+  function submit() {
+    const text = draft.trim()
+    if (text && !add.isPending) add.mutate(text)
+  }
+
+  return (
+    <section className={styles.pickBlock} aria-label="To-dos about no card">
+      <div className={styles.pickHead}>
+        <span className={styles.cardOpen}>
+          <span className={styles.blockTitle}>Other to-dos</span>
+        </span>
+        <span className={styles.paneNote}>Not tied to a card</span>
+      </div>
+      <ul className={styles.todos}>
+        {todos.map((todo) => (
+          <TodoRow
+            key={todo.id}
+            projectKey={projectKey}
+            todo={todo}
+            people={people}
+            files={files}
+          />
+        ))}
+      </ul>
+      <div className={styles.compose}>
+        <MentionBox
+          className={styles.composeBox}
+          value={draft}
+          onChange={setDraft}
+          members={people}
+          files={files}
+          maxLength={500}
+          placeholder="Add a to-do about no card — @ for a person, > for a file"
+          aria-label="Add a to-do about no card"
+          onEnter={submit}
+        />
+        {draft.trim() ? (
+          <Button small onClick={submit} disabled={add.isPending}>
+            Add
+          </Button>
+        ) : null}
+      </div>
+      <ErrorNotice error={add.error} />
+    </section>
+  )
+}
+
 /** One to-do: the tick, the words with their tags, and what became of it. */
 function TodoRow({
   projectKey,
@@ -281,5 +363,6 @@ function withTodoState(plan: TodayPlan, todoId: string, state: 'open' | 'done'):
       ...pick,
       todos: pick.todos.map((todo) => (todo.id === todoId ? { ...todo, state } : todo)),
     })),
+    free_todos: plan.free_todos.map((todo) => (todo.id === todoId ? { ...todo, state } : todo)),
   }
 }

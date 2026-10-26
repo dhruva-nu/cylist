@@ -163,7 +163,7 @@ async def _planned(
     # plan as the board has it now; a day gone by keeps what it had.
     if day >= today_in(zone):
         await today.sync_day(session, project, person_id, day)
-    return [
+    planned = [
         CardTodos(
             reference=picked.task.reference,
             title=picked.task.title,
@@ -171,7 +171,19 @@ async def _planned(
             todos=[DayTodo.model_validate(todo) for todo in picked.todos],
         )
         for picked in await today.picks_for(session, project, person_id, day)
+        if picked.task is not None
     ]
+    free = await today.free_pick(session, project, person_id, day)
+    if free is not None and free.todos:
+        planned.append(
+            CardTodos(
+                reference=None,
+                title="Other to-dos",
+                column=None,
+                todos=[DayTodo.model_validate(todo) for todo in free.todos],
+            )
+        )
+    return planned
 
 
 def _todo_sentence(planned: list[CardTodos]) -> str:
@@ -391,7 +403,8 @@ def _markdown(
             if not plan.todos:
                 continue
             where = f" ({plan.column})" if plan.column else ""
-            lines += ["", f"### {plan.reference} — {plan.title}{where}", ""]
+            heading = f"{plan.reference} — {plan.title}" if plan.reference else plan.title
+            lines += ["", f"### {heading}{where}", ""]
             lines += [_todo_line(todo) for todo in plan.todos]
 
     finished = [card for card in tasks if card.finished]

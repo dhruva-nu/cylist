@@ -60,9 +60,14 @@ class DayTodo(ReadModel):
 class CardTodos(ReadModel):
     """One card on the asker's plan, with what they meant to do about it."""
 
-    reference: str
+    reference: str | None = Field(
+        description="The card's reference. Null for the to-dos that were about no card, "
+        "which come last and are titled `Other to-dos`."
+    )
     title: str
-    column: str | None = Field(description="Where the card sits now; null in cold storage.")
+    column: str | None = Field(
+        description="Where the card sits now; null in cold storage, and for no card."
+    )
     todos: list[DayTodo]
 
 

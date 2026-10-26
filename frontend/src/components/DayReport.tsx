@@ -313,39 +313,46 @@ function ReportTodos({
       <h3 className={styles.section}>To-dos</h3>
       {report.todos
         .filter((card) => card.todos.length)
-        .map((card: CardTodos) => (
-          <div key={card.reference} className={styles.card}>
-            {card.column !== null ? (
-              <button
-                type="button"
-                className={`${styles.cardHead} ${styles.cardOpen}`}
-                title={`Open ${card.reference}`}
-                onClick={() => onOpen(card.reference)}
-              >
-                <span className={styles.reference}>{card.reference}</span>
-                <span className={styles.title}>{card.title}</span>
-                <span className={styles.where}>{card.column}</span>
-              </button>
-            ) : (
-              <div className={styles.cardHead}>
-                <span className={styles.reference}>{card.reference}</span>
-                <span className={styles.title}>{card.title}</span>
-                <span className={styles.where}>Cold storage</span>
-              </div>
-            )}
-            <ul className={styles.todos}>
-              {card.todos.map((todo, index) => (
-                <li key={index} className={styles.todo}>
-                  <TodoMark todo={todo} />
-                  <span className={todo.state === 'done' ? styles.todoDone : styles.todoText}>
-                    <Tagged text={todo.text} members={people} files={files} />
-                  </span>
-                  <span className={styles.todoFate}>{todoFate(todo)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        .map((card: CardTodos) => {
+          const reference = card.reference
+          return (
+            <div key={reference ?? 'no-card'} className={styles.card}>
+              {reference === null ? (
+                <div className={styles.cardHead}>
+                  <span className={styles.title}>{card.title}</span>
+                </div>
+              ) : card.column !== null ? (
+                <button
+                  type="button"
+                  className={`${styles.cardHead} ${styles.cardOpen}`}
+                  title={`Open ${card.reference}`}
+                  onClick={() => onOpen(reference)}
+                >
+                  <span className={styles.reference}>{card.reference}</span>
+                  <span className={styles.title}>{card.title}</span>
+                  <span className={styles.where}>{card.column}</span>
+                </button>
+              ) : (
+                <div className={styles.cardHead}>
+                  <span className={styles.reference}>{card.reference}</span>
+                  <span className={styles.title}>{card.title}</span>
+                  <span className={styles.where}>Cold storage</span>
+                </div>
+              )}
+              <ul className={styles.todos}>
+                {card.todos.map((todo, index) => (
+                  <li key={index} className={styles.todo}>
+                    <TodoMark todo={todo} />
+                    <span className={todo.state === 'done' ? styles.todoDone : styles.todoText}>
+                      <Tagged text={todo.text} members={people} files={files} />
+                    </span>
+                    <span className={styles.todoFate}>{todoFate(todo)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })}
     </section>
   )
 }

@@ -731,3 +731,78 @@ async def test_the_report_tells_two_mondays_apart(signed_in: AsyncClient) -> Non
     ).json()
 
     assert "2 moved to later days" in report["headline"]
+
+
+# --- To-dos about no card ----------------------------------------------------
+
+
+async def add_free_todo(client: AsyncClient, project: str, text: str, day: str = FRIDAY) -> dict:
+    added = await client.post(f"/projects/{project}/today/todos", json={"text": text, "day": day})
+    assert added.status_code == 201, added.text
+    return dict(added.json())
+
+
+async def test_a_todo_can_be_added_without_a_card(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    todo = await add_free_todo(signed_in, project, "Book the   dentist")
+    again = await add_free_todo(signed_in, project, "Call Neha")
+
+    found = await plan(signed_in, project)
+    assert found["picks"] == []
+    assert [t["text"] for t in found["free_todos"]] == ["Book the dentist", "Call Neha"]
+    assert found["free_todos"][0]["id"] == todo["id"] != again["id"]
+    assert found["open_count"] == 2
+    assert (await plan(signed_in, project, SATURDAY))["free_todos"] == []
+
+
+async def test_a_free_todo_is_ticked_reworded_and_deleted_like_any_other(
+    signed_in: AsyncClient,
+) -> None:
+    project = await make_project(signed_in)
+    todo = await add_free_todo(signed_in, project, "Book the dentist")
+    other = await add_free_todo(signed_in, project, "Call Neha")
+
+    ticked = await signed_in.patch(
+        f"/today/todos/{todo['id']}", json={"state": "done", "text": "Booked"}
+    )
+    assert ticked.status_code == 200, ticked.text
+    assert (await signed_in.delete(f"/today/todos/{other['id']}")).status_code == 200
+
+    found = await plan(signed_in, project)
+    assert [(t["text"], t["state"]) for t in found["free_todos"]] == [("Booked", "done")]
+    assert (found["open_count"], found["done_count"]) == (0, 1)
+
+
+async def test_wrap_up_carries_free_todos_on(signed_in: AsyncClient) -> None:
+    project = await make_project(signed_in)
+    keep = await add_free_todo(signed_in, project, "Carry me")
+    await add_free_todo(signed_in, project, "Leave me")
+
+    wrapped = await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": MONDAY, "move": [keep["id"]]},
+    )
+    assert wrapped.status_code == 200, wrapped.text
+    assert (wrapped.json()["moved"], wrapped.json()["not_done"]) == (1, 1)
+
+    friday = await plan(signed_in, project)
+    assert [t["state"] for t in friday["free_todos"]] == ["moved", "not_done"]
+    monday = await plan(signed_in, project, MONDAY)
+    assert [(t["text"], t["state"], t["carried_from"]) for t in monday["free_todos"]] == [
+        ("Carry me", "open", FRIDAY)
+    ]
+
+
+async def test_the_report_lists_free_todos_last(signed_in: AsyncClient) -> None:
+    project, card, _ = await friday_with_three_todos(signed_in)
+    await add_free_todo(signed_in, project, "Book the dentist")
+
+    report = (
+        await signed_in.get(f"/projects/{project}/reports/day", params={"date": FRIDAY})
+    ).json()
+
+    assert [c["reference"] for c in report["todos"]] == [card, None]
+    assert report["todos"][1]["title"] == "Other to-dos"
+    assert "### Other to-dos" in report["markdown"]
+    assert "- [ ] Book the dentist" in report["markdown"]
+    assert "of 4 to-dos done" in report["headline"]
