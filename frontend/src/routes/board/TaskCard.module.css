@@ -193,15 +193,7 @@
   border-color: transparent;
   background:
     linear-gradient(var(--card-surface), var(--card-surface)) padding-box,
-    conic-gradient(
-        from var(--agent-spin),
-        #1fd8f2,
-        #8a7cf0,
-        #e81ccf,
-        #8a7cf0,
-        #1fd8f2
-      )
-      border-box;
+    conic-gradient(from var(--agent-spin), #1fd8f2, #8a7cf0, #e81ccf, #8a7cf0, #1fd8f2) border-box;
   animation: agent-spin 3s linear infinite;
 }
 
