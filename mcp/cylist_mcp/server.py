@@ -119,6 +119,19 @@ allowed to end on.
 """
 
 
+def forbid_unknown_arguments(server: MCPServer) -> None:
+    """Make every tool refuse an argument it does not declare.
+
+    Pydantic drops extras by default, so a misnamed filter (``colunm``) was
+    accepted and the caller got an unfiltered answer it believed was filtered.
+    An error names the unexpected field and lets the model correct itself.
+    """
+    for tool in server._tool_manager.list_tools():  # no public hook for this
+        model = tool.fn_metadata.arg_model
+        model.model_config["extra"] = "forbid"
+        model.model_rebuild(force=True)
+
+
 def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -> MCPServer:
     """Wire the tools onto one API client, honouring the token's scopes.
 
@@ -148,4 +161,5 @@ def build_server(client: Api, scopes: frozenset[str], *, hosted: bool = False) -
     if VAULT_REVEAL in scopes:
         vault.register_reveal(server, client)
 
+    forbid_unknown_arguments(server)
     return server
