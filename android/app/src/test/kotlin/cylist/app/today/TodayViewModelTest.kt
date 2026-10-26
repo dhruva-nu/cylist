@@ -89,7 +89,7 @@ class TodayViewModelTest {
             "[]"
         }
         val open = if (date == "2026-10-16") 1 else 0
-        return """{"project_key":"ATL","day":"$date","timezone":"Asia/Kolkata","picks":$picks,"open_count":$open,"done_count":0}"""
+        return """{"project_key":"ATL","day":"$date","timezone":"Asia/Kolkata","picks":$picks,"free_todos":[],"open_count":$open,"done_count":0}"""
     }
 
     private fun model(): TodayViewModel {

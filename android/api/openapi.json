@@ -3,7 +3,7 @@
   "info": {
     "title": "Cylist",
     "description": "Cylist keeps a project's **board**, **files**, **vault** and **people** in one\nplace — for you in the browser, and for your agents over the same HTTP API.\n\nAuthenticate with either an `Authorization: Bearer cyl_…` header or the\nsession cookie set by `POST /auth/login`. Tokens carry scopes; read each\nendpoint's description to see which one it needs.",
-    "version": "0.4.5"
+    "version": "0.4.6"
   },
   "paths": {
     "/api/v1/health": {
@@ -1460,6 +1460,64 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PickRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_ref}/today/todos": {
+      "post": {
+        "tags": [
+          "today"
+        ],
+        "summary": "Add a to-do that is about no card",
+        "description": "Add a to-do to a day without tying it to a card. Tag people with `@` and files with `>`.\n\nIt is ticked, reworded, deleted and wrapped up like any other to-do.",
+        "operationId": "add_free_todo_api_v1_projects__project_ref__today_todos_post",
+        "parameters": [
+          {
+            "name": "project_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The project's id, or its key such as `ATL` (case-insensitive).",
+              "examples": [
+                "ATL"
+              ],
+              "title": "Project Ref"
+            },
+            "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeTodoCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoRead"
                 }
               }
             }
@@ -9707,8 +9765,16 @@
       "CardTodos": {
         "properties": {
           "reference": {
-            "type": "string",
-            "title": "Reference"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference",
+            "description": "The card's reference. Null for the to-dos that were about no card, which come last and are titled `Other to-dos`."
           },
           "title": {
             "type": "string",
@@ -9724,7 +9790,7 @@
               }
             ],
             "title": "Column",
-            "description": "Where the card sits now; null in cold storage."
+            "description": "Where the card sits now; null in cold storage, and for no card."
           },
           "todos": {
             "items": {
@@ -11852,6 +11918,28 @@
         "type": "object",
         "title": "FolderUpdate",
         "description": "Rename a folder, move it, or both.\n\n``parent_id`` distinguishes omitted from null: leaving it out keeps the\nfolder where it is, sending `null` moves it to the project's root.\n\nThe root itself accepts neither — it stands for the project, and the API\nsays so with a 422 rather than silently ignoring the request."
+      },
+      "FreeTodoCreate": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day",
+            "description": "Which day it is for, as `YYYY-MM-DD`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "day"
+        ],
+        "title": "FreeTodoCreate"
       },
       "GoalCreate": {
         "properties": {
@@ -17641,10 +17729,18 @@
             "title": "Picks",
             "description": "In the order the cards were picked."
           },
+          "free_todos": {
+            "items": {
+              "$ref": "#/components/schemas/TodoRead"
+            },
+            "type": "array",
+            "title": "Free Todos",
+            "description": "To-dos about no card in particular, in the order written."
+          },
           "open_count": {
             "type": "integer",
             "title": "Open Count",
-            "description": "To-dos still open on the day."
+            "description": "To-dos still open on the day, those about no card included."
           },
           "done_count": {
             "type": "integer",
@@ -17657,6 +17753,7 @@
           "day",
           "timezone",
           "picks",
+          "free_todos",
           "open_count",
           "done_count"
         ],

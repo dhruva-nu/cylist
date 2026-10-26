@@ -1375,3 +1375,8 @@ async def test_a_lookup_reads_every_page(
     assert not result.is_error
     assert [person["name"] for person in result.data["people"]] == ["Aditi K", "Lena W", "Leo Wren"]
     assert recorder.count("GET", "/people") == 3
+
+
+async def test_an_unknown_argument_is_an_error_not_ignored(server: MCPServer) -> None:
+    with pytest.raises(Exception, match="bogus"):
+        await server.call_tool("list_tasks", {"project": "ATL", "bogus": "x"})

@@ -40,16 +40,12 @@ import { CardsPane } from './today/CardsPane'
 import { PlanPane } from './today/PlanPane'
 import { WrapUpDialog } from './today/WrapUpDialog'
 
-export function Today() {
+/**
+ * The strip in the panel. It only asks; the planner it opens is
+ * `TodayPlanner`, held by the sidebar so the rail's count can open it too.
+ */
+export function Today({ onOpen }: { onOpen: () => void }) {
   const projectKey = useProjectKey()
-
-  const [showingPlan, setShowingPlan] = useState(false)
-  /** The day the planner is on. Lives here so a wrap-up can move it on. */
-  const [day, setDay] = useState(localToday)
-  /** The day being wrapped up, while its dialog is open. */
-  const [wrapping, setWrapping] = useState<string | null>(null)
-  /** The card opened over the planner, by reference. */
-  const [openCardRef, setOpenCardRef] = useState<string | null>(null)
 
   return (
     <SidebarAction
@@ -57,19 +53,41 @@ export function Today() {
       note={<TodoCount projectKey={projectKey} />}
       disabled={projectKey === null}
       title={projectKey === null ? 'Open a project to plan your day on it' : undefined}
-      onOpen={() => {
-        setDay(localToday())
-        setShowingPlan(true)
-      }}
-    >
-      {showingPlan && projectKey !== null ? (
+      onOpen={onOpen}
+    />
+  )
+}
+
+/**
+ * The planner and the dialogs over it. Mounted outside the panel and the rail
+ * both: the collapsed layer is `visibility: hidden`, which a dialog inside it
+ * would inherit.
+ */
+export function TodayPlanner({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const projectKey = useProjectKey()
+
+  /** The day the planner is on. Lives here so a wrap-up can move it on. */
+  const [day, setDay] = useState(localToday)
+  /** The day being wrapped up, while its dialog is open. */
+  const [wrapping, setWrapping] = useState<string | null>(null)
+  /** The card opened over the planner, by reference. */
+  const [openCardRef, setOpenCardRef] = useState<string | null>(null)
+
+  // Each time it is opened it starts on today, as the strip always did.
+  useEffect(() => {
+    if (open) setDay(localToday())
+  }, [open])
+
+  return (
+    <>
+      {open && projectKey !== null ? (
         <TodayDialog
           projectKey={projectKey}
           day={day}
           onDay={setDay}
           onOpenCard={setOpenCardRef}
           onWrapUp={() => setWrapping(day)}
-          onClose={() => setShowingPlan(false)}
+          onClose={onClose}
         />
       ) : null}
 
@@ -95,7 +113,7 @@ export function Today() {
           onClose={() => setOpenCardRef(null)}
         />
       ) : null}
-    </SidebarAction>
+    </>
   )
 }
 
@@ -103,10 +121,19 @@ export function Today() {
  * The same count, for a sidebar that has been collapsed to its rail.
  *
  * Exported for exactly one caller — see the note in `Sidebar.tsx` about a
- * count nobody can see.
+ * count nobody can see. It is a button: it opens the planner without the
+ * panel having to be expanded first.
  */
-export function TodayCount() {
-  return <TodoCount projectKey={useProjectKey()} />
+export function TodayCount({ onOpen }: { onOpen: () => void }) {
+  const projectKey = useProjectKey()
+  // Nothing to open off a project, and no count either.
+  if (projectKey === null) return null
+
+  return (
+    <button type="button" className={styles.countButton} title="Open Today" onClick={onOpen}>
+      <TodoCount projectKey={projectKey} />
+    </button>
+  )
 }
 
 /**

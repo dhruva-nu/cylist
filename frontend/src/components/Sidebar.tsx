@@ -57,7 +57,7 @@ import { DayReportPanel } from './DayReport'
 import { ProjectNav } from './ProjectNav'
 import { SegmentedChoice } from './SegmentedChoice'
 import { SidebarSection } from './SidebarSection'
-import { Today, TodayCount } from './Today'
+import { Today, TodayCount, TodayPlanner } from './Today'
 import { Button } from './ui'
 import styles from './Sidebar.module.css'
 
@@ -136,6 +136,8 @@ function readFolded(): string[] {
 export function Sidebar() {
   const [open, setOpen] = useState<boolean>(readShowing)
   const [folded, setFolded] = useState<string[]>(readFolded)
+  /** Held here, not in the panel, so the rail's count can open it too. */
+  const [planning, setPlanning] = useState(false)
 
   /**
    * Show or hide the panel, and remember which.
@@ -191,7 +193,7 @@ export function Sidebar() {
             strip carries, and it is here for exactly the reason a panel that
             can be shut needs it to be — a number nobody can see is a number
             that stops being worth keeping. */}
-        <TodayCount />
+        <TodayCount onOpen={() => setPlanning(true)} />
         {/* The project's areas, as marks. Nothing off a project, and nothing
             once the rail is a strip across a phone, where the bar's tabs sit
             just below it. */}
@@ -214,7 +216,7 @@ export function Sidebar() {
             hour, and its count is the thing worth having in the corner of your
             eye; Settings is the one you set once and leave, so it sits at the
             bottom. */}
-        <Today />
+        <Today onOpen={() => setPlanning(true)} />
         {/* The day behind you, under the day in front of you. Both are strips
             that open over the page rather than sections that fold: a list you
             consult and a report you ask for are both things you want at a
@@ -230,6 +232,8 @@ export function Sidebar() {
           <SettingsSection />
         </SidebarSection>
       </div>
+
+      <TodayPlanner open={planning} onClose={() => setPlanning(false)} />
     </aside>
   )
 }
