@@ -150,9 +150,11 @@
    block above them would silently switch the border off on every held card
    an agent picks up.
 
-   A thick border in the agent's colour. The hover rules repeat the selectors under
-   `.task:hover` because that one sets `border-color` with a higher weight and
-   used to wipe the border out whenever the pointer was over the card. */
+   `border-color` and a ring together, because a card's surface may already be
+   amber or red and a thin line in one colour is not enough to read on every
+   tint it lands on. The hover rules repeat the selectors under `.task:hover`
+   because that one sets `border-color` with a higher weight and used to wipe
+   the border out whenever the pointer was over the card. */
 
 .agentWorking,
 .agentWaiting,
@@ -164,58 +166,34 @@
 .task.agentStale:hover {
   --agent-ring: var(--agent);
 
-  border-width: 3px;
+  border-width: 2px;
   border-color: var(--agent-ring);
+  box-shadow: 0 0 0 2px var(--agent-ring);
 }
 
-/* Working swirls. A bright arc of the agent's colour travels round the
-   border, drawn on a pseudo-element that is masked down to the border's width
-   so only the ring shows, with a drop-shadow for the glow. The angle is a
-   registered property so the gradient can be animated; nothing on the card
-   changes size or position. */
+/* Working breathes. The ring's alpha rises and falls rather than the border
+   itself moving, so nothing on the board changes size or position — the card
+   is only ever brighter or dimmer. */
 
-@property --agent-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
+.agentWorking {
+  animation: agent-pulse 2.4s ease-in-out infinite;
 }
 
-.agentWorking,
-.task.agentWorking:hover {
-  border-color: color-mix(in srgb, var(--agent-ring) 25%, var(--line));
-}
+@keyframes agent-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--agent-ring);
+  }
 
-.agentWorking::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  padding: 3px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from var(--agent-angle),
-    transparent 0deg,
-    transparent 120deg,
-    color-mix(in srgb, var(--agent-ring) 50%, transparent) 220deg,
-    var(--agent-ring) 330deg,
-    #fff 360deg
-  );
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  filter: drop-shadow(0 0 5px var(--agent-ring));
-  pointer-events: none;
-  animation: agent-swirl 2.4s linear infinite;
-}
-
-@keyframes agent-swirl {
-  to {
-    --agent-angle: 360deg;
+  50% {
+    box-shadow:
+      0 0 0 7px transparent,
+      0 0 0 2px var(--agent-ring);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agentWorking::after {
+  .agentWorking {
     animation: none;
   }
 }
