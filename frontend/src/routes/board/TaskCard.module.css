@@ -150,25 +150,55 @@
    block above them would silently switch the border off on every held card
    an agent picks up.
 
-   The border alone, in a muted colour, and still: a ring that breathed made
-   every card with an agent on it the loudest thing on the board, which is
-   the opposite of what an agent getting on with it deserves. */
+   A thick border in the agent's colour. A working card also glows: a halo
+   that swells and fades around the border, as box-shadow so nothing on the
+   board changes size or position. The hover rules repeat the selectors under
+   `.task:hover` because that one sets `border-color` with a higher weight and
+   used to wipe the border out whenever the pointer was over the card. */
 
 .agentWorking,
 .agentWaiting,
 .agentDone,
-.agentStale {
+.agentStale,
+.task.agentWorking:hover,
+.task.agentWaiting:hover,
+.task.agentDone:hover,
+.task.agentStale:hover {
   --agent-ring: var(--agent);
 
-  border-width: 2px;
-  border-color: color-mix(in srgb, var(--agent-ring) 60%, var(--line));
+  border-width: 3px;
+  border-color: var(--agent-ring);
+}
+
+.agentWorking {
+  animation: agent-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes agent-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--agent-ring) 25%, transparent),
+      0 0 14px 2px color-mix(in srgb, var(--agent-ring) 55%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agentWorking {
+    animation: none;
+  }
 }
 
 /* Waiting is the amber the board already uses for "somebody has to do
    something" — because somebody does, and it is you. Static, so a card that
    needs you does not also demand you watch it. */
 
-.agentWaiting {
+.agentWaiting,
+.task.agentWaiting:hover {
   --agent-ring: var(--hold);
 }
 
@@ -176,7 +206,8 @@
    saying "come and look", and a message that removed itself would be one
    you could miss. */
 
-.agentDone {
+.agentDone,
+.task.agentDone:hover {
   --agent-ring: var(--ok);
 }
 
@@ -188,7 +219,8 @@
    guessed at from the clock. The server ends those rows now and says why, so
    the same border means the same thing and is finally certain of it. */
 
-.agentStale {
+.agentStale,
+.task.agentStale:hover {
   --agent-ring: var(--line-2);
 
   border-style: dashed;
