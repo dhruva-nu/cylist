@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -46,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cylist.app.board.BoardScreen
 import cylist.app.board.BoardViewModel
+import cylist.app.board.PreferencesPickStore
 import cylist.app.docs.DocsScreen
 import cylist.app.docs.DocsViewModel
 import cylist.app.more.MoreScreen
@@ -131,7 +133,8 @@ fun AppShell(
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.Projects) }
     // Keyed by the token, so signing in again (perhaps elsewhere) starts a fresh board.
-    val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session) }
+    val context = LocalContext.current
+    val board: BoardViewModel = viewModel(key = "board-${session.account.tokenId}") { BoardViewModel(session, PreferencesPickStore(context)) }
     // Today plans on the project the Board is on, and its count rides on the tab.
     val today: TodayViewModel = viewModel(key = "today-${session.account.tokenId}") { TodayViewModel(session) }
     val boardState by board.state.collectAsStateWithLifecycle()

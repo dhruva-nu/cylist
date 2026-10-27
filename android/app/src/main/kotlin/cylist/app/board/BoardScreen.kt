@@ -1,5 +1,19 @@
 package cylist.app.board
 
+import android.provider.Settings
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
@@ -696,6 +710,38 @@ private fun EmptyText(columnName: String, narrowed: Boolean) {
     )
 }
 
+/**
+ * A working agent's border: a 2dp conic gradient, cyan through violet to
+ * magenta and back, turning round the card every 3s (the web card's
+ * `agentWorking`). Held still when the system's animations are off, as the web
+ * does under `prefers-reduced-motion`.
+ */
+private fun Modifier.agentWorkingBorder(): Modifier = composed {
+    val still = Settings.Global.getFloat(LocalContext.current.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    val angle = if (still) {
+        0f
+    } else {
+        val spin by rememberInfiniteTransition(label = "agent-spin").animateFloat(
+            0f, 360f, infiniteRepeatable(tween(3000, easing = LinearEasing)), label = "angle",
+        )
+        spin
+    }
+    drawWithContent {
+        drawContent()
+        val width = 2.dp.toPx()
+        val radius = 10.dp.toPx()
+        val ring = Path().apply {
+            fillType = PathFillType.EvenOdd
+            addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
+            addRoundRect(RoundRect(width, width, size.width - width, size.height - width, CornerRadius(radius - width)))
+        }
+        val brush = Brush.sweepGradient(listOf(Color(0xFF1FD8F2), Color(0xFF8A7CF0), Color(0xFFE81CCF), Color(0xFF8A7CF0), Color(0xFF1FD8F2)), center)
+        clipPath(ring) {
+            rotate(angle, center) { drawCircle(brush, radius = size.maxDimension, center = center) }
+        }
+    }
+}
+
 /** One card, as the design's iteration B draws it. */
 @Composable
 fun TaskCard(task: TaskSummary, today: LocalDate, viewerId: UUID?, onAssign: (() -> Unit)? = null, onOpen: (() -> Unit)? = null) {
@@ -721,7 +767,13 @@ fun TaskCard(task: TaskSummary, today: LocalDate, viewerId: UUID?, onAssign: (()
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(colors.paper)
-            .border(BorderStroke(1.dp, border), RoundedCornerShape(10.dp))
+            .then(
+                when {
+                    agent != null && !agent.waiting -> Modifier.agentWorkingBorder()
+                    agent != null -> Modifier.border(BorderStroke(2.dp, border), RoundedCornerShape(10.dp))
+                    else -> Modifier.border(BorderStroke(1.dp, border), RoundedCornerShape(10.dp))
+                },
+            )
             .then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open ${task.reference}", onClick = onOpen) else Modifier)
             // The rail: the goal's colour down the left edge. An agent's card
             // wears its border instead, so the two never say different things.
