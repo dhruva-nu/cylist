@@ -43,7 +43,7 @@ data class BoardState(
     val stacks: Map<UUID, ColumnStack> = emptyMap(),
     val members: List<MemberRead> = emptyList(),
     val columnId: UUID? = null,
-    /** Whose cards to show; empty is everyone. Opens on you, as the web board does. */
+    /** Whose cards to show; empty is everyone. Opens on the last pick made here, else you, as the web board does. */
     val who: Set<UUID> = emptySet(),
     val agentFilter: AgentFilter = AgentFilter.All,
     val loading: Boolean = true,
@@ -74,7 +74,7 @@ data class Reassignment(val taskId: UUID, val ref: String, val from: PersonRead,
  * whatever changed while the app was in the background is picked up when it
  * comes back.
  */
-class BoardViewModel(private val session: Session) : ViewModel() {
+class BoardViewModel(private val session: Session, private val picks: PickStore = PickStore.None) : ViewModel() {
     private val client = session.client
     private val _state = MutableStateFlow(BoardState())
     val state: StateFlow<BoardState> = _state.asStateFlow()
@@ -146,14 +146,15 @@ class BoardViewModel(private val session: Session) : ViewModel() {
 
     fun selectColumn(id: UUID) = _state.update { it.copy(columnId = id) }
 
-    fun toggleWho(id: UUID) {
-        whoChosen = true
-        _state.update { it.copy(who = if (id in it.who) it.who - id else it.who + id) }
-    }
+    fun toggleWho(id: UUID) = choose(_state.value.who.let { if (id in it) it - id else it + id })
 
-    fun showEveryone() {
+    fun showEveryone() = choose(emptySet())
+
+    /** Show [who], and remember it for this project so the board opens on it next time. */
+    private fun choose(who: Set<UUID>) {
         whoChosen = true
-        _state.update { it.copy(who = emptySet()) }
+        _state.update { it.copy(who = who) }
+        _state.value.project?.key?.let { picks.write(it, pickText(who)) }
     }
 
     fun setAgentFilter(filter: AgentFilter) =
@@ -279,7 +280,7 @@ class BoardViewModel(private val session: Session) : ViewModel() {
                     tasks = tasks.map { task -> assigning[task.id]?.let { task.copy(assignee = it) } ?: task },
                     members = members.filter { it.archivedAt == null },
                     columnId = current.columnId?.takeIf { id -> columns.any { it.id == id } } ?: defaultColumn(columns, tasks, me),
-                    who = if (whoChosen) current.who else setOfNotNull(me?.takeIf { id -> members.any { it.id == id } }),
+                    who = if (whoChosen) current.who else openingPick(picks.read(key), me, members.mapTo(mutableSetOf()) { it.id }),
                     loading = false,
                     error = null,
                 )
