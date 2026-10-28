@@ -10,9 +10,11 @@ import cylist.api.generated.apis.AuthApi
 import cylist.api.generated.apis.BoardApi
 import cylist.api.generated.apis.FilesApi
 import cylist.api.generated.apis.PeopleApi
+import cylist.api.generated.apis.ReportsApi
 import cylist.api.generated.apis.TasksApi
 import cylist.api.generated.apis.TodayApi
 import cylist.api.generated.models.ColumnRead
+import cylist.api.generated.models.DayReport
 import cylist.api.generated.models.FiledItem
 import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.PickCreate
@@ -233,6 +235,23 @@ class TodayViewModel(
             }
             refresh()
             onDone(result)
+        }
+    }
+
+    /**
+     * The summary of [day]: the web's day report, from `GET /reports/day`, cut
+     * by the phone's zone so an evening's work stays on the day it happened.
+     */
+    fun report(day: LocalDate, onDone: (Result<DayReport>) -> Unit) {
+        val key = _state.value.projectKey ?: return
+        viewModelScope.launch {
+            onDone(
+                try {
+                    Result.success(io { client.api(::ReportsApi).dayReportApiV1ProjectsProjectRefReportsDayGet(key, day.toString(), zone) })
+                } catch (e: Exception) {
+                    Result.failure(Exception(describe(e), e))
+                },
+            )
         }
     }
 
