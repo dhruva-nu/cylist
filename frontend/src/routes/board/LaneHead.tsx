@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Goal } from '../../api/client'
 import { GoalStatusPill } from '../../components/GoalMarks'
 import { Button } from '../../components/ui'
+import { FoldIcon } from './icons'
 import styles from './LaneHead.module.css'
 
 /**
@@ -65,7 +66,9 @@ export function LaneHead({
         title={folded ? `Open ${name}` : `Fold ${name} away`}
         onClick={onToggleFold}
       >
-        <span aria-hidden="true">{folded ? '▸' : '▾'}</span>
+        {/* Drawn, not a ▸/▾ glyph: a glyph sits wherever its font puts it,
+            which is low on the line and never level with the name. */}
+        <FoldIcon />
       </button>
       {goal ? (
         <>
