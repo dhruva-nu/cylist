@@ -5466,7 +5466,7 @@ export interface components {
             id: string;
             /**
              * Url
-             * @description Where the image is served, relative to the site root: `/api/v1/images/{id}`. Put it in a description as markdown — `![screenshot](/api/v1/images/{id})`.
+             * @description Where the image is served, relative to the site root: `/api/v1/images/{id}`. Put it in a description as the target of a markdown image.
              */
             url: string;
             /**

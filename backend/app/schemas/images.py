@@ -16,8 +16,8 @@ class ImageRead(Schema):
     url: str = Field(
         description=(
             "Where the image is served, relative to the site root: "
-            "`/api/v1/images/{id}`. Put it in a description as markdown — "
-            "`![screenshot](/api/v1/images/{id})`."
+            "`/api/v1/images/{id}`. Put it in a description as the target of "
+            "a markdown image."
         )
     )
     mime: str = Field(description="The type read off the content: PNG, JPEG, GIF or WebP.")
