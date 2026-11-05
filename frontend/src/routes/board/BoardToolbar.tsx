@@ -14,7 +14,7 @@
 import type { Board, Goal, Person, Task } from '../../api/client'
 import type { AgentFilter } from '../agentState'
 import { BoardMenu } from './BoardMenu'
-import { ColumnsIcon, LanesIcon } from './icons'
+import { CaretIcon, ColumnsIcon, LanesIcon } from './icons'
 import type { BoardFilters } from './narrowBoard'
 import { PeopleFilter } from './PeopleFilter'
 import { QuickFilters } from './QuickFilters'
@@ -148,7 +148,7 @@ export function BoardToolbar({
                 : 'Fold every goal down to its heading'
             }
           >
-            {foldAll.everyLaneFolded ? '⌄' : '⌃'}
+            <CaretIcon up={!foldAll.everyLaneFolded} />
           </button>
         ) : null}
         {shaping ? (

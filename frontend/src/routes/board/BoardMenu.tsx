@@ -1,4 +1,5 @@
 import type { Board } from '../../api/client'
+import { CaretIcon } from './icons'
 import { usePopover } from './usePopover'
 import styles from './BoardToolbar.module.css'
 
@@ -37,7 +38,7 @@ export function BoardMenu({
         onClick={() => setOpen(!open)}
       >
         Board
-        <span aria-hidden="true">⌄</span>
+        <CaretIcon />
       </button>
       {open ? (
         <div className={`${styles.popover} ${styles.menuPopover}`} role="menu" aria-label="Board">

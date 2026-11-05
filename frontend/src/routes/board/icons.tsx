@@ -35,6 +35,19 @@ export function ChevronIcon() {
   )
 }
 
+/**
+ * A toolbar button's chevron: ⌄ for a menu that opens below it, ⌃ (`up`) for
+ * the reverse. Drawn rather than typed, because a ⌄ glyph sits at the bottom of
+ * its line and never level with the label beside it.
+ */
+export function CaretIcon({ up = false }: { up?: boolean }) {
+  return (
+    <svg className={styles.fold} viewBox="0 0 16 16" aria-hidden="true">
+      <path d={up ? 'm4 10 4-4 4 4' : 'm4 6 4 4 4-4'} />
+    </svg>
+  )
+}
+
 /** The people row's chevron: › opens the folded row, ‹ (`back`) folds it again. */
 export function FoldIcon({ back = false }: { back?: boolean }) {
   return (
