@@ -8,6 +8,7 @@ import {
   isMe,
   type BoardColumn,
   type ColumnDueDateInput,
+  type Goal,
   type Identity,
   type Person,
   type TaskDetail,
@@ -48,6 +49,20 @@ export function initialFormFields(
     jira_ref: task?.jira_ref ?? '',
     pr_refs: task?.pr_refs ?? [],
   }
+}
+
+/**
+ * The goals the form's picker offers: the open ones, and the one the card
+ * opened on whatever state that is in.
+ *
+ * An achieved or dropped goal is done being worked towards, so a card is not
+ * written under one — the API refuses an open card on an achieved goal anyway.
+ * The goal the form opened holding is kept so that editing a card already on a
+ * settled goal shows that goal rather than a select with nothing chosen, and
+ * saving the card leaves it where it was.
+ */
+export function pickableGoals(goals: readonly Goal[], openedOn: string | null): Goal[] {
+  return goals.filter((goal) => goal.status === 'open' || goal.id === openedOn)
 }
 
 /**
