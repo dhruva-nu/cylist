@@ -13,6 +13,7 @@ import type { Folder, FileItem, FolderChildren } from './files'
 import type { Template } from './board'
 import type { Role } from './roles'
 import type { Skill } from './skills'
+import type { DescriptionImage } from './images'
 import type { Doc, DocTree } from './docs'
 import type { VaultNode, VaultTree } from './vault'
 import type { TodayPlan } from './today'
@@ -75,6 +76,7 @@ describe('hand-written types against the generated schema', () => {
       template: {} as Sent<S['TemplateRead']> satisfies Open<Template>,
       role: {} as Sent<S['RoleRead']> satisfies Open<Role>,
       skill: {} as Sent<S['SkillRead']> satisfies Open<Skill>,
+      image: {} as Sent<S['ImageRead']> satisfies Open<DescriptionImage>,
       doc: {} as Sent<S['DocRead']> satisfies Open<Doc>,
       docTree: {} as Sent<S['DocTree']> satisfies Open<DocTree>,
       vaultTree: {} as Sent<S['VaultTreeRead']> satisfies Open<VaultTree>,

@@ -263,6 +263,7 @@ export function TaskForm({
 
         <TabPanel id="basics" current={tab}>
           <BasicsFields
+            projectKey={projectKey}
             form={form}
             onChange={updateForm}
             members={members}

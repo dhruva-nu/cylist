@@ -38,6 +38,7 @@ from app.core.errors import PayloadTooLargeError
 from app.db import Database
 from app.models.agent import Skill
 from app.models.file import Blob, FileItem, Folder
+from app.models.image import DescriptionImage
 from app.storage import BlobStore, BlobTooLargeError, StagedBlob
 
 DEFAULT_MIME = "application/octet-stream"
@@ -45,6 +46,7 @@ DEFAULT_MIME = "application/octet-stream"
 REFERRERS: Sequence[InstrumentedAttribute[UUID | None]] = (
     FileItem.blob_id,
     Skill.blob_id,
+    DescriptionImage.blob_id,
 )
 """Every column that can point at a blob.
 
@@ -325,9 +327,9 @@ async def ids_on_project(session: AsyncSession, project_id: UUID) -> set[UUID]:
     and keeping the two apart is how one of them gets forgotten: a new table
     that can hold a blob needs an entry there *and* a clause here.
 
-    Not derived from ``REFERRERS`` itself, because the two referrers reach a
+    Not derived from ``REFERRERS`` itself, because the referrers reach a
     project differently — a file item knows its folder and the folder knows the
-    project, while a skill says so on its own row — and a generic join over a
+    project, while a skill or a description image says so on its own row — and a generic join over a
     column alone cannot know which.
     """
     filed = await session.scalars(
@@ -336,4 +338,7 @@ async def ids_on_project(session: AsyncSession, project_id: UUID) -> set[UUID]:
         .where(Folder.project_id == project_id, FileItem.blob_id.is_not(None))
     )
     from_skills = await session.scalars(select(Skill.blob_id).where(Skill.project_id == project_id))
-    return {blob_id for blob_id in (*filed, *from_skills) if blob_id is not None}
+    from_images = await session.scalars(
+        select(DescriptionImage.blob_id).where(DescriptionImage.project_id == project_id)
+    )
+    return {blob_id for blob_id in (*filed, *from_skills, *from_images) if blob_id is not None}
