@@ -1,8 +1,14 @@
 /** One hook: what it fires on, where it sends, and the log of what it sent. */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, type Hook, type HookDelivery, type HookEvent } from '../../api/client'
+import type { Page } from '../../api/paging'
 import { Button, ErrorNotice, cardStyles } from '../../components/ui'
 import styles from './ProjectHooks.module.css'
 import { STATE_WORDS, attemptTime, deliveryOutcome, describeRule, isDangling } from './projectHooks'
@@ -11,6 +17,13 @@ import { affects, invalidates, queryKeys } from '../../api/queries'
 
 /** How long after a redelivery is queued the log looks again: the courier sends it within moments. */
 const REDELIVERY_SETTLES_MS = 2_000
+
+/**
+ * How many deliveries the log opens on: enough to see whether the hook works
+ * (CYLIST-184). Older ones are fetched only when asked for, a page at a time.
+ */
+const LATEST_DELIVERIES = 5
+const OLDER_DELIVERIES = 20
 
 export function HookDetail({
   projectKey,
@@ -31,12 +44,32 @@ export function HookDetail({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [message, setMessage] = useState('')
 
-  const deliveries = useQuery({
+  const deliveries = useInfiniteQuery({
     queryKey: queryKeys.hookDeliveries(hook.id),
-    queryFn: ({ signal }) => api.listHookDeliveries(projectKey, hook.id, signal),
+    queryFn: ({ pageParam, signal }) =>
+      api.listHookDeliveries(
+        projectKey,
+        hook.id,
+        pageParam,
+        pageParam === null ? LATEST_DELIVERIES : OLDER_DELIVERIES,
+        signal,
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next,
     // Retries happen in the background; a log left open should show them land.
     refetchInterval: 15_000,
   })
+  const log = deliveries.data?.pages.flatMap((page) => page.items) ?? []
+  const showingOlder = (deliveries.data?.pages.length ?? 0) > 1
+
+  /** Back to the latest few: the older pages are dropped, not just hidden, so
+   * the log's refresh goes on fetching one page and not every one opened. */
+  function showLatest() {
+    queryClient.setQueryData<InfiniteData<Page<HookDelivery>, string | null>>(
+      queryKeys.hookDeliveries(hook.id),
+      (data) => data && { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) },
+    )
+  }
 
   async function refreshLog() {
     await queryClient.invalidateQueries({ queryKey: queryKeys.hookDeliveries(hook.id) })
@@ -189,7 +222,7 @@ export function HookDetail({
         <p className={styles.quiet}>Loading…</p>
       ) : deliveries.error ? (
         <ErrorNotice error={deliveries.error} />
-      ) : deliveries.data.length === 0 ? (
+      ) : log.length === 0 ? (
         <p className={styles.quiet}>
           {hook.manual
             ? 'Nothing sent yet. Fire it, or send a test.'
@@ -197,7 +230,7 @@ export function HookDetail({
         </p>
       ) : (
         <ul className={styles.log}>
-          {deliveries.data.map((delivery) => (
+          {log.map((delivery) => (
             <li key={delivery.id} className={styles.delivery}>
               <details>
                 <summary>
@@ -236,6 +269,24 @@ export function HookDetail({
           ))}
         </ul>
       )}
+      {deliveries.hasNextPage || showingOlder ? (
+        <div className={styles.logMore}>
+          {deliveries.hasNextPage ? (
+            <Button
+              small
+              disabled={deliveries.isFetchingNextPage}
+              onClick={() => void deliveries.fetchNextPage()}
+            >
+              {deliveries.isFetchingNextPage ? 'Loading…' : 'Show older deliveries'}
+            </Button>
+          ) : null}
+          {showingOlder ? (
+            <Button small variant="ghost" onClick={showLatest}>
+              Show only the latest {LATEST_DELIVERIES}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   )
 }
