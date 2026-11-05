@@ -219,6 +219,13 @@
   list-style: none;
 }
 
+/* Older deliveries are asked for, not shown: the log opens on the latest few. */
+.logMore {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .delivery {
   border: 1px solid var(--line);
   border-radius: var(--radius-card);

@@ -1096,6 +1096,28 @@ class TestSendTest:
             )
         assert pending == 0
 
+    async def test_the_log_is_read_a_page_at_a_time_newest_first(
+        self, signed_in: AsyncClient
+    ) -> None:
+        """The Hooks page shows the newest five and asks for older ones only
+        when the reader does (CYLIST-184)."""
+        await _project(signed_in)
+        hook = await _hook(signed_in)
+        self._answering(signed_in, Receiver(200))
+        sent = [
+            (await signed_in.post(f"/projects/ATL/hooks/{hook['id']}/test")).json()["id"]
+            for _ in range(7)
+        ]
+        log = f"/projects/ATL/hooks/{hook['id']}/deliveries"
+
+        first = (await signed_in.get(log, params={"limit": 5})).json()
+        assert [entry["id"] for entry in first["items"]] == sent[::-1][:5]
+        assert first["next"] == sent[2]
+
+        rest = (await signed_in.get(log, params={"limit": 5, "after": first["next"]})).json()
+        assert [entry["id"] for entry in rest["items"]] == sent[1::-1]
+        assert rest["next"] is None
+
     async def test_a_hook_deleted_while_its_test_is_sent_is_a_404(
         self, signed_in: AsyncClient
     ) -> None:

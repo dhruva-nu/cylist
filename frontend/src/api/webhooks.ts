@@ -151,16 +151,18 @@ export const webhooksApi = {
       method: 'POST',
       body: jsonBody({ message: message.trim() || null }),
     }),
-  /** The newest page of a hook's deliveries: what a reader checks to see whether it works. */
-  listHookDeliveries: async (projectKey: string, id: string, signal?: AbortSignal) =>
-    (
-      await fetchPage<HookDelivery>(
-        `/projects/${projectKey}/hooks/${id}/deliveries`,
-        null,
-        25,
-        signal,
-      )
-    ).items,
+  /**
+   * A page of a hook's deliveries, newest first: the newest few are what a
+   * reader checks to see whether it works, and older ones come after `after`.
+   */
+  listHookDeliveries: (
+    projectKey: string,
+    id: string,
+    after: string | null,
+    limit: number,
+    signal?: AbortSignal,
+  ) =>
+    fetchPage<HookDelivery>(`/projects/${projectKey}/hooks/${id}/deliveries`, after, limit, signal),
   redeliverHook: (projectKey: string, id: string, deliveryId: string) =>
     request<HookDelivery>(
       `/projects/${projectKey}/hooks/${id}/deliveries/${deliveryId}/redeliver`,
