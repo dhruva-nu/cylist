@@ -16,3 +16,9 @@
   color: var(--ink-2);
   font-size: var(--text-md);
 }
+
+/* The description's own button, under the box it adds to. */
+.imageRow {
+  display: flex;
+  justify-content: flex-start;
+}

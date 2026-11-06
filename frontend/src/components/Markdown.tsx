@@ -7,6 +7,9 @@
  * it. GFM on top, because the docs agents write are full of tables, task lists
  * and fenced code, and plain CommonMark draws all three as punctuation.
  *
+ * Images are drawn no wider than the page — a pasted screenshot is usually
+ * wider than the dialog it is read in.
+ *
  * Links open in a new tab — a doc is something you read alongside the board,
  * and following a link out of it should not lose your place.
  */
@@ -15,11 +18,17 @@ import { Children, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { FiledItem, Person } from '../api/client'
+import { imageSrc } from './descriptionImages'
 import styles from './Markdown.module.css'
 import { Tagged } from './primitives/Tagged'
 
 const COMPONENTS: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+  // A description's own images are stored from the site root and drawn
+  // under this deployment's base path — see `descriptionImages.ts`.
+  img: ({ node: _node, src, alt, ...props }) => (
+    <img {...props} src={imageSrc(src)} alt={alt ?? ''} loading="lazy" />
+  ),
 }
 
 /** The people and files whose `@` and `>` tags are drawn as tags in the prose. */

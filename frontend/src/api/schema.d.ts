@@ -2112,6 +2112,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_ref}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload an image for a description
+         * @description Store an image as `multipart/form-data`, for a card's description to show.
+         *
+         *     The bytes go to the blob store, not the database; the description refers
+         *     to the image by the `url` returned, as markdown. The type is read off the
+         *     content, not the part's `Content-Type`, and anything that is not a PNG,
+         *     JPEG, GIF or WebP is refused.
+         */
+        post: operations["upload_image_api_v1_projects__project_ref__images_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/images/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an image
+         * @description The image's bytes, with no attachment disposition, so a description can draw them.
+         */
+        get: operations["get_image_api_v1_images__image_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_ref}/goals": {
         parameters: {
             query?: never;
@@ -5408,6 +5453,32 @@ export interface components {
             scopes: string[];
             /** @description Who this credential acts as: whoever signed in, or whoever minted the token an agent is using. Null only for the bootstrap session on a deployment with no accounts in it yet, whose first job is to create one. */
             person?: components["schemas"]["PersonRead"] | null;
+        };
+        /**
+         * ImageRead
+         * @description An uploaded image, and the address a description refers to it by.
+         */
+        ImageRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Url
+             * @description Where the image is served, relative to the site root: `/api/v1/images/{id}`. Put it in a description as the target of a markdown image.
+             */
+            url: string;
+            /**
+             * Mime
+             * @description The type read off the content: PNG, JPEG, GIF or WebP.
+             */
+            mime: string;
+            /**
+             * Size
+             * @description Bytes.
+             */
+            size: number;
         };
         /** InviteAccept */
         InviteAccept: {
@@ -11750,6 +11821,84 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    upload_image_api_v1_projects__project_ref__images_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project's id, or its key such as `ATL` (case-insensitive). */
+                project_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description The image: PNG, JPEG, GIF or WebP, at most 10 MB. */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageRead"];
+                };
+            };
+            /** @description The image is larger than 10 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The file is not a PNG, JPEG, GIF or WebP. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_image_api_v1_images__image_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                    "image/jpeg": unknown;
+                    "image/gif": unknown;
+                    "image/webp": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

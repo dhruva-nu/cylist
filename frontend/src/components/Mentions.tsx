@@ -10,9 +10,10 @@
  * whichever sigil is under the caret only changes what the rows say.
  */
 
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
 
 import type { FiledItem, Person } from '../api/client'
+import { imageFiles } from './descriptionImages'
 import {
   FILE_SIGIL,
   applyMention,
@@ -75,6 +76,12 @@ interface MentionBoxProps {
    * grown would leave the list the width of nothing.
    */
   className?: string | undefined
+  /**
+   * Images pasted or dropped into the box, with where the caret was. Given,
+   * the box takes them rather than letting the browser paste a file name or
+   * navigate to the dropped file; omitted, a paste or a drop is left alone.
+   */
+  onImages?: ((images: File[], at: number) => void) | undefined
 }
 
 /**
@@ -101,6 +108,7 @@ export function MentionBox({
   onEnter,
   onSubmit,
   className,
+  onImages,
 }: MentionBoxProps) {
   const field = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
   const [caret, setCaret] = useState(0)
@@ -161,6 +169,17 @@ export function MentionBox({
     }
   }
 
+  /** Hand the images among a paste or a drop to `onImages`, if there is one and there are any. */
+  function takeImages(
+    event: { preventDefault: () => void; currentTarget: HTMLInputElement | HTMLTextAreaElement },
+    files: FileList,
+  ) {
+    const images = onImages ? imageFiles(files) : []
+    if (!onImages || !images.length) return
+    event.preventDefault()
+    onImages(images, event.currentTarget.selectionStart ?? value.length)
+  }
+
   const shared = {
     value,
     placeholder,
@@ -183,6 +202,10 @@ export function MentionBox({
       track(event.currentTarget),
     onBlur: () => setDismissed(true),
     onFocus: () => setDismissed(false),
+    onPaste: (event: ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      takeImages(event, event.clipboardData.files),
+    onDrop: (event: DragEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      takeImages(event, event.dataTransfer.files),
   }
 
   return (
