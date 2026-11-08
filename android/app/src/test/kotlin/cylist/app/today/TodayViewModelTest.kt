@@ -76,6 +76,7 @@ class TodayViewModelTest {
         path.endsWith("/today") && method == "GET" -> json(planJson(date ?: "2026-10-16"))
         path.endsWith("/today/picks") -> json("""{"id":"$PICK","day":"2026-10-16","task":{"id":"$CARD","reference":"ATL-3","title":"Card","column":"In progress"},"todos":[]}""", 201)
         path.startsWith("/api/v1/today/todos/") && method == "PATCH" -> patchAnswer
+        path.endsWith("/reports/day") -> json("""{"project_key":"ATL","project_name":"Atlas","day":"$date","timezone":"Asia/Kolkata","starts_at":"2026-10-15T18:30:00Z","ends_at":"2026-10-16T18:30:00Z","entry_count":0,"finished":[],"tasks":[],"elsewhere":[],"todos":[],"headline":"A quiet day.","markdown":"A quiet day."}""")
         path.endsWith("/today/wrap-up") -> json("""{"day":"2026-10-16","to_day":"2026-10-19","moved":1,"not_done":0}""")
         else -> MockResponse.Builder().code(404).body("""{"error":{"code":"not_found","message":"no route"}}""").build()
     }
@@ -175,6 +176,17 @@ class TodayViewModelTest {
         )
         assertEquals(1, result!!.getOrThrow().moved)
         assertNull(model.state.value.error)
+    }
+
+    @Test
+    fun theSummaryIsTheWebsDayReportInThePhonesZone() = runTest(dispatcher) {
+        val model = opened()
+        var result: Result<cylist.api.generated.models.DayReport>? = null
+        model.report(friday) { result = it }
+        advanceUntilIdle()
+
+        assertEquals(mapOf("date" to "2026-10-16", "timezone" to "Asia/Kolkata"), seen("GET", "/projects/ATL/reports/day").single().query)
+        assertEquals("A quiet day.", result!!.getOrThrow().headline)
     }
 
     private companion object {

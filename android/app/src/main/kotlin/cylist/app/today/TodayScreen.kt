@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cylist.api.generated.models.DayReport
 import cylist.api.generated.models.FiledItem
 import cylist.api.generated.models.PersonRead
 import cylist.api.generated.models.PickRead
@@ -133,6 +134,7 @@ fun TodayScreen(viewModel: TodayViewModel, modifier: Modifier = Modifier) {
             tick = viewModel::tick,
             deleteTodo = viewModel::deleteTodo,
             wrapUp = viewModel::wrapUp,
+            report = viewModel::report,
             retry = { viewModel.refresh() },
         ),
         modifier = modifier,
@@ -148,10 +150,11 @@ class TodayActions(
     val tick: (UUID, Boolean) -> Unit = { _, _ -> },
     val deleteTodo: (UUID) -> Unit = {},
     val wrapUp: (LocalDate, LocalDate, List<UUID>, (Result<WrapUpResult>) -> Unit) -> Unit = { _, _, _, _ -> },
+    val report: (LocalDate, (Result<DayReport>) -> Unit) -> Unit = { _, _ -> },
     val retry: () -> Unit = {},
 )
 
-private enum class Sheet { None, Cards, WrapUp }
+private enum class Sheet { None, Cards, WrapUp, Summary }
 
 /** The screen with nothing behind it but [state], so it can be drawn on its own. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -177,6 +180,7 @@ fun TodayContent(state: TodayState, actions: TodayActions, modifier: Modifier = 
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Today", color = colors.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = Figtree, letterSpacing = (-0.33).sp)
             Spacer(Modifier.weight(1f))
+            IconAction(CylistIcons.Docs, "Summary of ${dayLong(state.day)}", enabled = state.projectKey != null) { sheet = Sheet.Summary }
             IconAction(CylistIcons.Plus, "Add cards to the day", enabled = state.projectKey != null) { sheet = Sheet.Cards }
         }
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -221,6 +225,7 @@ fun TodayContent(state: TodayState, actions: TodayActions, modifier: Modifier = 
             sheet = Sheet.None
             result = it
         }
+        Sheet.Summary -> SummarySheet(state.day, actions.report, close = { sheet = Sheet.None })
         Sheet.None -> Unit
     }
     result?.let { wrapped ->
@@ -993,7 +998,7 @@ private fun DayButton(text: String, description: String, onClick: () -> Unit) {
 
 /** `.btn` / `.btn.small` / `.btn.ghost`. */
 @Composable
-private fun SmallButton(text: String, enabled: Boolean = true, ghost: Boolean = false, large: Boolean = false, onClick: () -> Unit) {
+internal fun SmallButton(text: String, enabled: Boolean = true, ghost: Boolean = false, large: Boolean = false, onClick: () -> Unit) {
     val colors = CylistTheme.colors
     val shape = RoundedCornerShape(8.dp)
     Box(
