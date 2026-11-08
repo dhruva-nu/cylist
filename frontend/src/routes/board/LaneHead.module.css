@@ -17,7 +17,7 @@
 
 /* The lane's fold, at the head of the bar. A hit area the height of the bar
    rather than the size of the arrow in it: this is the only way back from a
-   folded lane, and a 10px triangle is not a target. */
+   folded lane, and a 12px chevron is not a target. */
 .laneFold {
   display: grid;
   flex: none;
@@ -30,9 +30,17 @@
   border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-3);
-  font-size: var(--text-xs);
-  line-height: 1;
   cursor: pointer;
+}
+
+/* One chevron, turned: › while the lane is folded, pointing down at the row
+   while it is open. */
+.laneFold > svg {
+  transition: transform 0.12s;
+}
+
+.laneFold[aria-expanded='true'] > svg {
+  transform: rotate(90deg);
 }
 
 .laneFold:hover {

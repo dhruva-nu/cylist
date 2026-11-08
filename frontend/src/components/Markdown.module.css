@@ -150,3 +150,14 @@ div.prose p {
 .prose img {
   max-width: 100%;
 }
+
+/* A pasted screenshot is drawn at its own size until it would overflow, then
+   scaled down with the page rather than scrolling inside it. */
+.prose img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}

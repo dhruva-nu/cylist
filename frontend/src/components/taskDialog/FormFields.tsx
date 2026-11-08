@@ -18,9 +18,9 @@ import type {
   Template,
 } from '../../api/client'
 import { Field, FieldPair } from '../Modal'
-import { MentionBox } from '../Mentions'
 import { PRIORITIES } from '../taskLabels'
 import { Button } from '../ui'
+import { DescriptionField } from './DescriptionField'
 import { PrRefListEditor } from './PullRequests'
 import { SubStatusListEditor } from './SubStatusListEditor'
 import styles from './FormFields.module.css'
@@ -39,6 +39,7 @@ const PRIORITY_VALUES: TaskPriority[] = PRIORITIES.map((option) => option.value)
  * urgent, what kind, the template it follows and the goal it is written under.
  */
 export function BasicsFields({
+  projectKey,
   form,
   onChange,
   members,
@@ -48,6 +49,7 @@ export function BasicsFields({
   goals,
   offerGoal,
 }: {
+  projectKey: string
   form: TaskInput
   onChange: (changes: Partial<TaskInput>) => void
   members: Person[]
@@ -68,20 +70,13 @@ export function BasicsFields({
         />
       </Field>
 
-      <Field
-        label="Description"
-        required
-        hint="Type @ to tag someone on the project, > to tag one of its files."
-      >
-        <MentionBox
-          multiline
-          value={form.description}
-          onChange={(description) => onChange({ description })}
-          members={members}
-          files={files}
-          placeholder="What done looks like"
-        />
-      </Field>
+      <DescriptionField
+        projectKey={projectKey}
+        value={form.description}
+        onChange={(description) => onChange({ description })}
+        members={members}
+        files={files}
+      />
 
       <FieldPair>
         <Field label="Priority" required>

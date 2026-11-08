@@ -93,7 +93,8 @@ export function ProjectGoals() {
 
   const allGoals = goals.data
   const openGoals = allGoals.filter((goal) => goal.status === 'open')
-  const settledGoals = allGoals.filter((goal) => goal.status !== 'open')
+  const achievedGoals = allGoals.filter((goal) => goal.status === 'achieved')
+  const droppedGoals = allGoals.filter((goal) => goal.status === 'dropped')
   const memberList = members.data?.members ?? []
 
   return (
@@ -138,19 +139,37 @@ export function ProjectGoals() {
         <GoalGrid goals={openGoals} projectKey={projectKey} members={memberList} files={files} />
       ) : null}
 
-      {view === 'list' && settledGoals.length ? (
-        <>
-          {/* Kept on the page rather than hidden behind a filter: a goal that
-              was reached is the most useful thing a goals page holds three
-              months later, and one that was dropped is the second. */}
-          <h2 className={styles.settledHead}>Settled</h2>
+      {/* Kept on the page rather than hidden behind a filter: a goal that was
+          reached is the most useful thing a goals page holds three months
+          later, and one that was dropped is the second. Each under a heading
+          of its own, so the record of what was reached is not read through
+          what was given up on. */}
+      {view === 'list' && achievedGoals.length ? (
+        <section aria-labelledby="goals-achieved">
+          <h2 id="goals-achieved" className={styles.settledHead}>
+            Achieved
+          </h2>
           <GoalGrid
-            goals={settledGoals}
+            goals={achievedGoals}
             projectKey={projectKey}
             members={memberList}
             files={files}
           />
-        </>
+        </section>
+      ) : null}
+
+      {view === 'list' && droppedGoals.length ? (
+        <section aria-labelledby="goals-dropped">
+          <h2 id="goals-dropped" className={styles.settledHead}>
+            Dropped
+          </h2>
+          <GoalGrid
+            goals={droppedGoals}
+            projectKey={projectKey}
+            members={memberList}
+            files={files}
+          />
+        </section>
       ) : null}
 
       {editing ? (

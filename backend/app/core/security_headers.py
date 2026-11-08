@@ -49,6 +49,15 @@ DOWNLOAD_HEADERS: Final[dict[str, str]] = {
 }
 """What a response carrying an uploaded file's bytes adds — a file or a skill."""
 
+IMAGE_HEADERS: Final[dict[str, str]] = {
+    **DOWNLOAD_HEADERS,
+    # An image's bytes never change under its id, so the browser may keep
+    # them — but only its own copy: a shared cache must not hand one project's
+    # screenshot to someone who is not on it.
+    "Cache-Control": "private, max-age=31536000, immutable",
+}
+"""What a description image adds: a download's headers, cacheable by its reader."""
+
 
 def spa_policy(*, allow_plain_sockets: bool) -> str:
     """The Content-Security-Policy for the SPA, and so for everything else.

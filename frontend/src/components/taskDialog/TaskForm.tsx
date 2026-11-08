@@ -34,6 +34,7 @@ import {
   formTabs,
   formTitle,
   initialFormFields,
+  pickableGoals,
   saveButtonLabel,
   summariseSave,
   taskPayload,
@@ -263,13 +264,14 @@ export function TaskForm({
 
         <TabPanel id="basics" current={tab}>
           <BasicsFields
+            projectKey={projectKey}
             form={form}
             onChange={updateForm}
             members={members}
             files={files}
             templates={templates}
             columns={columns}
-            goals={goals}
+            goals={pickableGoals(goals, task?.goal_id ?? defaultGoalId ?? null)}
             offerGoal={onBoard}
           />
         </TabPanel>

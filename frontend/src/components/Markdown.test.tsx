@@ -24,4 +24,13 @@ describe('Markdown', () => {
     expect(html).toContain('title="Ada — Eng"')
     expect(html).toMatch(/<strong>.*this.*<\/strong>/)
   })
+
+  it('draws a description image as an image', () => {
+    const html = renderToStaticMarkup(
+      <Markdown source={'![checkout error](/api/v1/images/0193)'} />,
+    )
+    expect(html).toContain('src="/api/v1/images/0193"')
+    expect(html).toContain('alt="checkout error"')
+    expect(html).toContain('loading="lazy"')
+  })
 })

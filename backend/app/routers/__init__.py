@@ -20,6 +20,7 @@ from app.routers import (
     goals,
     health,
     hooks,
+    images,
     people,
     permissions,
     projects,
@@ -57,6 +58,7 @@ api_router.include_router(templates.router)
 # After `templates` and `columns`, whose rows a hook's filters name.
 api_router.include_router(hooks.router)
 api_router.include_router(tasks.router)
+api_router.include_router(images.router)
 # After `tasks`, whose cards a goal's page lists and whose `_read` it borrows.
 api_router.include_router(goals.router)
 # After `tasks` too, for the same `resolved_task` every task path shares.

@@ -5774,6 +5774,113 @@
         }
       }
     },
+    "/api/v1/projects/{project_ref}/images": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Upload an image for a description",
+        "description": "Store an image as `multipart/form-data`, for a card's description to show.\n\nThe bytes go to the blob store, not the database; the description refers\nto the image by the `url` returned, as markdown. The type is read off the\ncontent, not the part's `Content-Type`, and anything that is not a PNG,\nJPEG, GIF or WebP is refused.",
+        "operationId": "upload_image_api_v1_projects__project_ref__images_post",
+        "parameters": [
+          {
+            "name": "project_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The project's id, or its key such as `ATL` (case-insensitive).",
+              "examples": [
+                "ATL"
+              ],
+              "title": "Project Ref"
+            },
+            "description": "The project's id, or its key such as `ATL` (case-insensitive)."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageRead"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The image is larger than 10 MB."
+          },
+          "422": {
+            "description": "The file is not a PNG, JPEG, GIF or WebP."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "contentMediaType": "application/octet-stream",
+                    "description": "The image: PNG, JPEG, GIF or WebP, at most 10 MB."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/images/{image_id}": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Get an image",
+        "description": "The image's bytes, with no attachment disposition, so a description can draw them.",
+        "operationId": "get_image_api_v1_images__image_id__get",
+        "parameters": [
+          {
+            "name": "image_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Image Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image.",
+            "content": {
+              "image/png": {},
+              "image/jpeg": {},
+              "image/gif": {},
+              "image/webp": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_ref}/goals": {
       "get": {
         "tags": [
@@ -13482,6 +13589,39 @@
         ],
         "title": "Identity",
         "description": "Who the current credential belongs to and what it may do."
+      },
+      "ImageRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Where the image is served, relative to the site root: `/api/v1/images/{id}`. Put it in a description as the target of a markdown image."
+          },
+          "mime": {
+            "type": "string",
+            "title": "Mime",
+            "description": "The type read off the content: PNG, JPEG, GIF or WebP."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Bytes."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "mime",
+          "size"
+        ],
+        "title": "ImageRead",
+        "description": "An uploaded image, and the address a description refers to it by."
       },
       "InviteAccept": {
         "properties": {

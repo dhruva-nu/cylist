@@ -26,6 +26,7 @@ from app.models.doc import Doc, DocSection, DocTopic
 from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
 from app.models.hook import DeliveryState, Hook, HookDelivery
+from app.models.image import DescriptionImage
 from app.models.permission import (
     EVERYONE_ELSE,
     ProjectPermission,
@@ -72,6 +73,7 @@ __all__ = [
     "CommentKind",
     "DayPick",
     "DeliveryState",
+    "DescriptionImage",
     "DevicePlatform",
     "Doc",
     "DocSection",

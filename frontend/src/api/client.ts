@@ -18,6 +18,7 @@ import { boardApi } from './board'
 import { docsApi } from './docs'
 import { filesApi } from './files'
 import { goalsApi } from './goals'
+import { imagesApi } from './images'
 import { peopleApi } from './people'
 import { projectsApi } from './projects'
 import { reportsApi } from './reports'
@@ -35,6 +36,7 @@ export * from './board'
 export * from './docs'
 export * from './files'
 export * from './goals'
+export * from './images'
 export * from './people'
 export * from './projects'
 export * from './reports'
@@ -52,6 +54,7 @@ export const api = {
   ...reportsApi,
   ...rolesApi,
   ...filesApi,
+  ...imagesApi,
   ...docsApi,
   ...skillsApi,
   ...boardApi,
