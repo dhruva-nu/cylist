@@ -10656,6 +10656,18 @@
             ],
             "title": "Carried From",
             "description": "The day it was moved on from, if it was."
+          },
+          "moved_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moved Reason",
+            "description": "Why it was moved, if somebody said."
           }
         },
         "type": "object",
@@ -10663,7 +10675,8 @@
           "text",
           "state",
           "moved_to",
-          "carried_from"
+          "carried_from",
+          "moved_reason"
         ],
         "title": "DayTodo",
         "description": "One to-do from the asker's plan for the day, and how the day left it."
@@ -17969,6 +17982,18 @@
             "title": "Carried From",
             "description": "The day it was handed on from, when it arrived by wrap-up."
           },
+          "moved_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moved Reason",
+            "description": "Why it was moved, when whoever wrapped up the day said — on the moved to-do and on its copy."
+          },
           "source_kind": {
             "anyOf": [
               {
@@ -18000,6 +18025,7 @@
           "done_at",
           "moved_to",
           "carried_from",
+          "moved_reason",
           "source_kind",
           "created_at"
         ],
@@ -18784,6 +18810,18 @@
             "type": "array",
             "title": "Move",
             "description": "The open to-dos to hand on. Every other open to-do on the day stays behind as `not_done`."
+          },
+          "reasons": {
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "propertyNames": {
+              "format": "uuid"
+            },
+            "type": "object",
+            "title": "Reasons",
+            "description": "Optionally, why a to-do is being moved: its id to a line of words. Only ids in `move` may be named; a blank reason is the same as none."
           },
           "timezone": {
             "anyOf": [

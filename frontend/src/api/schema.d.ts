@@ -4087,6 +4087,11 @@ export interface components {
              * @description The day it was moved on from, if it was.
              */
             carried_from: string | null;
+            /**
+             * Moved Reason
+             * @description Why it was moved, if somebody said.
+             */
+            moved_reason: string | null;
         };
         /** DeliveryAttempt */
         DeliveryAttempt: {
@@ -7612,6 +7617,11 @@ export interface components {
              */
             carried_from: string | null;
             /**
+             * Moved Reason
+             * @description Why it was moved, when whoever wrapped up the day said — on the moved to-do and on its copy.
+             */
+            moved_reason: string | null;
+            /**
              * Source Kind
              * @description What on the card it stands for, when it came from the card: a stage, a sub-task or a tick box. Ticking it ticks that too, and the other way about. Null for a to-do somebody wrote.
              */
@@ -7967,6 +7977,13 @@ export interface components {
              * @description The open to-dos to hand on. Every other open to-do on the day stays behind as `not_done`.
              */
             move?: string[];
+            /**
+             * Reasons
+             * @description Optionally, why a to-do is being moved: its id to a line of words. Only ids in `move` may be named; a blank reason is the same as none.
+             */
+            reasons?: {
+                [key: string]: string;
+            };
             /**
              * Timezone
              * @description IANA zone that says what today is, e.g. `Asia/Kolkata`. Defaults to UTC. A day from today on is brought in step with its cards before it is closed; a day gone by is closed on the plan it had.

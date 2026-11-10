@@ -49,6 +49,8 @@ export function WrapUpDialog({
   const [otherDay, setOtherDay] = useState(() => shiftDay(working, 1))
   /** Ticked by default, so what is tracked is what was unticked. */
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set())
+  /** Why each to-do is moving, by id. Optional; blank means none. */
+  const [reasons, setReasons] = useState<Readonly<Record<string, string>>>({})
 
   const toDay = target === 'next' ? working : target === 'tomorrow' ? tomorrow : otherDay
 
@@ -61,9 +63,20 @@ export function WrapUpDialog({
 
   const wrap = useMutation({
     meta: handlesOwnErrors,
-    mutationFn: () => api.wrapUpDay(projectKey, day, toDay, moving, localZone()),
+    mutationFn: () =>
+      api.wrapUpDay(projectKey, day, toDay, moving, reasonsFor(moving), localZone()),
     onSettled: refresh,
   })
+
+  /** Only for what is moving, and only the ones that say something. */
+  function reasonsFor(ids: string[]): Record<string, string> {
+    const given: Record<string, string> = {}
+    for (const id of ids) {
+      const words = (reasons[id] ?? '').trim()
+      if (words) given[id] = words
+    }
+    return given
+  }
 
   function flip(id: string) {
     const next = new Set(kept)
@@ -210,6 +223,20 @@ export function WrapUpDialog({
                         <span className={styles.todoMark}>
                           {ticked ? `→ ${weekdayShort(toDay)}` : 'stays, not done'}
                         </span>
+                        {ticked ? (
+                          <input
+                            type="text"
+                            className={styles.reasonField}
+                            placeholder="Why is it moving? (optional)"
+                            aria-label="Why this one is moving (optional)"
+                            maxLength={500}
+                            value={reasons[todo.id] ?? ''}
+                            onChange={(event) => {
+                              const words = event.currentTarget.value
+                              setReasons((now) => ({ ...now, [todo.id]: words }))
+                            }}
+                          />
+                        ) : null}
                       </li>
                     )
                   })}

@@ -330,6 +330,7 @@ function TodoRow({
       {moved && todo.moved_to ? (
         <span className={styles.todoMark}>→ {dayShort(todo.moved_to)}</span>
       ) : null}
+      {todo.moved_reason ? <span className={styles.todoReason}>“{todo.moved_reason}”</span> : null}
       {todo.state === 'not_done' ? <span className={styles.todoMark}>not done</span> : null}
       {/* A tick on the card can be refused — a role kept out of staging a
           column, say — and the box springs back; this says why. */}
