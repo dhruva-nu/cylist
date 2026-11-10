@@ -171,7 +171,7 @@ class TodayViewModelTest {
         advanceUntilIdle()
 
         assertEquals(
-            """{"day":"2026-10-16","to_day":"2026-10-19","move":["$TODO_A"],"reasons":{},"timezone":"Asia/Kolkata"}""",
+            """{"day":"2026-10-16","to_day":"2026-10-19","move":["$TODO_A"],"to_days":{},"reasons":{},"timezone":"Asia/Kolkata"}""",
             seen("POST", "/projects/ATL/today/wrap-up").single().body,
         )
         assertEquals(1, result!!.getOrThrow().moved)
