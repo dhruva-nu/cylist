@@ -292,6 +292,40 @@ async def test_wrap_up_moves_the_chosen_and_leaves_the_rest(signed_in: AsyncClie
     ]
 
 
+async def test_wrap_up_sends_some_todos_to_their_own_day(signed_in: AsyncClient) -> None:
+    project, _, todos = await friday_with_three_todos(signed_in)
+    later = "2026-10-22"
+
+    wrapped = await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={
+            "day": FRIDAY,
+            "to_day": MONDAY,
+            "move": [todos[1]["id"], todos[2]["id"]],
+            "to_days": {todos[2]["id"]: later},
+        },
+    )
+
+    assert wrapped.status_code == 200, wrapped.text
+    assert wrapped.json()["moved"] == 2
+    friday = (await plan(signed_in, project))["picks"][0]["todos"]
+    assert [t["moved_to"] for t in friday] == [None, MONDAY, later]
+    for day, count in ((MONDAY, 1), (later, 1)):
+        picks = (await plan(signed_in, project, day))["picks"]
+        assert [len(p["todos"]) for p in picks] == [count]
+
+
+async def test_wrap_up_refuses_a_day_for_a_todo_not_moving(signed_in: AsyncClient) -> None:
+    project, _, todos = await friday_with_three_todos(signed_in)
+
+    wrapped = await signed_in.post(
+        f"/projects/{project}/today/wrap-up",
+        json={"day": FRIDAY, "to_day": MONDAY, "move": [], "to_days": {todos[1]["id"]: MONDAY}},
+    )
+
+    assert wrapped.status_code == 422
+
+
 async def test_wrap_up_keeps_the_reason_a_todo_moved(signed_in: AsyncClient) -> None:
     project, _card, todos = await friday_with_three_todos(signed_in)
 
