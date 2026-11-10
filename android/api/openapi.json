@@ -18811,6 +18811,18 @@
             "title": "Move",
             "description": "The open to-dos to hand on. Every other open to-do on the day stays behind as `not_done`."
           },
+          "to_days": {
+            "additionalProperties": {
+              "type": "string",
+              "format": "date"
+            },
+            "propertyNames": {
+              "format": "uuid"
+            },
+            "type": "object",
+            "title": "To Days",
+            "description": "Optionally, a different day for some of the moved to-dos: its id to a day after `day`. Only ids in `move` may be named; the rest go to `to_day`."
+          },
           "reasons": {
             "additionalProperties": {
               "type": "string",

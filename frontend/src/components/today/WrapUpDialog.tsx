@@ -2,15 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../../api/client'
 import { usePeople } from '../../api/queries'
-import {
-  dayLong,
-  dayShort,
-  localDate,
-  localZone,
-  nextWorkingDay,
-  shiftDay,
-  weekdayShort,
-} from '../dates'
+import { dayLong, dayShort, localDate, localZone, nextWorkingDay, shiftDay } from '../dates'
 import { Modal } from '../Modal'
 import { useProjectFiles } from '../projectFiles'
 import { SegmentedChoice } from '../SegmentedChoice'
@@ -50,9 +42,13 @@ export function WrapUpDialog({
   /** Ticked by default, so what is tracked is what was unticked. */
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set())
   /** Why each to-do is moving, by id. Optional; blank means none. */
+  /** A day of its own for a to-do, by id; the rest go to the day chosen above. */
+  const [ownDays, setOwnDays] = useState<Readonly<Record<string, string>>>({})
   const [reasons, setReasons] = useState<Readonly<Record<string, string>>>({})
 
   const toDay = target === 'next' ? working : target === 'tomorrow' ? tomorrow : otherDay
+
+  const dayOf = (id: string) => ownDays[id] ?? toDay
 
   const open = (plan.data?.picks ?? [])
     .map((pick) => ({ pick, todos: pick.todos.filter((todo) => todo.state === 'open') }))
@@ -64,7 +60,15 @@ export function WrapUpDialog({
   const wrap = useMutation({
     meta: handlesOwnErrors,
     mutationFn: () =>
-      api.wrapUpDay(projectKey, day, toDay, moving, reasonsFor(moving), localZone()),
+      api.wrapUpDay(
+        projectKey,
+        day,
+        toDay,
+        moving,
+        reasonsFor(moving),
+        localZone(),
+        ownDaysFor(moving),
+      ),
     onSettled: refresh,
   })
 
@@ -74,6 +78,16 @@ export function WrapUpDialog({
     for (const id of ids) {
       const words = (reasons[id] ?? '').trim()
       if (words) given[id] = words
+    }
+    return given
+  }
+
+  /** Only for what is moving, and only the ones set apart from the day above. */
+  function ownDaysFor(ids: string[]): Record<string, string> {
+    const given: Record<string, string> = {}
+    for (const id of ids) {
+      const own = ownDays[id]
+      if (own && own !== toDay) given[id] = own
     }
     return given
   }
@@ -137,10 +151,17 @@ export function WrapUpDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="go"
-            disabled={!plan.data || wrap.isPending || (target === 'other' && otherDay <= day)}
+            disabled={
+              !plan.data ||
+              wrap.isPending ||
+              (target === 'other' && otherDay <= day) ||
+              moving.some((id) => dayOf(id) <= day)
+            }
             onClick={() => wrap.mutate()}
           >
-            {moving.length ? `Move ${moving.length} to ${toName}` : `Close ${dayName}`}
+            {moving.length
+              ? `Move ${moving.length}${moving.every((id) => dayOf(id) === toDay) ? ` to ${toName}` : ''}`
+              : `Close ${dayName}`}
           </Button>
         </>
       }
@@ -220,9 +241,19 @@ export function WrapUpDialog({
                         <span className={styles.todoText}>
                           <Tagged text={todo.text} members={people} files={files} />
                         </span>
-                        <span className={styles.todoMark}>
-                          {ticked ? `→ ${weekdayShort(toDay)}` : 'stays, not done'}
-                        </span>
+                        <span className={styles.todoMark}>{ticked ? '→' : 'stays, not done'}</span>
+                        {ticked ? (
+                          <input
+                            type="date"
+                            aria-label="The day this one moves to"
+                            value={dayOf(todo.id)}
+                            min={tomorrow}
+                            onChange={(event) => {
+                              const own = event.currentTarget.value
+                              if (own) setOwnDays((now) => ({ ...now, [todo.id]: own }))
+                            }}
+                          />
+                        ) : null}
                         {ticked ? (
                           <input
                             type="text"

@@ -61,6 +61,11 @@ class WrapUp(BaseModel):
         description="The open to-dos to hand on. Every other open to-do on the day "
         "stays behind as `not_done`.",
     )
+    to_days: dict[UUID, date] = Field(
+        default_factory=dict,
+        description="Optionally, a different day for some of the moved to-dos: its id to a day "
+        "after `day`. Only ids in `move` may be named; the rest go to `to_day`.",
+    )
     reasons: dict[UUID, Annotated[str, StringConstraints(max_length=TEXT_MAX_LENGTH)]] = Field(
         default_factory=dict,
         description="Optionally, why a to-do is being moved: its id to a line of words. "

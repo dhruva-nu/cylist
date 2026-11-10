@@ -7978,6 +7978,13 @@ export interface components {
              */
             move?: string[];
             /**
+             * To Days
+             * @description Optionally, a different day for some of the moved to-dos: its id to a day after `day`. Only ids in `move` may be named; the rest go to `to_day`.
+             */
+            to_days?: {
+                [key: string]: string;
+            };
+            /**
              * Reasons
              * @description Optionally, why a to-do is being moved: its id to a line of words. Only ids in `move` may be named; a blank reason is the same as none.
              */
