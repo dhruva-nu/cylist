@@ -302,5 +302,6 @@ async def wrap_up(
         day=body.day,
         to_day=body.to_day,
         move=body.move,
+        reasons=body.reasons,
     )
     return WrapUpResult(day=body.day, to_day=body.to_day, moved=moved, not_done=left)

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.models.today import TEXT_MAX_LENGTH
 from app.schemas.common import Schema
@@ -59,6 +60,11 @@ class WrapUp(BaseModel):
         default_factory=list,
         description="The open to-dos to hand on. Every other open to-do on the day "
         "stays behind as `not_done`.",
+    )
+    reasons: dict[UUID, Annotated[str, StringConstraints(max_length=TEXT_MAX_LENGTH)]] = Field(
+        default_factory=dict,
+        description="Optionally, why a to-do is being moved: its id to a line of words. "
+        "Only ids in `move` may be named; a blank reason is the same as none.",
     )
     timezone: str | None = Field(
         default=None,

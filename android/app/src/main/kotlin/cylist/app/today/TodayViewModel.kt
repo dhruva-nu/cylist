@@ -226,7 +226,7 @@ class TodayViewModel(
                     io {
                         client.api(::TodayApi).wrapUpApiV1ProjectsProjectRefTodayWrapUpPost(
                             key,
-                            WrapUp(day = day.toString(), toDay = toDay.toString(), move = move, timezone = zone),
+                            WrapUp(day = day.toString(), toDay = toDay.toString(), move = move, reasons = emptyMap(), timezone = zone),
                         )
                     },
                 )
