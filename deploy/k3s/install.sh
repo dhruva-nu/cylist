@@ -5,6 +5,7 @@
 set -euo pipefail
 
 K3S_VERSION="v1.37.2+k3s1"
+HELM_VERSION="v4.3.2"
 POD_CIDR="10.42.0.0/16"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +37,18 @@ installer="$(mktemp)"
 trap 'rm -f "$installer"' EXIT
 curl -sfL https://get.k3s.io -o "$installer"
 INSTALL_K3S_VERSION="$K3S_VERSION" sh "$installer"
+
+# Helm deploys Cylist (deploy/k3s/deploy.sh). Beside K3s's kubectl in
+# /usr/local/bin, which is on the Actions runner's PATH; pinned and checked.
+helm_tgz="$(mktemp)"
+trap 'rm -f "$installer" "$helm_tgz"' EXIT
+curl -sfL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz" -o "$helm_tgz"
+echo "$(curl -sfL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz.sha256sum" | cut -d' ' -f1)  $helm_tgz" |
+  sha256sum -c --quiet
+tar -xzf "$helm_tgz" -O linux-amd64/helm > /usr/local/bin/helm.new
+chmod 755 /usr/local/bin/helm.new
+mv /usr/local/bin/helm.new /usr/local/bin/helm
+helm version --short
 
 echo "waiting for the node to be Ready..."
 for _ in $(seq 1 60); do
