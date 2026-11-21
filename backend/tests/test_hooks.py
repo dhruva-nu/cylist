@@ -935,7 +935,13 @@ class TestOneBadReceiver:
                     await asyncio.sleep(0.02)
                 assert answered.count(RECEIVER) == count
             assert SLOW not in answered
-            fast_states = {d.state for d in await _queued(signed_in, fast["id"])}
+            # The receiver answers before the courier commits "delivered", so
+            # the last row can still be pending for a moment.
+            for _ in range(100):
+                fast_states = {d.state for d in await _queued(signed_in, fast["id"])}
+                if fast_states == {"delivered"}:
+                    break
+                await asyncio.sleep(0.02)
             assert fast_states == {"delivered"}
 
             released.set()
