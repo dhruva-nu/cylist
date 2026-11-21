@@ -14,16 +14,6 @@
   border-bottom: 1px solid var(--line);
 }
 
-/* Which template's board this is, where the title used to be — only drawn
-   once a project has more than the one board. */
-.boardName {
-  flex: none;
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-semibold);
-}
-
 /* Whose cards (CYLIST-99) — see `PeopleFilter`. Faces overlap a little, the
    way a group of people is drawn, and part to show who is picked: a ring
    around the picked ones, the rest faded back. */
@@ -234,7 +224,8 @@
   min-width: 0;
 }
 
-.toolButton {
+.toolButton,
+.iconButton {
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -252,12 +243,20 @@
 }
 
 .toolButton:hover,
+.iconButton:hover,
 .toolButtonOpen {
   background: var(--paper-2);
 }
 
 .toolButtonOpen {
   border-color: var(--ink-3);
+}
+
+.iconButton {
+  justify-content: center;
+  width: var(--control, 40px);
+  padding: 0;
+  font-size: var(--text-xl);
 }
 
 /* How many filters are narrowing the board, on the button that holds them. */
@@ -272,6 +271,42 @@
   color: var(--on-brand);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
+}
+
+/* Columns | Lanes. */
+.segmented {
+  display: inline-flex;
+  height: var(--control, 40px);
+  padding: 3px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+
+.segmented button {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--ink);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink);
 }
 
 /* --- Popovers under the bar's buttons --------------------------------------- */

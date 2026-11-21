@@ -1,7 +1,7 @@
 /**
  * How this reader has chosen to look at a board: what is folded away, whether
- * the cancelled cards are shown, and which columns have opened their on-hold
- * cards.
+ * the board is in lanes, whether the cancelled cards are shown, and which
+ * columns have opened their on-hold cards.
  *
  * All of it is remembered per project rather than board-wide: folding "Done"
  * away on one project says nothing about what you want to see on another. It
@@ -58,7 +58,7 @@ function parseFlag(stored: string | null): boolean {
 /**
  * A list of ids, remembered per project — what is folded away.
  *
- * Several things fold on this board — a column, a section of one, a
+ * Several things fold on this board — a column, a section of one, a lane, a
  * column's on-hold foot — and they are all the same list of ids under
  * different storage keys.
  */
@@ -79,7 +79,7 @@ function useFolded(storageKey: string) {
   return { folded, setFolded, toggle }
 }
 
-/** One way of looking at a board, on or off. Off by default. */
+/** One way of looking at a board, on or off — whether it is in lanes, say. Off by default. */
 function useBoardToggle(storageKey: string): [boolean, (on: boolean) => void] {
   const [on, update] = useStoredState(storageKey, parseFlag)
   const setOn = useCallback((next: boolean) => update(() => next), [update])
@@ -100,6 +100,27 @@ export function useBoardView(projectKey: string) {
     `cylist.board.collapsedOutcomes.${projectKey}`,
   )
   /**
+   * Which lanes are folded away, when the board is in lanes.
+   *
+   * The same fold a column has, turned ninety degrees: a board split by goal
+   * is as tall as the sum of its goals, and the goal you are not working on
+   * this week is a screen of scrolling between the two you are. A folded lane
+   * keeps its heading — the name and the count are the part you still need —
+   * and drops its row of cells.
+   *
+   * A folded lane is not a drop target, which is the one way it differs from a
+   * folded column. A column keeps a rail you can drop onto because a card put
+   * into "Done" is still a card put somewhere definite; a lane's cells are one
+   * goal's share of every column at once, and there is no single place a card
+   * dropped on a folded lane could honestly land.
+   */
+  const {
+    folded: foldedLanes,
+    setFolded: setFoldedLanes,
+    toggle: toggleLane,
+  } = useFolded(`cylist.board.lanes.folded.${projectKey}`)
+  const [lanesOn, setLanesOn] = useBoardToggle(`cylist.board.lanes.${projectKey}`)
+  /**
    * Whether the cancelled cards have been asked back onto the board.
    *
    * Stored the way round it is because the hide is the default (CYLIST-62):
@@ -114,6 +135,10 @@ export function useBoardView(projectKey: string) {
    * A list of the columns showing them rather than of the columns hiding them,
    * so the empty list — a reader who has never touched this — is every column
    * holding its held work back, which is the default the card asked for.
+   *
+   * Kept per column, and shared by a column's lane cells: in lanes a column is
+   * drawn once per goal, and opening the foot is a question about the column
+   * ("what has stalled in review?"), not about one goal's corner of it.
    */
   const { folded: holdShown, toggle: toggleHold } = useFolded(
     `cylist.board.holdShown.${projectKey}`,
@@ -124,6 +149,11 @@ export function useBoardView(projectKey: string) {
     toggleColumn,
     collapsedOutcomes,
     toggleOutcome,
+    foldedLanes,
+    setFoldedLanes,
+    toggleLane,
+    lanesOn,
+    setLanesOn,
     showCancelled,
     setShowCancelled,
     holdShown,

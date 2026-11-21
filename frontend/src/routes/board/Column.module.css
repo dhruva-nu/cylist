@@ -456,3 +456,33 @@
   opacity: 0.35;
   filter: saturate(0.4);
 }
+
+/* A column drawn in halves. The heading keeps its own box and stops there;
+   a lane's cell has no heading and is as tall as the cards in it, with a
+   floor so an empty lane is still something you can drop a card onto. */
+.headOnly {
+  min-height: 0;
+}
+
+.headOnly .unfolded {
+  flex: none;
+}
+
+.cardsOnly {
+  min-height: 96px;
+}
+
+.cardsOnly .cards {
+  overflow: visible;
+  padding-top: 12px;
+}
+
+/* A folded column's share of a lane: a strip wide enough to drop a card on,
+   with the count of what is already in it. */
+.railCell {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  min-height: 96px;
+  color: var(--ink-3);
+}

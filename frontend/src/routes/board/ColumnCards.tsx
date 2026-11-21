@@ -1,5 +1,5 @@
 /**
- * The cards in an open column.
+ * The cards in an open column, or in one lane's share of it.
  *
  * A divided column is still one column: one heading, one count, one place on
  * the board. What it has instead of a single stack of cards is a stack per way

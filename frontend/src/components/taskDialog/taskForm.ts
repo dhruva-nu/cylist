@@ -28,7 +28,7 @@ export function initialFormFields(
   task: TaskDetail | null,
   members: Person[],
   identity: Identity | undefined,
-  defaultTemplateId: string | null | undefined,
+  defaultGoalId: string | null | undefined,
 ): TaskInput {
   return {
     title: task?.title ?? '',
@@ -44,8 +44,8 @@ export function initialFormFields(
       members.find((person) => isMe(person, identity))?.id ??
       members[0]?.id ??
       '',
-    template_id: task?.template_id ?? defaultTemplateId ?? null,
-    goal_id: task?.goal_id ?? null,
+    template_id: task?.template_id ?? null,
+    goal_id: task?.goal_id ?? defaultGoalId ?? null,
     jira_ref: task?.jira_ref ?? '',
     pr_refs: task?.pr_refs ?? [],
   }

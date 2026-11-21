@@ -54,7 +54,7 @@ afterEach(() => {
 describe('moving a card', () => {
   it('draws it in its new column before the server has answered', async () => {
     vi.mocked(api.moveTask).mockReturnValue(new Promise(() => undefined))
-    const { result } = renderHook(() => useBoardMutations('ATL', [], true), { wrapper })
+    const { result } = renderHook(() => useBoardMutations('ATL', [], [], true), { wrapper })
 
     act(() => result.current.moveTask.mutate(drop))
 
@@ -66,7 +66,7 @@ describe('moving a card', () => {
 
   it('puts the cards back as they were when the server refuses', async () => {
     vi.mocked(api.moveTask).mockRejectedValue(new Error('You cannot move cards there.'))
-    const { result } = renderHook(() => useBoardMutations('ATL', [], true), { wrapper })
+    const { result } = renderHook(() => useBoardMutations('ATL', [], [], true), { wrapper })
 
     act(() => result.current.moveTask.mutate(drop))
     await waitFor(() => expect(result.current.moveTask.isError).toBe(true))
@@ -76,7 +76,7 @@ describe('moving a card', () => {
 
   it('keeps the card where it was dropped when the server agrees', async () => {
     vi.mocked(api.moveTask).mockResolvedValue(card('a', 'doing', 500) as unknown as TaskDetail)
-    const { result } = renderHook(() => useBoardMutations('ATL', [], true), { wrapper })
+    const { result } = renderHook(() => useBoardMutations('ATL', [], [], true), { wrapper })
 
     act(() => result.current.moveTask.mutate(drop))
     await waitFor(() => expect(result.current.moveTask.isSuccess).toBe(true))
@@ -87,7 +87,7 @@ describe('moving a card', () => {
 
   it('does not touch the other cards while it is in the air', async () => {
     vi.mocked(api.moveTask).mockReturnValue(new Promise(() => undefined))
-    const { result } = renderHook(() => useBoardMutations('ATL', [], true), { wrapper })
+    const { result } = renderHook(() => useBoardMutations('ATL', [], [], true), { wrapper })
 
     act(() => result.current.moveTask.mutate(drop))
     await waitFor(() => expect(columnOf('a')).toBe('doing'))

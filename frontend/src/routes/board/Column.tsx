@@ -1,5 +1,5 @@
 /**
- * One column of the board.
+ * One column of the board, or — in lanes — one half of one.
  *
  * Every column is a fixed height, whatever it is holding. A column that grew
  * with its cards meant dropping one moved every other column on the row out
@@ -22,7 +22,7 @@ import type { BoardColumn, Task } from '../../api/client'
 import { Button } from '../../components/ui'
 import { splitOnHold } from '../boardHiding'
 import { ColumnCards, countedCards } from './ColumnCards'
-import { columnDragId } from './dropTargets'
+import { columnDragId, laneCellDropId } from './dropTargets'
 import { StoreIcon } from './icons'
 import styles from './Column.module.css'
 
@@ -84,6 +84,19 @@ export interface ColumnProps {
   onToggleHold: () => void
   /** What is left to read of the column; null when every card is here. */
   more: ColumnMore | null
+  /**
+   * Which half of a column this is drawing.
+   *
+   * `all` is the ordinary board: one box with the heading, the cards and the
+   * composer in it. Grouped by goal, the column is split — `head` draws the
+   * heading once above every lane, and `cards` draws one lane's share of the
+   * cards, over and over down the board. Splitting the component rather than
+   * repeating a whole column per lane is what keeps the fold, the reordering
+   * handle and the column's own rules in one place.
+   */
+  part?: 'all' | 'head' | 'cards'
+  /** Which lane this cell belongs to; only a `cards` part has one. */
+  laneKey?: string
 }
 
 export function Column({
@@ -101,8 +114,13 @@ export function Column({
   hidingHold,
   onToggleHold,
   more,
+  part = 'all',
+  laneKey,
 }: ColumnProps) {
-  const dropId = column.id
+  const isLaneCell = part === 'cards'
+  // A lane's cell is its own drop target — the lane says which goal, the
+  // column says which column, and a drop reads both off the one id.
+  const dropId = isLaneCell && laneKey ? laneCellDropId(laneKey, column.id) : column.id
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: dropId })
   // A column is draggable on the whole card (so it visually moves as one
   // piece) but only the handle carries the listeners — otherwise every
@@ -113,7 +131,13 @@ export function Column({
     setNodeRef: setDragRef,
     transform,
     isDragging,
-  } = useDraggable({ id: columnDragId(column.id) })
+  } = useDraggable({
+    id: columnDragId(column.id),
+    // A lane's cells are not the column, they are one lane's share of it —
+    // and eight copies of a column all claiming to be draggable is eight
+    // things dnd-kit would have to be told apart by.
+    disabled: isLaneCell,
+  })
   const counted = countedCards(tasks.length)
   /**
    * The cards this column draws, and the ones it is sitting on.
@@ -127,7 +151,7 @@ export function Column({
 
   const setRefs = (node: HTMLElement | null) => {
     setDropRef(node)
-    setDragRef(node)
+    if (!isLaneCell) setDragRef(node)
   }
   const dragStyle = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
@@ -139,6 +163,8 @@ export function Column({
       style={dragStyle}
       className={[
         styles.column,
+        part === 'head' && styles.headOnly,
+        isLaneCell && styles.cardsOnly,
         collapsed && styles.collapsed,
         // Not `over` when the drop would be refused: highlighting a column the
         // card cannot land in is the board promising something it will not do.
@@ -157,7 +183,15 @@ export function Column({
           width has somewhere to travel from — and the keys are what make the
           filling inside it a swap React remounts, so the fade runs each time
           rather than only on the first. */}
-      {collapsed ? (
+      {collapsed && isLaneCell ? (
+        // A folded column still has a lane's worth of cards in it; what it
+        // does not have is room to draw them. The cell stays as a drop target
+        // so a card can be put into a column that is folded away, which is
+        // exactly what folding one is for.
+        <div key="railcell" className={styles.railCell} aria-hidden="true">
+          {tasks.length ? <span className={styles.count}>{tasks.length}</span> : null}
+        </div>
+      ) : collapsed ? (
         <ColumnRail
           key="rail"
           column={column}
@@ -170,25 +204,29 @@ export function Column({
         />
       ) : (
         <div key="open" className={styles.unfolded}>
-          <ColumnHead
-            column={column}
-            count={tasks.length}
-            dragAttributes={attributes}
-            dragListeners={listeners}
-            onCollapse={onToggleCollapse}
-            onEdit={onEdit}
-            onColdStorage={onColdStorage}
-          />
+          {isLaneCell ? null : (
+            <ColumnHead
+              column={column}
+              count={tasks.length}
+              dragAttributes={attributes}
+              dragListeners={listeners}
+              onCollapse={onToggleCollapse}
+              onEdit={onEdit}
+              onColdStorage={onColdStorage}
+            />
+          )}
 
-          <ColumnCards
-            column={column}
-            tasks={shown}
-            dropId={dropId}
-            collapsedOutcomes={collapsedOutcomes}
-            onToggleOutcome={onToggleOutcome}
-          />
+          {part === 'head' ? null : (
+            <ColumnCards
+              column={column}
+              tasks={shown}
+              dropId={dropId}
+              collapsedOutcomes={collapsedOutcomes}
+              onToggleOutcome={onToggleOutcome}
+            />
+          )}
 
-          {more ? (
+          {part !== 'cards' && more ? (
             <button
               type="button"
               className={styles.loadMore}
@@ -205,7 +243,7 @@ export function Column({
               with nothing on hold has nothing to say here, and a row of "0 on
               hold" down an untroubled board is noise on every column at
               once. */}
-          {onHold.length > 0 ? (
+          {part !== 'head' && onHold.length > 0 ? (
             <HoldFoot
               columnName={column.name}
               held={onHold.length}
@@ -214,7 +252,7 @@ export function Column({
             />
           ) : null}
 
-          {isFirst && onAddTask ? (
+          {isFirst && part === 'all' && onAddTask ? (
             <button className={styles.addTask} onClick={onAddTask}>
               + Add a task
             </button>

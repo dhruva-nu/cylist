@@ -12,11 +12,6 @@
  * columns and cards, the toolbar, the drag and drop, and the arithmetic of
  * which cards are drawn where.
  *
- * A board per template: each of the project's templates is a board of its own,
- * its stages the columns, and cards with no template sit on General with the
- * project's own columns. The dial at the board's left edge switches between
- * them — see `board/boards.ts` and `board/BoardDial.tsx`.
- *
  * Dragging is not only a pointer gesture. A focused card is picked up with
  * space and walked between columns with the arrow keys, which is the same
  * operation through the same code path — see `board/keyboardDrag.ts`.
@@ -33,15 +28,7 @@ import { EmptyState, ErrorNotice, useAnnouncer } from '../components/ui'
 import { readStored, writeStored } from '../storage'
 import { anyAgentCounted } from './agentState'
 import { hidesHold } from './boardHiding'
-import { BoardDial, type DialBoard } from './board/BoardDial'
-import { BoardGrid, type SharedColumnProps } from './board/BoardGrid'
-import {
-  boardsFor,
-  cardsOnBoard,
-  pickBoard,
-  rememberedBoardKey,
-  summariseBoard,
-} from './board/boards'
+import { BoardGrid, type LanesLayout, type SharedColumnProps } from './board/BoardGrid'
 import { peopleFromSearch, rememberedPeopleKey, searchFromPeople } from './board/boardPeople'
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
 import { CardActionsContext, type CardActions } from './board/cardActions'
@@ -49,7 +36,7 @@ import { ColdStorageDialog } from './board/ColdStorageDialog'
 import type { ColumnMore } from './board/Column'
 import { ColumnDialog } from './board/ColumnDialog'
 import { SCREEN_READER_INSTRUCTIONS } from './board/keyboardDrag'
-import { narrowBoard, tasksByColumn } from './board/narrowBoard'
+import { lanesFor, narrowBoard, tasksByColumn, type Lane } from './board/narrowBoard'
 import { NobodysCards } from './board/PeopleFilter'
 import { ReopenDialog } from './board/ReopenDialog'
 import { LiftedTaskCard } from './board/TaskCard'
@@ -62,16 +49,14 @@ import { usePermissions } from './usePermissions'
 
 export function ProjectBoard() {
   const { projectKey } = useParams({ from: '/p/$projectKey/board' })
-  const { q: initialQuery = '', who, board: boardKey } = useSearch({ from: '/p/$projectKey/board' })
+  const { q: initialQuery = '', who } = useSearch({ from: '/p/$projectKey/board' })
   const { board, tasks, members, templates, goals, live } = useBoardData(projectKey)
   // Already in hand: the sign-in gate does not draw a page until it is.
   const identity = useIdentity()
 
   // The members too, this time: without them the board cannot tell whether
-  // to open on you, and guessing either way redraws it a moment later. And
-  // the templates, which say which board this is: without them every card
-  // would sit on General until they landed.
-  if (board.isPending || tasks.isPending || members.isPending || templates.isPending) {
+  // to open on you, and guessing either way redraws it a moment later.
+  if (board.isPending || tasks.isPending || members.isPending) {
     return <EmptyState>Loading the board…</EmptyState>
   }
   if (board.error || tasks.error) return <ErrorNotice error={board.error ?? tasks.error} />
@@ -84,7 +69,6 @@ export function ProjectBoard() {
       projectKey={projectKey}
       initialQuery={initialQuery}
       who={who}
-      boardKey={boardKey}
       meId={identity.data?.person?.id ?? null}
       board={board.data}
       tasks={tasks.data.tasks}
@@ -92,6 +76,7 @@ export function ProjectBoard() {
       members={members.data?.members ?? EMPTY}
       templates={templates.data ?? EMPTY}
       goals={goals.data ?? EMPTY}
+      goalsLoaded={!goals.isPending}
       live={live}
     />
   )
@@ -106,7 +91,7 @@ const EMPTY: never[] = []
 /** Which dialog, if any, is open over the board. One at a time, never stacked. */
 type BoardDialog =
   | { kind: 'task'; taskId: string }
-  | { kind: 'newTask' }
+  | { kind: 'newTask'; goalId: string | null }
   | { kind: 'newSubtask'; parentRef: string }
   | { kind: 'column'; column: BoardColumn | null }
   | { kind: 'templates' }
@@ -116,7 +101,6 @@ function LoadedBoard({
   projectKey,
   initialQuery,
   who,
-  boardKey,
   meId,
   board,
   tasks,
@@ -124,6 +108,7 @@ function LoadedBoard({
   members,
   templates,
   goals,
+  goalsLoaded,
   live,
 }: {
   projectKey: string
@@ -135,8 +120,6 @@ function LoadedBoard({
   initialQuery: string
   /** `?who=`, whose cards the board shows — see `peopleFromSearch`. */
   who: string | undefined
-  /** `?board=`, which template's board — see `board/boards.ts`. */
-  boardKey: string | undefined
   /** The person signed in, where the session is one. */
   meId: string | null
   board: Board
@@ -147,6 +130,7 @@ function LoadedBoard({
   members: Person[]
   templates: Template[]
   goals: Goal[]
+  goalsLoaded: boolean
   /** Whether the board's socket is up — see `useBoardMutations`. */
   live: boolean
 }) {
@@ -155,6 +139,7 @@ function LoadedBoard({
   const view = useBoardView(projectKey)
   const { refresh, moveTask, moveSubStatus, setAssignee, reorderColumns } = useBoardMutations(
     projectKey,
+    goals,
     members,
     live,
   )
@@ -201,60 +186,24 @@ function LoadedBoard({
     }
     setChosen((current) => ({ ...current, ...rest }))
   }
-
-  /**
-   * Which template's board this is (`?board=`), and what is on it.
-   *
-   * The address first, so a link opens the board it names; then the board
-   * last opened on this project; then General. Like the people filter, a
-   * board picked here is remembered and replaces the address rather than
-   * pushing it, so Back leaves the board instead of walking through every
-   * board the dial turned past.
-   */
-  const boards = boardsFor(templates, board.columns)
-  const rememberedBoard = readStored(rememberedBoardKey(projectKey))
-  const current = pickBoard(boards, boardKey, rememberedBoard)
-  function pickTemplateBoard(key: string) {
-    writeStored(rememberedBoardKey(projectKey), key)
-    void navigate({ search: (search) => ({ ...search, board: key }), replace: true })
-  }
-  const boardTasks = cardsOnBoard(tasks, current, boards)
-  const dialBoards: DialBoard[] = boards.map((one) => ({
-    key: one.key,
-    name: one.name,
-    summary: summariseBoard(one, one === current ? boardTasks : cardsOnBoard(tasks, one, boards)),
-  }))
-
   // A chip pressed when the last agent on the board stops has nothing left to
   // narrow to, and the chips themselves go (CYLIST-97) — so the board lets go
   // of it rather than sitting empty under a filter nobody can see to release.
   // Settled during render, React's own pattern for state that follows props.
-  if (chosen.agent !== 'all' && !anyAgentCounted(boardTasks)) {
+  if (chosen.agent !== 'all' && !anyAgentCounted(tasks)) {
     setChosen((current) => ({ ...current, agent: 'all' }))
   }
 
-  /**
-   * This board's columns. `board.columns` stays every column the project has,
-   * for whatever rewrites them or names them — the menu, the dialogs, the
-   * search box's `col:` tag.
-   */
-  const columns = current.columns
-  const firstColumn = columns[0] ?? board.columns[0]
-  const doneColumn = board.columns.at(-1)
+  const columns = board.columns
+  const firstColumn = columns[0]
+  const doneColumn = columns.at(-1)
 
   const { visibleTasks, cancelledCount, hidingCancelled, parsed, agentTally, peopleTally } =
-    narrowBoard(
-      boardTasks,
-      { ...filters, showCancelled: view.showCancelled },
-      board.columns,
-      members,
-    )
+    narrowBoard(tasks, { ...filters, showCancelled: view.showCancelled }, columns, members)
   const byColumn = tasksByColumn(columns, visibleTasks)
 
   const drag = useBoardDrag({
-    // Every column, not this board's: a column dragged along the row is put
-    // back among all of the project's, which is the order the server keeps.
-    columns: board.columns,
+    columns,
     tasks,
     byColumn,
     templates,
@@ -278,6 +227,18 @@ function LoadedBoard({
     [projectKey, members, mutateSubStatus, mutateAssignee],
   )
 
+  /**
+   * Whether to draw the lanes yet.
+   *
+   * Not until the goals are in: every card would fall into the "No goal" lane
+   * for as long as the request took, and the board would visibly re-sort
+   * itself the moment it landed.
+   */
+  const inLanes = view.lanesOn && goalsLoaded
+  const lanes = lanesFor(goals, visibleTasks)
+  /** One gesture for the whole board: everything away, or everything back. */
+  const everyLaneFolded =
+    lanes.length > 0 && lanes.every((lane) => view.foldedLanes.includes(lane.key))
   const mayWriteCards = may('tasks')
 
   function toggleColumn(column: BoardColumn) {
@@ -289,6 +250,17 @@ function LoadedBoard({
     )
   }
 
+  function toggleLane(lane: Lane) {
+    const name = lane.goal?.name ?? 'No goal'
+    view.toggleLane(lane.key)
+    announce(view.foldedLanes.includes(lane.key) ? `${name} expanded.` : `${name} folded away.`)
+  }
+
+  function toggleEveryLane() {
+    view.setFoldedLanes(everyLaneFolded ? [] : lanes.map((lane) => lane.key))
+    announce(everyLaneFolded ? 'Every lane expanded.' : 'Every lane folded away.')
+  }
+
   const columnProps = (column: BoardColumn): SharedColumnProps => ({
     column,
     isFirst: column.id === firstColumn?.id,
@@ -297,7 +269,7 @@ function LoadedBoard({
     forbidden: drag.forbiddenColumns.has(column.id),
     onToggleCollapse: () => toggleColumn(column),
     onToggleOutcome: view.toggleOutcome,
-    onAddTask: mayWriteCards ? () => setDialog({ kind: 'newTask' }) : null,
+    onAddTask: mayWriteCards ? () => setDialog({ kind: 'newTask', goalId: null }) : null,
     onEdit: () => setDialog({ kind: 'column', column }),
     onColdStorage: column.id === doneColumn?.id ? () => setDialog({ kind: 'coldStorage' }) : null,
     // Settled per column, out of the column's own answer and the board's: see
@@ -326,11 +298,23 @@ function LoadedBoard({
     }
   }
 
+  const lanesLayout: LanesLayout | null = inLanes
+    ? {
+        lanes,
+        folded: view.foldedLanes,
+        projectKey,
+        onToggleFold: toggleLane,
+        onAddTask: mayWriteCards
+          ? (lane) => setDialog({ kind: 'newTask', goalId: lane.goal?.id ?? null })
+          : null,
+      }
+    : null
+
   const closeDialog = () => setDialog(null)
   /** What every task dialog the board opens is handed, whichever card it is for. */
   const taskDialogProps = {
     projectKey,
-    columns: board.columns,
+    columns,
     templates,
     goals,
     announce,
@@ -352,8 +336,7 @@ function LoadedBoard({
         members={members}
         goals={goals}
         meId={meId}
-        tasks={boardTasks}
-        boardName={boards.length > 1 ? current.name : null}
+        tasks={tasks}
         filters={filters}
         onFiltersChange={setFilters}
         showCancelled={view.showCancelled}
@@ -362,6 +345,9 @@ function LoadedBoard({
         hidingCancelled={hidingCancelled}
         agentTally={agentTally}
         peopleTally={peopleTally}
+        lanesOn={view.lanesOn}
+        onLanesOn={view.setLanesOn}
+        foldAll={inLanes ? { everyLaneFolded, onToggle: toggleEveryLane } : null}
         shaping={
           may('board')
             ? {
@@ -375,7 +361,7 @@ function LoadedBoard({
 
       <NobodysCards
         people={filters.people}
-        tasks={boardTasks}
+        tasks={tasks}
         members={members}
         meId={meId}
         onEveryone={() => setFilters({ people: [] })}
@@ -409,18 +395,7 @@ function LoadedBoard({
               columns={columns}
               byColumn={byColumn}
               columnProps={columnProps}
-              dial={
-                // Only once there is somewhere to switch to: a project with no
-                // templates has General alone, and a dial of one is a control
-                // about nothing.
-                boards.length > 1 ? (
-                  <BoardDial
-                    boards={dialBoards}
-                    selectedKey={current.key}
-                    onSelect={pickTemplateBoard}
-                  />
-                ) : null
-              }
+              lanes={lanesLayout}
             />
 
             {/* Outside the board, so the board's own overflow has nothing to
@@ -444,7 +419,7 @@ function LoadedBoard({
         <ColumnDialog
           projectKey={projectKey}
           column={dialog.column}
-          canDelete={board.columns.length > board.min_columns}
+          canDelete={columns.length > board.min_columns}
           isLast={dialog.column !== null && dialog.column.id === doneColumn?.id}
           maxOutcomes={board.max_outcomes}
           announce={announce}
@@ -475,7 +450,7 @@ function LoadedBoard({
       {dialog?.kind === 'templates' ? (
         <TemplateDialog
           projectKey={projectKey}
-          columns={board.columns}
+          columns={columns}
           announce={announce}
           onDone={refresh}
           onClose={closeDialog}
@@ -490,7 +465,7 @@ function LoadedBoard({
           {...taskDialogProps}
           taskId={null}
           firstColumn={firstColumn}
-          defaultTemplateId={current.template?.id ?? null}
+          defaultGoalId={dialog.goalId}
         />
       ) : null}
 

@@ -51,7 +51,7 @@ export function TaskForm({
   firstColumn,
   templates,
   goals,
-  defaultTemplateId,
+  defaultGoalId,
   task,
   members,
   files,
@@ -78,7 +78,7 @@ export function TaskForm({
   const identity = useIdentity()
   const deleting = useCommentDeleting({ projectKey, announce, onDone })
   const [form, setForm] = useState<TaskInput>(() =>
-    initialFormFields(task, members, identity.data, defaultTemplateId),
+    initialFormFields(task, members, identity.data, defaultGoalId),
   )
   /**
    * Which stage the card is on. Held apart from `form` because creating a card
@@ -271,7 +271,7 @@ export function TaskForm({
             files={files}
             templates={templates}
             columns={columns}
-            goals={pickableGoals(goals, task?.goal_id ?? null)}
+            goals={pickableGoals(goals, task?.goal_id ?? defaultGoalId ?? null)}
             offerGoal={onBoard}
           />
         </TabPanel>

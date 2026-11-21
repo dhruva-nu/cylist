@@ -2,19 +2,30 @@
  * The ids the board's drag and drop speaks in.
  *
  * dnd-kit knows a drop target and a draggable by one string each, so whatever
- * a drop has to tell the board — which column, which section of a divided
- * column, whether it was a column or a card being carried — is spelled
+ * a drop has to tell the board — which column, which lane, which section of a
+ * divided column, whether it was a column or a card being carried — is spelled
  * into that string. Every id is built and read here, so the spelling is one
  * thing rather than a convention kept in step across a dozen components.
  *
  * A drop target's id is its column, prefixed by whatever else narrows it: the
- * section of the column it is. Every part but the last one qualifies, and the
- * column is always the last.
+ * lane it is in, the section of the column it is. Every part but the last one
+ * qualifies, and the column is always the last — which is what lets the two
+ * qualifiers be read independently of each other and of how many there are.
  */
 
 import type { UniqueIdentifier } from '@dnd-kit/core'
 
+/**
+ * The lane a card is in, as a string a drop target can be named after.
+ *
+ * A card on no goal is in a lane too — the one everything unclassified falls
+ * into — so the absence needs a name of its own rather than a null that
+ * cannot be part of an id.
+ */
+export const NO_GOAL_LANE = 'none'
+
 const PART_SEPARATOR = '::'
+const LANE_PREFIX = 'lane:'
 const OUTCOME_PREFIX = 'out:'
 
 /**
@@ -23,7 +34,17 @@ const OUTCOME_PREFIX = 'out:'
  */
 const COLUMN_DRAG_PREFIX = 'column:'
 
-/** One section of a divided column, built on the drop id of the column it is in. */
+/** The lane a card belongs to, by its goal. */
+export function laneKeyOfTask(task: { goal_id: string | null }): string {
+  return task.goal_id ?? NO_GOAL_LANE
+}
+
+/** One lane's cell in a column: the lane says which goal, the column which column. */
+export function laneCellDropId(laneKey: string, columnId: string): string {
+  return `${LANE_PREFIX}${laneKey}${PART_SEPARATOR}${columnId}`
+}
+
+/** One section of a divided column, built on the drop id of the column (or cell) it is in. */
 export function outcomeDropId(index: number, columnDropId: string): string {
   return `${OUTCOME_PREFIX}${index}${PART_SEPARATOR}${columnDropId}`
 }
@@ -39,6 +60,13 @@ export function outcomeIndexOf(over: string): number | null {
   if (marked === undefined) return null
   const index = Number(marked.slice(OUTCOME_PREFIX.length))
   return Number.isInteger(index) ? index : null
+}
+
+/** The lane a drop target belongs to, or null when it is not in a lane. */
+export function laneKeyOf(over: string): string | null {
+  if (!over.startsWith(LANE_PREFIX)) return null
+  const separator = over.indexOf(PART_SEPARATOR)
+  return separator === -1 ? null : over.slice(LANE_PREFIX.length, separator)
 }
 
 /** The id a column's drag handle is given. */

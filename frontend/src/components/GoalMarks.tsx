@@ -2,9 +2,9 @@
  * The small drawn pieces of a goal: its colour, its progress, its date.
  *
  * They live together because they appear apart — on the goals page, on a
- * goal's own page and in the card dialog's picker — and a goal that reads as
- * three different things in three places is three things to learn instead of
- * one.
+ * goal's own page, in the card dialog's picker and in the board's lane
+ * headings — and a goal that reads as four different things in four places is
+ * four things to learn instead of one.
  */
 
 import type { ReactNode } from 'react'
@@ -21,7 +21,7 @@ export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
 
 /**
  * How a goal ended, drawn where the goal is named: the goals page, the goal's
- * own page.
+ * own page, and the lane heading on a board split by goal.
  *
  * Nothing at all for an open goal. Open is what a goal is nearly always, and a
  * badge on every one of them would be a word repeated down the page that only
