@@ -13,8 +13,10 @@ outbox exists: a session collects the news it wants told, and
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends, Request
@@ -27,6 +29,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import AsyncAdaptedQueuePool, ConnectionPoolEntry, QueuePool
 
 from app.config import Settings
 from app.core.errors import AppError
@@ -98,6 +101,72 @@ async def lock_row(session: AsyncSession, model: type[UUIDPrimaryKeyMixin], row_
     await session.execute(select(model.id).where(model.id == row_id).with_for_update())
 
 
+class PoolWaits:
+    """How long requests have stood in line for a connection, and how many
+    are standing there now. Kept by :class:`_MeasuredPool`, read by
+    :meth:`Database.pool_status` for ``/metrics``."""
+
+    def __init__(self) -> None:
+        self.waiting = 0
+        self.count = 0
+        self.seconds = 0.0
+
+
+class _MeasuredPool(AsyncAdaptedQueuePool):
+    """The pool ``create_async_engine`` builds anyway, timing each checkout.
+
+    ``_do_get`` is the method a pool implements to hand out a connection, and
+    the one that blocks when the pool is exhausted, so the time spent in it is
+    the wait — plus opening a connection, when one has to be opened. A full
+    pool shows up here as seconds well before it shows up as the checkout
+    timeout's 500s (CYLIST-131).
+    """
+
+    _sqla_logger_namespace = "sqlalchemy.pool.impl.AsyncAdaptedQueuePool"
+    """Log as the pool this stands in for, so SQLAlchemy's logging settings
+    still apply to it rather than the app's."""
+
+    waits: PoolWaits
+    """Set by :class:`Database` as soon as the engine exists, and carried to
+    the pool that replaces this one on :meth:`recreate`."""
+
+    def _do_get(self) -> ConnectionPoolEntry:
+        waits = self.waits
+        waits.waiting += 1
+        started = time.perf_counter()
+        try:
+            return super()._do_get()
+        finally:
+            waits.waiting -= 1
+            waits.count += 1
+            waits.seconds += time.perf_counter() - started
+
+    def recreate(self) -> QueuePool:
+        # What `dispose` swaps in. The same class, so the same measuring; the
+        # counts carry on rather than restart, as a counter's should.
+        pool = super().recreate()
+        assert isinstance(pool, _MeasuredPool)
+        pool.waits = self.waits
+        return pool
+
+
+@dataclass(frozen=True)
+class PoolStatus:
+    """The pool at one moment, for ``/metrics``."""
+
+    size: int
+    """Connections kept open, at most: ``CYLIST_DATABASE_POOL_SIZE``."""
+    max_overflow: int
+    """Connections lent beyond :attr:`size` under load, at most."""
+    in_use: int
+    """Connections checked out right now, overflow included."""
+    waiting: int
+    """Checkouts blocked on a connection right now."""
+    waits: int
+    wait_seconds: float
+    """Every checkout since the pool was built, and the time they took."""
+
+
 class Database:
     """Owns the connection pool for the lifetime of the application."""
 
@@ -118,12 +187,16 @@ class Database:
             pool_size=pool_size,
             max_overflow=max_overflow,
             pool_timeout=pool_timeout,
+            poolclass=_MeasuredPool,
             # Set on the connection as it opens, so it holds for every
             # statement on it without a round trip per transaction.
             connect_args={
                 "server_settings": {"statement_timeout": str(round(statement_timeout * 1000))}
             },
         )
+        self._waits = PoolWaits()
+        self._pool().waits = self._waits
+        self._max_overflow = max_overflow
         self._session_factory = async_sessionmaker(
             self._engine,
             expire_on_commit=False,  # attributes stay readable after commit
@@ -150,6 +223,23 @@ class Database:
     @property
     def engine(self) -> AsyncEngine:
         return self._engine
+
+    def _pool(self) -> _MeasuredPool:
+        pool = self._engine.sync_engine.pool
+        assert isinstance(pool, _MeasuredPool)
+        return pool
+
+    def pool_status(self) -> PoolStatus:
+        """How full the pool is, read on demand — cheap, and no I/O."""
+        pool = self._pool()
+        return PoolStatus(
+            size=pool.size(),
+            max_overflow=self._max_overflow,
+            in_use=pool.checkedout(),
+            waiting=self._waits.waiting,
+            waits=self._waits.count,
+            wait_seconds=self._waits.seconds,
+        )
 
     def publish_to(self, publish: Callable[[Event], None] | None) -> None:
         """Send committed events here from now on.

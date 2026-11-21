@@ -322,6 +322,22 @@ class Settings(BaseSettings):
     logs it was meant to prevent.
     """
 
+    # --- Metrics ----------------------------------------------------------
+    # Prometheus's view of the process — see app/core/prometheus.py. Served on
+    # a listener of its own, never on the app's port: whatever publishes the
+    # app to the internet publishes that port and nothing else.
+    metrics_enabled: bool = False
+    """Whether to count for Prometheus and serve ``/metrics``. Off, the
+    process neither counts nor opens the port."""
+
+    metrics_host: str = "0.0.0.0"  # noqa: S104 - a scraper in another container has to reach it
+    """Where the metrics listener binds. Every interface, because Prometheus
+    scrapes from outside the container; what keeps it off the internet is that
+    nothing publishes this port, not the address it binds."""
+
+    metrics_port: int = Field(default=9090, ge=0, le=65535)
+    """The metrics listener's port. Zero takes any free one, for tests."""
+
     # --- Tracing ----------------------------------------------------------
     # OpenTelemetry traces of requests, their statements and outbound hooks.
     # See app/core/tracing.py.

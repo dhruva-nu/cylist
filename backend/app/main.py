@@ -14,7 +14,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+    suppress,
+)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,14 +31,22 @@ from app.config import (
 )
 from app.core.base_path import BasePathMiddleware
 from app.core.body_limit import BodyLimitMiddleware
+from app.core.clock import epoch
 from app.core.crypto import configured_cipher
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
+from app.core.prometheus import (
+    METRICS_PATH,
+    Prometheus,
+    PrometheusMiddleware,
+    Sources,
+    serving,
+)
 from app.core.request_log import RequestLogMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.tracing import Tracing, describe_tracing
-from app.db import Database
+from app.db import Database, PoolStatus
 from app.mcp import mount_mcp
 from app.realtime import doorbell
 from app.realtime.bus import Bus
@@ -124,9 +137,21 @@ def build_lifespan(settings: Settings, tracing: Tracing | None = None) -> Lifesp
         # The only thing that deletes uploaded bytes — see blobs.sweep.
         sweeper = asyncio.create_task(_sweep_blobs_forever(app), name="cylist-blob-sweeper")
         try:
-            # The MCP tools at /mcp answer nothing until their session
-            # managers are running, and those live for exactly this long.
-            async with app.state.mcp.run():
+            async with AsyncExitStack() as running:
+                # The MCP tools at /mcp answer nothing until their session
+                # managers are running, and those live for exactly this long.
+                await running.enter_async_context(app.state.mcp.run())
+                # /metrics, on its own port and only if asked for — see
+                # app/core/prometheus.py. Never on the port this app serves.
+                prometheus: Prometheus | None = app.state.prometheus
+                if prometheus is not None:
+                    port = await running.enter_async_context(
+                        serving(prometheus, host=settings.metrics_host, port=settings.metrics_port)
+                    )
+                    logger.info(
+                        "Serving metrics",
+                        extra={"context": {"host": settings.metrics_host, "port": port}},
+                    )
                 yield
         finally:
             for task in (reaper, courier, sweeper, pusher, bus):
@@ -206,6 +231,11 @@ async def _reap_forever(app: FastAPI) -> None:
                 # Questions and permissions whose time ran out with nobody
                 # looking, and questions whose tool is no longer polling.
                 await agent_prompts.sweep(session)
+            # After a pass that did the work, not one that found the lease
+            # taken: the timestamp is for noticing that reaping has stopped.
+            prometheus: Prometheus | None = app.state.prometheus
+            if prometheus is not None:
+                prometheus.reaper_last_run.set(epoch())
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -322,6 +352,15 @@ def create_app(settings: Settings | None = None, *, tracing: Tracing | None = No
     )
     app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)
 
+    # Prometheus's counts, when they are asked for (CYLIST-195); None, and no
+    # middleware at all, when they are not. Beside the dashboard's counters
+    # and for the same reason, and handed the route list for the body limit's.
+    app.state.prometheus = _prometheus(app) if settings.metrics_enabled else None
+    if app.state.prometheus is not None:
+        app.add_middleware(
+            PrometheusMiddleware, prometheus=app.state.prometheus, routes=app.router.routes
+        )
+
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -367,13 +406,39 @@ def create_app(settings: Settings | None = None, *, tracing: Tracing | None = No
     # Last, because it claims "/": in the production image the built SPA is
     # served from this same process, and in development there is nothing to
     # serve and this does nothing.
-    mount_spa(app, settings.web_dir, reserved=API_PREFIX, base_path=settings.base_path)
+    # /metrics is reserved with the API: it is served on its own port, and
+    # here a 404 says so where index.html would have said 200.
+    mount_spa(
+        app,
+        settings.web_dir,
+        reserved=(API_PREFIX, METRICS_PATH),
+        base_path=settings.base_path,
+    )
 
     # Wraps the stack as it is built on the first request, outside every
     # middleware above, so where it is called among them does not matter.
     if tracing is not None:
         tracing.instrument_app(app)
     return app
+
+
+def _prometheus(app: FastAPI) -> Prometheus:
+    """The app's metrics, reading what they report from ``app.state`` when
+    scraped — so they follow whatever the lifespan, or a test, puts there."""
+
+    def pool() -> PoolStatus | None:
+        database: Database | None = getattr(app.state, "database", None)
+        return None if database is None else database.pool_status()
+
+    return Prometheus(
+        Sources(
+            counters=lambda: app.state.metrics,
+            realtime=lambda: app.state.hub.stats(),
+            pool=pool,
+            listening=lambda: app.state.bus.listening.is_set(),
+            blob_dir=lambda: app.state.settings.blob_dir,
+        )
+    )
 
 
 app = create_app()
