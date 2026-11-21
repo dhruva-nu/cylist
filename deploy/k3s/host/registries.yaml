@@ -1,0 +1,8 @@
+# Installed to /etc/rancher/k3s/registries.yaml by install.sh.
+# Images pushed by `docker push localhost:5000/...` are pulled by the cluster's
+# containerd from the in-cluster registry (platform/registry.yaml), which
+# listens on the host's loopback only.
+mirrors:
+  "localhost:5000":
+    endpoint:
+      - "http://127.0.0.1:5000"
