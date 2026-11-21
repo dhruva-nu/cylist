@@ -13,7 +13,6 @@ import {
   api,
   type Board,
   type BoardColumn,
-  type Goal,
   type Person,
   type Task,
   type TodayPlan,
@@ -42,43 +41,21 @@ export interface Move {
    */
   outcome: string | null
   outcomeIndex: number | null
-  /**
-   * The goal to put the card on, or null to take it off the one it is on.
-   * Left out entirely — as opposed to null — when the drop said nothing about
-   * a goal, which is every drop on a board that is not in lanes.
-   */
-  goalId?: string | null
 }
 
 /**
  * A card as it will look once a move has landed, so the board can draw it
  * there before the server has answered.
  */
-function withMoveApplied(
-  task: Task,
-  move: Move,
-  landedGoal: Goal | null | undefined,
-  cards: Task[],
-): Task {
-  const { columnId, position, outcome, outcomeIndex, goalId } = move
+function withMoveApplied(task: Task, move: Move, cards: Task[]): Task {
+  const { columnId, position, outcome, outcomeIndex } = move
+  if (!columnId) return task
   return {
     ...task,
-    ...(columnId
-      ? {
-          column_id: columnId,
-          position: sortKeyAt(cards, columnId, position, task.id),
-          outcome,
-          outcome_index: outcomeIndex,
-        }
-      : {}),
-    ...(goalId === undefined
-      ? {}
-      : {
-          goal_id: goalId,
-          goal_name: landedGoal?.name ?? null,
-          goal_colour: landedGoal?.colour ?? null,
-          goal_reference: landedGoal?.reference ?? null,
-        }),
+    column_id: columnId,
+    position: sortKeyAt(cards, columnId, position, task.id),
+    outcome,
+    outcome_index: outcomeIndex,
   }
 }
 
@@ -88,14 +65,13 @@ interface Snapshot<T> {
 }
 
 /**
- * `goals` and `members` are the project's lists as they currently stand, which
- * is what a card dropped into another goal's lane, or handed to someone, borrows
- * its new name and colour from while the request is in the air. `live` is
- * whether the board's socket is up, which decides who refetches the cards.
+ * `members` is the project's list as it currently stands, which is what a card
+ * handed to someone borrows its new name and colour from while the request is
+ * in the air. `live` is whether the board's socket is up, which decides who
+ * refetches the cards.
  */
 export function useBoardMutations(
   projectKey: string,
-  goals: Goal[] | undefined,
   members: Person[] | undefined,
   live: boolean,
 ) {
@@ -129,10 +105,10 @@ export function useBoardMutations(
    * either. After a refusal it is `refresh` instead: the cards were put back
    * from a snapshot, and the server, having changed nothing, sends no word.
    */
-  async function refreshCard(taskId: string, goalChanged = false) {
+  async function refreshCard(taskId: string) {
     const keys: QueryKey[] = live ? [] : [tasksKey, queryKeys.allTasks]
     const card = queryClient.getQueryData<BoardCards>(tasksKey)?.tasks.find((t) => t.id === taskId)
-    if (goalChanged || card?.goal_id) keys.push(queryKeys.goals(projectKey), queryKeys.allGoals)
+    if (card?.goal_id) keys.push(queryKeys.goals(projectKey), queryKeys.allGoals)
     const planned = queryClient
       .getQueriesData<TodayPlan>({ queryKey: queryKeys.todayPlans(projectKey) })
       .some(([, plan]) => plan?.picks.some((pick) => pick.task.id === taskId))
@@ -161,41 +137,18 @@ export function useBoardMutations(
     queryClient.setQueryData(tasksKey, snapshot?.previous)
   }
 
-  /**
-   * Where a dropped card lands: a column, and — when the board is in lanes —
-   * the goal of the lane it was dropped into.
-   *
-   * One mutation rather than two because it is one gesture. Dragging a card
-   * across into another goal's lane is how a card is put on a goal without
-   * opening it, and a version of that which moved the card first and linked it
-   * a moment later would show the reader two things happening where they did
-   * one.
-   */
+  /** Where a dropped card lands: a column, and the section of it where it is divided. */
   const moveTask = useMutation<Task | null, Error, Move, Snapshot<BoardCards>>({
-    mutationFn: async ({ taskId, taskRef, columnId, position, outcome, goalId }) => {
-      const moved = columnId ? await api.moveTask(taskId, columnId, position, outcome) : null
-      // By reference rather than by id for the same reason the dialog does:
-      // it is what the error message will name if the server refuses.
-      return goalId === undefined ? moved : api.updateTask(taskRef, { goal_id: goalId })
-    },
+    mutationFn: async ({ taskId, columnId, position, outcome }) =>
+      columnId ? await api.moveTask(taskId, columnId, position, outcome) : null,
     onMutate: (move) => {
-      const landedGoal =
-        move.goalId === undefined ? null : (goals ?? []).find((goal) => goal.id === move.goalId)
       const cards = queryClient.getQueryData<BoardCards>(tasksKey)?.tasks ?? []
       return changeCardsOptimistically((task) =>
-        task.id === move.taskId ? withMoveApplied(task, move, landedGoal, cards) : task,
+        task.id === move.taskId ? withMoveApplied(task, move, cards) : task,
       )
     },
     onError: (_error, _move, snapshot) => restoreCards(snapshot),
-    // The goal it left, as well as the one it is on now.
-    onSettled: (_moved, error, move, snapshot) =>
-      error
-        ? refresh()
-        : refreshCard(
-            move.taskId,
-            move.goalId !== undefined ||
-              Boolean(snapshot?.previous?.tasks.find((t) => t.id === move.taskId)?.goal_id),
-          ),
+    onSettled: (_moved, error, move) => (error ? refresh() : refreshCard(move.taskId)),
     meta: refreshesItself,
   })
 

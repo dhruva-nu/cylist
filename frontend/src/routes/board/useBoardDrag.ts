@@ -1,5 +1,5 @@
 /**
- * Dragging on the board: a card into a column, a lane or a section of one, and
+ * Dragging on the board: a card into a column or a section of one, and
  * a column's handle along the row.
  *
  * A card created from a template goes only where that template allows. While
@@ -21,15 +21,7 @@ import {
 } from '@dnd-kit/core'
 import { useState } from 'react'
 import type { BoardColumn, Task, Template } from '../../api/client'
-import {
-  columnIdFromDrag,
-  columnIdOf,
-  isColumnDrag,
-  laneKeyOf,
-  laneKeyOfTask,
-  NO_GOAL_LANE,
-  outcomeIndexOf,
-} from './dropTargets'
+import { columnIdFromDrag, columnIdOf, isColumnDrag, outcomeIndexOf } from './dropTargets'
 import { DRAG_KEYS, moveByColumn } from './keyboardDrag'
 import { forbiddenColumnsFor } from './narrowBoard'
 import type { Reopening } from './ReopenDialog'
@@ -90,8 +82,8 @@ export function useBoardDrag({
 
   const nameOfColumnId = (id: string) => columnById(id)?.name ?? 'the column'
   const nameOfTarget = (id: UniqueIdentifier | undefined) =>
-    // Through `columnIdOf`, because in lanes the target is a lane's cell in a
-    // column rather than the column itself — and "over lane:…::uuid" is not a
+    // Through `columnIdOf`, because the target may be a section of a column
+    // rather than the column itself — and "over out:0::uuid" is not a
     // sentence anybody wants read to them.
     typeof id === 'string' ? nameOfColumnId(columnIdOf(id)) : 'nowhere'
   const nameOfDragged = (id: UniqueIdentifier) =>
@@ -133,7 +125,7 @@ export function useBoardDrag({
   /** A column's handle let go over another column: the board is reordered. */
   function dropColumn(columnId: string, overId: string) {
     const fromIndex = columns.findIndex((column) => column.id === columnId)
-    // Every drop target names a column; in lanes it names the lane as well.
+    // Every drop target names a column, and a section's names the section too.
     const toIndex = columns.findIndex((column) => column.id === columnIdOf(overId))
     if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
 
@@ -145,12 +137,12 @@ export function useBoardDrag({
     announce(`${moved.name} moved ${toIndex < fromIndex ? 'left' : 'right'}.`)
   }
 
-  /** A card let go over a drop target: a move, a change of goal, both, or nothing. */
+  /** A card let go over a drop target: a move, a change of outcome, or nothing. */
   function dropCard(taskId: UniqueIdentifier, overId: string) {
     const task = taskById(taskId)
     if (!task) return
 
-    // Every drop target names a column; in lanes it names the lane as well.
+    // Every drop target names a column, and a section's names the section too.
     const droppedIn = columnIdOf(overId)
 
     // Refused here as well as by the server: a card that snaps back with an
@@ -161,8 +153,6 @@ export function useBoardDrag({
     // talking over the other.
     if (forbiddenFor(task).has(droppedIn)) return
 
-    const lane = laneKeyOf(overId)
-    const changingGoal = lane !== null && lane !== laneKeyOfTask(task)
     const changingColumn = task.column_id !== droppedIn
     // The section of a divided column the card was dropped on. A card put in a
     // different section of the column it is already in has not moved by the
@@ -170,9 +160,8 @@ export function useBoardDrag({
     // change worth making, so it counts here the way a column does.
     const landedOn = outcomeIndexOf(overId)
     const changingOutcome = landedOn !== null && landedOn !== task.outcome_index
-    // A card put back where it came from is not a move, and a lane it was
-    // already in is not a change of goal: neither is worth a request.
-    if (!changingColumn && !changingGoal && !changingOutcome) return
+    // A card put back where it came from is not a move, and not worth a request.
+    if (!changingColumn && !changingOutcome) return
 
     const move: Move = {
       taskId: task.id,
@@ -183,7 +172,6 @@ export function useBoardDrag({
       position: byColumn.get(droppedIn)?.length ?? 0,
       outcomeIndex: landedOn,
       outcome: landedOn === null ? null : (columnById(droppedIn)?.outcomes[landedOn] ?? null),
-      ...(changingGoal ? { goalId: lane === NO_GOAL_LANE ? null : lane } : {}),
     }
 
     if (changingColumn && doneColumn && task.column_id === doneColumn.id) {
