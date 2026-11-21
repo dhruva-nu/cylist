@@ -14,7 +14,6 @@
 import type { Board, Goal, Person, Task } from '../../api/client'
 import type { AgentFilter } from '../agentState'
 import { BoardMenu } from './BoardMenu'
-import { CaretIcon, ColumnsIcon, LanesIcon } from './icons'
 import type { BoardFilters } from './narrowBoard'
 import { PeopleFilter } from './PeopleFilter'
 import { QuickFilters } from './QuickFilters'
@@ -29,6 +28,7 @@ export function BoardToolbar({
   members,
   meId,
   tasks,
+  boardName,
   goals,
   filters,
   onFiltersChange,
@@ -38,9 +38,6 @@ export function BoardToolbar({
   hidingCancelled,
   agentTally,
   peopleTally,
-  lanesOn,
-  onLanesOn,
-  foldAll,
   shaping,
 }: {
   board: Board
@@ -48,6 +45,11 @@ export function BoardToolbar({
   meId: string | null
   /** Every card on the board, unfiltered. */
   tasks: Task[]
+  /**
+   * Which template's board this is, or null on a project with only the one
+   * board. The dial at the board's edge only says so while it is open.
+   */
+  boardName: string | null
   goals: Goal[]
   filters: ChosenFilters
   onFiltersChange: (changes: Partial<ChosenFilters>) => void
@@ -57,13 +59,6 @@ export function BoardToolbar({
   hidingCancelled: boolean
   agentTally: { needsYou: number; working: number }
   peopleTally: Map<string, number>
-  lanesOn: boolean
-  onLanesOn: (on: boolean) => void
-  /**
-   * The fold-every-lane button's state and action. Null while the board is not
-   * drawn in lanes: off the lanes, it is a button about nothing.
-   */
-  foldAll: { everyLaneFolded: boolean; onToggle: () => void } | null
   /**
    * Templates and columns. Both change the shape of the board rather than what
    * is on it, which is one permission, and null where the reader lacks it —
@@ -75,7 +70,13 @@ export function BoardToolbar({
     <div className={styles.toolbar}>
       {/* Still the page's heading for whoever navigates by headings; it is
           only the eye that has the breadcrumb to read instead. */}
-      <h1 className="visually-hidden">Kanban board</h1>
+      {boardName ? (
+        // Once there are boards to choose between, which one this is has to
+        // be said where the eye starts: the breadcrumb only says "Board".
+        <h1 className={styles.boardName}>{boardName}</h1>
+      ) : (
+        <h1 className="visually-hidden">Kanban board</h1>
+      )}
       {/* Where the title used to be (CYLIST-99): whose board this is being
           read as comes before what is on it. */}
       <PeopleFilter
@@ -118,39 +119,6 @@ export function BoardToolbar({
           cancelledCount={cancelledCount}
           hiding={hidingCancelled}
         />
-        {/* Columns or lanes: the same board read by column, or split into
-            one lane per goal. Two segments rather than a button that says
-            "on" and "off", so the board says which way it is being read. */}
-        <div className={styles.segmented} role="group" aria-label="Board layout">
-          <button type="button" aria-pressed={!lanesOn} onClick={() => onLanesOn(false)}>
-            <ColumnsIcon />
-            Columns
-          </button>
-          <button
-            type="button"
-            aria-pressed={lanesOn}
-            onClick={() => onLanesOn(true)}
-            title="Split the board into one lane per goal"
-          >
-            <LanesIcon />
-            Lanes
-          </button>
-        </div>
-        {foldAll ? (
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={foldAll.onToggle}
-            aria-label={foldAll.everyLaneFolded ? 'Open every lane' : 'Fold every lane'}
-            title={
-              foldAll.everyLaneFolded
-                ? 'Open every goal back up'
-                : 'Fold every goal down to its heading'
-            }
-          >
-            <CaretIcon up={!foldAll.everyLaneFolded} />
-          </button>
-        ) : null}
         {shaping ? (
           <BoardMenu
             board={board}
