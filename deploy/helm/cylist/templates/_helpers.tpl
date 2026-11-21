@@ -14,6 +14,21 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end -}}
 
+{{/* The environment label on every pod, which telemetry is grouped by. */}}
+{{- define "cylist.environmentLabel" -}}
+{{- if not .Values.environment -}}
+{{- fail "set environment (prod, staging, dev or dev-N)" -}}
+{{- end -}}
+cylist.in/environment: {{ .Values.environment | quote }}
+{{- end -}}
+
+{{/* Whether to render the Prometheus Operator's scrape objects. */}}
+{{- define "cylist.monitoring" -}}
+{{- if and .Values.monitoring.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor") -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "cylist.selectorLabels" -}}
 app.kubernetes.io/name: cylist
 app.kubernetes.io/instance: {{ .Release.Name }}

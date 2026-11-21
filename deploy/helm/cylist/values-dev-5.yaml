@@ -1,4 +1,6 @@
 # Dev slot 5: dev5.cylist.in. Release cylist-5 in namespace cylist-dev.
+environment: dev-5
+
 app:
   host: dev5.cylist.in
   env:

@@ -1,0 +1,321 @@
+# Alert rules for the Cylist estate (CYLIST-194; 02-observability-design.md
+# §4). severity is page (interrupt now, ntfy at high priority) or ticket (next
+# working day, ntfy at low priority). Alertmanager routes every dev alert as a
+# ticket whatever it says here: dev slots exist to be broken.
+#
+# Each alert's runbook line is its `runbook` annotation. BackupNotOffBox is
+# not here: there is no off-box target (Phase 0, Q3).
+#
+# Kubernetes series carry `namespace`, not `environment`; rules over them
+# derive environment from the namespace (cylist-prod -> prod).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cylist
+  namespace: monitoring
+spec:
+  groups:
+    - name: cylist.uptime
+      rules:
+        - alert: ProdDown
+          expr: probe_success{job="probe/monitoring/uptime-prod"} == 0
+          for: 2m
+          labels: {severity: page}
+          annotations:
+            summary: "cylist.in is not answering from outside"
+            runbook: "Grafana > Estate overview. Probe fails but pod is Ready: tunnel or DNS (systemctl status cloudflared; DEPLOY.md). Pod not Ready: kubectl -n cylist-prod describe/logs deploy/cylist."
+        - alert: EnvDown
+          expr: probe_success{job=~"probe/monitoring/uptime-.*", environment!="prod"} == 0
+          for: 5m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.environment }} is not answering from outside"
+            runbook: "Same path as ProdDown, in that environment's namespace. A dev slot nobody has deployed to is expected to fail."
+        - alert: WebSocketUpgradeFailing
+          expr: probe_success{job="probe/monitoring/websocket-prod"} == 0
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "prod WebSocket upgrade is not returning 101 from outside"
+            runbook: "Boards silently fall back to polling. Check DEPLOY.md 'WebSockets through the proxy'; Traefik timeouts in deploy/k3s/host/traefik-config.yaml."
+        - alert: TLSCertExpiringSoon
+          expr: probe_ssl_earliest_cert_expiry - time() < 14 * 86400
+          for: 1h
+          labels: {severity: ticket}
+          annotations:
+            summary: "TLS certificate for {{ $labels.instance }} expires in under 14 days"
+            runbook: "Cloudflare issues the edge certificate; check SSL/TLS > Edge Certificates in the Cloudflare dashboard."
+
+    - name: cylist.edge
+      rules:
+        - alert: TunnelDegraded
+          expr: cloudflared_tunnel_ha_connections < 4
+          for: 5m
+          labels: {severity: page, environment: prod}
+          annotations:
+            summary: "cloudflared has {{ $value }} of 4 tunnel connections"
+            runbook: "journalctl -u cloudflared; healthy is four 'Registered tunnel connection' lines. sudo systemctl restart cloudflared if stuck."
+        - alert: CloudflaredMetricsMissing
+          expr: absent_over_time(up{job="cloudflared"}[5m]) or up{job="cloudflared"} == 0
+          for: 5m
+          labels: {severity: ticket}
+          annotations:
+            summary: "No cloudflared metrics: cloudflared or Alloy is down"
+            runbook: "systemctl status cloudflared; kubectl -n monitoring logs ds/alloy. The public probes say whether users are affected."
+
+    - name: cylist.app
+      rules:
+        - alert: Unhandled500s
+          expr: increase(cylist_unhandled_500_total{environment="prod"}[10m]) > 0
+          labels: {severity: page}
+          annotations:
+            summary: "prod raised {{ $value | humanize }} unhandled exceptions in 10 minutes"
+            runbook: "Grafana > Explore > Loki: {environment=\"prod\", level=\"ERROR\"}; follow trace_id to Tempo."
+        - alert: HighErrorRate
+          expr: |
+            sum by (environment) (rate(http_requests_total{status=~"5..", environment="prod"}[10m]))
+              / sum by (environment) (rate(http_requests_total{environment="prod"}[10m])) > 0.02
+          for: 10m
+          labels: {severity: page}
+          annotations:
+            summary: "prod 5xx ratio is {{ $value | humanizePercentage }}"
+            runbook: "Grafana > Environment detail (prod): errors by route, then logs and traces for that route."
+        - alert: HighErrorRateNonProd
+          expr: |
+            sum by (environment) (rate(http_requests_total{status=~"5..", environment!="prod"}[10m]))
+              / sum by (environment) (rate(http_requests_total{environment!="prod"}[10m])) > 0.02
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.environment }} 5xx ratio is {{ $value | humanizePercentage }}"
+            runbook: "Grafana > Environment detail: errors by route."
+        - alert: SlowRequests
+          expr: |
+            histogram_quantile(0.95,
+              sum by (environment, le) (rate(http_request_duration_seconds_bucket{route!~".*/ws"}[15m]))) > 1
+          for: 15m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.environment }} p95 latency is {{ $value | humanizeDuration }}"
+            runbook: "Grafana > Environment detail: p95 by route; Postgres dashboard for slow queries and locks."
+        - alert: HookDeliveriesFailing
+          expr: increase(cylist_hook_deliveries_failed_total[30m]) > 0
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.environment }}: {{ $value | humanize }} hook deliveries failed in 30 minutes"
+            runbook: "Loki: {environment=\"<env>\"} |= \"hook\"; the receiving URL is usually down."
+        - alert: AuthRefusalSpike
+          expr: |
+            sum by (environment) (rate(cylist_auth_refusals_total[10m])) > 0.1
+              and sum by (environment) (rate(cylist_auth_refusals_total[10m]))
+                > 5 * sum by (environment) (rate(cylist_auth_refusals_total[1d] offset 1d))
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.environment }} auth refusals are 5x the usual rate"
+            runbook: "Grafana > Environment detail: refusals by reason. A token rotated somewhere, or someone guessing."
+        - alert: RateLimitHits
+          expr: |
+            sum by (environment) (rate(cylist_rate_limit_hits_total[10m])) > 0.1
+              and sum by (environment) (rate(cylist_rate_limit_hits_total[10m]))
+                > 5 * sum by (environment) (rate(cylist_rate_limit_hits_total[1d] offset 1d))
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.environment }} rate-limit hits are 5x the usual rate"
+            runbook: "Grafana > Environment detail: hits by bucket; Loki for the client."
+        - alert: RealtimeGap
+          expr: |
+            max by (environment) (cylist_ws_board_watchers{environment="prod"}) == 0
+              and sum by (environment) (rate(http_requests_total{environment="prod", route=~".*/boards?.*"}[30m])) > 0
+          for: 30m
+          labels: {severity: ticket}
+          annotations:
+            summary: "prod boards are being read but no board is watched live"
+            runbook: "Boards fell back to polling: WebSocketUpgradeFailing, browser console, Traefik and Cloudflare WebSocket settings."
+
+    - name: cylist.pods
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            label_replace(
+              increase(kube_pod_container_status_restarts_total{namespace="cylist-prod"}[15m]) > 3,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          labels: {severity: page}
+          annotations:
+            summary: "{{ $labels.pod }}/{{ $labels.container }} restarted {{ $value | humanize }} times in 15 minutes"
+            runbook: "kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous"
+        - alert: PodCrashLoopingNonProd
+          expr: |
+            label_replace(
+              increase(kube_pod_container_status_restarts_total{namespace=~"cylist-(staging|dev)"}[15m]) > 3,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.pod }}/{{ $labels.container }} restarted {{ $value | humanize }} times in 15 minutes"
+            runbook: "kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous"
+        - alert: OOMKilled
+          expr: |
+            label_replace(
+              (kube_pod_container_status_last_terminated_reason{reason="OOMKilled", namespace=~"cylist-.*"} == 1)
+                and on (namespace, pod, container)
+              (increase(kube_pod_container_status_restarts_total[15m]) > 0),
+              "environment", "$1", "namespace", "cylist-(.*)")
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.pod }}/{{ $labels.container }} was OOMKilled"
+            runbook: "Raise its memory limit in deploy/helm/cylist/values-<env>.yaml, or find the leak (Environment detail, memory panel)."
+        - alert: DeployStuck
+          expr: |
+            label_replace(
+              kube_deployment_status_replicas_unavailable{namespace=~"cylist-.*"} > 0,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.deployment }} has had an unavailable replica for 10 minutes"
+            runbook: "helm -n {{ $labels.namespace }} history <release>; helm rollback if the last revision is the cause."
+        - alert: PodPending
+          expr: |
+            label_replace(
+              kube_pod_status_phase{phase="Pending", namespace=~"cylist-.*|monitoring"} == 1,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} has been Pending for 10 minutes"
+            runbook: "kubectl describe pod: quota (deploy/k3s/platform/20-quotas.yaml), image pull, or an unbound volume."
+
+    - name: cylist.postgres
+      rules:
+        - alert: PostgresDown
+          expr: |
+            label_replace(pg_up{namespace="cylist-prod"} == 0 or up{job="cylist-prod/cylist-data-postgres"} == 0,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          for: 1m
+          labels: {severity: page}
+          annotations:
+            summary: "prod Postgres (or its exporter) is down"
+            runbook: "kubectl -n cylist-prod logs cylist-data-postgres-0 -c postgres; df -h / (a full disk stops Postgres)."
+        - alert: PostgresDownNonProd
+          expr: |
+            label_replace(pg_up{namespace=~"cylist-(staging|dev)"} == 0 or up{job=~"cylist-(staging|dev)/cylist-data-postgres"} == 0,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          for: 5m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.namespace }} Postgres (or its exporter) is down"
+            runbook: "kubectl -n {{ $labels.namespace }} logs cylist-data-postgres-0 -c postgres"
+        - alert: PostgresConnsNearMax
+          expr: |
+            sum by (namespace, environment) (pg_stat_activity_count)
+              / max by (namespace, environment) (pg_settings_max_connections) > 0.8
+          for: 5m
+          labels: {severity: page}
+          annotations:
+            summary: "{{ $labels.namespace }} Postgres is at {{ $value | humanizePercentage }} of max_connections"
+            runbook: "Postgres dashboard: connections by state. Look for idle-in-transaction and the app's pool size."
+
+    - name: cylist.node
+      rules:
+        - alert: DiskFilling
+          expr: |
+            node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
+              / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} < 0.20
+          for: 10m
+          labels: {severity: page}
+          annotations:
+            summary: "/ has {{ $value | humanizePercentage }} free"
+            runbook: "Every volume (Postgres, blobs, backups, Prometheus, Loki, Tempo) is on /. Node & storage dashboard; du -sh /var/lib/rancher/k3s/storage/*; docker system df."
+        - alert: DiskFullIn24h
+          expr: |
+            predict_linear(node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}[6h], 24 * 3600) < 0
+          for: 30m
+          labels: {severity: page}
+          annotations:
+            summary: "/ is predicted to fill within 24 hours"
+            runbook: "Find what is growing: Node & storage dashboard, then du as for DiskFilling."
+        - alert: InodesFilling
+          expr: |
+            node_filesystem_files_free{mountpoint="/"} / node_filesystem_files{mountpoint="/"} < 0.10
+          for: 10m
+          labels: {severity: page}
+          annotations:
+            summary: "/ has {{ $value | humanizePercentage }} of its inodes free"
+            runbook: "Usually Docker or containerd image layers: docker system prune; sudo k3s crictl rmi --prune."
+        - alert: MemoryLow
+          expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+          for: 10m
+          labels: {severity: page}
+          annotations:
+            summary: "{{ $value | humanizePercentage }} of memory available"
+            runbook: "Node & storage dashboard: memory by namespace. Dev slots are evicted first (PriorityClass)."
+        - alert: HighIOWait
+          expr: avg(rate(node_cpu_seconds_total{mode="iowait"}[5m])) > 0.20
+          for: 15m
+          labels: {severity: page}
+          annotations:
+            summary: "CPU is waiting on IO {{ $value | humanizePercentage }} of the time"
+            runbook: "Node & storage dashboard: IO by device; check SMART."
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+          for: 5m
+          labels: {severity: page}
+          annotations:
+            summary: "K3s node {{ $labels.node }} is not Ready"
+            runbook: "systemctl status k3s; journalctl -u k3s -n 200."
+        - alert: SmartFailing
+          expr: smartctl_device_smart_status != 1 or smartctl_device_critical_warning != 0 or smartctl_device_media_errors > 0
+          for: 5m
+          labels: {severity: page}
+          annotations:
+            summary: "Disk {{ $labels.device }} reports SMART trouble"
+            runbook: "sudo smartctl -a /dev/{{ $labels.device }}. Backups are on this same disk (Phase 0, Q3): copy them off now."
+        - alert: HostServiceDown
+          expr: node_systemd_unit_state{state="active", name=~"(cloudflared|k3s|docker|containerd)\\.service"} == 0
+          for: 3m
+          labels: {severity: page}
+          annotations:
+            summary: "{{ $labels.name }} is not active"
+            runbook: "systemctl status {{ $labels.name }}; journalctl -u {{ $labels.name }} -n 200."
+        - alert: RunnerDown
+          expr: node_systemd_unit_state{state="active", name="github-runner-cylist.service"} == 0
+          for: 10m
+          labels: {severity: ticket}
+          annotations:
+            summary: "The GitHub Actions runner is not active: CI cannot deploy"
+            runbook: "systemctl status github-runner-cylist; journalctl -u github-runner-cylist."
+
+    - name: cylist.backups
+      rules:
+        - alert: BackupStale
+          expr: |
+            label_replace(
+              (time() - kube_cronjob_status_last_successful_time{cronjob="cylist-data-backup"} > 26 * 3600)
+                or
+              ((time() - kube_cronjob_created{cronjob="cylist-data-backup"} > 26 * 3600)
+                unless kube_cronjob_status_last_successful_time{cronjob="cylist-data-backup"}),
+              "environment", "$1", "namespace", "cylist-(.*)")
+          labels: {severity: page}
+          annotations:
+            summary: "{{ $labels.namespace }} has had no successful backup in 26 hours"
+            runbook: "kubectl -n {{ $labels.namespace }} get jobs; logs of the last cylist-data-backup job. Run one now: kubectl create job --from=cronjob/cylist-data-backup backup-manual."
+        - alert: BackupJobFailed
+          expr: |
+            label_replace(
+              kube_job_status_failed{namespace=~"cylist-.*", job_name=~"cylist-data-backup.*"} > 0,
+              "environment", "$1", "namespace", "cylist-(.*)")
+          labels: {severity: ticket}
+          annotations:
+            summary: "Backup job {{ $labels.namespace }}/{{ $labels.job_name }} failed"
+            runbook: "kubectl -n {{ $labels.namespace }} logs job/{{ $labels.job_name }}"
+
+    - name: cylist.monitoring
+      rules:
+        - alert: MonitoringTargetDown
+          expr: up{namespace="monitoring"} == 0
+          for: 5m
+          labels: {severity: ticket}
+          annotations:
+            summary: "{{ $labels.job }} ({{ $labels.pod }}) is down"
+            runbook: "kubectl -n monitoring get pods; logs of the one that is down. Prometheus itself down is caught by the heartbeat."

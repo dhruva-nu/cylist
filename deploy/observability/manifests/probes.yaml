@@ -1,0 +1,159 @@
+# Outside-in uptime (CYLIST-194): blackbox-exporter fetches each public URL
+# through public DNS, Cloudflare's edge, the tunnel, Traefik (or Docker's
+# port, until each cutover) and the app. ProdDown and EnvDown read these.
+# One Probe per environment, so each carries its environment label.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-prod
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://cylist.in/api/v1/health]
+      labels:
+        environment: prod
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-staging
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://stage.cylist.in/api/v1/health]
+      labels:
+        environment: staging
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-dev-1
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://dev1.cylist.in/api/v1/health]
+      labels:
+        environment: dev-1
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-dev-2
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://dev2.cylist.in/api/v1/health]
+      labels:
+        environment: dev-2
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-dev-3
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://dev3.cylist.in/api/v1/health]
+      labels:
+        environment: dev-3
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-dev-4
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://dev4.cylist.in/api/v1/health]
+      labels:
+        environment: dev-4
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-dev-5
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://dev5.cylist.in/api/v1/health]
+      labels:
+        environment: dev-5
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: uptime-dev-index
+  namespace: monitoring
+spec:
+  module: http_2xx
+  interval: 30s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://dev.cylist.in/]
+      labels:
+        environment: dev-index
+---
+# Prod's WebSocket upgrade, end to end: 101, or realtime is broken for
+# everyone while every page still loads.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: websocket-prod
+  namespace: monitoring
+spec:
+  module: http_ws_101
+  interval: 60s
+  scrapeTimeout: 15s
+  prober:
+    url: blackbox.monitoring:9115
+  targets:
+    staticConfig:
+      static: [https://cylist.in/api/v1/agent-sessions/blackbox-probe/ws]
+      labels:
+        environment: prod

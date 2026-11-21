@@ -1,0 +1,81 @@
+# Loki, monolithic, on the filesystem (CYLIST-194). Alloy pushes every pod's
+# log lines here; Grafana queries it at http://loki.monitoring:3100.
+deploymentMode: Monolithic
+fullnameOverride: loki
+
+loki:
+  # One tenant. Nothing but Alloy and Grafana can reach it (the monitoring
+  # namespace's NetworkPolicy).
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2026-11-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    # 30 days, enforced by the compactor below. The 30Gi volume is the hard
+    # ceiling; LokiVolumeFilling alerts at 85% of it.
+    retention_period: 720h
+    allow_structured_metadata: true
+    volume_enabled: true
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    ingestion_rate_mb: 8
+    ingestion_burst_size_mb: 16
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+    compaction_interval: 10m
+    retention_delete_delay: 2h
+  pattern_ingester:
+    enabled: false
+  ruler:
+    enable_api: false
+
+singleBinary:
+  replicas: 1
+  priorityClassName: cylist-platform
+  persistence:
+    enabled: true
+    size: 30Gi
+    storageClass: local-path
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1536Mi}
+
+# Not needed at one replica on one node.
+gateway:
+  enabled: false
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+sidecar:
+  rules:
+    enabled: false
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false

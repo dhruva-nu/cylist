@@ -40,9 +40,7 @@ spec:
       labels:
         {{- include "cylist.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9187"
+        {{- include "cylist.environmentLabel" . | nindent 8 }}
     spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}

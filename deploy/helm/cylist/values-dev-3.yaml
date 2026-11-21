@@ -1,4 +1,6 @@
 # Dev slot 3: dev3.cylist.in. Release cylist-3 in namespace cylist-dev.
+environment: dev-3
+
 app:
   host: dev3.cylist.in
   env:

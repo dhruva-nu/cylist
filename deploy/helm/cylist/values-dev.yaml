@@ -4,6 +4,7 @@
 # does not gets a database of its own on that Postgres, through the optional
 # cylist-slot-N-db secret its deploy writes (see scripts/dev-slot.sh).
 priorityClassName: cylist-dev
+environment: dev
 
 app:
   env:

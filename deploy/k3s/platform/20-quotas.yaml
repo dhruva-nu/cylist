@@ -96,11 +96,13 @@ metadata:
   name: env-quota
   namespace: monitoring
 spec:
+  # Sized for the stack in deploy/observability (CYLIST-194): ~3 GiB requested,
+  # Prometheus alone may grow to 3 GiB. No CPU limit in total: a dozen
+  # sidecars at the LimitRange's 1-CPU default would add up to nothing real.
   hard:
     requests.cpu: "3"
-    requests.memory: 4Gi
-    limits.cpu: "6"
-    limits.memory: 8Gi
+    requests.memory: 6Gi
+    limits.memory: 16Gi
 ---
 apiVersion: v1
 kind: LimitRange

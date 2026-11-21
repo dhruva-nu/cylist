@@ -350,6 +350,9 @@ jobs:
       - name: Lint and validate every release
         run: deploy/helm/lint.sh
 
+      - name: Validate the monitoring stack's manifests
+        run: deploy/observability/lint.sh
+
       - name: Build the image
         run: docker build -f backend/Dockerfile --target runtime -t cylist:ci .
 
