@@ -45,6 +45,9 @@ deployInfo:
   branch: ""
   sha: ""
   time: ""
+  # "shared", or "own" for a dev slot on a database of its own. On the pod
+  # template too, so switching restarts the slot onto the other database.
+  database: shared
 
 priorityClassName: ""
 

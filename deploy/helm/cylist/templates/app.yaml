@@ -24,6 +24,7 @@ metadata:
     cylist.in/branch: {{ .Values.deployInfo.branch | quote }}
     cylist.in/sha: {{ .Values.deployInfo.sha | quote }}
     cylist.in/deployed-at: {{ .Values.deployInfo.time | quote }}
+    cylist.in/database: {{ .Values.deployInfo.database | quote }}
     cylist.in/host: {{ .Values.app.host | quote }}
 spec:
   replicas: 1
@@ -44,6 +45,7 @@ spec:
       annotations:
         # Restart when the settings change, as `docker compose up` does.
         checksum/env: {{ toJson .Values.app.env | sha256sum }}
+        cylist.in/database: {{ .Values.deployInfo.database | quote }}
     spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}

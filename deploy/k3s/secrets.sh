@@ -48,7 +48,21 @@ apply() { kubectl -n "$ns" apply -f - > /dev/null; echo "   $ns/$1"; }
 # may hold `@` but the host never does.
 app_env() {
   grep -v '^CYLIST_FCM_SERVICE_ACCOUNT_FILE=' "$dir/app.env" |
-    sed -E "s#^(CYLIST_DATABASE_URL=.*@)[^@/]*/#\1$POSTGRES_HOST/#"
+    sed -E "s#^(CYLIST_DATABASE_URL=.*@)[^@/]*/#\1$POSTGRES_HOST/#" |
+    if [[ "$ns" == cylist-dev ]]; then dev_jev_key; else cat; fi
+}
+
+# Dev asks jev with production's key, as scripts/dev-slot.sh arranges for the
+# Docker slots: one paid key, rotated once. Dev keeps its own if production
+# has none.
+dev_jev_key() {
+  local prod="${CYLIST_PROD_DIR:-$HOME/cylist-prod}/app.env" line='^(CYLIST_)?JEV_API_KEY=.'
+  if grep -qE "$line" "$prod" 2> /dev/null; then
+    grep -vE '^(CYLIST_)?JEV_API_KEY=' || true
+    grep -m1 -E "$line" "$prod"
+  else
+    cat
+  fi
 }
 
 echo "Secrets for $ns from $dir:"
