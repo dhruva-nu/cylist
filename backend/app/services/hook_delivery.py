@@ -59,6 +59,7 @@ import json
 import logging
 import random
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -550,6 +551,7 @@ class Courier:
         database: Database,
         vault_keys: VaultKeys,
         transport: httpx.AsyncBaseTransport | None = None,
+        instrument: Callable[[httpx.AsyncClient], None] | None = None,
     ) -> None:
         """Never returns until cancelled, and never dies of one bad pass — the
         same promise the agent-session reaper makes, for the same reason.
@@ -559,6 +561,8 @@ class Courier:
         filled at once rather than when the slowest of a batch is done.
 
         ``transport`` is the network unless a test answers in its place.
+        ``instrument`` is handed the client before its first send — the
+        application's tracing, when it is on, so each delivery is a span.
         """
         last_pruned: datetime | None = None
         in_flight: dict[asyncio.Task[None], UUID] = {}
@@ -570,6 +574,8 @@ class Courier:
             self._wake.set()
 
         async with httpx.AsyncClient(transport=transport) as client:
+            if instrument is not None:
+                instrument(client)
             try:
                 while True:
                     # Cleared before the pass, so a wake that arrives during it

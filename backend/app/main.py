@@ -32,6 +32,7 @@ from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
 from app.core.request_log import RequestLogMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.tracing import Tracing, describe_tracing
 from app.db import Database
 from app.mcp import mount_mcp
 from app.realtime import doorbell
@@ -65,7 +66,7 @@ endpoint's description to see which one it needs.
 """.strip()
 
 
-def build_lifespan(settings: Settings) -> Lifespan:
+def build_lifespan(settings: Settings, tracing: Tracing | None = None) -> Lifespan:
     """Create the startup/shutdown handler for a given configuration."""
 
     @asynccontextmanager
@@ -82,11 +83,14 @@ def build_lifespan(settings: Settings) -> Lifespan:
                     "data_dir": settings.data_dir,
                     "log_level": settings.log_level,
                     "log_to": describe_destination(settings),
+                    "tracing": describe_tracing(settings),
                 }
             },
         )
         settings.blob_dir.mkdir(parents=True, exist_ok=True)
         app.state.database = Database.configured(settings)
+        if tracing is not None:
+            tracing.instrument_engine(app.state.database.engine)
         # Committed changes reach the boards watching them, and queued hook
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
@@ -110,7 +114,10 @@ def build_lifespan(settings: Settings) -> Lifespan:
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
         courier = asyncio.create_task(
             app.state.courier.run(
-                app.state.database, settings.vault_keyring, app.state.hook_transport
+                app.state.database,
+                settings.vault_keyring,
+                app.state.hook_transport,
+                instrument=tracing.instrument_client if tracing is not None else None,
             ),
             name="cylist-hook-courier",
         )
@@ -128,6 +135,11 @@ def build_lifespan(settings: Settings) -> Lifespan:
                     await task
             await push_sender.aclose()
             await app.state.database.dispose()
+            # Last, so the spans of everything above stopping are among those
+            # it sends before its thread ends. In a thread, because the final
+            # export is a blocking POST.
+            if tracing is not None:
+                await asyncio.to_thread(tracing.shutdown)
             # Logged after the pool is closed, so the line is a statement that
             # shutdown finished rather than that it was attempted.
             logger.info("Cylist stopped")
@@ -222,11 +234,13 @@ async def _sweep_blobs_forever(app: FastAPI) -> None:
             logger.exception("The blob sweeper failed a pass")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, tracing: Tracing | None = None) -> FastAPI:
     """Build the application.
 
     Taking settings as an argument keeps the factory testable: a test can build
     an app pointed at a throwaway database without touching the environment.
+    ``tracing`` likewise: a test hands in one that exports to memory, and
+    otherwise it is whatever the settings describe — nothing, by default.
     """
     settings = settings or get_settings()
 
@@ -234,12 +248,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # including a complaint about the configuration, should already be going
     # to the places this deployment asked for.
     configure_logging(settings)
+    tracing = tracing or Tracing.configured(settings)
 
     app = FastAPI(
         title="Cylist",
         version="0.4.7",
         description=DESCRIPTION,
-        lifespan=build_lifespan(settings),
+        lifespan=build_lifespan(settings, tracing),
         openapi_url=f"{API_PREFIX}/openapi.json",
         docs_url=f"{API_PREFIX}/docs",
         redoc_url=None,
@@ -353,6 +368,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # served from this same process, and in development there is nothing to
     # serve and this does nothing.
     mount_spa(app, settings.web_dir, reserved=API_PREFIX, base_path=settings.base_path)
+
+    # Wraps the stack as it is built on the first request, outside every
+    # middleware above, so where it is called among them does not matter.
+    if tracing is not None:
+        tracing.instrument_app(app)
     return app
 
 

@@ -449,6 +449,17 @@ Every line carries the id of the request that produced it, and every response
 carries the same id in `X-Request-ID`. When somebody reports a failure, that id
 is the one thing worth asking them for.
 
+Traces are off until `CYLIST_OTLP_ENDPOINT` names an OTLP/HTTP receiver —
+`http://alloy.monitoring:4318`, say; `/v1/traces` is appended. Each request is
+then a server span with a child for every statement and every hook delivery,
+under `service.name=cylist` and `deployment.environment` set from
+`CYLIST_ENVIRONMENT`. Production samples a fifth of requests
+(`CYLIST_TRACE_SAMPLE_RATIO=0.2` in `docker-compose.prod.yml`); everywhere else
+samples all of them. The two records point at each other: a JSON log line from
+a traced request carries `trace_id` and `span_id`, and the server span carries
+the request id as `cylist.request_id`. Health checks are never traced, and a
+caller's `traceparent` is ignored — a trace starts here.
+
 ## When a deploy fails
 
 **`permission denied ... /var/run/docker.sock`,** from a user who is in the
