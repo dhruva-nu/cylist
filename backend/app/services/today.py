@@ -332,6 +332,7 @@ async def add_todo(
     text: str,
     *,
     carried_from: date | None = None,
+    moved_reason: str | None = None,
     source: str | None = None,
     reworded: bool = False,
 ) -> Todo:
@@ -343,6 +344,7 @@ async def add_todo(
         text=_clean(text),
         state=TodoState.OPEN,
         carried_from=carried_from,
+        moved_reason=moved_reason,
         source=source,
         reworded=reworded,
     )
@@ -440,6 +442,8 @@ async def wrap_up(
     day: date,
     to_day: date,
     move: list[UUID],
+    to_days: dict[UUID, date] | None = None,
+    reasons: dict[UUID, str] | None = None,
 ) -> tuple[int, int]:
     """Close a day: hand the chosen open to-dos on, and leave the rest behind.
 
@@ -452,7 +456,9 @@ async def wrap_up(
 
     Raises:
         UnprocessableRequestError: if ``to_day`` is not after ``day``, or
-            ``move`` names something that is not an open to-do on this day.
+            ``move`` names something that is not an open to-do on this day, or
+            ``to_days`` gives a day not after ``day`` or for one not being
+            moved, or ``reasons`` gives a reason for one that is not being moved.
     """
     if to_day <= day:
         raise UnprocessableRequestError("To-dos can only be moved on to a later day.")
@@ -475,10 +481,28 @@ async def wrap_up(
         )
 
     chosen = set(move)
+    given = {todo_id: " ".join(words.split()) for todo_id, words in (reasons or {}).items()}
+    given = {todo_id: words for todo_id, words in given.items() if words}
+    unmoved = [str(todo_id) for todo_id in given if todo_id not in chosen]
+    if unmoved:
+        raise UnprocessableRequestError(
+            "A reason can only be given for a to-do that is being moved.",
+            details={"not_being_moved": unmoved},
+        )
+    elsewhere = to_days or {}
+    strays = [str(todo_id) for todo_id in elsewhere if todo_id not in chosen]
+    if strays:
+        raise UnprocessableRequestError(
+            "A day can only be given for a to-do that is being moved.",
+            details={"not_being_moved": strays},
+        )
+    if any(other <= day for other in elsewhere.values()):
+        raise UnprocessableRequestError("To-dos can only be moved on to a later day.")
     moved = left = 0
     for todo_id, (picked, todo) in open_todos.items():
         if todo_id in chosen:
-            onward = await _pick_on(session, person_id, project.id, picked.task_id, to_day)
+            goes_to = elsewhere.get(todo_id, to_day)
+            onward = await _pick_on(session, person_id, project.id, picked.task_id, goes_to)
             # A card already on that day, kept in step with its card, may hold
             # this very item already; then there is nothing to carry.
             already = todo.source is not None and await session.scalar(
@@ -490,11 +514,13 @@ async def wrap_up(
                     onward,
                     todo.text,
                     carried_from=day,
+                    moved_reason=given.get(todo_id),
                     source=todo.source,
                     reworded=todo.reworded,
                 )
             todo.state = TodoState.MOVED
-            todo.moved_to = to_day
+            todo.moved_to = goes_to
+            todo.moved_reason = given.get(todo_id)
             moved += 1
         else:
             todo.state = TodoState.NOT_DONE
@@ -520,6 +546,7 @@ def todo_read(todo: Todo) -> TodoRead:
         done_at=todo.done_at,
         moved_to=todo.moved_to,
         carried_from=todo.carried_from,
+        moved_reason=todo.moved_reason,
         source_kind=kind if kind in ("stage", "subtask", "checklist") else None,
         created_at=todo.created_at,
     )

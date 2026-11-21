@@ -380,6 +380,7 @@ function todoFate(todo: DayTodo): string {
   if (todo.state === 'moved' && todo.moved_to) parts.push(`moved to ${dayShort(todo.moved_to)}`)
   if (todo.state === 'not_done') parts.push('not done')
   if (todo.carried_from) parts.push(`from ${weekdayShort(todo.carried_from)}`)
+  if (todo.moved_reason) parts.push(`“${todo.moved_reason}”`)
   return parts.join(' · ')
 }
 

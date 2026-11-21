@@ -79,7 +79,7 @@ fun todo(
     source: TodoRead.SourceKind? = null,
     id: UUID = UUID.randomUUID(),
 ) = TodoRead(
-    id = id, text = text, state = state, doneAt = null, movedTo = movedTo, carriedFrom = carriedFrom,
+    id = id, text = text, state = state, doneAt = null, movedTo = movedTo, carriedFrom = carriedFrom, movedReason = null,
     sourceKind = source, createdAt = "2026-10-16T09:00:00Z",
 )
 

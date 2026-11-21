@@ -38,6 +38,7 @@ export interface DayTodo {
   state: TodoState
   moved_to: string | null
   carried_from: string | null
+  moved_reason: string | null
 }
 
 /** One card on your plan for the day, with what you meant to do about it. */

@@ -55,6 +55,7 @@ class DayTodo(ReadModel):
     )
     moved_to: date | None
     carried_from: date | None = Field(description="The day it was moved on from, if it was.")
+    moved_reason: str | None = Field(description="Why it was moved, if somebody said.")
 
 
 class CardTodos(ReadModel):

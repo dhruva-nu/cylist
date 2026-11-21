@@ -44,7 +44,7 @@ class TodayViewModelTest {
     private val friday = LocalDate.of(2026, 10, 16)
 
     /** What the fake server answers for a patch of a to-do; a test may make it refuse. */
-    private var patchAnswer: MockResponse = json("""{"id":"$TODO_A","text":"Ask @Aditi K","state":"done","done_at":null,"moved_to":null,"carried_from":null,"source_kind":null,"created_at":"2026-10-16T04:00:00Z"}""")
+    private var patchAnswer: MockResponse = json("""{"id":"$TODO_A","text":"Ask @Aditi K","state":"done","done_at":null,"moved_to":null,"carried_from":null,"moved_reason":null,"source_kind":null,"created_at":"2026-10-16T04:00:00Z"}""")
 
     private data class Seen(val method: String, val path: String, val query: Map<String, String?>, val body: String)
 
@@ -85,7 +85,7 @@ class TodayViewModelTest {
     private fun planJson(date: String): String {
         val picks = if (date == "2026-10-16") {
             """[{"id":"$PICK","day":"$date","task":{"id":"$CARD","reference":"ATL-3","title":"Card","column":"In progress"},
-               "todos":[{"id":"$TODO_A","text":"Ask @Aditi K","state":"open","done_at":null,"moved_to":null,"carried_from":null,"source_kind":null,"created_at":"2026-10-16T04:00:00Z"}]}]"""
+               "todos":[{"id":"$TODO_A","text":"Ask @Aditi K","state":"open","done_at":null,"moved_to":null,"carried_from":null,"moved_reason":null,"source_kind":null,"created_at":"2026-10-16T04:00:00Z"}]}]"""
         } else {
             "[]"
         }
@@ -171,7 +171,7 @@ class TodayViewModelTest {
         advanceUntilIdle()
 
         assertEquals(
-            """{"day":"2026-10-16","to_day":"2026-10-19","move":["$TODO_A"],"timezone":"Asia/Kolkata"}""",
+            """{"day":"2026-10-16","to_day":"2026-10-19","move":["$TODO_A"],"to_days":{},"reasons":{},"timezone":"Asia/Kolkata"}""",
             seen("POST", "/projects/ATL/today/wrap-up").single().body,
         )
         assertEquals(1, result!!.getOrThrow().moved)

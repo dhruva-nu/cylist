@@ -18,6 +18,8 @@ export interface Todo {
   moved_to: string | null
   /** The day it was handed on from, when it arrived by wrap-up. */
   carried_from: string | null
+  /** Why it was moved, when whoever wrapped up the day said. */
+  moved_reason: string | null
   /**
    * What on the card it stands for, when it came from the card. Ticking it
    * ticks that too — finishes the sub-task, ticks the tick box, moves the card
@@ -89,10 +91,18 @@ export const todayApi = {
     request<Todo>(`/today/todos/${todoId}`, { method: 'PATCH', body: jsonBody(change) }),
   deleteTodo: (todoId: string) =>
     request<{ ok: boolean }>(`/today/todos/${todoId}`, { method: 'DELETE' }),
-  /** Close a day: `move` goes on to `toDay`, every other open to-do stays as not done. */
-  wrapUpDay: (projectKey: string, day: string, toDay: string, move: string[], timezone: string) =>
+  /** Close a day: `move` goes on to `toDay` (or its own day in `toDays`), every other open to-do stays as not done. */
+  wrapUpDay: (
+    projectKey: string,
+    day: string,
+    toDay: string,
+    move: string[],
+    reasons: Record<string, string>,
+    timezone: string,
+    toDays: Record<string, string> = {},
+  ) =>
     request<WrapUpResult>(`/projects/${projectKey}/today/wrap-up`, {
       method: 'POST',
-      body: jsonBody({ day, to_day: toDay, move, timezone }),
+      body: jsonBody({ day, to_day: toDay, move, to_days: toDays, reasons, timezone }),
     }),
 }

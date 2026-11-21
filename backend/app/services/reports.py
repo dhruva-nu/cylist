@@ -463,6 +463,8 @@ def _todo_line(todo: DayTodo) -> str:
     line = f"{box} {todo.text}"
     if todo.state is TodoState.MOVED and todo.moved_to:
         line += f" → moved to {_short_date(todo.moved_to)}"
+        if todo.moved_reason:
+            line += f" ({todo.moved_reason})"
     elif todo.state is TodoState.NOT_DONE:
         line += " — not done"
     if todo.carried_from:

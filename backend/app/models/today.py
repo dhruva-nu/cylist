@@ -177,6 +177,9 @@ class Todo(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """The day this was handed on from, when it was — the day before it moved,
     not the day it was first written, because "from Thu" is what is useful to
     read on a Friday."""
+    moved_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Why it was handed on, when whoever wrapped the day up said. Kept on the
+    original and on its copy, so it reads on either day."""
     source: Mapped[str | None] = mapped_column(String(SOURCE_MAX_LENGTH), nullable=True)
     """What on the card this to-do stands for, when it was imported from it:
     ``stage:<column id>:<index>``, ``subtask:<id>`` or ``checklist:<id>``. A

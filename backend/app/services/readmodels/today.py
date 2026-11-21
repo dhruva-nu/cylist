@@ -33,6 +33,10 @@ class TodoRead(ReadModel):
     carried_from: date | None = Field(
         description="The day it was handed on from, when it arrived by wrap-up."
     )
+    moved_reason: str | None = Field(
+        description="Why it was moved, when whoever wrapped up the day said — on the "
+        "moved to-do and on its copy."
+    )
     source_kind: Literal["stage", "subtask", "checklist"] | None = Field(
         description="What on the card it stands for, when it came from the card: a stage, "
         "a sub-task or a tick box. Ticking it ticks that too, and the other way about. "
