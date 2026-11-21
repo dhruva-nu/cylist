@@ -29,8 +29,8 @@ export interface TaskDialogProps {
    * lost it.
    */
   goals: Goal[]
-  /** A new card starts on this goal. The board's lanes pass their own. */
-  defaultGoalId?: string | null
+  /** A new card starts on this template. A template's board passes its own. */
+  defaultTemplateId?: string | null
   /** Opens another card in this dialog's place — a sub-task, from the list. */
   onOpenTask?: ((taskRef: string) => void) | undefined
   /** Asks the board to open a new-sub-task dialog under this reference. */
