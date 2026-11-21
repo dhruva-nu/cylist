@@ -1,0 +1,15 @@
+# Staging: stage.cylist.in, in namespace cylist-staging. Built like
+# production on purpose; it differs only where it has to.
+priorityClassName: cylist-staging
+
+app:
+  host: stage.cylist.in
+  env:
+    # Deployed (Secure cookie, `make seed` refused), and the cookie is named
+    # cylist_session_staging.
+    CYLIST_ENVIRONMENT: staging
+    CYLIST_CLIENT_URLS: '["http://localhost:8001","https://stage.cylist.in"]'
+
+backup:
+  # Staging is reloaded from production; a week of its own is plenty.
+  keep: 7

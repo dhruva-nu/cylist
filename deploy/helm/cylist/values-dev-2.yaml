@@ -1,0 +1,7 @@
+# Dev slot 2: dev2.cylist.in. Release cylist-2 in namespace cylist-dev.
+app:
+  host: dev2.cylist.in
+  env:
+    CYLIST_CLIENT_URLS: '["http://localhost:8012","https://dev2.cylist.in"]'
+  extraSecrets:
+    - cylist-slot-2-db

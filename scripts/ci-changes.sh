@@ -5,7 +5,7 @@
 # can be tried by hand):
 #
 #   backend, installers, frontend,  'true' or 'false'
-#   android
+#   android, chart
 #   agents                          JSON matrix `include` list for the CLI and
 #                                   MCP server legs; '[]' when neither changed
 #
@@ -67,6 +67,9 @@ frontend=$(flag frontend/)
 # The app's theme is checked against the web app's tokens (ThemeTokensTest), so
 # a change to those is an Android change too.
 android=$(flag android/ frontend/src/theme/tokens.css)
+# The Helm chart is installed and smoke-tested with the app's image and the
+# cluster's platform manifests, so a change to either reruns it.
+chart=$(flag deploy/helm/ deploy/k3s/platform/ backend/Dockerfile)
 
 legs=()
 if [[ "$cli" == true ]]; then
@@ -83,6 +86,7 @@ agents="[$(IFS=,; echo "${legs[*]}")]"
   echo "installers=$installers"
   echo "frontend=$frontend"
   echo "android=$android"
+  echo "chart=$chart"
   echo "agents=$agents"
 } >>"$out"
 
@@ -90,5 +94,5 @@ if [[ "$all" == true ]]; then
   echo "Running every suite: $reason." >&2
 else
   printf 'Changed files:\n%s\n' "$files" >&2
-  echo "backend=$backend cli=$cli mcp=$mcp installers=$installers frontend=$frontend android=$android" >&2
+  echo "backend=$backend cli=$cli mcp=$mcp installers=$installers frontend=$frontend android=$android chart=$chart" >&2
 fi

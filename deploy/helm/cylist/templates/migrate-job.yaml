@@ -1,0 +1,79 @@
+{{- if eq (include "cylist.component" .) "app" }}
+# `alembic upgrade head` before the new pods start, on install and on every
+# upgrade. A migration that fails fails the release here, visibly, instead of
+# leaving a pod crash-looping against a schema it does not match. Migrations
+# cannot be rolled back by `helm rollback`: the deploy dumps the database
+# before it runs this, and that dump is the way back.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "cylist.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      enableServiceLinks: false
+      containers:
+        - name: migrate
+          image: {{ include "cylist.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "cylist.appSecurityContext" . | nindent 12 }}
+          env:
+            - name: TOLERATE_UNKNOWN_REVISION
+              value: {{ .Values.app.migrations.tolerateUnknownRevision | quote }}
+            {{- include "cylist.env" . | nindent 12 }}
+          command:
+            - sh
+            - -c
+            # Retried while the database refuses the connection: a new pod's
+            # address reaches the network policy's allow list a few seconds
+            # after the pod starts. Any other failure fails the release.
+            - |
+              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                if out="$(alembic upgrade head 2>&1)"; then
+                  echo "$out"
+                  exit 0
+                fi
+                case "$out" in
+                  *"Connect call failed"*|*"Connection refused"*)
+                    echo "database not reachable yet (attempt $attempt)"; sleep 3 ;;
+                  *"Can't locate revision"*)
+                    echo "$out"
+                    [ "$TOLERATE_UNKNOWN_REVISION" = true ] || exit 1
+                    echo "WARNING: the database is at a migration this branch does not have; starting on that schema unmigrated."
+                    exit 0 ;;
+                  *) echo "$out" >&2; exit 1 ;;
+                esac
+              done
+              echo "$out" >&2
+              exit 1
+          # The settings are inline (env, above) rather than from the
+          # ConfigMap, which a first install has not created when this runs.
+          envFrom:
+            {{- include "cylist.envFromSecrets" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}
