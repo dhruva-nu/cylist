@@ -48,11 +48,15 @@ const projectBoardRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/ProjectBoard'), 'ProjectBoard'),
   // `?q=` so a board can be linked to already filtered — which is how a goal's
   // page hands you its own cards — and `?who=` for whose cards it shows
-  // (CYLIST-99), so a shared link shows the same people. Anything else in the
-  // query string is dropped rather than carried.
-  validateSearch: (search: Record<string, unknown>): { q?: string; who?: string } => ({
+  // (CYLIST-99), so a shared link shows the same people. `?board=` is which
+  // template's board — `bug`, `design-task` — see `board/boards.ts`. Anything
+  // else in the query string is dropped rather than carried.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { q?: string; who?: string; board?: string } => ({
     ...(typeof search.q === 'string' && search.q ? { q: search.q } : {}),
     ...(typeof search.who === 'string' && search.who ? { who: search.who } : {}),
+    ...(typeof search.board === 'string' && search.board ? { board: search.board } : {}),
   }),
 })
 

@@ -1,0 +1,168 @@
+/* The board switcher — see `BoardDial.tsx`. No panel: the dial is a ring line
+   and some names, drawn over the board, which is blurred behind them while the
+   dial is open so the names stay readable. */
+
+/* Halfway down the board's left edge. Small while shut, so it only takes the
+   chevron's own room from the cards under it; open, it is as big as the dial. */
+.dial {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: var(--layer-raised);
+  width: 40px;
+  height: 64px;
+  transform: translateY(-50%);
+}
+
+/* Wide enough for the selected board to spell out a long flow — eight
+   columns is the most a board takes. */
+.open {
+  width: 420px;
+  height: 230px;
+}
+
+/* The blur fades out towards the edges, so there is no box, just a softer
+   board under the names. */
+.open::before {
+  position: absolute;
+  inset: -24px -40px -24px 0;
+  content: '';
+  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  mask-image: radial-gradient(ellipse 70% 65% at 30% 50%, #000 55%, transparent 100%);
+  pointer-events: none;
+}
+
+.chevron {
+  position: absolute;
+  top: 50%;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: color 160ms ease;
+}
+
+.chevron:hover,
+.open .chevron {
+  color: var(--ink);
+}
+
+.chevron:focus-visible {
+  outline: 2px solid var(--focus);
+}
+
+.face {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.ring {
+  position: absolute;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-round);
+  pointer-events: none;
+}
+
+.item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: 16px auto auto;
+  column-gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-align: left;
+  text-shadow:
+    0 0 3px var(--bg),
+    0 0 8px var(--bg),
+    0 0 12px var(--bg);
+  cursor: pointer;
+  transform-origin: 0 50%;
+  transition:
+    transform 240ms cubic-bezier(0.3, 0.7, 0.2, 1),
+    opacity 240ms ease;
+}
+
+.item:hover {
+  color: var(--ink);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.itemOn {
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+}
+
+/* The workflow: one bar per column, as tall as its share of the cards. */
+.mark {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 12px;
+}
+
+.bar {
+  width: 2.5px;
+  border-radius: 1px;
+  background: var(--line-2);
+}
+
+.itemOn .bar {
+  background: var(--ink-3);
+}
+
+.count {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-round);
+  background: var(--blocked);
+}
+
+.flow {
+  grid-column: 2 / 4;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item,
+  .chevron {
+    transition: none;
+  }
+}

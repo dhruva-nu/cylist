@@ -78,28 +78,6 @@ export function OutIcon() {
   )
 }
 
-/** Three columns, for the board read by column. */
-export function ColumnsIcon() {
-  return (
-    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="2" y="2.5" width="3.2" height="11" rx="1" />
-      <rect x="6.4" y="2.5" width="3.2" height="7.5" rx="1" />
-      <rect x="10.8" y="2.5" width="3.2" height="9.5" rx="1" />
-    </svg>
-  )
-}
-
-/** Stacked bands, for the board split into a lane per goal. */
-export function LanesIcon() {
-  return (
-    <svg className={styles.toolIcon} viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="2" y="2.5" width="12" height="3" rx="1" />
-      <rect x="2" y="6.5" width="12" height="3" rx="1" />
-      <rect x="2" y="10.5" width="12" height="3" rx="1" />
-    </svg>
-  )
-}
-
 /** A funnel, for the filter. */
 export function FilterIcon() {
   return (

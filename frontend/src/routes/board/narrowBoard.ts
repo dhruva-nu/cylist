@@ -1,15 +1,14 @@
 /**
- * Which cards the board draws, and where: the filters, the hides, the columns
- * and the lanes. None of it touches React — it is the board's arithmetic,
+ * Which cards the board draws, and where: the filters, the hides and the
+ * columns. None of it touches React — it is the board's arithmetic,
  * worked out afresh from the cards it already holds on every render.
  */
 
-import type { BoardColumn, Goal, Person, Task, Template } from '../../api/client'
+import type { BoardColumn, Person, Task, Template } from '../../api/client'
 import { agentCounts, passesAgentFilter, type AgentFilter } from '../agentState'
 import { hidesCancelled, isCancelled, type StatusChoice } from '../boardHiding'
 import { filterTasks, parseQuery, tokenize } from '../boardSearch'
 import { cardsOwned, ownedByAny } from './boardPeople'
-import { laneKeyOfTask, NO_GOAL_LANE } from './dropTargets'
 
 /** The goal filter's choices: every card, the cards on no goal, or one goal's id. */
 export type GoalChoice = 'all' | 'none' | (string & {})
@@ -102,37 +101,6 @@ export function tasksByColumn(columns: BoardColumn[], tasks: Task[]): Map<string
     if (task.column_id !== null) byColumn.get(task.column_id)?.push(task)
   }
   return byColumn
-}
-
-/** One lane of the board: a goal's share of every column, or the share on no goal. */
-export interface Lane {
-  key: string
-  goal: Goal | null
-}
-
-/**
- * The lanes to draw, in the goals page's own order, with everything on no
- * goal at the bottom.
- *
- * Every open goal gets a lane whether or not a card is on it yet: an empty
- * lane is the drop target that puts the first card on a goal. A settled goal
- * only appears while it still has cards on the board, because a lane for
- * work that has stopped is a row of nothing that never goes away.
- */
-export function lanesFor(goals: Goal[], visibleTasks: Task[]): Lane[] {
-  return [
-    ...goals
-      .filter(
-        (goal) => goal.status === 'open' || visibleTasks.some((task) => task.goal_id === goal.id),
-      )
-      .map((goal) => ({ key: goal.id, goal })),
-    { key: NO_GOAL_LANE, goal: null },
-  ]
-}
-
-/** One lane's share of one column's cards. */
-export function tasksInLane(columnTasks: Task[], laneKey: string): Task[] {
-  return columnTasks.filter((task) => laneKeyOfTask(task) === laneKey)
 }
 
 /**
