@@ -1,6 +1,5 @@
 # Outside-in uptime (CYLIST-194): blackbox-exporter fetches each public URL
-# through public DNS, Cloudflare's edge, the tunnel, Traefik (or Docker's
-# port, until each cutover) and the app. ProdDown and EnvDown read these.
+# through public DNS, Cloudflare's edge, the tunnel, Traefik and the app. ProdDown and EnvDown read these.
 # One Probe per environment, so each carries its environment label.
 ---
 apiVersion: monitoring.coreos.com/v1

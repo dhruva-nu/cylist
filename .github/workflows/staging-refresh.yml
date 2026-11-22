@@ -1,27 +1,12 @@
 name: Refresh staging from production
 
 # Manual only. This drops everything staging holds and reloads it from a
-# fresh production dump, so it does not belong on any push trigger — see
-# scripts/staging-refresh.sh for what actually happens.
-# `target` picks which pair it copies between:
-#   docker-to-k3s  Docker production into K3s staging
-#                  (deploy/k3s/import-from-docker.sh). The default between the
-#                  staging cutover (Phase 5) and production's (Phase 6), when
-#                  stage.cylist.in is on K3s but production is still on Docker.
-#   k3s            K3s production into K3s staging (deploy/k3s/staging-refresh.sh).
-#                  Only once production is on K3s: before that, K3s production
-#                  is empty and this would empty staging.
-#   docker         the Docker stacks (scripts/staging-refresh.sh), which no
-#                  hostname reaches since Phase 5.
+# fresh production dump, database and uploaded files together, so it does not
+# belong on any push trigger. It runs deploy/k3s/staging-refresh.sh, which
+# copies production on K3s (cylist-prod) into staging on K3s (cylist-staging);
+# see that script for what actually happens. Production is only read.
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: Which copy. docker-to-k3s until production's K3s cutover (CYLIST-G13)
-        required: true
-        type: choice
-        options: [docker-to-k3s, k3s, docker]
-        default: docker-to-k3s
 
 jobs:
   refresh:
@@ -36,14 +21,6 @@ jobs:
 
       - name: Refresh
         env:
-          TARGET: ${{ inputs.target }}
           # The cylist-deployer service account: the cylist-* namespaces only.
           KUBECONFIG: /home/dnu2/.kube/cylist-deployer.yaml
-        run: |
-          if [[ "$TARGET" == docker-to-k3s ]]; then
-            deploy/k3s/import-from-docker.sh prod staging --yes
-          elif [[ "$TARGET" == k3s ]]; then
-            deploy/k3s/staging-refresh.sh --yes
-          else
-            scripts/staging-refresh.sh --yes
-          fi
+        run: deploy/k3s/staging-refresh.sh --yes

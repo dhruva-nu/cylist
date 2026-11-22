@@ -52,7 +52,7 @@ mkdir -p "$TARGET"
 echo "→ database"
 if [[ -n ${CYLIST_BACKUP_CONTAINER:-} ]]; then
   # Same major as the server by construction. Credentials come from the
-  # container's own environment, as in deploy.sh.
+  # container's own environment.
   docker exec "$CYLIST_BACKUP_CONTAINER" sh -c \
     'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' \
     > "$TARGET/database.dump"

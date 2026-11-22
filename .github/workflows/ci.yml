@@ -379,20 +379,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Builds the image, dumps the database, migrates, restarts the stack and
-      # waits for /api/v1/health. The same script deploys by hand over SSH.
-      #
-      # To the Docker stack, until the repository variable
-      # CYLIST_PROD_TARGET is set to k3s at the Phase 6 cutover; then to
-      # K3s through deploy/k3s/deploy.sh. A push has no inputs to pick with.
+      # Builds the image, dumps the database, migrates, rolls out the
+      # release on K3s and waits for /api/v1/health. The same script deploys
+      # by hand (make deploy).
       - name: Deploy
         env:
-          TARGET: ${{ vars.CYLIST_PROD_TARGET || 'docker' }}
           # The cylist-deployer service account: the cylist-* namespaces only.
           KUBECONFIG: /home/dnu2/.kube/cylist-deployer.yaml
-        run: |
-          if [[ "$TARGET" == k3s ]]; then
-            deploy/k3s/deploy.sh
-          else
-            scripts/deploy.sh
-          fi
+        run: deploy/k3s/deploy.sh

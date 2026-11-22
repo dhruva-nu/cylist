@@ -6,14 +6,12 @@
 #   deploy/k3s/deploy.sh staging    staging, namespace cylist-staging
 #   deploy/k3s/deploy.sh dev N      dev slot N (1-5), namespace cylist-dev
 #
-# The K3s counterpart of scripts/deploy.sh, in the same order and for the same
-# reasons: the image is built before anything running is touched, and the
-# database is dumped before migrations run, since `alembic upgrade` is the one
-# step a redeploy of the previous commit cannot undo. What differs is how each
-# step is done:
+# The image is built before anything running is touched, and the database is
+# dumped before migrations run, since `alembic upgrade` is the one step a
+# redeploy of the previous commit cannot undo. The steps:
 #
 #   build      docker build, pushed to the in-cluster registry (localhost:5000)
-#   secrets    deploy/k3s/secrets.sh, from the same files the Docker stack reads
+#   secrets    deploy/k3s/secrets.sh, from the env files in $SECRETS_DIR
 #   database   the data release (deploy/helm/cylist, component=data)
 #   backup     pg_dump through kubectl exec, into $SECRETS_DIR/backups/k3s/
 #   migrate    the chart's pre-upgrade hook Job
@@ -28,9 +26,9 @@
 # service account's (deploy/k3s/deployer-kubeconfig.sh), which can reach the
 # cylist-* namespaces and nothing else.
 #
-# Until an environment is cut over (Phases 4-6), cloudflared still sends its
-# hostname to the Docker stack, so a K3s deploy is reachable only through
-# Traefik on this machine: curl -H 'Host: <host>' http://127.0.0.1/
+# cloudflared sends every hostname to Traefik on 127.0.0.1:80, which routes it
+# by Host to the right release; on this machine the same is reachable with
+# curl -H 'Host: <host>' http://127.0.0.1/
 
 set -euo pipefail
 
@@ -88,8 +86,7 @@ psql_admin() {
 }
 
 if [[ -n "$SLOT" ]]; then
-  # For its migration check and the index page. Its Docker-only steps are
-  # never called from here.
+  # For its migration check, its database's name and the index page.
   # shellcheck source=scripts/dev-slot.sh
   source "$ROOT/scripts/dev-slot.sh"
 fi
@@ -138,9 +135,9 @@ ls -1t "$BACKUPS"/cylist-*.dump 2> /dev/null | tail -n "+$((KEEP_BACKUPS + 1))" 
 EXTRA=()
 DB_MODE=shared
 if [[ -n "$SLOT" ]]; then
-  # The same rule as the Docker slots (dev_slot_database): the shared database
-  # only ever takes migrations that are on main; a branch with migrations of
-  # its own runs on a copy, cylist_slot_N, made afresh from the dump above.
+  # The rule in scripts/dev-slot.sh: the shared database only ever takes
+  # migrations that are on main; a branch with migrations of its own runs on
+  # a copy, cylist_slot_N, made afresh from the dump above.
   step "Choosing slot $SLOT's database"
   if ! unmerged="$(_dev_unmerged_migrations)"; then
     warn "could not find origin/$DEV_MAIN_BRANCH to compare migrations with, so slot $SLOT gets a database of its own rather than risk migrating the shared one"
@@ -233,7 +230,7 @@ if [[ -n "$SLOT" ]]; then
 
   step "Regenerating the index at $(dev_index_url)"
   # Two slots can deploy at once and the index is one page shared by all
-  # five: read, changed, written. Serialised as on Docker.
+  # five: read, changed, written. Serialised.
   (
     flock 9
     rows=""

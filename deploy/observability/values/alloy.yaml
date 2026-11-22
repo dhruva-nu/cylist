@@ -13,10 +13,6 @@ alloy:
   mounts:
     # /var/log/pods: every K3s container's log files.
     varlog: true
-    extra:
-      - name: docker-sock
-        mountPath: /var/run/docker.sock
-        readOnly: true
   extraPorts:
     - name: otlp-grpc
       port: 4317
@@ -33,14 +29,6 @@ controller:
   hostNetwork: true
   dnsPolicy: ClusterFirstWithHostNet
   priorityClassName: cylist-platform
-  volumes:
-    extra:
-      # The Docker stacks' logs, until Phase 7 removes them. Read-only in
-      # name only: the socket is the Docker API. Remove with the stacks.
-      - name: docker-sock
-        hostPath:
-          path: /var/run/docker.sock
-          type: Socket
 
 serviceMonitor:
   enabled: false

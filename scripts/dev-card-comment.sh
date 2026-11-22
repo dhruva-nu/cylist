@@ -12,7 +12,7 @@
 # Everything comes in through the environment:
 #
 #   CARD                 the card, e.g. CYLIST-79
-#   SLOT URL BRANCH SHA  the deploy step's outputs (scripts/dev-slot.sh)
+#   SLOT URL BRANCH SHA  the deploy step's outputs (deploy/k3s/deploy.sh)
 #   CYLIST_AGENT_TOKEN   a production API token (read + write); unset means skip
 #   CYLIST_URL           production, default https://dnu-home-1.tail222f46.ts.net
 #

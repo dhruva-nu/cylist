@@ -15,8 +15,8 @@ UV       := uv --project $(BACKEND)
 .DEFAULT_GOAL := help
 .PHONY: help setup db db-stop migrate revision dev dev-api dev-web \
         up down logs image deploy prod-logs prod-ps staging-deploy \
-        staging-refresh staging-logs staging-ps staging-down \
-        dev-slot-given dev-deploy dev-logs dev-ps dev-down dev-db-logs dev-db-ps dashboard-sync migrate-check \
+        staging-refresh staging-logs staging-ps \
+        dev-slot-given dev-deploy dev-logs dev-ps dashboard-sync migrate-check \
         test lint format typecheck check seed backup hash-password vault-key vault-reseal blobs-gc \
         agent android android-install openapi openapi-check clean
 
@@ -78,90 +78,65 @@ image: ## Build the production image: API and built SPA in one container
 	docker build -f $(BACKEND)/Dockerfile -t cylist:latest .
 
 # --- Production, on the server ---------------------------------------------
-# These act on docker-compose.prod.yml, so they mean something only on
-# dnu-home-1. CI runs `deploy` for you on every push to main; run it by hand
-# when you want to ship without waiting, or to see why a deploy failed.
+# Every environment runs on the K3s cluster on dnu-home-1 and is deployed by
+# deploy/k3s/deploy.sh (see DEPLOY.md and deploy/k3s/README.md), so these mean
+# something only there. CI runs `deploy` for you on every push to main; run it
+# by hand when you want to ship without waiting, or to see why a deploy failed.
 
-# Where the secrets that must not be in the repository live. deploy.sh defaults
-# to the same path; both are overridable for a server that keeps them elsewhere.
-CYLIST_PROD_DIR ?= $(HOME)/cylist-prod
-PROD := CYLIST_PROD_DIR=$(CYLIST_PROD_DIR) docker compose -f docker-compose.prod.yml
-
-deploy: ## Build, migrate and restart the production stack on this machine
-	scripts/deploy.sh
+deploy: ## Build, migrate and roll out production on this machine's K3s
+	deploy/k3s/deploy.sh
 
 prod-logs: ## Follow the production app's logs
-	$(PROD) logs -f app
+	kubectl -n cylist-prod logs -f deploy/cylist -c app
 
-prod-ps: ## Show what the production stack is running
-	$(PROD) ps
+prod-ps: ## Show what production is running
+	kubectl -n cylist-prod get pods
 
 # --- Staging, on the same machine -------------------------------------------
 # Staging is production's shape with production's data: the same image built the
-# same way, the same one-container deploy, restored from a production dump by
-# `staging-refresh`. It listens on :8001, and it is deployed when you ask for it
-# — `staging-deploy` below, or the "Deploy staging" workflow run from the
-# `staging` branch — rather than on every push to it.
+# same way, the same chart, restored from production by `staging-refresh`. It is
+# deployed when you ask for it — `staging-deploy` below, or the "Deploy staging"
+# workflow run from the `staging` branch — rather than on every push to it.
 #
 # Because it is restored from production it holds real vault ciphertext, and its
 # app.env carries the production vault key. Its secrets are production secrets.
 
-CYLIST_STAGING_DIR ?= $(HOME)/cylist-staging
-STAGING := CYLIST_STAGING_DIR=$(CYLIST_STAGING_DIR) docker compose -f docker-compose.staging.yml
-
-staging-deploy: ## Build, migrate and restart the staging stack on this machine
-	scripts/deploy.sh staging
+staging-deploy: ## Build, migrate and roll out staging on this machine's K3s
+	deploy/k3s/deploy.sh staging
 
 staging-refresh: ## Replace staging's database and files with a copy of production
-	# Staging is on K3s, production still on Docker (CYLIST-198); the Docker-only
-	# refresh is scripts/staging-refresh.sh.
-	deploy/k3s/import-from-docker.sh prod staging
+	deploy/k3s/staging-refresh.sh
 
 staging-logs: ## Follow the staging app's logs
-	$(STAGING) logs -f app
+	kubectl -n cylist-staging logs -f deploy/cylist -c app
 
-staging-ps: ## Show what the staging stack is running
-	$(STAGING) ps
-
-staging-down: ## Stop the staging stack and remove its containers (volumes kept)
-	$(STAGING) down
+staging-ps: ## Show what staging is running
+	kubectl -n cylist-staging get pods
 
 # --- Dev, on the same machine ------------------------------------------------
-# Five slots, not one stack, so five branches can be up side by side. None is
-# tied to a branch: the "Deploy dev" workflow is workflow_dispatch, so you pick
-# the branch in the "Run workflow" dropdown and the slot as its input. Slot N
-# listens on :801N and is served at devN.cylist.in. All five share one database
-# (docker-compose.dev-db.yml) and its secrets in ~/cylist-dev-shared — see
-# docker-compose.dev.yml. Every slot target here names the slot:
+# Five slots, not one environment, so five branches can be up side by side. None
+# is tied to a branch: the "Deploy dev" workflow is workflow_dispatch, so you
+# pick the branch in the "Run workflow" dropdown and the slot as its input. Slot
+# N is the Helm release cylist-N in namespace cylist-dev, served at
+# devN.cylist.in. All five share one database — see scripts/dev-slot.sh. Every
+# slot target here names the slot:
 #
 #   make dev-deploy SLOT=2
 #   make dev-logs SLOT=2
 
 SLOT ?=
-DEV_SHARED = $(or $(CYLIST_DEV_ROOT),$(HOME))/cylist-dev-shared
-DEV = CYLIST_DEV_SLOT=$(SLOT) CYLIST_DEV_DIR=$(DEV_SHARED) docker compose -f docker-compose.dev.yml
-DEV_DB = CYLIST_DEV_DIR=$(DEV_SHARED) docker compose -f docker-compose.dev-db.yml
 
 dev-slot-given:
 	@case "$(SLOT)" in [1-5]) ;; *) echo "say which dev slot: SLOT=1 to SLOT=5" >&2; exit 2;; esac
 
-dev-deploy: dev-slot-given ## Build, migrate and restart dev slot SLOT on this machine
-	scripts/deploy.sh dev $(SLOT)
+dev-deploy: dev-slot-given ## Build, migrate and roll out dev slot SLOT on this machine's K3s
+	deploy/k3s/deploy.sh dev $(SLOT)
 
 dev-logs: dev-slot-given ## Follow dev slot SLOT's app logs
-	$(DEV) logs -f app
+	kubectl -n cylist-dev logs -f deploy/cylist-$(SLOT) -c app
 
 dev-ps: dev-slot-given ## Show what dev slot SLOT is running
-	$(DEV) ps
-
-dev-down: dev-slot-given ## Stop dev slot SLOT and remove its containers (volumes kept)
-	$(DEV) down
-
-dev-db-logs: ## Follow the Postgres every dev slot shares
-	$(DEV_DB) logs -f postgres
-
-dev-db-ps: ## Show the Postgres every dev slot shares
-	$(DEV_DB) ps
+	kubectl -n cylist-dev get pods -l app.kubernetes.io/instance=cylist-$(SLOT)
 
 dashboard-sync: ## Copy the status dashboard to where its systemd service runs it from
 	mkdir -p $(HOME)/cylist-dashboard

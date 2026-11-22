@@ -27,10 +27,6 @@ BLACKBOX_VERSION=11.21.3
 SMARTCTL_VERSION=0.19.2
 
 NS=monitoring
-# Grafana's Service IP (values/kube-prometheus-stack.yaml) and the tailnet
-# port it is served on. Tailnet only: Phase 0, Q4.
-GRAFANA_IP=10.43.200.30
-GRAFANA_TAILNET_PORT=3443
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
@@ -149,9 +145,10 @@ helm upgrade --install smartctl "$chart" -n "$NS" \
 step "Probes, scrape targets, alert rules and dashboards"
 kubectl apply -k "$here"
 
-step "Grafana on the tailnet"
-tailscale serve --bg --yes --https="$GRAFANA_TAILNET_PORT" "http://$GRAFANA_IP:80" > /dev/null
-echo "   https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'):$GRAFANA_TAILNET_PORT"
+step "Grafana"
+# Not served on the tailnet: only production is (2026-11-22). Reach it from
+# this machine through a port-forward.
+echo "   kubectl -n $NS port-forward svc/kps-grafana 3000:80, then http://localhost:3000"
 echo "   user admin, password in $SECRETS/grafana-admin-password"
 echo "   pages: subscribe to ntfy.sh topic $(< "$SECRETS/ntfy-topic")"
 

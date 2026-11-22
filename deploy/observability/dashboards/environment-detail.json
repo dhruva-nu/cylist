@@ -500,7 +500,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Memory (Docker and K3s)",
+      "title": "Memory",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -511,18 +511,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(container_memory_working_set_bytes{runtime=\"docker\", environment=\"$environment\", compose_service=\"app\"})",
-          "legendFormat": "docker app",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "expr": "sum(container_memory_working_set_bytes{container=\"app\", pod=~\"cylist-.*\", namespace=~\"cylist-${environment:regex}|cylist-dev\"} * on (namespace, pod) group_left() max by (namespace, pod) (kube_pod_labels{label_cylist_in_environment=\"$environment\"}))",
-          "legendFormat": "k3s app",
-          "refId": "B"
+          "legendFormat": "app",
+          "refId": "A"
         }
       ],
       "fieldConfig": {

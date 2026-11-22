@@ -1,5 +1,5 @@
-# Ceilings per namespace, sized for a 16-CPU / 30 GiB host that also runs the
-# Docker stacks until Phase 7. Phase 0 measured each app idle at ~140 MiB and
+# Ceilings per namespace, sized for a 16-CPU / 30 GiB host that is also a
+# desktop. Phase 0 measured each app idle at ~140 MiB and
 # each postgres at ~110 MiB. The LimitRange gives every container defaults, so
 # a pod without resources set is still admitted under the quota.
 apiVersion: v1
