@@ -38,6 +38,7 @@ jobs:
       installers: ${{ steps.filter.outputs.installers }}
       frontend: ${{ steps.filter.outputs.frontend }}
       android: ${{ steps.filter.outputs.android }}
+      chart: ${{ steps.filter.outputs.chart }}
 
     steps:
       - uses: actions/checkout@v5
@@ -310,13 +311,58 @@ jobs:
             android/*/build/test-results/
             android/buildSrc/build/reports/
 
+  # The Helm chart the K3s cluster runs Cylist from (deploy/helm). Linted and
+  # validated as every release it is installed as, then installed for real on
+  # a throwaway K3s (k3d) with the image built from this commit — see
+  # deploy/helm/smoke-test.sh for what that checks.
+  chart:
+    name: Helm chart
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
+    runs-on: ubuntu-latest
+    env:
+      HELM_VERSION: v4.3.2
+      KUBECONFORM_VERSION: v0.8.0
+      K3D_VERSION: v5.9.0
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pinned and checksummed, as on dnu-home-1.
+      - name: Install helm, kubeconform and k3d
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+          curl -sSfL "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz.sha256sum" | sha256sum -c
+          tar xzf "helm-$HELM_VERSION-linux-amd64.tar.gz" linux-amd64/helm
+          curl -sSfLO "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz"
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/CHECKSUMS" |
+            grep ' kubeconform-linux-amd64.tar.gz$' | sha256sum -c
+          tar xzf kubeconform-linux-amd64.tar.gz kubeconform
+          curl -sSfLo k3d "https://github.com/k3d-io/k3d/releases/download/$K3D_VERSION/k3d-linux-amd64"
+          curl -sSfL "https://github.com/k3d-io/k3d/releases/download/$K3D_VERSION/checksums.txt" |
+            grep 'k3d-linux-amd64$' | awk '{print $1"  k3d"}' | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m755 linux-amd64/helm kubeconform k3d "$RUNNER_TEMP/bin/"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Lint and validate every release
+        run: deploy/helm/lint.sh
+
+      - name: Build the image
+        run: docker build -f backend/Dockerfile --target runtime -t cylist:ci .
+
+      - name: Install on a throwaway cluster
+        run: deploy/helm/smoke-test.sh cylist:ci
+
   # Everything above runs on GitHub's machines. This one runs on dnu-home-1
   # itself, through a self-hosted runner that polls GitHub outbound — which is
   # why deploying to a server behind a home router needs no inbound port, no
   # deploy key, and no secrets stored in this repository.
   deploy:
     name: Deploy to dnu-home-1
-    needs: [backend, agents, installers, frontend, android]
+    needs: [backend, agents, installers, frontend, android, chart]
     # Only main, and only a real push: a pull request that happens to target
     # main must not put anything on the server. A push to `staging` gets the
     # test jobs above and nothing else — staging is deployed by hand,

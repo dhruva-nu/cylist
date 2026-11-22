@@ -21,6 +21,14 @@ kubectl apply -f deploy/k3s/platform/
 mode 0640, group `dnu2`. Use `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`, or
 copy that file to `~/.kube/config`.
 
+## Secrets
+
+`deploy/k3s/secrets.sh prod|staging|dev` builds each namespace's Secrets from
+the same `app.env`, `postgres.env` and `fcm-service-account.json` that the
+Docker stacks read, so the two cannot drift apart. It rewrites the host in
+`CYLIST_DATABASE_URL` to the in-cluster Postgres. Cylist itself is installed
+from the Helm chart in `deploy/helm/`.
+
 ## Network
 
 - Traefik's `web` entrypoint is published on `:80` by ServiceLB. cloudflared
