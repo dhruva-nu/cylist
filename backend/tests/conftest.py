@@ -235,6 +235,7 @@ APP_STATE = {
     "doc_engine",
     "doc_corpora",
     "metrics",
+    "prometheus",
     "mcp",
     "sign_in_throttle",
     "vault_cipher",
@@ -274,6 +275,8 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.sign_in_throttle = SignInThrottle()
     # In place, not replaced: MetricsMiddleware holds this object.
     app.state.metrics.__init__()
+    # Left alone: None unless the test built the app with metrics on, and
+    # then it reads everything above through app.state when scraped.
     return app
 
 

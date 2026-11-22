@@ -1,9 +1,11 @@
 """Request counters, in memory, for the status dashboard.
 
-Deliberately not Prometheus or anything that needs a client library and a
-scrape config: one process, one dashboard reading one JSON endpoint. Counts
-reset when the process restarts, which is why the endpoint also reports
-:attr:`Metrics.since` — a rate is meaningless without knowing the window.
+Kept without Prometheus, which is optional (:mod:`app.core.prometheus`): one
+process, one dashboard reading one JSON endpoint, whatever else is configured.
+When Prometheus is on, it reads the counters below rather than keeping its own
+copies, so the two can never disagree. Counts reset when the process restarts,
+which is why the endpoint also reports :attr:`Metrics.since` — a rate is
+meaningless without knowing the window.
 """
 
 from __future__ import annotations

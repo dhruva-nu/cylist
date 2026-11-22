@@ -62,10 +62,12 @@ class SpaFiles(StaticFiles):
 
     The API is excluded from that fallback. ``GET /api/v1/porjects`` is a typo,
     and an agent deserves to be told so with a 404 rather than handed a page of
-    HTML that its JSON parser will choke on.
+    HTML that its JSON parser will choke on. So is ``/metrics``, which lives on
+    a port of its own (:mod:`app.core.prometheus`) and must not look present on
+    this one.
     """
 
-    def __init__(self, directory: Path, *, reserved: str, base_path: str = "") -> None:
+    def __init__(self, directory: Path, *, reserved: tuple[str, ...], base_path: str = "") -> None:
         super().__init__(directory=directory, html=True)
         self._reserved = reserved
         # Rendered once: the build does not change under a running process.
@@ -102,7 +104,9 @@ class SpaFiles(StaticFiles):
         return HTMLResponse(self._index, headers={"Cache-Control": "no-cache"})
 
 
-def mount_spa(app: FastAPI, directory: Path, *, reserved: str, base_path: str = "") -> bool:
+def mount_spa(
+    app: FastAPI, directory: Path, *, reserved: tuple[str, ...], base_path: str = ""
+) -> bool:
     """Serve the SPA in ``directory`` at ``/``, if it has been built.
 
     ``/`` within the app, that is: under a base path the app itself sits at
