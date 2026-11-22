@@ -39,6 +39,25 @@ SECRETS="${CYLIST_OBSERVABILITY_DIR:-$HOME/cylist-observability}"
 
 step() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
 
+# Download a chart into $charts and print its path. Charts come from GitHub
+# release assets, which time out on this line often enough (one in four, seen
+# 2026-11-22) that a run with six of them rarely gets through, so the download
+# alone is retried; the install after it is not.
+charts="$(mktemp -d)"
+trap 'rm -rf "$charts"' EXIT
+fetch() {
+  local repo_url=$1 name=$2 version=$3 attempt
+  for attempt in 1 2 3 4 5; do
+    if helm pull "$name" --repo "$repo_url" --version "$version" -d "$charts" > /dev/null; then
+      echo "$charts/$name-$version.tgz"
+      return
+    fi
+    echo "   download of $name $version failed (attempt $attempt); retrying" >&2
+    sleep $((attempt * 5))
+  done
+  return 1
+}
+
 step "Platform manifests (namespaces, priorities, quotas, policies)"
 kubectl apply -f "$repo/deploy/k3s/platform/"
 
@@ -96,40 +115,34 @@ EOF
 echo "   grafana-admin, alertmanager-urls"
 
 step "kube-prometheus-stack $KPS_VERSION"
-helm upgrade --install kps kube-prometheus-stack \
-  --repo https://prometheus-community.github.io/helm-charts \
-  --version "$KPS_VERSION" -n "$NS" \
+chart="$(fetch https://prometheus-community.github.io/helm-charts kube-prometheus-stack "$KPS_VERSION")"
+helm upgrade --install kps "$chart" -n "$NS" \
   -f "$here/values/kube-prometheus-stack.yaml" --wait --timeout 20m
 
 step "Loki $LOKI_VERSION"
-helm upgrade --install loki loki \
-  --repo https://grafana-community.github.io/helm-charts \
-  --version "$LOKI_VERSION" -n "$NS" \
+chart="$(fetch https://grafana-community.github.io/helm-charts loki "$LOKI_VERSION")"
+helm upgrade --install loki "$chart" -n "$NS" \
   -f "$here/values/loki.yaml" --wait --timeout 20m
 
 step "Tempo $TEMPO_VERSION"
-helm upgrade --install tempo tempo \
-  --repo https://grafana-community.github.io/helm-charts \
-  --version "$TEMPO_VERSION" -n "$NS" \
+chart="$(fetch https://grafana-community.github.io/helm-charts tempo "$TEMPO_VERSION")"
+helm upgrade --install tempo "$chart" -n "$NS" \
   -f "$here/values/tempo.yaml" --wait --timeout 20m
 
 step "Alloy $ALLOY_VERSION"
-helm upgrade --install alloy alloy \
-  --repo https://grafana.github.io/helm-charts \
-  --version "$ALLOY_VERSION" -n "$NS" \
+chart="$(fetch https://grafana.github.io/helm-charts alloy "$ALLOY_VERSION")"
+helm upgrade --install alloy "$chart" -n "$NS" \
   -f "$here/values/alloy.yaml" \
   --set-file alloy.configMap.content="$here/alloy/config.alloy" --wait --timeout 20m
 
 step "blackbox-exporter $BLACKBOX_VERSION"
-helm upgrade --install blackbox prometheus-blackbox-exporter \
-  --repo https://prometheus-community.github.io/helm-charts \
-  --version "$BLACKBOX_VERSION" -n "$NS" \
+chart="$(fetch https://prometheus-community.github.io/helm-charts prometheus-blackbox-exporter "$BLACKBOX_VERSION")"
+helm upgrade --install blackbox "$chart" -n "$NS" \
   -f "$here/values/blackbox.yaml" --wait --timeout 15m
 
 step "smartctl-exporter $SMARTCTL_VERSION"
-helm upgrade --install smartctl prometheus-smartctl-exporter \
-  --repo https://prometheus-community.github.io/helm-charts \
-  --version "$SMARTCTL_VERSION" -n "$NS" \
+chart="$(fetch https://prometheus-community.github.io/helm-charts prometheus-smartctl-exporter "$SMARTCTL_VERSION")"
+helm upgrade --install smartctl "$chart" -n "$NS" \
   -f "$here/values/smartctl.yaml" --wait --timeout 15m
 
 step "Probes, scrape targets, alert rules and dashboards"
