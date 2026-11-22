@@ -149,8 +149,9 @@ grafana:
     existingSecret: grafana-admin
     userKey: admin-user
     passwordKey: admin-password
-  # Reached only through `tailscale serve` on the tailnet (Phase 0, Q4). The
-  # host reaches a ClusterIP directly, so it is pinned for serve to target.
+  # Reached through `kubectl port-forward` from this machine; not on the
+  # tailnet since 2026-11-22. The pinned ClusterIP dates from when
+  # `tailscale serve` targeted it, and is kept so the Service is not recreated.
   service:
     type: ClusterIP
     clusterIP: 10.43.200.30
@@ -164,7 +165,7 @@ grafana:
     limits: {memory: 512Mi}
   grafana.ini:
     server:
-      root_url: https://dnu-home-1.tail222f46.ts.net:3443/
+      root_url: http://localhost:3000/
     analytics:
       reporting_enabled: false
       check_for_updates: false
