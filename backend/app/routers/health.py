@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+import asyncpg
 from fastapi import APIRouter, Request, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -70,7 +71,10 @@ async def health(
     """
     try:
         await session.execute(text("SELECT 1"))
-    except SQLAlchemyError:
+    # SQLAlchemy wraps what asyncpg raises once a connection is open, but not
+    # what it raises while opening one: OSError when nothing listens, and a
+    # PostgresError such as 57P03 while the server shuts down.
+    except (SQLAlchemyError, OSError, asyncpg.PostgresError):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return Health(status="degraded", database="down")
     return Health(status="ok", database="up")
