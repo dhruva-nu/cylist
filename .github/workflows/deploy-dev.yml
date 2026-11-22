@@ -10,9 +10,10 @@ name: Deploy dev
 #
 #   gh workflow run deploy-dev.yml --ref <branch> -f slot=2 -f card=CYLIST-79
 #
-# `target` picks the Docker slot (the default, and what devN.cylist.in serves
-# until the Phase 4 cutover) or the K3s one: deploy/k3s/deploy.sh, release
-# cylist-N in namespace cylist-dev.
+# `target` picks the K3s slot (the default, and what devN.cylist.in has served
+# since the Phase 4 cutover, CYLIST-197): deploy/k3s/deploy.sh, release
+# cylist-N in namespace cylist-dev. `docker` still deploys the old Docker slot,
+# which no hostname reaches any more; it is kept until Phase 7 removes it.
 #
 # `card` is optional. Given one, a successful deploy comments on that card in
 # production Cylist which slot its branch is in — see the last step.
@@ -34,11 +35,11 @@ on:
         type: string
         default: ""
       target:
-        description: Where to deploy. docker until this environment's K3s cutover (CYLIST-G13)
+        description: Where to deploy. k3s since the Phase 4 cutover (CYLIST-197); docker reaches no hostname
         required: true
         type: choice
-        options: [docker, k3s]
-        default: docker
+        options: [k3s, docker]
+        default: k3s
 
 # One deploy per slot at a time, and never a half-finished one: two runs of
 # scripts/deploy.sh against the same slot would fight over its containers, and a
