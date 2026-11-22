@@ -46,6 +46,7 @@ from app.core.logging import (
     reset_request_id,
     sanitise_request_id,
 )
+from app.core.tracing import tag_request
 
 logger = logging.getLogger("app.request")
 
@@ -98,6 +99,9 @@ class RequestLogMiddleware:
 
         request_id = sanitise_request_id(_inbound_request_id(scope)) or new_request_id()
         token = bind_request_id(request_id)
+        # The server span is already current — its middleware is outside this
+        # one — so the trace learns the id the log lines will carry.
+        tag_request(request_id)
         started = time.perf_counter()
         status_code = 0
 
