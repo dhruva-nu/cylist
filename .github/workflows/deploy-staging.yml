@@ -9,17 +9,18 @@ name: Deploy staging
 # read before triggering. What you get instead is control over *when* staging
 # moves — a merge into `staging` no longer restarts it underneath you.
 #
-# `target` picks the Docker stack (the default, and what stage.cylist.in
-# serves until the Phase 5 cutover) or K3s: deploy/k3s/deploy.sh staging.
+# `target` picks K3s (the default, and what stage.cylist.in has served since
+# the Phase 5 cutover, CYLIST-198): deploy/k3s/deploy.sh staging. `docker`
+# still deploys the old stack, which no hostname reaches; Phase 7 removes it.
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: Where to deploy. docker until this environment's K3s cutover (CYLIST-G13)
+        description: Where to deploy. k3s since the Phase 5 cutover (CYLIST-198); docker reaches no hostname
         required: true
         type: choice
-        options: [docker, k3s]
-        default: docker
+        options: [k3s, docker]
+        default: k3s
 
 # One staging deploy at a time, and never a half-finished one. Two runs of
 # scripts/deploy.sh against the same stack would fight over the same containers,

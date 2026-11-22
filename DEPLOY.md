@@ -549,6 +549,12 @@ a copy taken from production at that moment — the two move together, or stagin
 ends up with file rows pointing at blobs it does not have. Production is only
 read: `pg_dump`, and a read-only mount of its data volume.
 
+Since the staging cutover (CYLIST-198), staging runs on K3s and production is
+still on Docker. So the copy is `deploy/k3s/import-from-docker.sh prod staging`,
+which also compares every table's row count and every blob's checksum with
+production before it starts the app. The same script does production's
+own restore at its cutover (`prod prod`). It took 11 s on 2026-11-22.
+
 That has a consequence worth being explicit about:
 
 > **Staging's secrets are production's secrets.** The dump carries real vault
