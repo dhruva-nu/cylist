@@ -1,6 +1,7 @@
 # Staging: stage.cylist.in, in namespace cylist-staging. Built like
 # production on purpose; it differs only where it has to.
 priorityClassName: cylist-staging
+environment: staging
 
 app:
   host: stage.cylist.in

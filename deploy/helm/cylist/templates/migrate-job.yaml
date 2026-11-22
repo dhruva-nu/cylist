@@ -42,17 +42,20 @@ spec:
           command:
             - sh
             - -c
-            # Retried while the database refuses the connection: a new pod's
+            # Retried while the database cannot be reached yet: a new pod's
             # address reaches the network policy's allow list a few seconds
-            # after the pod starts. Any other failure fails the release.
+            # after the pod starts, and when the data release has just
+            # restarted Postgres, its headless name resolves only once the
+            # new pod is in the Service's endpoints. Any other failure fails
+            # the release.
             - |
-              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              for attempt in $(seq 1 20); do
                 if out="$(alembic upgrade head 2>&1)"; then
                   echo "$out"
                   exit 0
                 fi
                 case "$out" in
-                  *"Connect call failed"*|*"Connection refused"*)
+                  *"Connect call failed"*|*"Connection refused"*|*"Name or service not known"*|*"Temporary failure in name resolution"*)
                     echo "database not reachable yet (attempt $attempt)"; sleep 3 ;;
                   *"Can't locate revision"*)
                     echo "$out"

@@ -1,0 +1,38 @@
+# Tempo, single binary, on the filesystem (CYLIST-194). Apps send OTLP to
+# Alloy, which forwards here; Grafana queries http://tempo.monitoring:3200.
+fullnameOverride: tempo
+priorityClassName: cylist-platform
+
+tempo:
+  reportingEnabled: false
+  # 7 days. The 15Gi volume is the hard ceiling; TempoVolumeFilling alerts
+  # at 85% of it.
+  retention: 168h
+  # Only OTLP; Alloy is the only sender.
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+  # Request rate, errors and duration per span, and the service graph, as
+  # Prometheus series: the traces-to-metrics links in Grafana.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://kps-prometheus.monitoring:9090/api/v1/write
+  overrides:
+    defaults:
+      metrics_generator:
+        processors: [service-graphs, span-metrics]
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 1Gi}
+
+persistence:
+  enabled: true
+  storageClassName: local-path
+  size: 15Gi
+
+serviceMonitor:
+  enabled: true

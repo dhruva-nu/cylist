@@ -69,7 +69,7 @@ frontend=$(flag frontend/)
 android=$(flag android/ frontend/src/theme/tokens.css)
 # The Helm chart is installed and smoke-tested with the app's image and the
 # cluster's platform manifests, so a change to either reruns it.
-chart=$(flag deploy/helm/ deploy/k3s/platform/ backend/Dockerfile)
+chart=$(flag deploy/helm/ deploy/k3s/platform/ deploy/observability/ backend/Dockerfile)
 
 legs=()
 if [[ "$cli" == true ]]; then

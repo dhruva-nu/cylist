@@ -1,0 +1,216 @@
+// Grafana Alloy on dnu-home-1 (CYLIST-194): one pod on the host network, so
+// it can read what only the host can see.
+//
+//   logs     every K3s pod's log files, and every Docker container's until the
+//            Docker stacks are gone (Phase 7) -> Loki
+//   metrics  cloudflared's 127.0.0.1:20241, which no pod can reach -> Prometheus
+//   traces   OTLP from the apps on :4317/:4318 -> Tempo
+//
+// Labels are kept low-cardinality: environment, namespace, pod, container,
+// level, runtime. request_id, trace_id and the rest of the line stay in the
+// line or in structured metadata.
+
+// ---------------------------------------------------------------- K3s logs
+
+discovery.kubernetes "pods" {
+  role = "pod"
+  selectors {
+    role  = "pod"
+    field = "spec.nodeName=" + coalesce(sys.env("HOSTNAME"), constants.hostname)
+  }
+}
+
+discovery.relabel "pod_logs" {
+  targets = discovery.kubernetes.pods.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_cylist_in_environment"]
+    target_label  = "environment"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+    target_label  = "instance"
+  }
+  rule {
+    target_label = "runtime"
+    replacement  = "k3s"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+    separator     = "/"
+    target_label  = "__path__"
+    replacement   = "/var/log/pods/*$1/*.log"
+  }
+}
+
+local.file_match "pod_logs" {
+  path_targets = discovery.relabel.pod_logs.output
+}
+
+loki.source.file "pod_logs" {
+  targets    = local.file_match.pod_logs.targets
+  forward_to = [loki.process.pod_logs.receiver]
+}
+
+loki.process "pod_logs" {
+  // containerd's CRI framing: timestamp, stream, partial flag, line.
+  stage.cri {}
+  forward_to = [loki.process.cylist_json.receiver]
+}
+
+// --------------------------------------------------------------- Docker logs
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+
+  // Only the Cylist stacks; their compose projects are cylist-prod,
+  // cylist-staging, cylist-dev-N and cylist-dev-db.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "cylist-.*"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "cylist-(prod|staging|dev-[1-5])"
+    target_label  = "environment"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "cylist-dev-db"
+    replacement   = "dev"
+    target_label  = "environment"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "pod"
+  }
+  rule {
+    target_label = "runtime"
+    replacement  = "docker"
+  }
+}
+
+loki.source.docker "docker_logs" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.docker_logs.output
+  relabel_rules = discovery.relabel.docker_logs.rules
+  forward_to    = [loki.process.cylist_json.receiver]
+}
+
+// ------------------------------------------------- the app's JSON log lines
+
+// The app logs one JSON object per line when CYLIST_LOG_FORMAT=json
+// (backend/app/core/logging.py). Lines that are not JSON (Postgres, Traefik,
+// a text-format app) pass through untouched.
+loki.process "cylist_json" {
+  stage.match {
+    selector = "{container=\"app\"}"
+
+    stage.json {
+      expressions = {
+        level      = "level",
+        logger     = "logger",
+        request_id = "request_id",
+        trace_id   = "trace_id",
+        span_id    = "span_id",
+      }
+    }
+    stage.labels {
+      values = { level = "" }
+    }
+    stage.structured_metadata {
+      values = {
+        logger     = "",
+        request_id = "",
+        trace_id   = "",
+        span_id    = "",
+      }
+    }
+  }
+
+  stage.label_drop {
+    values = ["filename"]
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki.monitoring:3100/loki/api/v1/push"
+  }
+}
+
+// ------------------------------------------------------------- host metrics
+
+// cloudflared serves its metrics on loopback only; this pod shares the host's.
+prometheus.scrape "cloudflared" {
+  targets         = [{"__address__" = "127.0.0.1:20241", "job" = "cloudflared", "instance" = "dnu-home-1"}]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.prometheus.receiver]
+}
+
+prometheus.exporter.self "alloy" {}
+
+prometheus.scrape "alloy" {
+  targets         = prometheus.exporter.self.alloy.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.prometheus.receiver]
+}
+
+prometheus.remote_write "prometheus" {
+  endpoint {
+    url = "http://kps-prometheus.monitoring:9090/api/v1/write"
+  }
+}
+
+// ------------------------------------------------------------------- traces
+
+otelcol.receiver.otlp "apps" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.traces.input]
+  }
+}
+
+otelcol.processor.batch "traces" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo.monitoring:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

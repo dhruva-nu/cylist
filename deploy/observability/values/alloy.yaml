@@ -1,0 +1,46 @@
+# Grafana Alloy as a DaemonSet of one, on the host network (CYLIST-194). The
+# pipeline itself is alloy/config.alloy, passed by install.sh with
+# --set-file alloy.configMap.content.
+#
+# The host network is what lets it scrape cloudflared on 127.0.0.1 and listen
+# for OTLP where every pod can reach it. Its ports (4317, 4318, 12345) are
+# bound on every host address, but ufw drops inbound except from the pod
+# network (10.42.0.0/16), so neither the LAN nor the tailnet reaches them.
+fullnameOverride: alloy
+
+alloy:
+  enableReporting: false
+  mounts:
+    # /var/log/pods: every K3s container's log files.
+    varlog: true
+    extra:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+        readOnly: true
+  extraPorts:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 768Mi}
+
+controller:
+  type: daemonset
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  priorityClassName: cylist-platform
+  volumes:
+    extra:
+      # The Docker stacks' logs, until Phase 7 removes them. Read-only in
+      # name only: the socket is the Docker API. Remove with the stacks.
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+
+serviceMonitor:
+  enabled: false

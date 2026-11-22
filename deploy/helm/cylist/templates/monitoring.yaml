@@ -1,0 +1,45 @@
+{{- if include "cylist.monitoring" . }}
+{{- if eq (include "cylist.component" .) "data" }}
+# postgres_exporter, the Postgres pod's sidecar. The NetworkPolicy lets the
+# monitoring namespace in (deploy/k3s/platform/30-networkpolicies.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "cylist.postgresName" . }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  selector:
+    matchLabels:
+      {{- include "cylist.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cylist_in_environment]
+          targetLabel: environment
+{{- end }}
+{{- if and (eq (include "cylist.component" .) "app") .Values.app.metrics.enabled }}
+# The app's /metrics, on its metrics port (CYLIST-195).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  selector:
+    matchLabels:
+      {{- include "cylist.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cylist_in_environment]
+          targetLabel: environment
+{{- end }}
+{{- end }}

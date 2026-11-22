@@ -1,0 +1,14 @@
+# smartctl_exporter (CYLIST-194): the disk's SMART health. Privileged, as
+# smartctl needs the raw device. Alert rules are ours (manifests/rules-*.yaml).
+fullnameOverride: smartctl
+priorityClassName: cylist-platform
+
+serviceMonitor:
+  enabled: true
+
+prometheusRules:
+  enabled: false
+
+resources:
+  requests: {cpu: 10m, memory: 32Mi}
+  limits: {memory: 128Mi}

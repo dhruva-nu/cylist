@@ -1,4 +1,6 @@
 # Dev slot 4: dev4.cylist.in. Release cylist-4 in namespace cylist-dev.
+environment: dev-4
+
 app:
   host: dev4.cylist.in
   env:

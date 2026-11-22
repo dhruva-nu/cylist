@@ -7,6 +7,10 @@ set -euo pipefail
 CHART="$(cd "$(dirname "${BASH_SOURCE[0]}")/cylist" && pwd)"
 # Validated against the API of the cluster it is installed on.
 KUBE_VERSION="${KUBE_VERSION:-1.37.0}"
+# Rendered as if the monitoring stack's CRDs were installed, as they are on
+# the cluster, and checked against those CRDs' published schemas.
+API_VERSIONS=(--api-versions monitoring.coreos.com/v1/PodMonitor --api-versions traefik.io/v1alpha1/Middleware)
+CRD_SCHEMAS='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
 releases=(
   "cylist-prod cylist-data data values-prod.yaml"
@@ -26,7 +30,8 @@ for release in "${releases[@]}"; do
   for f in $files; do args+=(-f "$CHART/$f"); done
   echo "→ $ns/$name ($component: $files)"
   helm lint --quiet --strict "$CHART" "${args[@]}" || status=1
-  helm template "$name" "$CHART" -n "$ns" "${args[@]}" |
-    kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" - || status=1
+  helm template "$name" "$CHART" -n "$ns" "${args[@]}" "${API_VERSIONS[@]}" |
+    kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" \
+      -schema-location default -schema-location "$CRD_SCHEMAS" - || status=1
 done
 exit "$status"

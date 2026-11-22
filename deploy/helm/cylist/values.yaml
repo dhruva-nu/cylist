@@ -51,6 +51,17 @@ deployInfo:
 
 priorityClassName: ""
 
+# Which of the seven this is: prod, staging or dev-1..dev-5, and "dev" for
+# dev's shared data release. Set on every pod as cylist.in/environment, which
+# Prometheus and Alloy copy onto every metric and log line as `environment`
+# (deploy/observability/README.md).
+environment: ""
+
+# Scrape objects for the Prometheus Operator. Rendered only where its CRDs
+# are installed, so a cluster without the monitoring stack still installs.
+monitoring:
+  enabled: true
+
 app:
   host: ""
   ingressClassName: traefik
@@ -69,6 +80,18 @@ app:
     # CF-Connecting-IP, believed only from the pod network (CYLIST-122).
     CYLIST_TRUSTED_PROXY_CIDRS: '["10.42.0.0/16"]'
     CYLIST_CLIENT_URLS: "[]"
+    # One JSON object per line, which Alloy parses into Loki (CYLIST-194).
+    CYLIST_LOG_FORMAT: json
+    # Traces as OTLP/HTTP to Alloy, which relays them to Tempo (CYLIST-196).
+    # Every request in staging and dev; production samples (values-prod.yaml).
+    CYLIST_OTLP_ENDPOINT: http://alloy.monitoring:4318
+    CYLIST_TRACE_SAMPLE_RATIO: "1.0"
+
+  # Prometheus metrics on a port of their own (CYLIST-195), scraped by a
+  # PodMonitor and published by no Service, so never reachable from outside.
+  metrics:
+    enabled: true
+    port: 9090
 
   # More secrets read after secrets.app, so their keys win. Each is optional:
   # a dev slot on a database of its own gets cylist-slot-N-db with just its
