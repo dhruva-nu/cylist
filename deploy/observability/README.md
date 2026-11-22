@@ -66,7 +66,7 @@ expose). Each Cylist rule has a `runbook` annotation that appears in the push.
 | Severity | Goes to | When |
 |---|---|---|
 | `page` (and the chart's `critical`) | ntfy, priority 5 | Production or the box |
-| `ticket` (and everything else) | ntfy, priority 2, silent | Staging, dev, slow trends |
+| `ticket` (and everything else) | ntfy, priority 1: listed in the app, never pops up | Staging, dev, slow trends |
 | `Watchdog` | Healthchecks.io, every minute | Always firing; its silence is the alarm |
 
 Staging and dev never page: Alertmanager routes anything labelled with their

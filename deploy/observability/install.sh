@@ -78,7 +78,8 @@ topic="$(< "$SECRETS/ntfy-topic")"
 
 # ntfy renders the title and message from Alertmanager's JSON (tpl=yes), so
 # the push reads as words rather than a JSON blob. page rings; ticket is a
-# silent notification for the morning.
+# notification that never pops up (ntfy priority 1): it waits in the app
+# for the morning.
 ntfy_url() {
   python3 - "$topic" "$1" "$2" << 'PY'
 import sys, urllib.parse
@@ -109,7 +110,7 @@ metadata:
 type: Opaque
 stringData:
   page: '$(ntfy_url 5 rotating_light)'
-  ticket: '$(ntfy_url 2 memo)'
+  ticket: '$(ntfy_url 1 memo)'
   heartbeat: '$heartbeat'
 EOF
 echo "   grafana-admin, alertmanager-urls"

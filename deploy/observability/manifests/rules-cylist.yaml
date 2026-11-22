@@ -48,12 +48,17 @@ spec:
 
     - name: cylist.edge
       rules:
+        # A ticket, not a page: the other connections carry the traffic, and
+        # ProdDown pages if they stop. One connection dropping and coming back
+        # every few minutes is common on this line (2026-11-22: 56 times in
+        # 3h, 99% of probes fine), so this averages over an hour rather than
+        # firing and resolving with every flap.
         - alert: TunnelDegraded
-          expr: cloudflared_tunnel_ha_connections < 4
-          for: 5m
-          labels: {severity: page, environment: prod}
+          expr: avg_over_time(cloudflared_tunnel_ha_connections[1h]) < 3.5
+          for: 15m
+          labels: {severity: ticket, environment: prod}
           annotations:
-            summary: "cloudflared has {{ $value }} of 4 tunnel connections"
+            summary: "cloudflared has averaged {{ $value | printf \"%.1f\" }} of 4 tunnel connections over the last hour"
             runbook: "journalctl -u cloudflared; healthy is four 'Registered tunnel connection' lines. sudo systemctl restart cloudflared if stuck."
         - alert: CloudflaredMetricsMissing
           expr: absent_over_time(up{job="cloudflared"}[5m]) or up{job="cloudflared"} == 0
