@@ -8,8 +8,18 @@ name: Deploy staging
 # `staging` has already run them, and their result is on the commit for you to
 # read before triggering. What you get instead is control over *when* staging
 # moves — a merge into `staging` no longer restarts it underneath you.
+#
+# `target` picks the Docker stack (the default, and what stage.cylist.in
+# serves until the Phase 5 cutover) or K3s: deploy/k3s/deploy.sh staging.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to deploy. docker until this environment's K3s cutover (CYLIST-G13)
+        required: true
+        type: choice
+        options: [docker, k3s]
+        default: docker
 
 # One staging deploy at a time, and never a half-finished one. Two runs of
 # scripts/deploy.sh against the same stack would fight over the same containers,
@@ -49,4 +59,13 @@ jobs:
       # Builds the image, dumps the database, migrates, restarts the stack and
       # waits for /api/v1/health — the same script production and dev use.
       - name: Deploy
-        run: scripts/deploy.sh staging
+        env:
+          TARGET: ${{ inputs.target }}
+          # The cylist-deployer service account: the cylist-* namespaces only.
+          KUBECONFIG: /home/dnu2/.kube/cylist-deployer.yaml
+        run: |
+          if [[ "$TARGET" == k3s ]]; then
+            deploy/k3s/deploy.sh staging
+          else
+            scripts/deploy.sh staging
+          fi

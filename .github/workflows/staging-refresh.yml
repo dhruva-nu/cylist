@@ -3,8 +3,17 @@ name: Refresh staging from production
 # Manual only. This drops everything staging holds and reloads it from a
 # fresh production dump, so it does not belong on any push trigger — see
 # scripts/staging-refresh.sh for what actually happens.
+# `target` picks which pair it copies between: the Docker stacks (the
+# default) or K3s's (deploy/k3s/staging-refresh.sh). Never across the two.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to deploy. docker until this environment's K3s cutover (CYLIST-G13)
+        required: true
+        type: choice
+        options: [docker, k3s]
+        default: docker
 
 jobs:
   refresh:
@@ -18,4 +27,13 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Refresh
-        run: scripts/staging-refresh.sh --yes
+        env:
+          TARGET: ${{ inputs.target }}
+          # The cylist-deployer service account: the cylist-* namespaces only.
+          KUBECONFIG: /home/dnu2/.kube/cylist-deployer.yaml
+        run: |
+          if [[ "$TARGET" == k3s ]]; then
+            deploy/k3s/staging-refresh.sh --yes
+          else
+            scripts/staging-refresh.sh --yes
+          fi

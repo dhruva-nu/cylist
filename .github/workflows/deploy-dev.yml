@@ -10,6 +10,10 @@ name: Deploy dev
 #
 #   gh workflow run deploy-dev.yml --ref <branch> -f slot=2 -f card=CYLIST-79
 #
+# `target` picks the Docker slot (the default, and what devN.cylist.in serves
+# until the Phase 4 cutover) or the K3s one: deploy/k3s/deploy.sh, release
+# cylist-N in namespace cylist-dev.
+#
 # `card` is optional. Given one, a successful deploy comments on that card in
 # production Cylist which slot its branch is in — see the last step.
 #
@@ -29,6 +33,12 @@ on:
         required: false
         type: string
         default: ""
+      target:
+        description: Where to deploy. docker until this environment's K3s cutover (CYLIST-G13)
+        required: true
+        type: choice
+        options: [docker, k3s]
+        default: docker
 
 # One deploy per slot at a time, and never a half-finished one: two runs of
 # scripts/deploy.sh against the same slot would fight over its containers, and a
@@ -73,7 +83,15 @@ jobs:
         # branch check does: the shell is the self-hosted runner's.
         env:
           SLOT: ${{ inputs.slot }}
-        run: scripts/deploy.sh dev "$SLOT"
+          TARGET: ${{ inputs.target }}
+          # The cylist-deployer service account: the cylist-* namespaces only.
+          KUBECONFIG: /home/dnu2/.kube/cylist-deployer.yaml
+        run: |
+          if [[ "$TARGET" == k3s ]]; then
+            deploy/k3s/deploy.sh dev "$SLOT"
+          else
+            scripts/deploy.sh dev "$SLOT"
+          fi
 
       # Tells the card which slot its branch is in, as Agent: the same line the
       # deploy-dev skill has an agent post, so a deploy started by hand from
@@ -81,8 +99,11 @@ jobs:
       # (read + write) kept as an Actions secret; without it this step warns and
       # the agent's own comment is all there is. It never fails the run — the
       # deploy it reports on has already succeeded. See scripts/dev-card-comment.sh.
+      # Docker only until the Phase 4 cutover: before it, devN.cylist.in
+      # still serves the Docker slot, so a comment naming it for a K3s deploy
+      # would send the card's reader to the wrong code.
       - name: Comment on the card
-        if: inputs.card != ''
+        if: inputs.card != '' && inputs.target == 'docker'
         env:
           CARD: ${{ inputs.card }}
           SLOT: ${{ steps.deploy.outputs.slot }}

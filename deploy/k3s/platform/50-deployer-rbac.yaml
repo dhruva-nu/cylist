@@ -1,0 +1,95 @@
+# What the self-hosted Actions runner deploys with (CYLIST-193): a service
+# account that can manage Cylist's releases in the three cylist-* namespaces
+# and nothing else. It cannot touch kube-system, monitoring, the registry,
+# nodes, namespaces, quotas, network policies or RBAC. Its kubeconfig is made
+# by deploy/k3s/deployer-kubeconfig.sh.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cylist-deployer
+  namespace: kube-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cylist-deployer-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: cylist-deployer
+type: kubernetes.io/service-account-token
+---
+# Namespaced rules only. A ClusterRole so it is written once, but granted
+# only through the RoleBindings below, which confine it to their namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cylist-deployer
+rules:
+  # Helm keeps each release's history in Secrets of its namespace.
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, persistentvolumeclaims, pods]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Dumps, restores and the blobs copy run through exec.
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [pods/log, events, endpoints]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments/scale, statefulsets/scale]
+    verbs: [get, update, patch]
+  - apiGroups: [apps]
+    resources: [replicasets, controllerrevisions]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cylist-deployer
+  namespace: cylist-prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cylist-deployer
+subjects:
+  - kind: ServiceAccount
+    name: cylist-deployer
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cylist-deployer
+  namespace: cylist-staging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cylist-deployer
+subjects:
+  - kind: ServiceAccount
+    name: cylist-deployer
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cylist-deployer
+  namespace: cylist-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cylist-deployer
+subjects:
+  - kind: ServiceAccount
+    name: cylist-deployer
+    namespace: kube-system
