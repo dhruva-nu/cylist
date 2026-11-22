@@ -82,10 +82,34 @@ The receivers' URLs are made by `install.sh` into the Secret
   check's own integration set to notify you (ntfy, email, or both). Without it
   a dead box, a dead Prometheus or a power cut pages nobody.
 
-To test the path end to end: `kubectl -n monitoring scale statefulset
-prometheus-kps-prometheus --replicas=0` silences Watchdog, and Healthchecks.io
-should page after the grace period. The operator puts the replica back on its
-next reconcile, or immediately with `--replicas=1`.
+To test the path end to end, stop Prometheus and keep it stopped. The
+operator would put it straight back, so scale the operator down first:
+
+```sh
+kubectl -n monitoring scale deploy kps-operator --replicas=0
+kubectl -n monitoring scale statefulset prometheus-kps --replicas=0
+# ...wait for the page, then:
+kubectl -n monitoring scale statefulset prometheus-kps --replicas=1
+kubectl -n monitoring scale deploy kps-operator --replicas=1
+```
+
+Alertmanager keeps the last Watchdog alive for about 3 minutes after
+Prometheus stops: on the CYLIST-199 game day, Prometheus stopped at 17:18:26
+and Alertmanager dropped the alert at about 17:21:30. Allow that plus the
+check's period and grace before expecting the page.
+
+What else the game day showed (2026-11-22):
+
+- A stopped prod app container never reaches `ProdDown`. `net-watchdog`
+  (`/usr/local/sbin/net-watchdog`, a systemd timer, outside this repo)
+  restarts it at its second failed tick, which took 77 s, inside the alert's
+  2 minutes. To test `ProdDown`, stop cloudflared instead. The watchdog does
+  not touch it, and `ProdDown` paged after 2m49s.
+- A stopped cloudflared does not raise `TunnelDegraded`: its series vanishes,
+  and the hourly average of the samples that are left stays at 4. That case is
+  covered by `HostServiceDown` (page, 4m08s) and `CloudflaredMetricsMissing`
+  (ticket). `TunnelDegraded` catches connections that drop while cloudflared
+  keeps running.
 
 ## Scrape targets
 
