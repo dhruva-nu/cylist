@@ -51,6 +51,16 @@ rules:
   - apiGroups: [networking.k8s.io]
     resources: [ingresses]
     verbs: [get, list, watch, create, update, patch, delete]
+  # The chart's own CRD objects: a PodMonitor per release, scraped by the
+  # monitoring stack (CYLIST-194/195), and the app's Traefik Middleware.
+  # Without these, helm fails before it changes anything, as the first CI
+  # deploy to K3s did (CYLIST-198).
+  - apiGroups: [monitoring.coreos.com]
+    resources: [podmonitors]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
