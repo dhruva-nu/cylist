@@ -147,6 +147,10 @@ if [[ -n "$SLOT" ]]; then
     unmerged="(unknown)"
   fi
   db_secret="cylist-slot-$SLOT-db"
+  # What the running release reads, for restore_db_secret below. Empty when
+  # it has no secret, i.e. runs on the shared database.
+  prev_db_url="$(kubectl -n "$NS" get secret "$db_secret" --ignore-not-found \
+    -o jsonpath='{.data.CYLIST_DATABASE_URL}' | base64 -d)"
   if [[ -z "$unmerged" ]]; then
     echo "   no migrations that $DEV_MAIN_BRANCH does not have: the shared database"
     kubectl -n "$NS" delete secret "$db_secret" --ignore-not-found > /dev/null
@@ -172,6 +176,22 @@ if [[ -n "$SLOT" ]]; then
   EXTRA=(-f "$CHART/values-dev-$SLOT.yaml")
 fi
 
+# The secret is optional in the pod spec and read when a pod starts, so a
+# failed upgrade that left the new one in place would move the rolled-back
+# release onto the new database at its next restart, silently (CYLIST-199
+# game day). Put it back the way the running release had it.
+restore_db_secret() {
+  [[ -n "$SLOT" ]] || return 0
+  if [[ -z "$prev_db_url" ]]; then
+    kubectl -n "$NS" delete secret "$db_secret" --ignore-not-found > /dev/null
+  else
+    kubectl -n "$NS" create secret generic "$db_secret" \
+      --from-env-file=<(printf 'CYLIST_DATABASE_URL=%s\n' "$prev_db_url") \
+      --dry-run=client -o yaml | kubectl -n "$NS" apply -f - > /dev/null
+  fi
+  echo "   slot $SLOT's database secret is back as the previous release had it" >&2
+}
+
 step "Migrating and rolling out"
 # Branch names are anyone's text; they reach helm as JSON in a file, never
 # through --set, which would read a comma or `=` in one as syntax.
@@ -183,8 +203,11 @@ jq -n --arg branch "$BRANCH" --arg sha "$SHA" --arg db "$DB_MODE" \
 # --rollback-on-failure puts the previous release back if the migration hook
 # or the rollout fails; the schema stays wherever the migration left it, and
 # the dump above is the way back from that.
-helm upgrade --install "$RELEASE" "$CHART" -n "$NS" "${VALUES[@]}" "${EXTRA[@]}" \
-  -f "$info" --set component=app --rollback-on-failure --wait --timeout 10m
+if ! helm upgrade --install "$RELEASE" "$CHART" -n "$NS" "${VALUES[@]}" "${EXTRA[@]}" \
+  -f "$info" --set component=app --rollback-on-failure --wait --timeout 10m; then
+  restore_db_secret
+  exit 1
+fi
 
 step "Checking health"
 for attempt in $(seq 1 30); do
