@@ -113,7 +113,9 @@ staging-deploy: ## Build, migrate and restart the staging stack on this machine
 	scripts/deploy.sh staging
 
 staging-refresh: ## Replace staging's database and files with a copy of production
-	scripts/staging-refresh.sh
+	# Staging is on K3s, production still on Docker (CYLIST-198); the Docker-only
+	# refresh is scripts/staging-refresh.sh.
+	deploy/k3s/import-from-docker.sh prod staging
 
 staging-logs: ## Follow the staging app's logs
 	$(STAGING) logs -f app
