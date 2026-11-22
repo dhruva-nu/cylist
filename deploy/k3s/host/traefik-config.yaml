@@ -1,0 +1,36 @@
+# Installed to /var/lib/rancher/k3s/server/manifests/traefik-config.yaml by
+# install.sh, where K3s merges it into its bundled Traefik chart (41.6.x).
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      web:
+        # cloudflared reaches the cluster on 127.0.0.1:80. ServiceLB DNATs
+        # :80 on every node address, so the LAN and tailnet reach it too.
+        expose:
+          default: true
+        forwardedHeaders:
+          # cloudflared and ServiceLB both arrive from loopback or the pod CIDR.
+          trustedIPs:
+            - "127.0.0.1/32"
+            - "10.42.0.0/16"
+        transport:
+          # 0 = no timeout, so WebSockets and long-polls are not cut off.
+          # Idle keep-alive connections are still closed after 3 minutes.
+          respondingTimeouts:
+            readTimeout: 0
+            writeTimeout: 0
+            idleTimeout: 180s
+      websecure:
+        # tailscale serve holds :443 on the tailnet address; never publish it.
+        expose:
+          default: false
+    metrics:
+      prometheus:
+        addRoutersLabels: true
+        service:
+          enabled: true
