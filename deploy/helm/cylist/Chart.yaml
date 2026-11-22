@@ -6,4 +6,4 @@ description: >-
   component=app (the API and SPA, its migrations and its route).
 type: application
 version: 0.1.0
-appVersion: "0.4.7"
+appVersion: "0.5.0"

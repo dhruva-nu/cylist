@@ -282,7 +282,7 @@ def create_app(settings: Settings | None = None, *, tracing: Tracing | None = No
 
     app = FastAPI(
         title="Cylist",
-        version="0.4.7",
+        version="0.5.0",
         description=DESCRIPTION,
         lifespan=build_lifespan(settings, tracing),
         openapi_url=f"{API_PREFIX}/openapi.json",

@@ -16,6 +16,15 @@
 #   scripts/backup.sh [destination-directory]
 #
 # Reads CYLIST_DATABASE_URL and CYLIST_DATA_DIR, falling back to backend/.env.
+#
+# The dump must be readable by the pg_restore that will restore it, and a
+# pg_dump newer than the server writes a format older tools reject. So the
+# client may not be newer than the server:
+#
+#   PG_DUMP=/usr/lib/postgresql/16/bin/pg_dump   use a client that matches
+#   CYLIST_BACKUP_CONTAINER=<postgres container> dump inside that container
+#                                                (its own client, no host
+#                                                pg_dump needed)
 
 set -euo pipefail
 
@@ -41,7 +50,24 @@ TARGET="$DESTINATION/cylist-$STAMP"
 mkdir -p "$TARGET"
 
 echo "→ database"
-pg_dump --format=custom --no-owner --file "$TARGET/database.dump" "$DUMP_URL"
+if [[ -n ${CYLIST_BACKUP_CONTAINER:-} ]]; then
+  # Same major as the server by construction. Credentials come from the
+  # container's own environment, as in deploy.sh.
+  docker exec "$CYLIST_BACKUP_CONTAINER" sh -c \
+    'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+    > "$TARGET/database.dump"
+else
+  PG_DUMP="${PG_DUMP:-pg_dump}"
+  client_major="$("$PG_DUMP" --version | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+  server_major="$(psql -At "$DUMP_URL" -c 'show server_version_num' | cut -c1-2)"
+  if (( client_major > server_major )); then
+    echo "refusing: $PG_DUMP is version $client_major but the server is $server_major." >&2
+    echo "A dump from the newer client cannot be restored by a $server_major pg_restore." >&2
+    echo "Set PG_DUMP to a $server_major client, or CYLIST_BACKUP_CONTAINER to dump inside the container." >&2
+    exit 1
+  fi
+  "$PG_DUMP" --format=custom --no-owner --file "$TARGET/database.dump" "$DUMP_URL"
+fi
 
 echo "→ uploaded files"
 if [[ -d "$DATA_DIR" ]]; then
@@ -56,6 +82,9 @@ cat > "$TARGET/RESTORE.md" <<'NOTES'
     createdb cylist
     pg_restore --dbname "$CYLIST_DATABASE_URL" --no-owner database.dump
     mkdir -p "$CYLIST_DATA_DIR" && tar -xzf data.tar.gz -C "$CYLIST_DATA_DIR"
+
+Use a pg_restore at least as new as the server that was dumped, and a
+server at least as new as the dump's client.
 
 Then set CYLIST_VAULT_KEY to the key this installation used. It is not in
 this backup, and without it every vault secret here stays unreadable.
