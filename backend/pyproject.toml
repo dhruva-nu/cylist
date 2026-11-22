@@ -1,6 +1,6 @@
 [project]
 name = "cylist-backend"
-version = "0.4.7"
+version = "0.5.0"
 description = "Cylist API — projects, boards, files and a vault, for humans and agents alike."
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -41,6 +41,19 @@ dependencies = [
     # is built from this repository alone.
     "jev",
     "jevdocs",
+    # The /metrics exposition, on a port of its own and only when
+    # CYLIST_METRICS_ENABLED is set — see app/core/prometheus.py.
+    "prometheus-client>=0.21",
+    # Traces, sent over OTLP/HTTP when CYLIST_OTLP_ENDPOINT is set and not
+    # loaded at all when it is not — see app/core/tracing.py. The SDK and its
+    # instrumentations move together (1.x with 0.x-beta of the same release),
+    # so they are kept at matching versions.
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
 ]
 
 [tool.uv.sources]
@@ -116,6 +129,9 @@ strict = true
 plugins = ["pydantic.mypy"]
 exclude = ["alembic/versions/"]
 warn_unreachable = true
+# The SQLAlchemy instrumentation's EngineTracer carries no annotations;
+# app/core/tracing.py is the one place that builds one, and needs nothing back.
+untyped_calls_exclude = ["opentelemetry.instrumentation.sqlalchemy"]
 
 [[tool.mypy.overrides]]
 module = ["alembic.*"]

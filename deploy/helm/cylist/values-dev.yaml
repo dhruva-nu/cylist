@@ -1,0 +1,34 @@
+# Every dev slot, and the shared data release, in namespace cylist-dev. Each
+# slot adds values-dev-N.yaml. The slots share one Postgres and one blobs
+# volume, so they show the same data; a slot whose branch has migrations main
+# does not gets a database of its own on that Postgres, through the optional
+# cylist-slot-N-db secret its deploy writes (see scripts/dev-slot.sh).
+priorityClassName: cylist-dev
+environment: dev
+
+app:
+  env:
+    # Not "dev": "preview" is deployed (Secure cookie, make seed refused)
+    # without changing what dev means on someone's own machine.
+    CYLIST_ENVIRONMENT: preview
+    # Each slot has its own hostname and is served at the root.
+    CYLIST_BASE_PATH: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 768Mi
+  migrations:
+    tolerateUnknownRevision: true
+
+database:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      memory: 1Gi
+
+backup:
+  keep: 7

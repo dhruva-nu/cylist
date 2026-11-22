@@ -1,0 +1,30 @@
+# When the node is short of resources, the scheduler preempts lower classes
+# first: dev, then staging and monitoring, never prod for either.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: cylist-prod
+value: 100000
+description: Production app and database.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: cylist-platform
+value: 50000
+description: Monitoring and the image registry.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: cylist-staging
+value: 10000
+description: Staging app and database.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: cylist-dev
+value: 1000
+preemptionPolicy: Never
+description: Dev slots. Never preempts anything to fit.

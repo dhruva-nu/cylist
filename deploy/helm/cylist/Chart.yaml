@@ -1,0 +1,9 @@
+apiVersion: v2
+name: cylist
+description: >-
+  Cylist on K3s. One chart, installed twice per namespace: once with
+  component=data (Postgres, the blob volume, backups) and once per app with
+  component=app (the API and SPA, its migrations and its route).
+type: application
+version: 0.1.0
+appVersion: "0.5.0"

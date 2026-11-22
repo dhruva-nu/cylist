@@ -1,0 +1,287 @@
+{{- if eq (include "cylist.component" .) "data" }}
+{{- $pg := include "cylist.postgresName" . }}
+# Postgres for every app in this namespace. Headless, so the name resolves
+# straight to the one pod; only pods in this namespace can reach it (see
+# deploy/k3s/platform/30-networkpolicies.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $pg }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  clusterIP: None
+  selector:
+    {{- include "cylist.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+    - name: metrics
+      port: 9187
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $pg }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ $pg }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cylist.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "cylist.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+        {{- include "cylist.environmentLabel" . | nindent 8 }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      # The image's own postgres user (uid 70 in the alpine image), so the
+      # entrypoint never needs root to chown anything.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.database.image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.postgres }}
+          env:
+            # A subdirectory, so initdb never finds the volume root non-empty.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          startupProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.database.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+        - name: exporter
+          image: {{ .Values.database.exporter.image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.postgres }}
+                  key: POSTGRES_DB
+            - name: DATA_SOURCE_URI
+              value: localhost:5432/$(POSTGRES_DB)?sslmode=disable
+            - name: DATA_SOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.postgres }}
+                  key: POSTGRES_USER
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.postgres }}
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: metrics
+              containerPort: 9187
+          resources:
+            {{- toYaml .Values.database.exporter.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: {{ .Values.database.storage }}
+---
+# The uploaded files every app in this namespace serves. ReadWriteOnce is per
+# node, and there is one node, so all five dev slots mount it at once.
+# Kept on `helm uninstall`: a file is a row in Postgres plus its bytes here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cylist.blobsClaim" . }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: {{ .Values.blobs.storage }}
+{{- if .Values.backup.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-backups
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: {{ .Values.backup.storage }}
+---
+# What scripts/backup.sh made by hand, nightly: the database and the blobs,
+# as a pair, since a restore needs both. Not CYLIST_VAULT_KEY, on purpose.
+# Dumped with the server's own major version (the image is the database's),
+# so pg_restore in the same image reads it back.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-backup
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: {{ .Values.backup.timeZone }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "cylist.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          {{- with .Values.priorityClassName }}
+          priorityClassName: {{ . }}
+          {{- end }}
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: {{ .Values.database.image }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: PGHOST
+                  value: {{ $pg }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.postgres }}
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.postgres }}
+                      key: POSTGRES_PASSWORD
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.postgres }}
+                      key: POSTGRES_DB
+                - name: KEEP
+                  value: {{ .Values.backup.keep | quote }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  # A new pod's address reaches the network policy's allow
+                  # list a few seconds after the pod starts; until then
+                  # Postgres refuses it.
+                  waited=0
+                  until pg_isready -q -t 2; do
+                    [ "$waited" -lt 60 ] || { echo "Postgres never answered" >&2; exit 1; }
+                    sleep 2; waited=$((waited + 2))
+                  done
+                  echo "-> Postgres answered after ${waited}s"
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  target="/backups/cylist-$stamp"
+                  mkdir -p "$target.partial"
+                  echo "-> database $PGDATABASE"
+                  pg_dump --format=custom --no-owner --file "$target.partial/database.dump"
+                  echo "-> uploaded files"
+                  # blobs/ under a data directory, as scripts/backup.sh lays it out.
+                  tar -czf "$target.partial/data.tar.gz" -C /data blobs
+                  mv "$target.partial" "$target"
+                  du -sh "$target"/*
+                  # Newest $KEEP, and no half-written ones from a run that died.
+                  rm -rf /backups/*.partial
+                  ls -1d /backups/cylist-* | sort -r | tail -n "+$((KEEP + 1))" | xargs -r rm -rf
+                  echo "kept $(ls -1d /backups/cylist-* | wc -l) backups"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                - name: blobs
+                  mountPath: /data/blobs
+                  readOnly: true
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ .Release.Name }}-backups
+            - name: blobs
+              persistentVolumeClaim:
+                claimName: {{ include "cylist.blobsClaim" . }}
+{{- end }}
+{{- end }}

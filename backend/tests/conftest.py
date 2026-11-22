@@ -25,8 +25,9 @@ migrations produce that same schema.
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
@@ -198,6 +199,31 @@ async def session(database: Database) -> AsyncIterator[AsyncSession]:
         yield db_session
 
 
+@pytest.fixture
+def restore_root_logger() -> Iterator[None]:
+    """Put the root logger back exactly as it was after the test.
+
+    For tests that reconfigure logging for the whole process, which is the
+    only way to test something that is by nature global. Without this the
+    first one to enable a file would leave every later test in the run writing
+    into a ``tmp_path`` that pytest has already deleted.
+    """
+    root = logging.getLogger()
+    handlers = list(root.handlers)
+    level = root.level
+    try:
+        yield
+    finally:
+        for handler in list(root.handlers):
+            if handler not in handlers:
+                root.removeHandler(handler)
+                handler.close()
+        for handler in handlers:
+            if handler not in root.handlers:
+                root.addHandler(handler)
+        root.setLevel(level)
+
+
 APP_STATE = {
     "settings",
     "hub",
@@ -209,6 +235,7 @@ APP_STATE = {
     "doc_engine",
     "doc_corpora",
     "metrics",
+    "prometheus",
     "mcp",
     "sign_in_throttle",
     "vault_cipher",
@@ -248,6 +275,8 @@ def as_new(app: FastAPI, settings: Settings, database: Database) -> FastAPI:
     app.state.sign_in_throttle = SignInThrottle()
     # In place, not replaced: MetricsMiddleware holds this object.
     app.state.metrics.__init__()
+    # Left alone: None unless the test built the app with metrics on, and
+    # then it reads everything above through app.state when scraped.
     return app
 
 

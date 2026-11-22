@@ -1,0 +1,91 @@
+# dev.cylist.in on K3s: the page listing what each dev slot runs. The page is
+# the ConfigMap dev-index, rewritten by deploy/k3s/deploy.sh on every slot
+# deploy from the slots' Deployment annotations; this only serves it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dev-index
+  namespace: cylist-dev
+  labels:
+    app.kubernetes.io/name: dev-index
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dev-index
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dev-index
+    spec:
+      priorityClassName: cylist-dev
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: httpd
+          image: docker.io/library/busybox:1.37.0
+          command: [httpd, -f, -p, "8080", -h, /srv]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          volumeMounts:
+            - name: page
+              mountPath: /srv
+              readOnly: true
+      volumes:
+        - name: page
+          configMap:
+            name: dev-index
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-index
+  namespace: cylist-dev
+spec:
+  selector:
+    app.kubernetes.io/name: dev-index
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dev-index
+  namespace: cylist-dev
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: dev.cylist.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dev-index
+                port:
+                  name: http

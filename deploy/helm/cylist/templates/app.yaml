@@ -1,0 +1,213 @@
+{{- if eq (include "cylist.component" .) "app" }}
+{{- if not .Values.app.host }}
+{{- fail "set app.host to the hostname this app is served at" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-env
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+data:
+  {{- range $name, $value := .Values.app.env }}
+  {{ $name }}: {{ $value | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+  annotations:
+    cylist.in/branch: {{ .Values.deployInfo.branch | quote }}
+    cylist.in/sha: {{ .Values.deployInfo.sha | quote }}
+    cylist.in/deployed-at: {{ .Values.deployInfo.time | quote }}
+    cylist.in/database: {{ .Values.deployInfo.database | quote }}
+    cylist.in/host: {{ .Values.app.host | quote }}
+spec:
+  replicas: 1
+  # One process holds the in-memory parts (see DEPLOY.md, "More than one
+  # worker"), and the blobs volume is ReadWriteOnce: never two at once.
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "cylist.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "cylist.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+        {{- include "cylist.environmentLabel" . | nindent 8 }}
+      annotations:
+        # Restart when the settings change, as `docker compose up` does.
+        checksum/env: {{ toJson .Values.app.env | sha256sum }}
+        cylist.in/database: {{ .Values.deployInfo.database | quote }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      enableServiceLinks: false
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: app
+          image: {{ include "cylist.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "cylist.appSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+            {{- if .Values.app.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.app.metrics.port }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-env
+            {{- include "cylist.envFromSecrets" . | nindent 12 }}
+          {{- if or .Values.app.metrics.enabled .Values.app.fcmSecret }}
+          env:
+            {{- if .Values.app.metrics.enabled }}
+            - name: CYLIST_METRICS_ENABLED
+              value: "true"
+            - name: CYLIST_METRICS_PORT
+              value: {{ .Values.app.metrics.port | quote }}
+            {{- end }}
+            {{- if .Values.app.fcmSecret }}
+            - name: CYLIST_FCM_SERVICE_ACCOUNT_FILE
+              value: /run/secrets/fcm/fcm-service-account.json
+            {{- end }}
+          {{- end }}
+          # /api/v1/health asks the database, so it decides readiness: a pod
+          # whose database is down stops getting traffic. Liveness asks only
+          # whether the process answers (health/requests is in memory), so a
+          # database outage does not also restart the app.
+          startupProbe:
+            httpGet:
+              path: /api/v1/health/requests
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health/requests
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: blobs
+              mountPath: /data/blobs
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.app.fcmSecret }}
+            - name: fcm
+              mountPath: /run/secrets/fcm
+              readOnly: true
+            {{- end }}
+      volumes:
+        # Only blobs/ under the data directory is state; the rest is scratch.
+        - name: data
+          emptyDir: {}
+        - name: blobs
+          persistentVolumeClaim:
+            claimName: {{ include "cylist.blobsClaim" . }}
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.app.fcmSecret }}
+        - name: fcm
+          secret:
+            secretName: {{ .Values.app.fcmSecret }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  selector:
+    {{- include "cylist.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.app.ingressClassName }}
+  rules:
+    - host: {{ .Values.app.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}
+                port:
+                  name: http
+{{- if .Capabilities.APIVersions.Has "traefik.io/v1alpha1/Middleware" }}
+---
+# /metrics is never served to the internet. The app serves it only on its
+# metrics port, which no Service publishes (CYLIST-195); this refuses the
+# path at Traefik too, so a mistake in one is not a leak. Traefik has no
+# plain "deny": an allow-list nothing can match answers 403 to everyone.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-deny
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+spec:
+  ipAllowList:
+    sourceRange: [255.255.255.255/32]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-internal
+  labels:
+    {{- include "cylist.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-deny@kubernetescrd
+spec:
+  ingressClassName: {{ .Values.app.ingressClassName }}
+  rules:
+    - host: {{ .Values.app.host | quote }}
+      http:
+        paths:
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}
+                port:
+                  name: http
+{{- end }}
+{{- end }}

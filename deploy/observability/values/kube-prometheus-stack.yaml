@@ -1,0 +1,251 @@
+# kube-prometheus-stack in namespace monitoring: Prometheus, Alertmanager,
+# Grafana, node-exporter and kube-state-metrics (CYLIST-194). Installed by
+# deploy/observability/install.sh, which pins the chart version.
+
+# Plain object names (prometheus-operator, not kps-kube-prometheus-stack-...).
+fullnameOverride: kps
+cleanPrometheusOperatorObjectNames: true
+
+# K3s runs the scheduler, controller-manager and proxy inside the one k3s
+# process and does not serve their metrics where the defaults look, so their
+# monitors would be permanently down. etcd is not used (SQLite datastore).
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+defaultRules:
+  # The chart's rules for components disabled above would fire forever.
+  rules:
+    etcd: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeControllerManager: false
+    kubeProxy: false
+# Our own rules (manifests/rules-*.yaml) say severity page or ticket; the
+# chart's say critical or warning. Alertmanager routes critical with page.
+
+prometheusOperator:
+  priorityClassName: cylist-platform
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+prometheus:
+  prometheusSpec:
+    priorityClassName: cylist-platform
+    # Pick up every ServiceMonitor, PodMonitor, Probe, ScrapeConfig and rule
+    # in the cluster, not only this release's: the Cylist chart ships its own.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    # Alloy pushes what it scrapes from the host (cloudflared) here.
+    enableRemoteWriteReceiver: true
+    # Exemplars link a latency bucket to the trace that produced it.
+    enableFeatures: [exemplar-storage]
+    # Hard caps: a full disk takes Postgres down. Whichever is hit first.
+    retention: 15d
+    retentionSize: 20GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    resources:
+      requests: {cpu: 200m, memory: 1Gi}
+      limits: {memory: 3Gi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 30Gi
+    externalLabels:
+      cluster: dnu-home-1
+
+alertmanager:
+  alertmanagerSpec:
+    priorityClassName: cylist-platform
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 128Mi}
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 1Gi
+    # The receivers' URLs, made by install.sh from ~/cylist-observability.
+    # They are credentials (anyone holding them can page or silence the
+    # heartbeat), so they are read from files, never written into the config.
+    secrets: [alertmanager-urls]
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: ticket
+      group_by: [alertname, environment, namespace]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        # Always firing. Its pings are the heartbeat: when they stop, the
+        # outside service pages, because nothing on this box can.
+        - matchers: [alertname = Watchdog]
+          receiver: heartbeat
+          group_wait: 0s
+          group_interval: 1m
+          repeat_interval: 1m
+        # Silences the chart's InfoInhibitor plumbing.
+        - matchers: [alertname = InfoInhibitor]
+          receiver: "null"
+        # Dev slots exist to be broken: never page for them, whatever the
+        # rule says.
+        - matchers: [environment =~ "dev.*"]
+          receiver: ticket
+        - matchers: [namespace = cylist-dev]
+          receiver: ticket
+        # Only production and the box itself page; staging waits for morning.
+        - matchers: [environment = staging]
+          receiver: ticket
+        - matchers: [namespace = cylist-staging]
+          receiver: ticket
+        - matchers: [severity =~ "page|critical"]
+          receiver: page
+          repeat_interval: 1h
+    inhibit_rules:
+      # A page for something already covers its tickets.
+      - source_matchers: [severity =~ "page|critical"]
+        target_matchers: [severity =~ "ticket|warning|info"]
+        equal: [alertname, environment, namespace]
+      - source_matchers: [alertname = InfoInhibitor]
+        target_matchers: [severity = info]
+        equal: [namespace]
+    receivers:
+      - name: "null"
+      - name: heartbeat
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-urls/heartbeat
+            send_resolved: false
+      - name: page
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-urls/page
+            send_resolved: true
+      - name: ticket
+        webhook_configs:
+          - url_file: /etc/alertmanager/secrets/alertmanager-urls/ticket
+            send_resolved: true
+
+grafana:
+  priorityClassName: cylist-platform
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  # Reached only through `tailscale serve` on the tailnet (Phase 0, Q4). The
+  # host reaches a ClusterIP directly, so it is pinned for serve to target.
+  service:
+    type: ClusterIP
+    clusterIP: 10.43.200.30
+    port: 80
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 2Gi
+  resources:
+    requests: {cpu: 20m, memory: 128Mi}
+    limits: {memory: 512Mi}
+  grafana.ini:
+    server:
+      root_url: https://dnu-home-1.tail222f46.ts.net:3443/
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+    users:
+      allow_sign_up: false
+    auth.anonymous:
+      enabled: false
+  sidecar:
+    dashboards:
+      # Every ConfigMap labelled grafana_dashboard=1, in a folder named by its
+      # grafana_folder annotation. Dashboards live in git, not in the PVC.
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+        allowUiUpdates: false
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      url: http://loki.monitoring:3100
+      jsonData:
+        derivedFields:
+          # A log line's trace_id opens its trace in Tempo.
+          - name: trace_id
+            matcherType: label
+            matcherRegex: trace_id
+            datasourceUid: tempo
+            url: "$${__value.raw}"
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      url: http://tempo.monitoring:3200
+      jsonData:
+        tracesToLogsV2:
+          # A trace opens the log lines that carry its id.
+          datasourceUid: loki
+          spanStartTimeShift: -5m
+          spanEndTimeShift: 5m
+          filterByTraceID: true
+          customQuery: true
+          query: '{environment=~".+"} | trace_id="$${__span.traceId}"'
+        tracesToMetrics:
+          datasourceUid: prometheus
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+  # The Prometheus datasource the chart provisions links exemplars to Tempo.
+  datasources:
+    exemplarTraceIdDestinations:
+      datasourceUid: tempo
+      traceIdLabelName: trace_id
+
+kube-state-metrics:
+  priorityClassName: cylist-platform
+  # cylist.in/environment onto kube_pod_labels, so pod state joins to the
+  # environment the same way app metrics are labelled.
+  metricLabelsAllowlist:
+    - pods=[cylist.in/environment,app.kubernetes.io/instance,app.kubernetes.io/component]
+    - deployments=[app.kubernetes.io/instance]
+  # What each release runs, for the Estate overview and Delivery dashboards.
+  metricAnnotationsAllowList:
+    - deployments=[cylist.in/branch,cylist.in/sha,cylist.in/deployed-at,cylist.in/host,cylist.in/database]
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+prometheus-node-exporter:
+  priorityClassName: cylist-platform
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/k3s/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+    - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs|tracefs)$
+    # The units the estate depends on, including the CI runner that deploys.
+    - --collector.systemd
+    - --collector.systemd.unit-include=(github-runner-cylist|cloudflared|k3s|docker|tailscaled|containerd)\.service
+  extraHostVolumeMounts:
+    - name: dbus
+      hostPath: /run/dbus/system_bus_socket
+      mountPath: /var/run/dbus/system_bus_socket
+      readOnly: true
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}

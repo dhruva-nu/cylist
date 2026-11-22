@@ -1,0 +1,73 @@
+# The in-cluster image registry. CI builds with Docker and pushes to
+# localhost:5000; the cluster's containerd pulls from it through the mirror in
+# host/registries.yaml. It runs on the host network bound to 127.0.0.1, so it
+# is never reachable from the LAN or the tailnet and needs no auth.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data
+  namespace: registry
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: registry
+  labels:
+    app.kubernetes.io/name: registry
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: registry
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: cylist-platform
+      containers:
+        - name: registry
+          image: docker.io/library/registry:2.8.3
+          env:
+            - name: REGISTRY_HTTP_ADDR
+              value: "127.0.0.1:5000"
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          ports:
+            - containerPort: 5000
+              name: http
+          readinessProbe:
+            httpGet:
+              host: 127.0.0.1
+              path: /v2/
+              port: 5000
+          livenessProbe:
+            httpGet:
+              host: 127.0.0.1
+              path: /v2/
+              port: 5000
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry-data

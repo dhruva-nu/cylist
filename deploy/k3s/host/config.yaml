@@ -1,0 +1,18 @@
+# K3s server config, installed to /etc/rancher/k3s/config.yaml by install.sh.
+# Single node, SQLite datastore (no cluster-init): HA is a non-goal and the
+# cluster can be rebuilt from git plus secrets (CYLIST-188, Q2).
+node-name: dnu-home-1
+
+# The kubeconfig is readable by dnu2's group, so kubectl works without sudo.
+write-kubeconfig-mode: "0640"
+write-kubeconfig-group: dnu2
+
+# Secrets are encrypted at rest in the datastore.
+secrets-encryption: true
+
+# Keep headroom for the desktop and the Docker stacks that run alongside the
+# cluster until Phase 7, and evict pods before the host runs out of memory.
+kubelet-arg:
+  - "system-reserved=cpu=1,memory=2Gi"
+  - "kube-reserved=cpu=500m,memory=512Mi"
+  - "eviction-hard=memory.available<500Mi,nodefs.available<10%,imagefs.available<10%"

@@ -1,0 +1,9 @@
+# Dev slot 1: dev1.cylist.in. Release cylist-1 in namespace cylist-dev.
+environment: dev-1
+
+app:
+  host: dev1.cylist.in
+  env:
+    CYLIST_CLIENT_URLS: '["http://localhost:8011","https://dev1.cylist.in"]'
+  extraSecrets:
+    - cylist-slot-1-db

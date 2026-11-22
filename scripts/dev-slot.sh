@@ -394,28 +394,48 @@ _dev_slot_check_served() {
 # no process of its own to serve it.
 dev_index_write() {
   mkdir -p "$DEV_INDEX_DIR"
-  local tmp="$DEV_INDEX_DIR/.index.html.$$" rows="" n file branch sha deployed_at commit database
+  local tmp="$DEV_INDEX_DIR/.index.html.$$" rows="" n file
   for n in "${DEV_SLOTS[@]}"; do
     file="$(dev_slot_dir "$n")/deployed"
     if [[ -f "$file" ]]; then
-      branch="$(sed -n 's/^branch=//p' "$file" | head -n1)"
-      sha="$(sed -n 's/^sha=//p' "$file" | head -n1)"
-      deployed_at="$(sed -n 's/^time=//p' "$file" | head -n1)"
-      # A slot deployed before slots could have their own was on the shared one.
-      database="$(sed -n 's/^database=//p' "$file" | head -n1)"
-      if [[ "$database" == own ]]; then database="its own"; else database=shared; fi
-      if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-        commit="<a href=\"$(_html "$DEV_REPO_URL")/commit/$sha\"><code>${sha:0:12}</code></a>"
-      else
-        commit="<code>$(_html "$sha")</code>"
-      fi
-      rows+="<tr><th><a href=\"$(dev_slot_url "$n")\">dev_$n</a></th><td><code>$(_html "$branch")</code></td><td>$commit</td><td><time>$(_html "$deployed_at")</time></td><td>$database</td></tr>"$'\n'
+      rows+="$(dev_index_row "$n" \
+        "$(sed -n 's/^branch=//p' "$file" | head -n1)" \
+        "$(sed -n 's/^sha=//p' "$file" | head -n1)" \
+        "$(sed -n 's/^time=//p' "$file" | head -n1)" \
+        "$(sed -n 's/^database=//p' "$file" | head -n1)")"$'\n'
     else
-      rows+="<tr class=\"empty\"><th>dev_$n</th><td colspan=\"4\">empty</td></tr>"$'\n'
+      rows+="$(dev_index_row "$n")"$'\n'
     fi
   done
+  dev_index_page "$rows" > "$tmp"
+  chmod 644 "$tmp"
+  mv "$tmp" "$DEV_INDEX_DIR/index.html"
+}
 
-  cat > "$tmp" << EOF
+# One slot's row of the index: slot, then branch, sha, time and database, or
+# the slot alone when it is empty. Shared with the K3s deploy, which reads the
+# same four things from the slot's Deployment (deploy/k3s/deploy.sh).
+dev_index_row() {
+  local n="$1" branch="${2:-}" sha="${3:-}" deployed_at="${4:-}" database="${5:-}" commit
+  if [[ -z "$branch$sha" ]]; then
+    printf '<tr class="empty"><th>dev_%s</th><td colspan="4">empty</td></tr>' "$n"
+    return 0
+  fi
+  # A slot deployed before slots could have their own was on the shared one.
+  if [[ "$database" == own ]]; then database="its own"; else database=shared; fi
+  if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    commit="<a href=\"$(_html "$DEV_REPO_URL")/commit/$sha\"><code>${sha:0:12}</code></a>"
+  else
+    commit="<code>$(_html "$sha")</code>"
+  fi
+  printf '<tr><th><a href="%s">dev_%s</a></th><td><code>%s</code></td><td>%s</td><td><time>%s</time></td><td>%s</td></tr>' \
+    "$(dev_slot_url "$n")" "$n" "$(_html "$branch")" "$commit" "$(_html "$deployed_at")" "$database"
+}
+
+# The whole index page around the rows, on stdout.
+dev_index_page() {
+  local rows="$1"
+  cat << EOF
 <!doctype html>
 <html lang="en">
 <head>
@@ -459,8 +479,6 @@ $rows</tbody>
 </body>
 </html>
 EOF
-  chmod 644 "$tmp"
-  mv "$tmp" "$DEV_INDEX_DIR/index.html"
 }
 
 # Branch names are anyone's text; nothing of theirs reaches the page unescaped.

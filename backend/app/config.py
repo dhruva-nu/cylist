@@ -13,6 +13,7 @@ from functools import lru_cache
 from ipaddress import IPv4Network, IPv6Network
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from fastapi import Request
 from pydantic import AliasChoices, Field, field_validator, model_validator
@@ -321,6 +322,43 @@ class Settings(BaseSettings):
     logs it was meant to prevent.
     """
 
+    # --- Metrics ----------------------------------------------------------
+    # Prometheus's view of the process — see app/core/prometheus.py. Served on
+    # a listener of its own, never on the app's port: whatever publishes the
+    # app to the internet publishes that port and nothing else.
+    metrics_enabled: bool = False
+    """Whether to count for Prometheus and serve ``/metrics``. Off, the
+    process neither counts nor opens the port."""
+
+    metrics_host: str = "0.0.0.0"  # noqa: S104 - a scraper in another container has to reach it
+    """Where the metrics listener binds. Every interface, because Prometheus
+    scrapes from outside the container; what keeps it off the internet is that
+    nothing publishes this port, not the address it binds."""
+
+    metrics_port: int = Field(default=9090, ge=0, le=65535)
+    """The metrics listener's port. Zero takes any free one, for tests."""
+
+    # --- Tracing ----------------------------------------------------------
+    # OpenTelemetry traces of requests, their statements and outbound hooks.
+    # See app/core/tracing.py.
+    otlp_endpoint: str = ""
+    """The OTLP/HTTP receiver spans are sent to: its base address, such as
+    ``http://alloy.monitoring:4318``, to which ``/v1/traces`` is appended.
+
+    Empty — the default — turns tracing off altogether: no SDK, no exporter
+    thread, nothing sent. Protobuf over HTTP, not gRPC, so the port is the
+    receiver's 4318 rather than 4317.
+    """
+
+    trace_sample_ratio: float = Field(default=1.0, ge=0, le=1)
+    """The share of requests traced, decided once per trace from its id.
+
+    Every request by default, which is right where traffic is light — a dev
+    slot, staging. Production sets 0.2. A request's statements and the spans
+    under it follow the request's decision, so a trace is always whole or
+    absent, never a request with half its queries missing.
+    """
+
     # --- Retention --------------------------------------------------------
     # How long the tables that only ever grow keep what they hold. Applied
     # once an hour by the hook courier's prune pass — see
@@ -355,6 +393,25 @@ class Settings(BaseSettings):
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("database_url must use the postgresql+asyncpg:// driver")
         return value
+
+    @field_validator("otlp_endpoint")
+    @classmethod
+    def _require_http_endpoint(cls, value: str) -> str:
+        """Refuse a receiver address that is not ``http(s)://host…`` at startup.
+
+        The exporter would otherwise take it, fail every export in its own
+        thread, and leave a deployment that believes it is traced.
+        """
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        parts = urlsplit(cleaned)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError(
+                f"otlp_endpoint is {cleaned!r}, which is not an http(s) address such as "
+                "http://alloy.monitoring:4318"
+            )
+        return cleaned
 
     @field_validator("trusted_proxy_cidrs")
     @classmethod

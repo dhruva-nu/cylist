@@ -1,0 +1,49 @@
+# blackbox-exporter (CYLIST-194): probes the public URLs from outside in,
+# through DNS, Cloudflare's edge and the tunnel, the path a user takes. The
+# targets are Probe objects in manifests/probes.yaml.
+fullnameOverride: blackbox
+priorityClassName: cylist-platform
+
+# A public resolver, not the cluster's: the host's resolver is Tailscale's,
+# which answers for ts.net and can hold a stale negative answer for the
+# public names (see the machine notes), so it would test the wrong thing.
+dnsPolicy: None
+dnsConfig:
+  nameservers: [1.1.1.1, 8.8.8.8]
+
+config:
+  modules:
+    # The app's health endpoint: 200 and a JSON body saying so.
+    http_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        valid_status_codes: [200]
+        follow_redirects: false
+        preferred_ip_protocol: ip4
+        fail_if_not_ssl: true
+    # A WebSocket upgrade that survives Cloudflare and both proxies answers
+    # 101. No real token: the app accepts the handshake and then closes a bad
+    # credential with 4401, so 101 says the path works (DEPLOY.md,
+    # "WebSockets through the proxy").
+    http_ws_101:
+      prober: http
+      timeout: 10s
+      http:
+        method: GET
+        valid_http_versions: ["HTTP/1.1"]
+        valid_status_codes: [101]
+        follow_redirects: false
+        preferred_ip_protocol: ip4
+        fail_if_not_ssl: true
+        headers:
+          Connection: Upgrade
+          Upgrade: websocket
+          Sec-WebSocket-Version: "13"
+          Sec-WebSocket-Key: Y3lsaXN0LWJsYWNrYm94IQ==
+          Authorization: Bearer blackbox-probe
+
+resources:
+  requests: {cpu: 10m, memory: 32Mi}
+  limits: {memory: 128Mi}

@@ -33,6 +33,11 @@ even with a dozen in flight. The id also goes out on the response as
 ``X-Request-ID``, so a failure a user reports can be found without guessing at
 timestamps.
 
+With tracing on (``CYLIST_OTLP_ENDPOINT``), a JSON line written inside a
+sampled span also carries ``trace_id`` and ``span_id``, so a line leads to its
+trace; the server span carries the request id the other way — see
+:mod:`app.core.tracing`.
+
 What is never written
 ---------------------
 
@@ -55,6 +60,8 @@ import uuid
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, TextIO
+
+from app.core.tracing import current_trace_ids
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle, and only needed for types
     from app.config import Settings
@@ -151,6 +158,22 @@ class RequestIdFilter(logging.Filter):
         return True
 
 
+class TraceContextFilter(logging.Filter):
+    """Give every record the ``trace_id`` and ``span_id`` it was written under.
+
+    Both ``None`` outside a sampled span, which is every record when tracing
+    is off. Read here, as the record is handled, for :class:`RequestIdFilter`'s
+    reason — and because this is still the task that wrote it, so the span
+    current here is the one the line belongs to.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "trace_id"):
+            ids = current_trace_ids()
+            record.trace_id, record.span_id = ids if ids is not None else (None, None)
+        return True
+
+
 # --- Formatters ------------------------------------------------------------
 
 
@@ -223,6 +246,13 @@ class JsonFormatter(logging.Formatter):
         if request_id:
             payload["request_id"] = request_id
 
+        # Beside the request id, so a line names both the request and the
+        # trace it can be found in.
+        trace_id = getattr(record, "trace_id", None)
+        if trace_id:
+            payload["trace_id"] = trace_id
+            payload["span_id"] = getattr(record, "span_id", None)
+
         context = _record_context(record)
         if context:
             payload["context"] = context
@@ -278,6 +308,7 @@ def configure_logging(settings: Settings) -> None:
 def _install(root: logging.Logger, handler: logging.Handler) -> None:
     setattr(handler, _HANDLER_TAG, True)
     handler.addFilter(RequestIdFilter())
+    handler.addFilter(TraceContextFilter())
     root.addHandler(handler)
 
 

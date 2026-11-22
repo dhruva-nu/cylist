@@ -1,0 +1,35 @@
+# Production: cylist.in, in namespace cylist-prod.
+priorityClassName: cylist-prod
+environment: prod
+
+app:
+  host: cylist.in
+  env:
+    CYLIST_ENVIRONMENT: prod
+    # One request in five traced, to start (02-observability-design.md).
+    CYLIST_TRACE_SAMPLE_RATIO: "0.2"
+    # Most local first. localhost:8000 is the Docker stack until the Phase 6
+    # cutover decides what answers there.
+    CYLIST_CLIENT_URLS: '["http://localhost:8000","https://cylist.in"]'
+  fcmSecret: cylist-fcm
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      memory: 1536Mi
+
+database:
+  storage: 20Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      memory: 2Gi
+
+blobs:
+  storage: 20Gi
+
+backup:
+  storage: 40Gi

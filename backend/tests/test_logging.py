@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from collections.abc import Iterator
 from ipaddress import ip_network
 from pathlib import Path
 
@@ -39,30 +38,8 @@ from tests.conftest import (
     sign_in,
 )
 
-
-@pytest.fixture(autouse=True)
-def restore_root_logger() -> Iterator[None]:
-    """Put the root logger back exactly as it was after every test here.
-
-    These tests reconfigure logging for the whole process, which is the only
-    way to test something that is by nature global. Without this the first one
-    to enable a file would leave every later test in the run writing into a
-    ``tmp_path`` that pytest has already deleted.
-    """
-    root = logging.getLogger()
-    handlers = list(root.handlers)
-    level = root.level
-    try:
-        yield
-    finally:
-        for handler in list(root.handlers):
-            if handler not in handlers:
-                root.removeHandler(handler)
-                handler.close()
-        for handler in handlers:
-            if handler not in root.handlers:
-                root.addHandler(handler)
-        root.setLevel(level)
+pytestmark = pytest.mark.usefixtures("restore_root_logger")
+"""These tests reconfigure logging for the whole process — see the fixture."""
 
 
 def record(

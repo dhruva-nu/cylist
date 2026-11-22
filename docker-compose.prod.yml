@@ -73,6 +73,10 @@ services:
       # real client is in CF-Connecting-IP, believed only from these networks
       # (CYLIST-122) — the sign-in log and the login rate limit depend on it.
       CYLIST_TRUSTED_PROXY_CIDRS: '["172.16.0.0/12"]'
+      # A fifth of requests traced, once CYLIST_OTLP_ENDPOINT is set in
+      # app.env; until then tracing is off and this is read by nothing.
+      # Staging and the dev slots keep the default of every request.
+      CYLIST_TRACE_SAMPLE_RATIO: "0.2"
     ports:
       # Loopback only. See the note at the top of this file.
       - "127.0.0.1:8000:8000"

@@ -14,7 +14,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+    suppress,
+)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,13 +31,22 @@ from app.config import (
 )
 from app.core.base_path import BasePathMiddleware
 from app.core.body_limit import BodyLimitMiddleware
+from app.core.clock import epoch
 from app.core.crypto import configured_cipher
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, describe_destination
 from app.core.metrics import Metrics, MetricsMiddleware
+from app.core.prometheus import (
+    METRICS_PATH,
+    Prometheus,
+    PrometheusMiddleware,
+    Sources,
+    serving,
+)
 from app.core.request_log import RequestLogMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
-from app.db import Database
+from app.core.tracing import Tracing, describe_tracing
+from app.db import Database, PoolStatus
 from app.mcp import mount_mcp
 from app.realtime import doorbell
 from app.realtime.bus import Bus
@@ -65,7 +79,7 @@ endpoint's description to see which one it needs.
 """.strip()
 
 
-def build_lifespan(settings: Settings) -> Lifespan:
+def build_lifespan(settings: Settings, tracing: Tracing | None = None) -> Lifespan:
     """Create the startup/shutdown handler for a given configuration."""
 
     @asynccontextmanager
@@ -82,11 +96,14 @@ def build_lifespan(settings: Settings) -> Lifespan:
                     "data_dir": settings.data_dir,
                     "log_level": settings.log_level,
                     "log_to": describe_destination(settings),
+                    "tracing": describe_tracing(settings),
                 }
             },
         )
         settings.blob_dir.mkdir(parents=True, exist_ok=True)
         app.state.database = Database.configured(settings)
+        if tracing is not None:
+            tracing.instrument_engine(app.state.database.engine)
         # Committed changes reach the boards watching them, and queued hook
         # deliveries wake the courier. Both were built in the factory; this is
         # where they start being listened to.
@@ -110,16 +127,31 @@ def build_lifespan(settings: Settings) -> Lifespan:
         reaper = asyncio.create_task(_reap_forever(app), name="cylist-reaper")
         courier = asyncio.create_task(
             app.state.courier.run(
-                app.state.database, settings.vault_keyring, app.state.hook_transport
+                app.state.database,
+                settings.vault_keyring,
+                app.state.hook_transport,
+                instrument=tracing.instrument_client if tracing is not None else None,
             ),
             name="cylist-hook-courier",
         )
         # The only thing that deletes uploaded bytes — see blobs.sweep.
         sweeper = asyncio.create_task(_sweep_blobs_forever(app), name="cylist-blob-sweeper")
         try:
-            # The MCP tools at /mcp answer nothing until their session
-            # managers are running, and those live for exactly this long.
-            async with app.state.mcp.run():
+            async with AsyncExitStack() as running:
+                # The MCP tools at /mcp answer nothing until their session
+                # managers are running, and those live for exactly this long.
+                await running.enter_async_context(app.state.mcp.run())
+                # /metrics, on its own port and only if asked for — see
+                # app/core/prometheus.py. Never on the port this app serves.
+                prometheus: Prometheus | None = app.state.prometheus
+                if prometheus is not None:
+                    port = await running.enter_async_context(
+                        serving(prometheus, host=settings.metrics_host, port=settings.metrics_port)
+                    )
+                    logger.info(
+                        "Serving metrics",
+                        extra={"context": {"host": settings.metrics_host, "port": port}},
+                    )
                 yield
         finally:
             for task in (reaper, courier, sweeper, pusher, bus):
@@ -128,6 +160,11 @@ def build_lifespan(settings: Settings) -> Lifespan:
                     await task
             await push_sender.aclose()
             await app.state.database.dispose()
+            # Last, so the spans of everything above stopping are among those
+            # it sends before its thread ends. In a thread, because the final
+            # export is a blocking POST.
+            if tracing is not None:
+                await asyncio.to_thread(tracing.shutdown)
             # Logged after the pool is closed, so the line is a statement that
             # shutdown finished rather than that it was attempted.
             logger.info("Cylist stopped")
@@ -194,6 +231,11 @@ async def _reap_forever(app: FastAPI) -> None:
                 # Questions and permissions whose time ran out with nobody
                 # looking, and questions whose tool is no longer polling.
                 await agent_prompts.sweep(session)
+            # After a pass that did the work, not one that found the lease
+            # taken: the timestamp is for noticing that reaping has stopped.
+            prometheus: Prometheus | None = app.state.prometheus
+            if prometheus is not None:
+                prometheus.reaper_last_run.set(epoch())
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -222,11 +264,13 @@ async def _sweep_blobs_forever(app: FastAPI) -> None:
             logger.exception("The blob sweeper failed a pass")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, tracing: Tracing | None = None) -> FastAPI:
     """Build the application.
 
     Taking settings as an argument keeps the factory testable: a test can build
     an app pointed at a throwaway database without touching the environment.
+    ``tracing`` likewise: a test hands in one that exports to memory, and
+    otherwise it is whatever the settings describe — nothing, by default.
     """
     settings = settings or get_settings()
 
@@ -234,12 +278,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # including a complaint about the configuration, should already be going
     # to the places this deployment asked for.
     configure_logging(settings)
+    tracing = tracing or Tracing.configured(settings)
 
     app = FastAPI(
         title="Cylist",
-        version="0.4.7",
+        version="0.5.0",
         description=DESCRIPTION,
-        lifespan=build_lifespan(settings),
+        lifespan=build_lifespan(settings, tracing),
         openapi_url=f"{API_PREFIX}/openapi.json",
         docs_url=f"{API_PREFIX}/docs",
         redoc_url=None,
@@ -307,6 +352,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)
 
+    # Prometheus's counts, when they are asked for (CYLIST-195); None, and no
+    # middleware at all, when they are not. Beside the dashboard's counters
+    # and for the same reason, and handed the route list for the body limit's.
+    app.state.prometheus = _prometheus(app) if settings.metrics_enabled else None
+    if app.state.prometheus is not None:
+        app.add_middleware(
+            PrometheusMiddleware, prometheus=app.state.prometheus, routes=app.router.routes
+        )
+
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -352,8 +406,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Last, because it claims "/": in the production image the built SPA is
     # served from this same process, and in development there is nothing to
     # serve and this does nothing.
-    mount_spa(app, settings.web_dir, reserved=API_PREFIX, base_path=settings.base_path)
+    # /metrics is reserved with the API: it is served on its own port, and
+    # here a 404 says so where index.html would have said 200.
+    mount_spa(
+        app,
+        settings.web_dir,
+        reserved=(API_PREFIX, METRICS_PATH),
+        base_path=settings.base_path,
+    )
+
+    # Wraps the stack as it is built on the first request, outside every
+    # middleware above, so where it is called among them does not matter.
+    if tracing is not None:
+        tracing.instrument_app(app)
     return app
+
+
+def _prometheus(app: FastAPI) -> Prometheus:
+    """The app's metrics, reading what they report from ``app.state`` when
+    scraped — so they follow whatever the lifespan, or a test, puts there."""
+
+    def pool() -> PoolStatus | None:
+        database: Database | None = getattr(app.state, "database", None)
+        return None if database is None else database.pool_status()
+
+    return Prometheus(
+        Sources(
+            counters=lambda: app.state.metrics,
+            realtime=lambda: app.state.hub.stats(),
+            pool=pool,
+            listening=lambda: app.state.bus.listening.is_set(),
+            blob_dir=lambda: app.state.settings.blob_dir,
+        )
+    )
 
 
 app = create_app()

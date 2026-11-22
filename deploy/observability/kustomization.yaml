@@ -1,0 +1,33 @@
+# Applied by install.sh with `kubectl apply -k`. Everything the charts do
+# not ship: probes, scrape targets, alert rules and the dashboards.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - manifests/docker-cadvisor.yaml
+  - manifests/scrape.yaml
+  - manifests/probes.yaml
+  - manifests/rules-cylist.yaml
+
+# One ConfigMap per dashboard, built from dashboards/*.json (written by
+# dashboards/build.py). Grafana's sidecar loads every ConfigMap labelled
+# grafana_dashboard into the folder its grafana_folder annotation names.
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Cylist
+configMapGenerator:
+  - name: dashboard-estate-overview
+    files: [dashboards/estate-overview.json]
+  - name: dashboard-environment-detail
+    files: [dashboards/environment-detail.json]
+  - name: dashboard-postgres
+    files: [dashboards/postgres.json]
+  - name: dashboard-edge
+    files: [dashboards/edge.json]
+  - name: dashboard-node-storage
+    files: [dashboards/node-storage.json]
+  - name: dashboard-delivery
+    files: [dashboards/delivery.json]

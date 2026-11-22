@@ -1,0 +1,147 @@
+# Defaults shared by every environment. Each environment's file
+# (values-prod.yaml, values-staging.yaml, values-dev.yaml plus
+# values-dev-N.yaml) sets what differs, and the deploy passes `component`.
+#
+#   helm upgrade --install cylist-data deploy/helm/cylist -n cylist-prod \
+#     -f deploy/helm/cylist/values-prod.yaml --set component=data
+#   helm upgrade --install cylist deploy/helm/cylist -n cylist-prod \
+#     -f deploy/helm/cylist/values-prod.yaml --set component=app \
+#     --set image.tag=<sha>
+#
+# Two releases rather than one, so the migration hook (which runs before an
+# app release's resources exist) always finds its database already up, and a
+# `helm rollback` of the app never touches Postgres or the blobs.
+#
+# Install the data release without --wait and wait on Postgres instead
+# (`kubectl rollout status statefulset/cylist-data-postgres`): local-path
+# binds a volume only once a pod uses it, and nothing uses the blobs or
+# backups volume until an app or the first backup runs, so --wait would never
+# see them Bound.
+
+# Which half this release is: "data" or "app". No default, so a release that
+# forgot cannot be installed as the wrong one.
+component: ""
+
+# The release that holds Postgres and the blobs volume in this namespace. App
+# releases find both by this name.
+dataRelease: cylist-data
+
+# The secrets are made from the existing */app.env and postgres.env files by
+# deploy/k3s/secrets.sh, never by this chart and never committed.
+secrets:
+  # CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY, JEV_API_KEY.
+  app: cylist-app
+  # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
+  postgres: cylist-postgres
+
+image:
+  repository: localhost:5000/cylist
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# What is running, for the dev index and for anyone asking the cluster.
+# Written onto the Deployment as cylist.in/* annotations by the deploy.
+deployInfo:
+  branch: ""
+  sha: ""
+  time: ""
+  # "shared", or "own" for a dev slot on a database of its own. On the pod
+  # template too, so switching restarts the slot onto the other database.
+  database: shared
+
+priorityClassName: ""
+
+# Which of the seven this is: prod, staging or dev-1..dev-5, and "dev" for
+# dev's shared data release. Set on every pod as cylist.in/environment, which
+# Prometheus and Alloy copy onto every metric and log line as `environment`
+# (deploy/observability/README.md).
+environment: ""
+
+# Scrape objects for the Prometheus Operator. Rendered only where its CRDs
+# are installed, so a cluster without the monitoring stack still installs.
+monitoring:
+  enabled: true
+
+app:
+  host: ""
+  ingressClassName: traefik
+
+  # Non-secret settings, rendered into the ConfigMap (and inline into the
+  # migration Job, which runs before the ConfigMap exists on a first install).
+  # Values are strings, exactly as the app reads them from its environment.
+  env:
+    CYLIST_ENVIRONMENT: ""
+    CYLIST_DATA_DIR: /data
+    CYLIST_WEB_DIR: /app/web
+    # Empty on purpose: the SPA is served by this same process, so every
+    # request is same-origin and no CORS middleware is installed.
+    CYLIST_CORS_ORIGINS: "[]"
+    # Requests arrive from Traefik, a pod. The real client is in
+    # CF-Connecting-IP, believed only from the pod network (CYLIST-122).
+    CYLIST_TRUSTED_PROXY_CIDRS: '["10.42.0.0/16"]'
+    CYLIST_CLIENT_URLS: "[]"
+    # One JSON object per line, which Alloy parses into Loki (CYLIST-194).
+    CYLIST_LOG_FORMAT: json
+    # Traces as OTLP/HTTP to Alloy, which relays them to Tempo (CYLIST-196).
+    # Every request in staging and dev; production samples (values-prod.yaml).
+    CYLIST_OTLP_ENDPOINT: http://alloy.monitoring:4318
+    CYLIST_TRACE_SAMPLE_RATIO: "1.0"
+
+  # Prometheus metrics on a port of their own (CYLIST-195), scraped by a
+  # PodMonitor and published by no Service, so never reachable from outside.
+  metrics:
+    enabled: true
+    port: 9090
+
+  # More secrets read after secrets.app, so their keys win. Each is optional:
+  # a dev slot on a database of its own gets cylist-slot-N-db with just its
+  # CYLIST_DATABASE_URL, and has none otherwise.
+  extraSecrets: []
+
+  # The Firebase service-account key for pushes (CYLIST-107), as a Secret
+  # holding fcm-service-account.json. Empty: pushes are off.
+  fcmSecret: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+  migrations:
+    # A dev slot's branch can be older than the shared database's schema. Its
+    # migration then fails with "Can't locate revision", and the slot is
+    # started on that schema unmigrated rather than refused (see deploy.sh).
+    tolerateUnknownRevision: false
+
+database:
+  image: docker.io/library/postgres:16-alpine
+  storage: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
+blobs:
+  storage: 10Gi
+
+backup:
+  enabled: true
+  # 03:30 IST, when the logs show nobody using it.
+  schedule: "30 3 * * *"
+  timeZone: Asia/Kolkata
+  # How many nightly backups to keep. They stay on this disk: there is no
+  # off-box target (CYLIST-188, Q3), so a lost disk loses these with the data.
+  keep: 14
+  storage: 20Gi
