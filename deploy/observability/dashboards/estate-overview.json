@@ -592,7 +592,7 @@
     },
     {
       "type": "row",
-      "title": "Memory by environment: Docker (before) and K3s (after)",
+      "title": "Memory by namespace",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -602,51 +602,6 @@
         "h": 1
       },
       "id": 15
-    },
-    {
-      "type": "timeseries",
-      "title": "Docker containers",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (environment) (container_memory_working_set_bytes{runtime=\"docker\"})",
-          "legendFormat": "{{environment}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "custom": {
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 41,
-        "w": 12,
-        "h": 8
-      },
-      "id": 16
     },
     {
       "type": "timeseries",
@@ -686,12 +641,12 @@
         }
       },
       "gridPos": {
-        "x": 12,
+        "x": 0,
         "y": 41,
-        "w": 12,
+        "w": 24,
         "h": 8
       },
-      "id": 17
+      "id": 16
     }
   ]
 }

@@ -23,7 +23,7 @@ application's next hourly sweep — after deleting a large project, say. In a
 deployment it runs inside the app container, against the configuration the
 server itself runs with::
 
-    docker compose -f docker-compose.prod.yml exec app python -m app.cli blobs gc
+    kubectl -n cylist-prod exec deploy/cylist -c app -- python -m app.cli blobs gc
 
 ``hash-password`` makes the *bootstrap* password: the one login that belongs
 to nobody, accepted only while no person in the directory has an account. It

@@ -2,7 +2,7 @@
 # slot adds values-dev-N.yaml. The slots share one Postgres and one blobs
 # volume, so they show the same data; a slot whose branch has migrations main
 # does not gets a database of its own on that Postgres, through the optional
-# cylist-slot-N-db secret its deploy writes (see scripts/dev-slot.sh).
+# cylist-slot-N-db secret its deploy writes (see deploy/k3s/deploy.sh).
 priorityClassName: cylist-dev
 environment: dev
 

@@ -5,8 +5,7 @@
 #   deploy/k3s/staging-refresh.sh          ask first
 #   deploy/k3s/staging-refresh.sh --yes    do not ask
 #
-# The K3s counterpart of scripts/staging-refresh.sh, with the same rule: the
-# database and the uploaded blobs move as a pair, from the same moment, or
+# The database and the uploaded blobs move as a pair, from the same moment, or
 # staging ends up with file rows pointing at blobs it does not have. Production
 # is only read, by pg_dump and by tar over its app pod's blobs mount; nothing
 # here writes to cylist-prod.
@@ -67,9 +66,12 @@ kubectl -n "$STAGING" scale "$STAGING_APP" --replicas=0 > /dev/null
 kubectl -n "$STAGING" wait --for=delete pod -l app.kubernetes.io/instance=cylist,app.kubernetes.io/component=app --timeout=2m
 
 step "Restoring into staging"
-# The whole schema, not pg_restore --clean, for the reason given in
-# scripts/staging-refresh.sh; one transaction, so a failure leaves staging as
-# it was.
+# The whole schema is dropped rather than pg_restore --clean, which only drops
+# what the dump names. Staging usually runs migrations production has not had
+# yet, and a table only staging has holds foreign keys that stop --clean
+# dropping the tables they point at — leaving those tables staging's and
+# everything else production's. One transaction, so a failure leaves staging
+# as it was; --no-owner because staging's database role is not production's.
 # shellcheck disable=SC2016  # expanded in the pod
 kubectl -n "$STAGING" exec -i "$POSTGRES_POD" -c postgres -- sh -c \
   '{ echo "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"

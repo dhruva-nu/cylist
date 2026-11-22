@@ -3,17 +3,15 @@ name: Deploy dev
 # Manual, and not tied to any branch: GitHub's own "Run workflow" dropdown lets
 # you pick whichever branch to run this from, and actions/checkout below
 # follows that same ref by default. That is the whole mechanism — no branch
-# input to maintain here. What you do pick is the slot: dev is five stacks,
+# input to maintain here. What you do pick is the slot: dev is five slots,
 # dev_1 to dev_5, so five branches can be up side by side. Slot N is served at
 # https://devN.cylist.in/, and https://dev.cylist.in/ lists which branch and
 # commit is in each.
 #
 #   gh workflow run deploy-dev.yml --ref <branch> -f slot=2 -f card=CYLIST-79
 #
-# `target` picks the K3s slot (the default, and what devN.cylist.in has served
-# since the Phase 4 cutover, CYLIST-197): deploy/k3s/deploy.sh, release
-# cylist-N in namespace cylist-dev. `docker` still deploys the old Docker slot,
-# which no hostname reaches any more; it is kept until Phase 7 removes it.
+# It runs deploy/k3s/deploy.sh dev N: release cylist-N in namespace cylist-dev
+# on this machine's K3s.
 #
 # `card` is optional. Given one, a successful deploy comments on that card in
 # production Cylist which slot its branch is in — see the last step.
@@ -34,15 +32,9 @@ on:
         required: false
         type: string
         default: ""
-      target:
-        description: Where to deploy. k3s since the Phase 4 cutover (CYLIST-197); docker reaches no hostname
-        required: true
-        type: choice
-        options: [k3s, docker]
-        default: k3s
 
 # One deploy per slot at a time, and never a half-finished one: two runs of
-# scripts/deploy.sh against the same slot would fight over its containers, and a
+# deploy/k3s/deploy.sh against the same slot would fight over its release, and a
 # run cancelled between `alembic upgrade` and the restart leaves the slot in a
 # state nobody chose — so a second trigger for a slot queues behind the first.
 # Different slots are different groups and never wait on each other.
@@ -69,12 +61,12 @@ jobs:
           CARD: ${{ inputs.card }}
         run: scripts/dev-card-comment.sh check
 
-      # Creates the slot's secrets on its first deploy and copies production's
-      # jev key into them, builds the image, dumps the database, migrates,
-      # restarts the slot and waits for /api/v1/health — the same script
-      # production and staging use — then records branch / sha / time in
-      # ~/cylist-dev-N, regenerates the dev.cylist.in index and checks the
-      # slot answers at devN.cylist.in. See scripts/dev-slot.sh.
+      # Builds the image, updates the shared dev secrets (with production's
+      # jev key), dumps the database, puts the slot on the shared database or
+      # a copy of its own, migrates, rolls out the slot and waits for
+      # /api/v1/health — the same script production and staging use — then
+      # regenerates the dev.cylist.in index from every slot's Deployment
+      # annotations. See deploy/k3s/deploy.sh and scripts/dev-slot.sh.
       #
       # Its outputs (slot, url, branch, sha) are there for a later step that
       # reports where this branch went.
@@ -84,15 +76,9 @@ jobs:
         # branch check does: the shell is the self-hosted runner's.
         env:
           SLOT: ${{ inputs.slot }}
-          TARGET: ${{ inputs.target }}
           # The cylist-deployer service account: the cylist-* namespaces only.
           KUBECONFIG: /home/dnu2/.kube/cylist-deployer.yaml
-        run: |
-          if [[ "$TARGET" == k3s ]]; then
-            deploy/k3s/deploy.sh dev "$SLOT"
-          else
-            scripts/deploy.sh dev "$SLOT"
-          fi
+        run: deploy/k3s/deploy.sh dev "$SLOT"
 
       # Tells the card which slot its branch is in, as Agent: the same line the
       # deploy-dev skill has an agent post, so a deploy started by hand from
@@ -100,11 +86,8 @@ jobs:
       # (read + write) kept as an Actions secret; without it this step warns and
       # the agent's own comment is all there is. It never fails the run — the
       # deploy it reports on has already succeeded. See scripts/dev-card-comment.sh.
-      # Docker only until the Phase 4 cutover: before it, devN.cylist.in
-      # still serves the Docker slot, so a comment naming it for a K3s deploy
-      # would send the card's reader to the wrong code.
       - name: Comment on the card
-        if: inputs.card != '' && inputs.target == 'docker'
+        if: inputs.card != ''
         env:
           CARD: ${{ inputs.card }}
           SLOT: ${{ steps.deploy.outputs.slot }}

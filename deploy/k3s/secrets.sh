@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Make an environment's Kubernetes Secrets from the files its Docker stack
-# already reads, so the two never disagree and nothing secret is committed.
+# Make an environment's Kubernetes Secrets from the env files kept on this
+# machine, so nothing secret is committed.
 #
 #   deploy/k3s/secrets.sh prod|staging|dev
 #
@@ -10,13 +10,12 @@
 #   ~/cylist-dev-shared  cylist-dev       cylist-app, cylist-postgres
 #
 # The directories can be moved with CYLIST_PROD_DIR, CYLIST_STAGING_DIR and
-# CYLIST_DEV_DIR, as scripts/deploy.sh reads them. Re-running replaces the
-# Secrets with what the files hold now; running pods pick changes up on their
-# next restart.
+# CYLIST_DEV_DIR. Re-running replaces the Secrets with what the files hold
+# now; running pods pick changes up on their next restart.
 #
 # Two values are changed on the way in:
 #   - CYLIST_DATABASE_URL's host becomes the data release's Postgres service,
-#     since the compose host name means nothing in the cluster.
+#     whatever host the file names.
 #   - CYLIST_FCM_SERVICE_ACCOUNT_FILE is dropped: the chart mounts cylist-fcm
 #     and sets the path itself.
 set -euo pipefail
@@ -52,9 +51,9 @@ app_env() {
     if [[ "$ns" == cylist-dev ]]; then dev_jev_key; else cat; fi
 }
 
-# Dev asks jev with production's key, as scripts/dev-slot.sh arranges for the
-# Docker slots: one paid key, rotated once. Dev keeps its own if production
-# has none.
+# Dev asks jev with production's key rather than one of its own: jev is a paid
+# API, not per-environment state, and a key that exists once is rotated once.
+# Dev keeps its own if production has none.
 dev_jev_key() {
   local prod="${CYLIST_PROD_DIR:-$HOME/cylist-prod}/app.env" line='^(CYLIST_)?JEV_API_KEY=.'
   if grep -qE "$line" "$prod" 2> /dev/null; then

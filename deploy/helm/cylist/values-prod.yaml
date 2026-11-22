@@ -8,9 +8,9 @@ app:
     CYLIST_ENVIRONMENT: prod
     # One request in five traced, to start (02-observability-design.md).
     CYLIST_TRACE_SAMPLE_RATIO: "0.2"
-    # Most local first. localhost:8000 is the Docker stack until the Phase 6
-    # cutover decides what answers there.
-    CYLIST_CLIENT_URLS: '["http://localhost:8000","https://cylist.in"]'
+    # Only the public address: nothing deployed listens on a localhost port
+    # any more, and on this machine localhost:8000 is `make dev-api`.
+    CYLIST_CLIENT_URLS: '["https://cylist.in"]'
   fcmSecret: cylist-fcm
   resources:
     requests:

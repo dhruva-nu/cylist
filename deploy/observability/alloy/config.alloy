@@ -1,8 +1,7 @@
 // Grafana Alloy on dnu-home-1 (CYLIST-194): one pod on the host network, so
 // it can read what only the host can see.
 //
-//   logs     every K3s pod's log files, and every Docker container's until the
-//            Docker stacks are gone (Phase 7) -> Loki
+//   logs     every K3s pod's log files -> Loki
 //   metrics  cloudflared's 127.0.0.1:20241, which no pod can reach -> Prometheus
 //   traces   OTLP from the apps on :4317/:4318 -> Tempo
 //
@@ -68,55 +67,6 @@ loki.process "pod_logs" {
   // containerd's CRI framing: timestamp, stream, partial flag, line.
   stage.cri {}
   forward_to = [loki.process.cylist_json.receiver]
-}
-
-// --------------------------------------------------------------- Docker logs
-
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
-}
-
-discovery.relabel "docker_logs" {
-  targets = discovery.docker.containers.targets
-
-  // Only the Cylist stacks; their compose projects are cylist-prod,
-  // cylist-staging, cylist-dev-N and cylist-dev-db.
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
-    regex         = "cylist-.*"
-    action        = "keep"
-  }
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
-    regex         = "cylist-(prod|staging|dev-[1-5])"
-    target_label  = "environment"
-  }
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
-    regex         = "cylist-dev-db"
-    replacement   = "dev"
-    target_label  = "environment"
-  }
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "container"
-  }
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/(.*)"
-    target_label  = "pod"
-  }
-  rule {
-    target_label = "runtime"
-    replacement  = "docker"
-  }
-}
-
-loki.source.docker "docker_logs" {
-  host          = "unix:///var/run/docker.sock"
-  targets       = discovery.relabel.docker_logs.output
-  relabel_rules = discovery.relabel.docker_logs.rules
-  forward_to    = [loki.process.cylist_json.receiver]
 }
 
 // ------------------------------------------------- the app's JSON log lines

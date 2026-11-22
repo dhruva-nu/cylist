@@ -4,6 +4,6 @@ environment: dev-5
 app:
   host: dev5.cylist.in
   env:
-    CYLIST_CLIENT_URLS: '["http://localhost:8015","https://dev5.cylist.in"]'
+    CYLIST_CLIENT_URLS: '["https://dev5.cylist.in"]'
   extraSecrets:
     - cylist-slot-5-db

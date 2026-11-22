@@ -263,17 +263,17 @@ flight. A caller that sets `X-Request-ID` itself keeps its own, which is how a
 CLI or MCP run ties its logs to the server's.
 
 Logs go to stderr, which is what `make logs` and `make prod-logs` follow.
-To also keep them in a file on the server, set one variable:
+To also keep them in a file, set one variable:
 
 ```bash
 CYLIST_LOG_TO_FILE=true
 ```
 
-They land in `CYLIST_DATA_DIR/logs/cylist.log` — inside the volume every
-deployment already mounts and backs up — and rotate at 10 MB, five files deep.
-`CYLIST_LOG_LEVEL` and `CYLIST_LOG_FORMAT` (`text` or `json`) are the other two
-knobs; see `backend/.env.example` for all of them, and [DEPLOY.md](DEPLOY.md)
-for reading them on the server.
+They land in `CYLIST_DATA_DIR/logs/cylist.log` and rotate at 10 MB, five files
+deep. The deployments do not use it: they log JSON to stdout, which goes to
+Loki. `CYLIST_LOG_LEVEL` and `CYLIST_LOG_FORMAT` (`text` or `json`) are the other
+two knobs; see `backend/.env.example` for all of them, and [DEPLOY.md](DEPLOY.md)
+for reading the deployments' logs.
 
 Credentials never appear in the log — no tokens, no cookies, not even their
 hashes — and neither do request bodies or query strings. That is a property
@@ -299,16 +299,16 @@ rsync -a "$CYLIST_DATA_DIR"/ backup/data/     # the uploaded files
 ## Deploying
 
 `main` deploys itself. Every push that passes CI is built and released to
-**dnu-home-1** by a self-hosted runner on that machine, and served over HTTPS at
-<https://cylist.in> — one container holding the API and the
-built SPA, in front of a Postgres that publishes no port at all.
+**dnu-home-1** by a self-hosted runner on that machine, into the K3s cluster
+there, and served over HTTPS at <https://cylist.in> — one container holding the
+API and the built SPA, in front of a Postgres that publishes no port at all.
 
 `make deploy` runs the same script by hand on the server. See
 [DEPLOY.md](DEPLOY.md) for the shape of it, the one-time setup, and how to roll
 a bad release back.
 
-**Staging** is the same machine, the same image and the same deploy script, on
-:8001 and on the tailnet only. It holds the `staging` branch, deployed when you
+**Staging** is the same machine, the same image and the same deploy script, at
+<https://stage.cylist.in>. It holds the `staging` branch, deployed when you
 ask for it rather than on every push, and `make staging-refresh` reloads it from
 production's database and files — so what it rehearses is a real release against
 real rows.

@@ -31,8 +31,8 @@ client's.
 
 The chart never creates secrets. `deploy/k3s/secrets.sh prod|staging|dev`
 builds `cylist-app`, `cylist-postgres` and (prod only) `cylist-fcm` from the
-`app.env`, `postgres.env` and `fcm-service-account.json` files that the
-Docker stacks read.
+`app.env`, `postgres.env` and `fcm-service-account.json` files in
+`~/cylist-prod`, `~/cylist-staging` and `~/cylist-dev-shared`.
 
 ## Install
 

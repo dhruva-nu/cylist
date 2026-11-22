@@ -1,61 +1,102 @@
 # Deploying Cylist
 
-Cylist runs on **dnu-home-1**, a machine at home. Every push to `main` that
-passes CI deploys itself there, and the result is served over HTTPS at
-<https://cylist.in>.
+Cylist runs on **dnu-home-1**, a machine at home, on a single-node K3s cluster.
+Every push to `main` that passes CI deploys itself there, and the result is
+served over HTTPS at <https://cylist.in>. Staging and five dev slots run on the
+same cluster, each at a hostname of its own.
+
+The detail lives beside the code that does it:
+
+- [`deploy/k3s/README.md`](deploy/k3s/README.md): the cluster itself, its
+  install, network, isolation, registry and upgrades.
+- [`deploy/helm/README.md`](deploy/helm/README.md): the chart every
+  environment is installed from.
+- [`deploy/observability/README.md`](deploy/observability/README.md): metrics,
+  logs, traces, uptime probes and alerts.
+
+This file is how those pieces fit together, and what to do with them.
 
 ## The shape of it
 
-Production is **one container**, not the four that `docker compose up` gives
-you in development. `backend/Dockerfile` builds the React app and copies the
-bundle into the API image; FastAPI answers `/api/v1` and hands every other path
-`index.html` for the router in the browser to resolve. One process, one port,
-one origin — which is what makes the session cookie first-party and lets CORS
-be switched off entirely.
+An environment is **one app container**, not the four that `docker compose up`
+gives you in development. `backend/Dockerfile` builds the React app and copies
+the bundle into the API image; FastAPI answers `/api/v1` and hands every other
+path `index.html` for the router in the browser to resolve. One process, one
+port, one origin — which is what makes the session cookie first-party and lets
+CORS be switched off entirely.
+
+Each environment is two Helm releases of `deploy/helm/cylist` in its own
+namespace: `cylist-data` (Postgres, the blobs volume and the nightly backup)
+and the app (`cylist`, or `cylist-N` for dev slot N).
 
 ```
 GitHub                          dnu-home-1
 ──────                          ──────────
 push to main
   └─ CI on GitHub's machines    self-hosted runner (polls outbound)
-     backend · agents · web       └─ scripts/deploy.sh
-        all green ───────────────────┤ build image (SPA + API)
+     backend · agents · web       └─ deploy/k3s/deploy.sh
+     chart                           │ docker build, push to localhost:5000
+        all green ───────────────────┤ secrets from ~/cylist-prod
                                      │ pg_dump the database
-                                     │ alembic upgrade head
-                                     │ restart, wait for health
+                                     │ helm upgrade: migrate hook, roll out
+                                     │ wait for health through Traefik
                                      ↓
-                         cloudflared tunnel → cylist.in
+                    cloudflared tunnel → cylist.in, stage., dev., devN.
                                      ↓
-                              127.0.0.1:8000  ← app container
+                    Traefik on 127.0.0.1:80, routes by Host
                                      ↓
-                              postgres (no published port)
+                    app pod (cylist-prod/cylist, …)
+                                     ↓
+                    cylist-data-postgres (no Service outside its namespace)
 ```
 
 Nothing is exposed to your router — it cannot be, the ISP line is behind
 carrier-grade NAT. The runner reaches GitHub outbound, and `cloudflared` reaches
-Cloudflare outbound, which terminates HTTPS for `cylist.in` — so there is no
+Cloudflare outbound, which terminates HTTPS for every hostname — so there is no
 inbound port forward, no deploy key, and no secret of any kind stored in this
 repository.
 
+| | namespace | app release | hostname | secrets |
+| --- | --- | --- | --- | --- |
+| production | `cylist-prod` | `cylist` | `cylist.in` | `~/cylist-prod` |
+| staging | `cylist-staging` | `cylist` | `stage.cylist.in` | `~/cylist-staging` |
+| dev slot N | `cylist-dev` | `cylist-N` | `devN.cylist.in` | `~/cylist-dev-shared` |
+| dev index | `cylist-dev` | `dev-index` (not Helm) | `dev.cylist.in` | none |
+
 ## What a deploy does
 
-[`scripts/deploy.sh`](scripts/deploy.sh) is the whole of it, and CI runs exactly
-that script — so a deploy from GitHub and one you run by hand over SSH are the
-same code path. In order:
+[`deploy/k3s/deploy.sh`](deploy/k3s/deploy.sh) is the whole of it, and CI runs
+exactly that script — so a deploy from GitHub and one you run by hand are the
+same code path. `deploy/k3s/deploy.sh` is production, `deploy/k3s/deploy.sh
+staging` staging, `deploy/k3s/deploy.sh dev N` slot N. In order:
 
-1. **Build the image.** Both halves compile here: `npm run build` type-checks
-   the SPA and `uv sync --frozen` rejects a stale lockfile. A build that fails
-   has touched nothing that is running.
-2. **Dump the database** into `~/cylist-prod/backups`, keeping the last ten.
-   This happens *before* migrations because `alembic upgrade` is the only step
-   that redeploying the previous commit cannot undo.
-3. **Migrate,** in a one-off container. A migration that fails fails the deploy
-   visibly, rather than leaving a container restarting against a schema it does
-   not match.
-4. **Restart and wait for health.** If `/api/v1/health` never answers, the
-   deploy fails and prints the container's logs.
+1. **Build the image** and push it to the in-cluster registry as
+   `localhost:5000/cylist:<short sha>`. Both halves compile here: `npm run
+   build` type-checks the SPA and `uv sync --frozen` rejects a stale lockfile.
+   A build that fails has touched nothing that is running. A tree with local
+   changes gets a `-dirty-<time>` tag, never the commit's.
+2. **Update the secrets** with [`deploy/k3s/secrets.sh`](deploy/k3s/secrets.sh),
+   from the env files on this machine (see *Secrets*).
+3. **Make sure Postgres is up**: the `cylist-data` release.
+4. **Dump the database** into `<secrets dir>/backups/k3s/`, keeping the last
+   ten. This happens *before* migrations because `alembic upgrade` is the only
+   step that redeploying the previous commit cannot undo.
+5. **Migrate and roll out**: `helm upgrade --rollback-on-failure --wait`. The
+   chart's pre-upgrade hook Job runs `alembic upgrade head`; if it fails, or
+   the new pod never becomes ready, Helm puts the previous release back.
+6. **Check health**: `/api/v1/health` through Traefik on `127.0.0.1:80`, by
+   hostname. If it never answers, the deploy fails and prints the pod's logs.
+
+The script uses whatever kubeconfig `KUBECONFIG` names. CI gives it
+`/home/dnu2/.kube/cylist-deployer.yaml`, the `cylist-deployer` service account,
+which can reach the `cylist-*` namespaces and nothing else; it is written by
+[`deploy/k3s/deployer-kubeconfig.sh`](deploy/k3s/deployer-kubeconfig.sh).
 
 ## One-time setup on the server
+
+The cluster, its platform manifests and the registry are in
+[`deploy/k3s/README.md`](deploy/k3s/README.md), and monitoring is
+`deploy/observability/install.sh`. What follows is Cylist's own.
 
 ### Secrets
 
@@ -64,15 +105,22 @@ overwrite them:
 
 ```
 ~/cylist-prod/
-  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
-                 (CYLIST_VAULT_KEYS, once rotated), JEV_API_KEY
-  postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  backups/       the dumps deploy.sh leaves behind
+  app.env                    CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
+                             (CYLIST_VAULT_KEYS, once rotated), JEV_API_KEY
+  postgres.env               POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+  fcm-service-account.json   the Firebase key for pushes (production only)
+  backups/k3s/               the dumps deploy.sh leaves behind
 ```
 
-Both files are `chmod 600`. Everything that is not actually secret —
-`CYLIST_ENVIRONMENT`, the data directory, the empty CORS list — is set in
-`docker-compose.prod.yml` instead, where you can read it.
+All of them `chmod 600`. Every deploy turns them into the namespace's Secrets
+(`cylist-app`, `cylist-postgres` and, for production, `cylist-fcm`), so editing
+a file and redeploying is how a secret changes. Two values are changed on the
+way in: the host in `CYLIST_DATABASE_URL` becomes the in-cluster Postgres,
+whatever the file says, and `CYLIST_FCM_SERVICE_ACCOUNT_FILE` is dropped,
+because the chart mounts the key and sets the path itself. Everything that is
+not actually secret — `CYLIST_ENVIRONMENT`, the data directory, the empty CORS
+list, the client URLs — is in the chart's `values*.yaml` instead, where you can
+read it.
 
 > **`CYLIST_VAULT_KEY` is the one irreplaceable value here.** Change it and
 > every vault secret already stored becomes unreadable. It is deliberately kept
@@ -96,15 +144,14 @@ any point along the way:
    CYLIST_VAULT_KEYS={"2": "<new key>"}
    ```
 
-   Redeploy, or `docker compose -f docker-compose.prod.yml up -d app`. From
-   now on new and edited secrets are sealed under version 2; old rows still
-   open under version 1.
+   Redeploy (`make deploy`). From now on new and edited secrets are sealed
+   under version 2; old rows still open under version 1.
 
 2. **Reseal.** Re-encrypt every row still on an older key, while the app keeps
    serving:
 
    ```bash
-   docker compose -f docker-compose.prod.yml exec app python -m app.cli vault-reseal
+   kubectl -n cylist-prod exec deploy/cylist -c app -- python -m app.cli vault-reseal
    ```
 
    It works in batches of 200 rows (`--batch-size` to change), each its own
@@ -132,35 +179,24 @@ remember the leak exposed every secret sealed under it, so the credentials in
 the vault and every hook's signing secret should be changed at their source
 too.
 
-**Push notifications** (CYLIST-107) need one more secret, a Firebase
-service-account key for the `cylist-mobile` project, kept beside the others as
-`~/cylist-prod/fcm-service-account.json` (`chmod 600`). The server reads it from
-the path in `CYLIST_FCM_SERVICE_ACCOUNT_FILE`, never from the environment
-itself. `docker-compose.prod.yml` mounts it at
-`/run/secrets/fcm-service-account.json`, so on production there are two things to
-do, **before** deploying a release that has that mount:
+#### Push notifications
 
-1. Put the key at `~/cylist-prod/fcm-service-account.json` (`chmod 600`). The
-   mount needs the file to exist: a bind mount of a missing file makes Docker
-   create an empty directory in its place.
-2. In `app.env`, add `CYLIST_FCM_SERVICE_ACCOUNT_FILE=/run/secrets/fcm-service-account.json`.
+Push notifications (CYLIST-107) need a Firebase service-account key for the
+`cylist-mobile` project, kept as `~/cylist-prod/fcm-service-account.json`
+(`chmod 600`). `secrets.sh` refuses to deploy production without it. It becomes
+the `cylist-fcm` Secret, which `values-prod.yaml` names as `app.fcmSecret`; the
+chart mounts it and points `CYLIST_FCM_SERVICE_ACCOUNT_FILE` at it. Staging and
+dev have no `fcmSecret`, so pushes are off there.
 
-Staging's compose file does not mount it yet. To turn pushes on there, add the
-same line under `app:` › `volumes:` with `${CYLIST_STAGING_DIR}` in place of
-`${CYLIST_PROD_DIR}`, and do the same two steps in `~/cylist-staging`.
-
-Then redeploy. The log's start-up lines say `Push notifications are on` with the
-Firebase project, or why they are off. Without the key the server runs as
-before and every push is a debug line; a key that cannot be read is an error
-line, not a failed start. Pushes go only to phones whose token is still live,
-so revoking a phone's token in the web app silences it.
+The log's start-up lines say `Push notifications are on` with the Firebase
+project, or why they are off. Without the key the server runs as before and
+every push is a debug line; a key that cannot be read is an error line, not a
+failed start. Pushes go only to phones whose token is still live, so revoking a
+phone's token in the web app silences it.
 
 Generate the two Cylist secrets with `make hash-password` and `make vault-key`.
 `JEV_API_KEY` is TypeSafe's, for jev (see backend/.env.example); without it the
 server still runs, but `ask_docs` answers nothing and agents read the code.
-Set it before deploying 0033, too: that migration asks jev which topic each old
-scratchpad note belongs under, and without a key files them all under
-*Engineering → Agents*.
 
 ### The runner
 
@@ -172,8 +208,9 @@ systemctl status github-runner-cylist
 journalctl -u github-runner-cylist -f
 ```
 
-It is a **system** unit, and the reason is worth knowing, because the symptom is
-baffling on its own:
+It still needs Docker — every deploy runs `docker build` and `docker push` —
+and it is a **system** unit, and the reason is worth knowing, because the
+symptom is baffling on its own:
 
 > `permission denied while trying to connect to the Docker daemon socket`
 > — from a user who is plainly in the `docker` group.
@@ -193,6 +230,8 @@ than at login, which is what you want on a server.
 
 The unit is [`scripts/github-runner-cylist.service`](scripts/github-runner-cylist.service);
 installing it is a copy into `/etc/systemd/system` and an `enable --now`.
+Runner jobs do not see `~/.local/bin`, so tools a workflow calls (`helm`,
+`kubectl`, `jq`) belong in `/usr/local/bin`.
 
 To re-register the runner (a new repository, or a revoked token):
 
@@ -205,12 +244,12 @@ cd ~/actions-runner && ./config.sh --unattended --replace \
 
 ### Serving it
 
-Production is on the public internet as <https://cylist.in> through a
-Cloudflare Tunnel: `cloudflared` on the server holds outbound connections to
-Cloudflare's edge, Cloudflare terminates HTTPS, and requests for `cylist.in` are
-relayed down the tunnel to the app on loopback — the only thing that reaches it.
-The app's own password login is the only gate, which is why production sets
-`CYLIST_ENVIRONMENT=prod`, so the session cookie is issued `Secure`.
+Every environment is on the public internet through one Cloudflare Tunnel:
+`cloudflared` on the server holds outbound connections to Cloudflare's edge,
+Cloudflare terminates HTTPS, and requests are relayed down the tunnel to
+Traefik on loopback, which routes each to its environment by `Host`. The app's
+own password login is the only gate, which is why every deployed environment
+issues its session cookie `Secure`.
 
 It is a *locally-managed* tunnel, created from the CLI (the Zero Trust
 dashboard asks for a payment method; this path does not):
@@ -222,23 +261,26 @@ cloudflared tunnel route dns cylist cylist.in
 ```
 
 `~/.cloudflared/config.yml` names the tunnel, its credentials file, and one
-ingress rule per deployment on this machine — a hostname each, every target a
-loopback port — with a `http_status:404` catch-all:
+ingress rule per hostname, every one to `http://127.0.0.1:80`, with a
+`http_status:404` catch-all:
 
-| hostname | → | what |
-| --- | --- | --- |
-| `cylist.in` | `127.0.0.1:8000` | production |
-| `stage.cylist.in` | `127.0.0.1:8001` | staging |
-| `dev.cylist.in` | `127.0.0.1:8010` | the dev index |
-| `devN.cylist.in` | `127.0.0.1:801N` | dev slot N, 1–5 |
+| hostname | what |
+| --- | --- |
+| `cylist.in` | production |
+| `stage.cylist.in` | staging |
+| `dev.cylist.in` | the dev index |
+| `devN.cylist.in` | dev slot N, 1–5 |
 
 Each hostname is a CNAME to the tunnel (`cloudflared tunnel route dns cylist
-<hostname>`, once). The rules are static: a deploy never touches them, it only
-has to be up on its port. To change them, edit `~/.cloudflared/config.yml`,
-validate, and copy it over `/etc/cloudflared/config.yml`, which is what the
-service reads. `cloudflared tunnel ingress validate` checks it, and
-`cloudflared tunnel run cylist` serves it in the foreground for a test. The
-real thing is the `cloudflared` systemd service, installed with
+<hostname>`, once), and each app release's Ingress claims its hostname in
+Traefik. The rules are static: a deploy never touches them. To change them,
+edit `~/.cloudflared/config.yml`, check it with `cloudflared tunnel ingress
+validate`, copy it over `/etc/cloudflared/config.yml`, which is what the
+service reads, and **restart the service** (`sudo systemctl restart
+cloudflared`): it does not pick up a changed ingress on its own.
+`cloudflared tunnel run cylist` serves it in the foreground for a test.
+
+The service was installed with
 `sudo cloudflared --config ~/.cloudflared/config.yml service install --no-update-service`
 (the `--config` matters: sudo changes `$HOME`). That copies `config.yml` to
 `/etc/cloudflared/` but keeps reading the credentials JSON from
@@ -256,10 +298,12 @@ itself, not an error page from Cloudflare:
 curl -si -X POST https://cylist.in/mcp | head -1
 ```
 
+On this machine, `curl -H 'Host: <hostname>' http://127.0.0.1/api/v1/health`
+asks an environment through Traefik without the tunnel; that is what the
+deploy's health check does.
+
 Everything above is on the public internet, each behind its own password
-login; only the dashboard (`:7443`) is still `tailscale serve`, tailnet-only.
-The old Funnel route for production is off (`tailscale funnel --https=443
-off`).
+login; only the status dashboard (`:7443`) is `tailscale serve`, tailnet-only.
 
 **Turn on "Always Use HTTPS"** for the zone (Cloudflare dashboard → SSL/TLS →
 Edge Certificates). Cloudflare otherwise serves plain `http://` as-is, and
@@ -268,41 +312,23 @@ every deployed environment issues its session cookie `Secure`, so a login over
 
 ### Telling clients where to find it
 
-A stack is reachable at more than one address, and which one works depends on
-where the laptop asking is — not on anything either end can settle once. So
-each compose file lists them, and the app hands the list to any client that
-asks (`GET /api/v1/setup`, unauthenticated: it is read before a client has a
-token):
+An environment could be reachable at more than one address, and which one works
+depends on where the laptop asking is. So each environment's values file lists
+them as `CYLIST_CLIENT_URLS`, and the app hands the list to any client that asks
+(`GET /api/v1/setup`, unauthenticated: it is read before a client has a token).
+Today each lists only its public hostname — nothing deployed listens on a
+localhost port — for example in `values-prod.yaml`:
 
 ```yaml
-CYLIST_CLIENT_URLS: '["http://localhost:8000","https://cylist.in"]'
+CYLIST_CLIENT_URLS: '["https://cylist.in"]'
 ```
 
-| | production | staging | dev slot N |
-|---|---|---|---|
-| local | `http://localhost:8000` | `http://localhost:8001` | `http://localhost:801N` |
-| remote | `cylist.in` | `stage.cylist.in` | `devN.cylist.in` |
-| off the tailnet | yes | yes | yes — all through the one Cloudflare Tunnel |
-
 `cylist setup` stores every address it is given, and the CLI and the MCP server
-try them in order, moving on when one will not *connect*. That is what makes
-one setup work on the tailnet, off it, and on this machine itself — see
-[`cli/README.md`](cli/README.md).
-
-Two things to keep straight:
-
-* **The app never dials these.** They are advisory data returned to callers, so
-  `localhost` in the list means *the caller's* localhost — right for something
-  running on this machine, an instant refusal (and then the next address) for
-  anything else. Cheap either way, which is why it stays first.
-* **Every remote address works from anywhere**, since all of them are
-  hostnames on the one tunnel; nothing here is tailnet-only any more. The
-  failover mechanism is address-agnostic either way — it steps over what does
-  not connect, it cannot invent reachability.
-
-Change one of these and the client keeps the old list until its next `cylist
-setup` or `cylist login`. Neither is urgent: an address that has gone away
-costs one connection failure and is stepped over.
+try them in order, moving on when one will not *connect* — see
+[`cli/README.md`](cli/README.md). The app never dials these; they are advisory
+data returned to callers. Change one and the client keeps the old list until its
+next `cylist setup` or `cylist login`; an address that has gone away costs one
+connection failure and is stepped over.
 
 ### MCP at `/mcp`
 
@@ -322,18 +348,16 @@ curl -si -X POST https://<host>/mcp | head -1
 
 ### WebSockets through the proxy
 
-Two things hold a socket now: a browser watching a board, and each agent
-session reporting on a card. `wss:` follows `https:` automatically — the
-frontend derives the scheme from the page it was served by — and `tailscale
-serve`/`funnel` forwards `Upgrade` end to end, so **there is nothing to
-configure**. There is no flag for it, and there would be nothing to turn on
-if it did not work.
+Two things hold a socket: a browser watching a board, and each agent session
+reporting on a card. `wss:` follows `https:` automatically — the frontend
+derives the scheme from the page it was served by — Cloudflare and
+`cloudflared` forward `Upgrade` end to end, and Traefik's `web` entrypoint has
+no read or write timeout (`deploy/k3s/host/traefik-config.yaml`), so a quiet
+socket is not cut off. The blackbox exporter probes production's WebSocket
+upgrade from outside (see the observability README).
 
-**This has never been exercised in this deployment.** Until CYLIST-40 no
-WebSocket traffic existed at all, so the paragraph above is a reasonable
-expectation rather than an observation. Check it after the first deploy that
-includes this, from a laptop rather than from the server — loopback bypasses
-the very thing under test:
+To check it by hand, from a laptop rather than from the server — loopback
+bypasses the very thing under test:
 
 ```bash
 curl -isk -N --http1.1 \
@@ -349,7 +373,8 @@ curl -isk -N --http1.1 \
 | `101 Switching Protocols` | The upgrade survived the proxy. This is the answer you want. |
 | `200` with HTML | The SPA mount swallowed it — wrong path, or a route registered after `mount_spa`. |
 | `403` | The origin check refused it. |
-| `502` / Cloudflare error page | `cloudflared` is down or cannot reach `127.0.0.1:8000` — `journalctl -u cloudflared`. |
+| `404` from Traefik | No Ingress claims that hostname — is the release installed? |
+| `502` / Cloudflare error page | `cloudflared` is down or cannot reach `127.0.0.1:80` — `journalctl -u cloudflared`. |
 
 A `101` does **not** prove the token is good: a bad credential is accepted
 and then closed with 4401, deliberately, because a browser cannot read a
@@ -357,11 +382,9 @@ handshake's status code and would otherwise be unable to tell "signed out"
 from "server down".
 
 `GET /api/v1/health/realtime` reports how many sockets this process is
-holding — agent connections and board watchers, counts only, no names. That
-is the way to answer "did the upgrade actually work last Tuesday, when
-nobody was looking": a board that has silently fallen back to polling looks
-exactly like a working one from the outside, and shows up here as watchers
-that never arrive.
+holding — agent connections and board watchers, counts only, no names. A board
+that has silently fallen back to polling looks exactly like a working one from
+the outside, and shows up here as watchers that never arrive.
 
 If sockets turn out not to get through, nothing breaks. The board keeps its
 ten-second poll as a fallback and the agent hooks keep reporting over HTTP;
@@ -369,9 +392,11 @@ what is lost is the promptness, not the correctness.
 
 ### More than one worker
 
-Each environment runs one uvicorn process today, because one is plenty. It
-no longer has to (CYLIST-133): `--workers N`, or a second replica on the same
-database, is safe. What used to make it unsafe, and what replaced it:
+Each environment runs one replica with one uvicorn process today, because one
+is plenty, and the chart rolls it out with `Recreate` since the blobs volume is
+ReadWriteOnce. It no longer has to be one process (CYLIST-133): `--workers N`
+on the same database is safe. What used to make it unsafe, and what replaced
+it:
 
 * **Fan-out.** Who is connected is still a dictionary per process, but every
   committed event now also goes out as a Postgres `NOTIFY` on the
@@ -396,74 +421,48 @@ in-process, so N workers let N times as many attempts through.
 
 ## Logs
 
-`make prod-logs` follows the running container, and for most questions that is
-the whole answer. Its limit is that it is Docker's buffer: `docker compose
-down` takes it with it, and so does enough traffic.
+Every app writes one JSON object per line to stdout (`CYLIST_LOG_FORMAT=json`,
+set by the chart). Alloy ships every pod's log to Loki, kept for 30 days, so
+logs outlive the pod: Grafana → Explore → Loki, for example
+`{environment="prod", container="app", level="ERROR"}`. For the running pod
+alone, `make prod-logs` (or `staging-logs`, `dev-logs SLOT=N`) follows it with
+`kubectl logs`. How to reach Grafana is in the observability README.
 
-For logs that outlive the container, add one line to `app.env` and redeploy:
+`CYLIST_LOG_TO_FILE` is not worth setting in the cluster: the app's `/data` is
+scratch space (only `/data/blobs` is a volume), so the file goes with the pod.
 
-```bash
-CYLIST_LOG_TO_FILE=true
-```
+**The `client` on each line is the real caller**, not Traefik. The app only
+ever hears from Traefik's pod, so the chart sets
+`CYLIST_TRUSTED_PROXY_CIDRS='["10.42.0.0/16"]'`, the pod network: a request
+from inside it has its client taken from `CF-Connecting-IP` (Cloudflare sets
+it; nothing upstream can append to it), and the proxy's address is kept beside
+it as `peer`. A request from anywhere else keeps its peer as the client and its
+headers are ignored. The same address feeds the sign-in log and the login rate
+limit (`429` with `Retry-After` after five attempts at one account, or thirty
+from one address, a minute). If the cluster is ever put behind a different
+proxy, the networks it connects from go in that list and nothing else does.
 
-They are then written to `/data/logs/cylist.log` inside the container, which is
-the `cylist-data` volume — the same one holding uploaded files, so
-`scripts/backup.sh` already carries it. Rotation is at 10 MB with five files
-kept, so the most this can ever occupy is 60 MB; an unbounded log file on this
-machine would fill the disk and take Postgres down with it, which is a worse
-outage than the missing logs it was meant to prevent.
-
-Reading them on the server:
-
-```bash
-docker compose -f docker-compose.prod.yml exec app tail -f /data/logs/cylist.log
-```
-
-**The `client` on each line is the real caller**, not `cloudflared`. The
-container only ever hears from the Docker bridge gateway, so every compose
-file sets `CYLIST_TRUSTED_PROXY_CIDRS='["172.16.0.0/12"]'`: a request from
-inside that network has its client taken from `CF-Connecting-IP` (Cloudflare
-sets it; nothing upstream can append to it), and the bridge address is kept
-beside it as `peer`. A request from anywhere else keeps its peer as the client
-and its headers are ignored, so nothing that reaches the port directly can
-write its own address into the log. The same address feeds the sign-in log
-and the login rate limit (`429` with `Retry-After` after five attempts at one
-account, or thirty from one address, a minute). If the stack is ever put
-behind a different proxy, the networks it connects from go in that list and
-nothing else does.
-
-Two other variables are worth knowing. `CYLIST_LOG_LEVEL=DEBUG` adds every
-static asset and every health check — for a problem being chased, not for
-leaving on. `CYLIST_LOG_FORMAT=json` writes one JSON object per line, including
-tracebacks, which is what to set if anything is ever pointed at these files:
-
-```bash
-docker compose -f docker-compose.prod.yml exec app \
-  sh -c 'grep WARNING /data/logs/cylist.log' | jq -r '.context.path' | sort | uniq -c
-```
-
-Staging and dev take the same variables in their own `app.env`, and write to
-their own volumes.
+`CYLIST_LOG_LEVEL=DEBUG` in an environment's `app.env` adds every static asset
+and every health check — for a problem being chased, not for leaving on.
 
 Every line carries the id of the request that produced it, and every response
 carries the same id in `X-Request-ID`. When somebody reports a failure, that id
 is the one thing worth asking them for.
 
-Traces are off until `CYLIST_OTLP_ENDPOINT` names an OTLP/HTTP receiver —
-`http://alloy.monitoring:4318`, say; `/v1/traces` is appended. Each request is
-then a server span with a child for every statement and every hook delivery,
-under `service.name=cylist` and `deployment.environment` set from
-`CYLIST_ENVIRONMENT`. Production samples a fifth of requests
-(`CYLIST_TRACE_SAMPLE_RATIO=0.2` in `docker-compose.prod.yml`); everywhere else
-samples all of them. The two records point at each other: a JSON log line from
-a traced request carries `trace_id` and `span_id`, and the server span carries
-the request id as `cylist.request_id`. Health checks are never traced, and a
-caller's `traceparent` is ignored — a trace starts here.
+Traces go to Tempo: the chart sets `CYLIST_OTLP_ENDPOINT` to Alloy
+(`http://alloy.monitoring:4318`). Each request is a server span with a child for
+every statement and every hook delivery, under `service.name=cylist` and
+`deployment.environment` set from `CYLIST_ENVIRONMENT`. Production samples a
+fifth of requests (`CYLIST_TRACE_SAMPLE_RATIO=0.2` in `values-prod.yaml`);
+everywhere else samples all of them. The two records point at each other: a log
+line from a traced request carries `trace_id` and `span_id`, and the server span
+carries the request id as `cylist.request_id`. Health checks are never traced,
+and a caller's `traceparent` is ignored — a trace starts here.
 
 ## When a deploy fails
 
 **`permission denied ... /var/run/docker.sock`,** from a user who is in the
-`docker` group — the runner's groups, not the user's. See the note above, and
+`docker` group — the runner's groups, not the user's. See *The runner*, and
 check the process itself:
 
 ```bash
@@ -478,82 +477,79 @@ session, so it, and not the service you just repaired, is taking the jobs.
 is the stale one. Kill it. `KillMode=mixed` in the unit is what stops this
 happening again.
 
-**A migration failed** — nothing was restarted, so the previous container is
-still serving. Fix the migration and deploy again, or restore the dump
-`deploy.sh` took moments earlier; see *Rolling back*.
+**A migration failed, or the new pod never became ready** — Helm rolled the
+release back, so the previous version is still serving. The schema stays
+wherever the migration left it. `kubectl -n <namespace> logs job/<release>-migrate`
+(or `kubectl get jobs`) shows why. Fix it and deploy again, or restore the dump
+`deploy.sh` took moments earlier; see *Rolling back*. A dev slot's
+database secret is put back as the previous release had it.
+
+**`missing <dir>/app.env`** — `secrets.sh` found no env files for that
+environment. See *Secrets*; for dev, *Dev → One-time setup*.
 
 ## Staging
 
-Staging runs on the same machine, from the **`staging` branch**, on **:8001** —
-served at <https://stage.cylist.in>, through the same Cloudflare Tunnel as
-production and just as public, behind its own password login.
+Staging runs on the same cluster, namespace `cylist-staging`, from the
+**`staging` branch** — served at <https://stage.cylist.in>, through the same
+Cloudflare Tunnel as production and just as public, behind its own password
+login.
 
 It is deliberately production's shape, not development's: the same
-`backend/Dockerfile` `runtime` image, the same one-container deploy, the same
-`scripts/deploy.sh` — only the argument differs.
+`backend/Dockerfile` `runtime` image, the same chart, the same
+`deploy/k3s/deploy.sh` — only the argument differs.
 
 ```bash
-make staging-deploy     # build, migrate, restart          (scripts/deploy.sh staging)
-make staging-refresh    # reload it from production's data
+make staging-deploy     # build, migrate, roll out         (deploy/k3s/deploy.sh staging)
+make staging-refresh    # reload it from production's data (deploy/k3s/staging-refresh.sh)
 make staging-logs       # follow it
 make staging-ps         # what is running
 ```
 
 Staging is deployed when you ask for it, and not on every push. Pushing to
-`staging` runs CI's three test jobs and stops there; the deploy is
+`staging` runs CI's test jobs and stops there; the deploy is
 [`.github/workflows/deploy-staging.yml`](.github/workflows/deploy-staging.yml),
 triggered by hand from the Actions tab (`workflow_dispatch`) on the same
 self-hosted runner. Run it from the `staging` branch — from any other branch it
-fails on its first step rather than putting that branch on :8001, which is what
-dev is for.
+fails on its first step rather than putting that branch on staging, which is
+what dev is for.
 
 So the test result is still there to read before you trigger, on the commit the
-push produced; what the workflow no longer does is decide *when* staging moves.
-A merge into `staging` leaves whatever is running on :8001 running.
+push produced; what the workflow does not do is decide *when* staging moves.
+A merge into `staging` leaves whatever is running there running.
 
 ### What differs from production, and why
 
 | | production | staging |
 | --- | --- | --- |
-| compose project | `cylist-prod` | `cylist-staging` |
-| image tag | `cylist:latest` | `cylist:staging` |
-| port | `127.0.0.1:8000` | `127.0.0.1:8001` |
+| namespace | `cylist-prod` | `cylist-staging` |
+| values | `values-prod.yaml` | `values-staging.yaml` |
 | served at | `cylist.in` | `stage.cylist.in` — both public, via the tunnel |
 | secrets | `~/cylist-prod` | `~/cylist-staging` |
 | `CYLIST_ENVIRONMENT` | `prod` | `staging` |
+| priority class | `cylist-prod` | `cylist-staging`, evicted before production and monitoring |
+| nightly backups kept | 14 | 7 |
+| pushes | on | off |
 
-Two of those are load-bearing rather than cosmetic:
-
-**The image tag.** Staging builds `cylist:staging`, never `cylist:latest`. If
-both wrote the same tag, a staging build would move the tag production restarts
-from, and the next `docker compose up` in production would silently adopt
-staging's code.
-
-**`CYLIST_ENVIRONMENT=staging`.** The app treats `staging` and `prod` alike
-wherever being *deployed* is what matters — `Settings.is_deployed`. It issues
-the session cookie `Secure`, because both sit behind `tailscale serve` and are
+**`CYLIST_ENVIRONMENT=staging`** is the one that is load-bearing. The app
+treats `staging` and `prod` alike wherever being *deployed* is what matters —
+`Settings.is_deployed`. It issues the session cookie `Secure`, because both are
 reached over HTTPS; and `make seed` refuses to run, because staging holds real
 rows. It also names the cookie `cylist_session_staging` rather than
-production's `cylist_session`: both are on the same host, a browser does not
-separate cookies by port, and with one name signing in to either signed you out
-of the other (CYLIST-81).
+production's `cylist_session`, so that signing in to one never signs you out of
+the other (CYLIST-81).
 
 > A `Secure` cookie is dropped by the browser over plain HTTP, and the symptom
 > is a login that returns 200 and then does not stick. Reach staging through
-> its HTTPS address, not `http://127.0.0.1:8001` directly.
+> its HTTPS address.
 
 ### Staging holds production's data
 
-`make staging-refresh` replaces staging's database *and* its uploaded blobs with
-a copy taken from production at that moment — the two move together, or staging
-ends up with file rows pointing at blobs it does not have. Production is only
-read: `pg_dump`, and a read-only mount of its data volume.
-
-Since the staging cutover (CYLIST-198), staging runs on K3s and production is
-still on Docker. So the copy is `deploy/k3s/import-from-docker.sh prod staging`,
-which also compares every table's row count and every blob's checksum with
-production before it starts the app. The same script does production's
-own restore at its cutover (`prod prod`). It took 11 s on 2026-11-22.
+`make staging-refresh` (or the *Refresh staging from production* workflow)
+replaces staging's database *and* its uploaded blobs with a copy taken from
+production at that moment — the two move together, or staging ends up with
+file rows pointing at blobs it does not have. Production is only read:
+`pg_dump`, and `tar` over its app pod's blobs mount. Staging comes back at
+production's migration; *Deploy staging* migrates it forward.
 
 That has a consequence worth being explicit about:
 
@@ -575,7 +571,7 @@ decrypt, which is the trade.
   app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
                  JEV_API_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  backups/       the dumps staging deploys leave behind
+  backups/k3s/   the dumps staging deploys leave behind
 ```
 
 Both files `chmod 600`, as production's are. Serving it is the
@@ -584,15 +580,17 @@ nothing per deploy.
 
 ## Dev
 
-Dev is **five slots**, `dev_1` to `dev_5`, on the same machine — so five
-branches can be up side by side instead of taking turns on one stack. Slot N
-listens on **:801N** and is served at `https://devN.cylist.in/`, through the
-same Cloudflare Tunnel as everything else. <https://dev.cylist.in/> is a small
-index of which branch and commit is in each slot and when it went there.
+Dev is **five slots**, `dev_1` to `dev_5`, in namespace `cylist-dev` — so five
+branches can be up side by side instead of taking turns. Slot N is the release
+`cylist-N`, served at `https://devN.cylist.in/`, through the same Cloudflare
+Tunnel as everything else. <https://dev.cylist.in/> is a small index of which
+branch and commit is in each slot, when it went there, and which database it is
+on.
 
 The slots differ in the code they run, not in the data they show: all five use
-**one Postgres** and **one blob volume**, so a project, card or file made on
-one slot is there on every other. See *One database for every slot* below.
+**one Postgres** and **one blobs volume** (dev's `cylist-data` release), so a
+project, card or file made on one slot is there on every other. See *One
+database for every slot* below.
 
 A slot is the same as staging except for one thing: it is not tied to a branch.
 The workflow is [`.github/workflows/deploy-dev.yml`](.github/workflows/deploy-dev.yml),
@@ -608,7 +606,7 @@ gh workflow run deploy-dev.yml --ref feature/my-branch -f slot=2 -f card=CYLIST-
 ```
 
 Runs for the same slot queue behind each other — two deploys into one slot
-would fight over its containers — while different slots never wait on each
+would fight over its release — while different slots never wait on each
 other. Deploying into a slot replaces whatever branch was there; the index says
 what that was.
 
@@ -619,10 +617,9 @@ own deploy does not wait on them either, but for a different reason: the push
 to `staging` has already run them.)
 
 ```bash
-make dev-deploy SLOT=2   # build, migrate, restart       (scripts/deploy.sh dev 2)
+make dev-deploy SLOT=2   # build, migrate, roll out      (deploy/k3s/deploy.sh dev 2)
 make dev-logs SLOT=2     # follow it
 make dev-ps SLOT=2       # what is running
-make dev-down SLOT=2     # stop it (volumes kept)
 ```
 
 ### Telling the card where it went
@@ -643,7 +640,9 @@ well. An agent reads the card first and posts only if the line isn't already
 there. The step is
 [`scripts/dev-card-comment.sh`](scripts/dev-card-comment.sh):
 `POST /api/v1/tasks/<card>/comments`, with `author_id` set to the directory
-entry flagged `is_agent`, which it looks up from `GET /api/v1/people`.
+entry flagged `is_agent`, which it looks up from `GET /api/v1/people`. It reads
+`slot`, `url`, `branch` and `sha` from the deploy step's outputs, which
+`deploy.sh` writes for a slot deploy.
 
 It needs one secret, **`CYLIST_AGENT_TOKEN`**: a production API token with
 `read` and `write`, minted by someone who can comment on the board. A token
@@ -669,119 +668,78 @@ the repository variable `CYLIST_URL`.
 
 | | staging | dev slot N |
 | --- | --- | --- |
-| compose project | `cylist-staging` | `cylist-dev-N` |
-| image tag | `cylist:staging` | `cylist:dev-N` |
-| port | `127.0.0.1:8001` | `127.0.0.1:801N` |
+| release | `cylist-staging/cylist` | `cylist-dev/cylist-N` |
+| values | `values-staging.yaml` | `values-dev.yaml` + `values-dev-N.yaml` |
 | served at | `stage.cylist.in` | `devN.cylist.in` |
 | secrets | `~/cylist-staging` | `~/cylist-dev-shared`, the same for every slot |
 | deploy trigger | manual, `staging` only | manual, any branch, pick a slot |
-| data | copied from production | shared by all five slots, empty to start; a copy of its own for a branch with unmerged migrations |
+| data | copied from production | shared by all five slots, never restored from production; a copy of its own for a branch with unmerged migrations |
 | `CYLIST_ENVIRONMENT` | `staging` | `preview` |
-| `CYLIST_BASE_PATH` | unset | unset |
-
-All five come from one file, [`docker-compose.dev.yml`](docker-compose.dev.yml),
-which takes the slot from `CYLIST_DEV_SLOT` and has no default for it — a
-command that forgot which slot it meant fails instead of acting on another.
+| `CYLIST_BASE_PATH` | unset | empty |
 
 **A hostname each, no base path.** Each slot is served at the root of its own
 hostname, exactly like production and staging, so `CYLIST_BASE_PATH` is empty.
-The slots used to share one tailnet port and be told apart by path
-(`:9443/dev_N`, with `CYLIST_BASE_PATH=/dev_N` so the app knew the prefix the
-browser saw); the app still supports that shape — see
-`backend/app/core/base_path.py` — and a slot built that way keeps its old
-prefix until it is deployed again, which is why a slot deploy also removes any
-`:9443/dev_N` mapping it finds.
+The app still supports being served under a prefix — see
+`backend/app/core/base_path.py` — but nothing deployed uses it.
 
 **`CYLIST_ENVIRONMENT=preview`, not `dev`.** `CYLIST_ENVIRONMENT` already means
 something in the app: the literal value `"dev"` is what `Settings` defaults to
 on someone's own machine, where the session cookie is *not* `Secure` and
 `make seed` is allowed to run — see `Settings.is_deployed` in
 `backend/app/config.py`. Setting the real value to `"dev"` here would have
-quietly picked up that machine's behavior on a stack that is, in every way
-that matters, a deployment: one container behind the tunnel, reached over
-HTTPS. `"preview"` gets it into `is_deployed` alongside staging and
-production without touching what `"dev"` means anywhere else.
+quietly picked up that machine's behavior on what is, in every way that
+matters, a deployment: one container behind the tunnel, reached over HTTPS.
+`"preview"` gets it into `is_deployed` alongside staging and production without
+touching what `"dev"` means anywhere else.
+
+**Production's jev key.** `secrets.sh dev` copies production's `JEV_API_KEY`
+into dev's `cylist-app` Secret on every deploy — jev is a paid API, not
+per-environment state, so a key that exists once is rotated once. Dev keeps its
+own if production has none.
 
 ### What a slot deploy does beyond the usual
 
-`scripts/deploy.sh dev N` runs the same build, dump, migrate, restart and health
-check as production and staging. Around that,
-[`scripts/dev-slot.sh`](scripts/dev-slot.sh):
+`deploy/k3s/deploy.sh dev N` runs the same build, secrets, dump, migrate, roll
+out and health check as production and staging, with
+[`scripts/dev-slot.sh`](scripts/dev-slot.sh) for the slot-specific helpers.
+Around that it:
 
-1. **Creates the shared secrets** on the first deploy of any slot, if
-   `~/cylist-dev-shared` has neither file, and the shared blob volume
-   `cylist-dev-blobs`: a random database password, a fresh vault key, and the
-   bootstrap password hash copied from the old single dev stack's
-   `~/cylist-dev/app.env` (override with `CYLIST_DEV_TEMPLATE=<path to an
-   app.env>`). Files that already exist are never touched. With no hash to
-   copy the deploy warns, and nobody can sign in to the slots until one is added
-   (`make hash-password`) and it is deployed again.
-2. **Copies production's `JEV_API_KEY`** into the shared `app.env`, on every
-   deploy — jev is a paid API, not per-environment state, so a key that exists
-   once is rotated once.
-3. **Records what it deployed** in `~/cylist-dev-N/deployed`, one `key=value`
-   per line: `branch`, `sha`, `time` (UTC).
-4. **Retires the slot's own Postgres and the old single dev stack** if their
-   containers are still there, and drops the slot's own database if its branch
-   no longer needs one (see below).
-5. **Regenerates the index** at `~/cylist-dev-index/index.html` from the five
-   `deployed` files. It is a static file, so it is only as current as the last
-   slot deploy. A `busybox httpd` container, `cylist-dev-index`, serves that
-   directory read-only on `127.0.0.1:8010`; the deploy starts it if it is not
-   running. `dev.cylist.in` is relayed to that port by the tunnel.
-6. **Removes the slot's old `:9443/dev_N` tailscale mapping** if one is still
-   there, from before the slots had hostnames — a slot built for its hostname
-   has no base path, so the old route would answer with a broken app. Best
-   effort: it needs tailscale's operator, and a slot that cannot clean up is
-   still a working slot. Once no slot has one left, `tailscale serve --https
-   9443 off` takes the port down.
-7. **Checks the slot answers through the tunnel** at
-   `https://devN.cylist.in/api/v1/health`, and fails the deploy if it never
-   does — up on loopback but not served is not deployed.
-
-Steps 4–6 hold a lock (`~/.cylist-dev.lock`), since the index is shared by
-all five slots. The workflow's deploy step also exposes
-`slot`, `url`, `branch` and `sha` as step outputs, for a later step that wants
-to say where a branch went. The *Comment on the card* step reads them.
+1. **Chooses the slot's database** — the shared one or a copy of its own; see
+   below.
+2. **Records what it deployed** on the slot's Deployment, as `cylist.in/branch`,
+   `cylist.in/sha`, `cylist.in/deployed-at` and `cylist.in/database`
+   annotations.
+3. **Drops the slot's own database** once it is up on the shared one, if its
+   branch no longer needs one.
+4. **Regenerates the index**: reads those annotations from every slot's
+   Deployment, writes the page into the `dev-index` ConfigMap, applies
+   [`deploy/k3s/dev-index.yaml`](deploy/k3s/dev-index.yaml) (a small httpd
+   Deployment, Service and Ingress for `dev.cylist.in`) and restarts it so the
+   new page shows at once. That step holds a lock
+   (`~/.cylist-dev.lock.k3s`), since the page is shared by all five slots.
 
 ### One-time setup
 
-Nothing by hand — the first slot deploy creates the shared directory, and each
-slot's first deploy its own:
-
 ```
 ~/cylist-dev-shared/
-  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY,
-                 JEV_API_KEY
+  app.env        CYLIST_DATABASE_URL, CYLIST_PASSWORD_HASH, CYLIST_VAULT_KEY
   postgres.env   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  backups/       the dumps slot deploys leave behind
-~/cylist-dev-N/
-  deployed       branch, sha, time and database (shared or own) of slot N's
-                 last deploy
-  db.env         only while slot N has a database of its own: its
-                 CYLIST_DATABASE_URL
+  backups/k3s/   the dumps slot deploys leave behind
 ```
 
-Both env files `chmod 600`. The shared database starts empty — it is never
-restored from production, so unlike staging's `app.env` it needs only its own
-`CYLIST_VAULT_KEY`, not production's.
+Both files `chmod 600`, made by hand: a slot deploy fails on its secrets step
+if either is missing. The database URL's host does not matter (it is rewritten
+to the in-cluster Postgres); its password must match `postgres.env`. The shared
+database starts empty — it is never restored from production, so unlike
+staging's `app.env` it needs only its own `CYLIST_VAULT_KEY`, not production's.
+The password hash is for opening the first account (`make hash-password`).
 
 Serving is the `devN.cylist.in` and `dev.cylist.in` ingress rules in the
-tunnel config — see *Serving it* — and nothing per deploy. Only the index
-directory is served as files, by the `cylist-dev-index` container; the slot
-directories hold secrets and are never mounted into it.
+tunnel config — see *Serving it* — and nothing per deploy.
 
 ### One database for every slot
 
-[`docker-compose.dev-db.yml`](docker-compose.dev-db.yml) is the one Postgres,
-compose project `cylist-dev-db`, with no published port. It makes the docker
-network `cylist-dev`; every slot joins it and reaches the database as
-`cylist-dev-db`. Each slot mounts the shared volume `cylist-dev-blobs` at
-`/data/blobs`, since a file is a database row plus bytes on disk; its logs stay
-in its own volume. `make dev-db-ps` and `make dev-db-logs` look at the
-database.
-
-Every slot deploy dumps the shared database to `~/cylist-dev-shared/backups`
+Every slot deploy dumps the shared database to `~/cylist-dev-shared/backups/k3s`
 before it migrates anything. A migration is the one thing five branches cannot
 share, so **the shared database only ever takes migrations that are already on
 `main`**:
@@ -796,61 +754,22 @@ share, so **the shared database only ever takes migrations that are already on
   `cylist_slot_N`. Each deploy drops it, restores the dump just taken of the
   shared one into it, and migrates that. The slot starts with everything the
   others show; its schema changes and whatever is done on it stay in the slot
-  and are gone at its next deploy. Its `CYLIST_DATABASE_URL` is in
-  `~/cylist-dev-N/db.env`, which `docker-compose.dev.yml` reads after the
-  shared `app.env`.
-* When a slot goes back to a branch with no migrations of its own, `db.env` is
-  removed and, once the slot is up on the shared database, `cylist_slot_N` is
-  dropped.
+  and are gone at its next deploy. Its `CYLIST_DATABASE_URL` is in the Secret
+  `cylist-slot-N-db`, which `values-dev-N.yaml` lists in `app.extraSecrets`
+  and which wins over the shared `cylist-app`.
+* When a slot goes back to a branch with no migrations of its own, that Secret
+  is deleted and, once the slot is up on the shared database, `cylist_slot_N`
+  is dropped.
 
-The index at <https://dev.cylist.in/> says which database each slot is on.
 `scripts/dev-slot.sh` fetches `main` to compare against (set
 `CYLIST_DEV_MAIN_BRANCH` to compare against another branch); if it cannot find
 it at all, the slot gets a database of its own rather than risk the shared one.
 
 A branch cut before `main`'s latest migration meets a database at a revision
-it has never heard of. The deploy warns and starts the slot on that schema
-unmigrated, rather than failing: an older branch on a newer schema mostly
-works, and dev is for looking. If that branch has migrations of its own they
-are not applied either, and the warning says to rebase it onto `main`.
-
-What one process per slot means against one database, and is accepted for dev:
-
-* **Live board updates stay within a slot.** The WebSocket fan-out is
-  in-process, so a change made on dev_2 reaches boards open on dev_2 at once,
-  and boards open on dev_4 on their next load.
-* **A slot restarting ends open agent sessions** — every process ends them at
-  start-up, believing itself the only one — and each slot's reaper can end a
-  session whose socket is held by another slot.
-* **Every slot runs a hook courier**, so a queued hook delivery may be picked
-  up by any of them.
-
-Before the database was shared, each slot had a Postgres of its own. A slot's
-first deploy after the change removes that container; its volume is kept, as
-are the old per-slot `app.env` and `postgres.env` in `~/cylist-dev-N`, which
-nothing reads any more:
-
-```bash
-docker volume rm cylist-dev-N_postgres-data
-rm ~/cylist-dev-N/app.env ~/cylist-dev-N/postgres.env
-rm -r ~/cylist-dev-N/backups
-```
-
-### The old single dev stack
-
-Before the slots, dev was one stack: compose project `cylist-dev`, image
-`cylist:dev`, `127.0.0.1:8002`, served at the root of `:9443`. The first slot
-deploy retires it — removes its containers and network and the `cylist:dev`
-image — and the index takes over `:9443/`, which replaces its serve mapping.
-Every later deploy finds nothing left to do.
-
-Its data is left alone. Once nothing in it is wanted (and once the slots have
-taken their bootstrap password hash from it):
-
-```bash
-docker volume rm cylist-dev_postgres-data cylist-dev_cylist-data
-rm -r ~/cylist-dev
-```
+it has never heard of. Dev's values set `app.migrations.tolerateUnknownRevision`,
+so the migration Job lets the slot start on that schema unmigrated rather than
+failing: an older branch on a newer schema mostly works, and dev is for
+looking. Rebase the branch onto `main` to get its own migrations applied.
 
 ## Dashboard
 
@@ -858,40 +777,23 @@ A one-page status view of production, staging and the five dev slots, at
 <https://dnu-home-1.tail222f46.ts.net:7443> — tailnet only, the one thing on
 this machine that is not on the tunnel.
 
+> **It predates K3s.** Its container state comes from `docker inspect` and its
+> health from loopback ports the Docker stacks used, so since the cutover only
+> its public-reachability column means anything. Grafana (see the observability
+> README) is the status view for the cluster.
+
 [`scripts/dashboard/server.py`](scripts/dashboard/server.py) is stdlib-only
 Python: no dependencies to install, no build step. It answers `/` with a
-static page and `/api/status` with, per environment:
-
-* **container state and uptime** — `docker inspect` on `cylist-<env>-app-1`
-  (`cylist-dev-N-app-1` for a slot).
-* **health and request counts** — the app's own `/api/v1/health` and
-  `/api/v1/health/requests` (added in `backend/app/routers/health.py`,
-  counted by an in-process middleware that resets on every restart — see
-  `backend/app/core/metrics.py`), read over loopback. That is also why there
-  is no CORS to configure: the browser only ever talks to this process, never
-  to the apps directly.
-* **whether it is actually being served** — a real HTTP round trip to the
-  address a browser would use, not a proxy for it. For staging and dev that
-  is a direct request to their `tailscale serve` address; for production it
-  is a request to `https://cylist.in` through Cloudflare's edge, pinned to one
-  of the zone's anycast addresses with `curl --resolve` so a stale answer in
-  the host's own resolver cannot fake it. That is the only check that proves
-  the tunnel is registered and relaying, rather than that the app answers on
-  loopback. It runs on its own 45-second timer rather than blocking the
-  page's poll.
-* **last backup age** — the newest file in `~/cylist-<env>/backups`.
-
-Machine-wide, it also reports disk usage. The page polls `/api/status` every
-eight seconds; the slower public-reachability check updates independently in
-the background and is served from cache.
+static page and `/api/status` with, per environment, container state, health,
+whether it is actually being served (a real request to its public hostname
+through Cloudflare's edge, pinned with `curl --resolve` so a stale answer in the
+host's own resolver cannot fake it), and the age of its newest backup.
 
 It is not deployed by CI. `scripts/cylist-dashboard.service` runs it from
 `~/cylist-dashboard`, deliberately *not* from a checkout: the self-hosted
 runner's working directory can be pointed at any branch by the dev workflow,
 and this service must not have its own code swapped out from under it because
 someone deployed something unrelated.
-
-### One-time setup
 
 ```bash
 make dashboard-sync                                    # copies the two files into place
@@ -906,25 +808,47 @@ then `sudo systemctl restart cylist-dashboard`.
 
 ## Deploying by hand
 
+On dnu-home-1, with a kubeconfig that reaches the cluster (see
+[`deploy/k3s/README.md`](deploy/k3s/README.md)):
+
 ```bash
-ssh dnu2@dnu-home-1
 cd ~/actions-runner/_work/cylist/cylist   # or any checkout
 git pull
-make deploy
+make deploy                               # deploy/k3s/deploy.sh
 ```
 
 `make prod-logs` follows the app, `make prod-ps` says what is running.
 
-## Rolling back
+## Backups and rolling back
+
+There are two kinds of dump, both on this machine's disk:
+
+- **Pre-deploy dumps**, database only, taken by every deploy before it
+  migrates: `<secrets dir>/backups/k3s/cylist-<stamp>.dump`, the newest ten.
+- **Nightly backups**, database *and* uploaded blobs, made by the chart's
+  `cylist-data-backup` CronJob at 03:30 IST into the `cylist-data-backups`
+  volume in each namespace: 14 kept in production, 7 in staging and dev. Each
+  is a directory holding `database.dump` and `data.tar.gz`, laid out as
+  `scripts/backup.sh` lays it out. The `BackupStale` and `BackupJobFailed`
+  alerts watch it; `kubectl -n <namespace> create job
+  --from=cronjob/cylist-data-backup backup-manual` runs one now.
+
+Neither includes `CYLIST_VAULT_KEY`, and neither leaves the box: a lost disk
+loses them with the data.
 
 Code rolls back by deploying an older commit — check it out and run
-`make deploy`. Schema does not, which is what the pre-migration dump is for:
+`make deploy` — or with `helm -n cylist-prod rollback cylist`, which never
+touches Postgres or the blobs. Schema does not roll back, which is what the
+pre-migration dump is for:
 
 ```bash
-cd ~/cylist-prod/backups
-docker compose -f ~/…/docker-compose.prod.yml exec -T postgres \
-  pg_restore --clean --no-owner -U cylist -d cylist < cylist-<stamp>.dump
+kubectl -n cylist-prod scale deploy/cylist --replicas=0
+kubectl -n cylist-prod exec -i cylist-data-postgres-0 -c postgres -- \
+  sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < ~/cylist-prod/backups/k3s/cylist-<stamp>.dump
+kubectl -n cylist-prod scale deploy/cylist --replicas=1
 ```
 
-`make backup` is the separate, keep-it-forever backup: it takes the uploaded
-file blobs as well as the database, which the deploy dumps do not.
+`make backup` runs `scripts/backup.sh`, for a database you can reach from this
+shell — your own development one, say. It takes the uploaded files as well as
+the database.

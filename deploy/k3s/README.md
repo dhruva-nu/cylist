@@ -1,7 +1,9 @@
 # K3s platform (Phase 1, CYLIST-191)
 
-A single-node K3s cluster on dnu-home-1. It runs alongside the Docker stacks
-until they are cut over (Phases 4–6) and removed (Phase 7).
+A single-node K3s cluster on dnu-home-1. Every Cylist environment runs on it:
+production, staging, the five dev slots and the dev index, each deployed by
+`deploy/k3s/deploy.sh` (see DEPLOY.md). Docker stays installed only to build
+images and for local development.
 
 | Path | Goes to | Holds |
 |---|---|---|
@@ -24,15 +26,16 @@ copy that file to `~/.kube/config`.
 ## Secrets
 
 `deploy/k3s/secrets.sh prod|staging|dev` builds each namespace's Secrets from
-the same `app.env`, `postgres.env` and `fcm-service-account.json` that the
-Docker stacks read, so the two cannot drift apart. It rewrites the host in
+the `app.env`, `postgres.env` and `fcm-service-account.json` kept in
+`~/cylist-prod`, `~/cylist-staging` and `~/cylist-dev-shared`, so nothing
+secret is committed. It rewrites the host in
 `CYLIST_DATABASE_URL` to the in-cluster Postgres. Cylist itself is installed
 from the Helm chart in `deploy/helm/`.
 
 ## Network
 
 - Traefik's `web` entrypoint is published on `:80` by ServiceLB. cloudflared
-  will reach it at `127.0.0.1:80` once routes move over (Phase 4 onwards).
+  sends every hostname to it at `127.0.0.1:80`, and Traefik routes by Host.
 - `websecure` is not published. `tailscale serve` keeps `:443` on the tailnet
   address.
 - The API server (`6443`) and the kubelet (`10250`) listen on every address.

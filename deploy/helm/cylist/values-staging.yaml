@@ -9,7 +9,7 @@ app:
     # Deployed (Secure cookie, `make seed` refused), and the cookie is named
     # cylist_session_staging.
     CYLIST_ENVIRONMENT: staging
-    CYLIST_CLIENT_URLS: '["http://localhost:8001","https://stage.cylist.in"]'
+    CYLIST_CLIENT_URLS: '["https://stage.cylist.in"]'
 
 backup:
   # Staging is reloaded from production; a week of its own is plenty.

@@ -9,10 +9,7 @@ Edit the dashboards here, not in Grafana: Grafana's copy is read-only and is
 replaced on every install.
 
 Every dashboard groups by `environment` (prod, staging, dev-1..dev-5, and
-"dev" for dev's shared Postgres). Until each cutover, an environment's
-traffic is in Docker and its Kubernetes panels are empty; the Docker panels
-(runtime="docker", from docker-cadvisor and Alloy) are the baseline the
-cutover is compared against.
+"dev" for dev's shared Postgres).
 """
 
 from __future__ import annotations
@@ -212,13 +209,10 @@ def estate_overview() -> dict[str, Any]:
         [target('sum by (namespace) (kube_pod_status_ready{condition="false", namespace=~"cylist-.*|monitoring"})', "{{namespace}}")],
         thresholds=[{"color": "green", "value": None}, {"color": "red", "value": 1}]), 10, 8))
 
-    p.append(lay.row("Memory by environment: Docker (before) and K3s (after)"))
-    p.append(lay.place(timeseries(
-        "Docker containers", [target('sum by (environment) (container_memory_working_set_bytes{runtime="docker"})', "{{environment}}")],
-        "bytes"), 12, 8))
+    p.append(lay.row("Memory by namespace"))
     p.append(lay.place(timeseries(
         "K3s pods", [target('sum by (namespace) (container_memory_working_set_bytes{namespace=~"cylist-.*", container!=""})', "{{namespace}}")],
-        "bytes"), 12, 8))
+        "bytes"), 24, 8))
     return dashboard("cylist-estate", "Cylist / Estate overview", p)
 
 
@@ -259,11 +253,10 @@ def environment_detail() -> dict[str, Any]:
     p.append(lay.place(timeseries(
         "Event-loop lag", [target(f'{{__name__=~"cylist_event_loop_lag.*", {env}}}', "{{__name__}}")], "s"), 8, 7))
     p.append(lay.place(timeseries(
-        "Memory (Docker and K3s)",
-        [target(f'sum(container_memory_working_set_bytes{{runtime="docker", {env}, compose_service="app"}})', "docker app"),
-         target('sum(container_memory_working_set_bytes{container="app", pod=~"cylist-.*", '
+        "Memory",
+        [target('sum(container_memory_working_set_bytes{container="app", pod=~"cylist-.*", '
                 + NS_OF_ENV + '} * on (namespace, pod) group_left() '
-                'max by (namespace, pod) (kube_pod_labels{label_cylist_in_environment="$environment"}))', "k3s app", "B")],
+                'max by (namespace, pod) (kube_pod_labels{label_cylist_in_environment="$environment"}))', "app")],
         "bytes"), 8, 7))
 
     p.append(lay.row("Logs and traces"))

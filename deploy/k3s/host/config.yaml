@@ -10,8 +10,8 @@ write-kubeconfig-group: dnu2
 # Secrets are encrypted at rest in the datastore.
 secrets-encryption: true
 
-# Keep headroom for the desktop and the Docker stacks that run alongside the
-# cluster until Phase 7, and evict pods before the host runs out of memory.
+# Keep headroom for the desktop and image builds, and evict pods before the
+# host runs out of memory.
 kubelet-arg:
   - "system-reserved=cpu=1,memory=2Gi"
   - "kube-reserved=cpu=500m,memory=512Mi"
