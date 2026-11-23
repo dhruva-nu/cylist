@@ -330,6 +330,51 @@ data returned to callers. Change one and the client keeps the old list until its
 next `cylist setup` or `cylist login`; an address that has gone away costs one
 connection failure and is stepped over.
 
+### Passkeys
+
+Sign-in with a fingerprint (WebAuthn, CYLIST-204) needs HTTPS and a stable
+domain, and a passkey is **bound to the domain it was made on**. So each
+environment has its own: production `cylist.in`, staging `stage.cylist.in`,
+each dev slot `devN.cylist.in`. A passkey made on one does nothing on another,
+by design.
+
+Nothing extra is configured. The relying-party ID is the host of the first
+`CYLIST_CLIENT_URLS` entry and the allowed origins are all of its entries (see
+the values files). Override with `CYLIST_WEBAUTHN_RP_ID` and
+`CYLIST_WEBAUTHN_ORIGINS` (JSON list) only on purpose: **changing the RP ID
+orphans every passkey already registered**, and everyone falls back to their
+password. A deployment with no client URL has no domain to bind to, and its
+passkey endpoints answer 503 rather than guess. If `CYLIST_CLIENT_URLS` lists
+more than one host (a tailnet name and a public one), put the one passkeys
+should live on first.
+
+#### Break-glass: somebody has lost every passkey and every signed-in device
+
+Only whoever can run commands on the deployment can do this; it is not
+available over HTTP or to a project admin. Verify the person out of band first
+(a call, in person), then:
+
+```sh
+kubectl -n cylist-prod exec deploy/cylist -c app -- \
+  python -m app.cli recover someone@example.com \
+  --reason "lost phone; confirmed by voice call 2026-11-23"
+```
+
+It asks for confirmation (`--yes` skips), then, in one transaction:
+
+- revokes every session and API token the person holds,
+- deletes all their passkeys,
+- writes a `recovery.operator_reset` audit entry with your `--reason`,
+- prints a **single-use code** (default one hour; `--ttl-minutes`).
+
+Hand the code to the person directly. They choose *Lost your passkey or
+password? → I have a code from my operator* on the sign-in screen, which signs
+them in once; they should add a passkey straight away. Add `--lock-password`
+when the password may be compromised too: it stops opening the account, so a
+passkey is the only way in, and their last passkey cannot be deleted. (Setting a
+new password for a locked account is not built yet: they sign in by passkey, or
+the operator can run the command again.) The same command works for staging (`-n cylist-staging`) and dev slots.
+
 ### MCP at `/mcp`
 
 The same process serves the MCP tools over streamable HTTP at `/mcp`, beside

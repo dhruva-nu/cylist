@@ -342,6 +342,10 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Pers
         # to be a hash of a password nobody holds.
         await verify_password(password, dummy_hash())
         return SignInRefusal("unknown_email")
+    if person.password_locked:
+        # Costs what a check costs, so a locked account is not quicker to refuse.
+        await verify_password(password, dummy_hash())
+        return SignInRefusal("password_locked", person.id)
     if not await verify_password(password, person.password_hash):
         return SignInRefusal("wrong_password", person.id)
     if person.is_archived:
@@ -488,6 +492,7 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
 async def set_password(session: AsyncSession, person: Person, new_password: str) -> Person:
     """Replace somebody's password. The caller has already proved it is theirs."""
     person.password_hash = await hash_password(new_password)
+    person.password_locked = False
     _clear_invitation(person)
     await session.flush()
     return person

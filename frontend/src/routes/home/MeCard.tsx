@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import type { Person } from '../../api/client'
-import { queryKeys, useIdentity, useInvalidate } from '../../api/queries'
+import { passkeysSupported } from '../../api/client'
+import { queryKeys, useIdentity, useInvalidate, usePasskeys } from '../../api/queries'
 import { PersonDialog } from '../../components/PersonDialog'
 import { Avatar, Button, cardStyles } from '../../components/ui'
 import styles from './Home.module.css'
 import { ChangePasswordDialog, FirstAccountDialog } from './PasswordDialogs'
+import { PasskeysDialog } from './PasskeysDialog'
 
 /**
  * Who you are, on the screen where you start projects.
@@ -24,8 +26,12 @@ export function MeCard({ onSaved }: { onSaved: (message: string) => void }) {
   const invalidate = useInvalidate()
   const [editing, setEditing] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
+  const [managingPasskeys, setManagingPasskeys] = useState(false)
   const identity = useIdentity()
   const me: Person | null = identity.data?.person ?? null
+  // Nudge until there is one: it is what makes losing a password survivable.
+  const passkeys = usePasskeys(me !== null && passkeysSupported())
+  const noPasskeys = passkeys.data?.length === 0
 
   async function refresh() {
     await invalidate(queryKeys.identity, queryKeys.people)
@@ -46,6 +52,9 @@ export function MeCard({ onSaved }: { onSaved: (message: string) => void }) {
               On every project you create, and pickable as an assignee from the moment it exists.
             </span>
           </div>
+          <Button variant={noPasskeys ? 'go' : 'plain'} onClick={() => setManagingPasskeys(true)}>
+            {noPasskeys ? 'Add a passkey' : 'Passkeys'}
+          </Button>
           <Button onClick={() => setChangingPassword(true)}>Password</Button>
           <Button onClick={() => setEditing(true)}>Edit</Button>
         </div>
@@ -77,6 +86,10 @@ export function MeCard({ onSaved }: { onSaved: (message: string) => void }) {
 
       {editing && !me ? (
         <FirstAccountDialog onDone={refresh} onClose={() => setEditing(false)} />
+      ) : null}
+
+      {managingPasskeys ? (
+        <PasskeysDialog onSaved={onSaved} onClose={() => setManagingPasskeys(false)} />
       ) : null}
 
       {changingPassword ? (

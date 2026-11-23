@@ -289,6 +289,23 @@ class Settings(BaseSettings):
     ``["http://localhost:8000", "https://box.tailnet.ts.net"]``.
     """
 
+    # --- Passkeys (CYLIST-204) --------------------------------------------
+    webauthn_rp_id: str | None = None
+    """The relying-party ID passkeys are bound to: a registrable domain such as
+    ``cylist.in``, or a host such as ``dev1.cylist.in``.
+
+    Unset, it is the host of the first of :attr:`client_urls`, so each
+    deployment is bound to its own domain and a passkey made on staging means
+    nothing to production. Change it only on purpose: every passkey made under
+    the old value stops working."""
+
+    webauthn_origins: list[str] = Field(default_factory=list)
+    """Origins (``https://cylist.in``) a browser may present a passkey from.
+    Unset, they are the origins of :attr:`client_urls`."""
+
+    webauthn_rp_name: str = "Cylist"
+    """What the authenticator shows next to the passkey."""
+
     # --- Logging ----------------------------------------------------------
     # What the process says about itself, and where. See app/core/logging.py
     # for what is written; these decide how much of it and to where.
@@ -597,6 +614,35 @@ class Settings(BaseSettings):
         except ArgumentError:
             # Unparseable, so nothing can be said about its shape safely.
             return "<unparseable database url>"
+
+    @property
+    def passkey_rp_id(self) -> str | None:
+        """The relying-party ID, or ``None`` where passkeys are not set up.
+
+        Explicit if configured, else the host of the first client URL, else
+        ``localhost`` on a developer's machine (dev and test) — and nothing on
+        a deployed stack with no public address, which has no domain to bind a
+        passkey to and must not guess one."""
+        if self.webauthn_rp_id:
+            return self.webauthn_rp_id
+        for url in self.client_urls:
+            if host := urlsplit(url).hostname:
+                return host
+        return "localhost" if self.environment in ("dev", "test") else None
+
+    @property
+    def passkey_origins(self) -> list[str]:
+        """Every origin a passkey ceremony may come from, without a path."""
+        if self.webauthn_origins:
+            return [origin.rstrip("/") for origin in self.webauthn_origins]
+        origins = []
+        for url in self.client_urls:
+            parts = urlsplit(url)
+            if parts.scheme and parts.netloc:
+                origins.append(f"{parts.scheme}://{parts.netloc}")
+        if self.environment in ("dev", "test") and self.passkey_rp_id == "localhost":
+            origins += ["http://localhost:5173", "http://localhost:8000"]
+        return origins
 
     @property
     def is_deployed(self) -> bool:

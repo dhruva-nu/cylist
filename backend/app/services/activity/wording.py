@@ -260,6 +260,13 @@ _STATUS_WORDS = {
     "cancelled": "cancelled",
 }
 
+_SIGN_IN_METHODS = {
+    "password": "a password",
+    "passkey": "a passkey",
+    "invite": "an invitation",
+    "recovery": "a recovery code",
+}
+
 _CHECKLIST_WORDS = {"open": "Reopened", "done": "Ticked off", "cancelled": "Cancelled"}
 
 
@@ -449,13 +456,28 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     Verb.PERSON_RESTORED: lambda p: f"Brought {p.get('name')} back out of the archive.",
     Verb.TOKEN_ISSUED: lambda p: f"Issued the API token {_quoted(p.get('name'))}.",
     Verb.TOKEN_REVOKED: lambda p: f"Revoked the API token {_quoted(p.get('name'))}.",
-    Verb.SESSION_STARTED: lambda p: "Signed in.",
+    Verb.SESSION_STARTED: lambda p: (
+        f"Signed in with {_SIGN_IN_METHODS.get(str(p.get('method')), 'a password')}."
+    ),
     Verb.SESSION_ENDED: lambda p: "Signed out." if p.get("current") else "Signed out a session.",
     Verb.PERSON_INVITED: lambda p: f"Invited {p.get('name')} to open an account.",
     Verb.PERSON_INVITE_WITHDRAWN: lambda p: f"Withdrew the invitation to {p.get('name')}.",
     Verb.PERSON_ACCOUNT_OPENED: lambda p: f"{p.get('name')} opened their account.",
     Verb.PERSON_PASSWORD_CHANGED: lambda p: f"{p.get('name')} changed their password.",
     Verb.PERSON_PASSWORD_RESET: lambda p: f"Reset {p.get('name')}'s password.",
+    Verb.PASSKEY_REGISTERED: lambda p: f"Added the passkey {_quoted(p.get('name'))}.",
+    Verb.PASSKEY_RENAMED: lambda p: (
+        f"Renamed the passkey {_quoted(p.get('old_name'))} to {_quoted(p.get('name'))}."
+    ),
+    Verb.PASSKEY_DELETED: lambda p: f"Removed the passkey {_quoted(p.get('name'))}.",
+    Verb.RECOVERY_STARTED: lambda p: "Started recovering an account from a new device.",
+    Verb.RECOVERY_APPROVED: lambda p: "Approved a new device from a signed-in one.",
+    Verb.RECOVERY_COMPLETED: lambda p: (
+        "Recovered their account; every other session and token was ended."
+    ),
+    Verb.RECOVERY_OPERATOR_RESET: lambda p: (
+        f"The operator reset {p.get('name')}'s sign-in from the server."
+    ),
     # --- Goals --------------------------------------------------------------
     Verb.GOAL_CREATED: lambda p: f"Added the goal {_quoted(p.get('name'))}.",
     Verb.GOAL_UPDATED: lambda p: (

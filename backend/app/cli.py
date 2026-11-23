@@ -32,6 +32,18 @@ the moment somebody opens an account from it. Nobody signs in with it day to
 day — everybody has their own email and password after that — so there is no
 reason to keep it anywhere but ``.env``.
 
+When somebody has lost every passkey and every signed-in device, the operator
+breaks glass from the server (CYLIST-204)::
+
+    kubectl -n cylist-prod exec deploy/cylist -c app -- \\
+        python -m app.cli recover someone@example.com --reason "lost phone, verified by call"
+
+It ends every session and API token the person holds, removes their passkeys,
+and prints a one-time code (an hour) that they redeem on the sign-in screen
+under "I have a code from my operator", which signs them in to add a new
+passkey. ``--lock-password`` also stops their password working, leaving a passkey
+as the only way in. The reason goes into the audit trail. See DEPLOY.md.
+
 This is not the ``cylist`` CLI for day-to-day use — that one arrives with the
 agent tooling and talks to the HTTP API.
 """
@@ -46,15 +58,21 @@ import secrets
 import sys
 from datetime import timedelta
 
+from sqlalchemy import func, select
+
 from app.auth.passwords import hash_password_sync
+from app.auth.principal import Principal
 from app.config import Settings, get_settings
 from app.core.crypto import VaultCipher, VaultUnavailableError, cipher_for
 from app.db import Database
-from app.services import blobs
+from app.models.activity import Channel, EntityType, Verb
+from app.models.person import Person
+from app.services import activity, blobs, recovery
 from app.services.reseal import BATCH, ResealReport, reseal
 from app.storage import LocalBlobStore
 
 _VAULT_KEY_BYTES = 32
+OPERATOR_LABEL = "Operator (server CLI)"
 
 
 def _hash_password() -> int:
@@ -135,6 +153,75 @@ def _blobs_gc(idle_minutes: int) -> int:
     return 0
 
 
+async def _recover(email: str, reason: str, lock_password: bool, ttl: timedelta) -> str | None:
+    settings = get_settings()
+    database = Database(settings.database_url)
+    try:
+        async with database.session() as session:
+            person = await session.scalar(
+                select(Person).where(
+                    func.lower(Person.email) == email.strip().lower(),
+                    Person.password_hash.is_not(None),
+                    Person.archived_at.is_(None),
+                )
+            )
+            if person is None:
+                return None
+            code, revoked, dropped = await recovery.operator_reset(
+                session, person, lock_password=lock_password, ttl=ttl
+            )
+            await activity.record(
+                session,
+                Principal(
+                    token_id=None,
+                    person_id=None,
+                    label=OPERATOR_LABEL,
+                    scopes=frozenset(),
+                    channel=Channel.API,
+                ),
+                Verb.RECOVERY_OPERATOR_RESET,
+                entity_type=EntityType.PERSON,
+                entity_id=person.id,
+                payload={
+                    "name": person.name,
+                    "reason": reason,
+                    "credentials_revoked": revoked,
+                    "passkeys_removed": dropped,
+                    "password_locked": lock_password,
+                },
+            )
+            print(
+                f"Ended {revoked} session(s) and token(s); removed {dropped} passkey(s)"
+                f"{'; switched the password off' if lock_password else ''}.",
+                file=sys.stderr,
+            )
+            return recovery.display(code)
+    finally:
+        await database.dispose()
+
+
+def _recover_command(
+    email: str, reason: str, lock_password: bool, ttl_minutes: int, yes: bool
+) -> int:
+    if not reason.strip():
+        print("--reason is required: it goes into the audit trail.", file=sys.stderr)
+        return 2
+    if ttl_minutes < 1:
+        print("--ttl-minutes must be at least 1.", file=sys.stderr)
+        return 2
+    if not yes and input(f"End every sign-in of {email} and issue a recovery code? [y/N] ") != "y":
+        print("Nothing changed.", file=sys.stderr)
+        return 1
+    code = asyncio.run(
+        _recover(email, reason.strip(), lock_password, timedelta(minutes=ttl_minutes))
+    )
+    if code is None:
+        print("No active account has that email address.", file=sys.stderr)
+        return 1
+    print(f"Recovery code (single use, give it to them directly): {code}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.cli", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -171,7 +258,23 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    recover = subcommands.add_parser(
+        "recover",
+        help="Break glass: end somebody's sign-ins and issue a one-time recovery code.",
+    )
+    recover.add_argument("email")
+    recover.add_argument("--reason", required=True, help="Why; written to the audit trail.")
+    recover.add_argument(
+        "--lock-password", action="store_true", help="Also switch their password off."
+    )
+    recover.add_argument("--ttl-minutes", type=int, default=60, help="How long the code lasts.")
+    recover.add_argument("--yes", action="store_true", help="Do not ask first.")
+
     args = parser.parse_args(argv)
+    if args.command == "recover":
+        return _recover_command(
+            args.email, args.reason, args.lock_password, args.ttl_minutes, args.yes
+        )
     if args.command == "vault-reseal":
         if args.batch_size < 1:
             parser.error("--batch-size must be at least 1")

@@ -370,6 +370,444 @@
         }
       }
     },
+    "/api/v1/auth/passkeys/register/options": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Start adding a passkey",
+        "description": "Options for `navigator.credentials.create()`, for the signed-in person.",
+        "operationId": "register_options_api_v1_auth_passkeys_register_options_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyOptions"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          },
+          "503": {
+            "description": "This deployment has no passkey domain."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/passkeys/register/verify": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Finish adding a passkey",
+        "description": "Verify the browser's answer and keep the public key.\n\n`recommend_another` is true until the person has two passkeys: the client\nshould prompt for a second device, because one lost phone must not be the\nend of the account.",
+        "operationId": "register_verify_api_v1_auth_passkeys_register_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyRegistered"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That authenticator is already registered."
+          },
+          "422": {
+            "description": "The challenge is spent or the answer did not verify."
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          }
+        }
+      }
+    },
+    "/api/v1/me/passkeys": {
+      "get": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "List your passkeys",
+        "operationId": "my_passkeys_api_v1_me_passkeys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PasskeyRead"
+                  },
+                  "type": "array",
+                  "title": "Response My Passkeys Api V1 Me Passkeys Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The bootstrap session has no person behind it."
+          }
+        }
+      }
+    },
+    "/api/v1/me/passkeys/{passkey_id}": {
+      "patch": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Rename one of your passkeys",
+        "operationId": "rename_passkey_api_v1_me_passkeys__passkey_id__patch",
+        "parameters": [
+          {
+            "name": "passkey_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Passkey Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyRename"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyRead"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No passkey of yours with that id."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Remove one of your passkeys",
+        "description": "Remove a passkey. Refused for the last one while the password is off.",
+        "operationId": "delete_passkey_api_v1_me_passkeys__passkey_id__delete",
+        "parameters": [
+          {
+            "name": "passkey_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Passkey Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledged"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No passkey of yours with that id."
+          },
+          "422": {
+            "description": "It is your last way in: your password is switched off."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/passkeys/login/options": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Start signing in with a passkey",
+        "description": "Options for `navigator.credentials.get()`. Takes and names nobody: the\ndevice offers whichever passkey it holds for this site.",
+        "operationId": "login_options_api_v1_auth_passkeys_login_options_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyOptions"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          },
+          "503": {
+            "description": "This deployment has no passkey domain."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/passkeys/login/verify": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Sign in with a passkey",
+        "description": "Verify the assertion and issue the session cookie a password login would.\n\nEvery way of failing — unknown passkey, reused or expired challenge, wrong\nsignature, a counter that did not advance, an archived account — is the\nsame 401.",
+        "operationId": "login_verify_api_v1_auth_passkeys_login_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyLogin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The passkey was not accepted."
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/recovery/start": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Ask to be let in from a new device",
+        "description": "Get a short code to type on a device that is still signed in.\n\nAnswers identically for an address with no account, so it cannot be used\nto find out who has one.",
+        "operationId": "recovery_start_api_v1_auth_recovery_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryStarted"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/recovery/approve": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Approve a new device from this signed-in one",
+        "description": "Let the device showing this code in. Works from any live session or API\ntoken of the same person; approve only a code you are looking at on a\ndevice you are holding.",
+        "operationId": "recovery_approve_api_v1_auth_recovery_approve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryApprove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledged"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The code is unknown, spent, expired or not yours."
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/recovery/{request_id}/claim": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Collect an approved recovery on the new device",
+        "description": "Poll with the secret from `start`. `pending` until a signed-in device\napproves; then one call signs this device in, ends every other session and\nAPI token the person holds, and can never be repeated.",
+        "operationId": "recovery_claim_api_v1_auth_recovery__request_id__claim_post",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryClaim"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown, spent or expired request, or the wrong secret."
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/recovery/redeem": {
+      "post": {
+        "tags": [
+          "passkeys"
+        ],
+        "summary": "Sign in with a code from the operator",
+        "description": "Spend a code made by `python -m app.cli recover`. Single use.",
+        "operationId": "recovery_redeem_api_v1_auth_recovery_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryRedeem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The code is unknown, spent or expired."
+          },
+          "429": {
+            "description": "Too many attempts; `Retry-After` says how long to wait."
+          }
+        }
+      }
+    },
     "/api/v1/tokens": {
       "get": {
         "tags": [
@@ -9917,6 +10355,29 @@
         "title": "CardTodos",
         "description": "One card on the asker's plan, with what they meant to do about it."
       },
+      "CeremonyOptions": {
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Challenge Id",
+            "description": "Send back with the browser's answer; single use."
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Options",
+            "description": "The WebAuthn options in the JSON form the browser's `PublicKeyCredential.parseCreationOptionsFromJSON` and `parseRequestOptionsFromJSON` read."
+          }
+        },
+        "type": "object",
+        "required": [
+          "challenge_id",
+          "options"
+        ],
+        "title": "CeremonyOptions",
+        "description": "What to hand to ``navigator.credentials.create()`` or ``.get()``."
+      },
       "Channel": {
         "type": "string",
         "enum": [
@@ -14102,6 +14563,139 @@
         "title": "MembershipUpdate",
         "description": "Replaces a project's membership with exactly these people."
       },
+      "PasskeyLogin": {
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Challenge Id"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Credential",
+            "description": "`PublicKeyCredential.toJSON()` from `navigator.credentials.get()`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "challenge_id",
+          "credential"
+        ],
+        "title": "PasskeyLogin"
+      },
+      "PasskeyRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "transports": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Transports"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "transports",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "PasskeyRead"
+      },
+      "PasskeyRegistered": {
+        "properties": {
+          "passkey": {
+            "$ref": "#/components/schemas/PasskeyRead"
+          },
+          "passkey_count": {
+            "type": "integer",
+            "title": "Passkey Count"
+          },
+          "recommend_another": {
+            "type": "boolean",
+            "title": "Recommend Another",
+            "description": "True while the person has fewer than two: one lost device must not lock them out."
+          }
+        },
+        "type": "object",
+        "required": [
+          "passkey",
+          "passkey_count",
+          "recommend_another"
+        ],
+        "title": "PasskeyRegistered"
+      },
+      "PasskeyRegistration": {
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Challenge Id"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Credential",
+            "description": "`PublicKeyCredential.toJSON()` from `navigator.credentials.create()`."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Name",
+            "description": "What to call it, e.g. 'OnePlus phone'.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "challenge_id",
+          "credential"
+        ],
+        "title": "PasskeyRegistration"
+      },
+      "PasskeyRename": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "PasskeyRename"
+      },
       "PasswordChange": {
         "properties": {
           "current_password": {
@@ -15134,6 +15728,124 @@
           "projects_watched"
         ],
         "title": "RealtimeCounts"
+      },
+      "RecoveryApprove": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "RecoveryApprove"
+      },
+      "RecoveryClaim": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret"
+        ],
+        "title": "RecoveryClaim"
+      },
+      "RecoveryRedeem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "RecoveryRedeem"
+      },
+      "RecoveryStart": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "RecoveryStart"
+      },
+      "RecoveryStarted": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Show on screen; a signed-in device types it in."
+          },
+          "secret": {
+            "type": "string",
+            "title": "Secret",
+            "description": "Keep on this device; needed to claim. Never display."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "code",
+          "secret",
+          "expires_at"
+        ],
+        "title": "RecoveryStarted"
+      },
+      "RecoveryState": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "signed_in"
+            ],
+            "title": "State"
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "RecoveryState"
       },
       "RequestCounts": {
         "properties": {

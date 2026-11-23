@@ -59,3 +59,27 @@
   margin: 0;
   color: var(--ink-2);
 }
+
+.link {
+  align-self: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.code {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-4xl);
+  letter-spacing: 0.15em;
+  text-align: center;
+  user-select: all;
+}

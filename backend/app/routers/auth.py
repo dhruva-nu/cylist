@@ -88,6 +88,8 @@ async def _start_session(
     response: Response,
     settings: Settings,
     person: Person | None,
+    *,
+    method: str,
 ) -> tuple[Identity, Principal]:
     """Mint a session for this person, set the cookie, and say who they are.
 
@@ -101,6 +103,9 @@ async def _start_session(
     more is a session only a copy of the cookie could use. Then, once the new
     one exists, the person is held to :data:`~app.services.tokens.MAX_SESSIONS`
     live sessions by letting the oldest go.
+
+    ``method`` is how they proved who they are — ``password``, ``invite``,
+    ``passkey`` or ``recovery`` — and goes into the audit entry (CYLIST-204).
 
     A session holds every scope: it is a person sitting at the browser. Narrow
     scopes are for API tokens, which are handed to other software.
@@ -126,7 +131,13 @@ async def _start_session(
         scopes=ALL_SCOPES,
         channel=Channel.WEB,
     )
-    await activity.record(session, principal, Verb.SESSION_STARTED, entity_type=EntityType.SESSION)
+    await activity.record(
+        session,
+        principal,
+        Verb.SESSION_STARTED,
+        entity_type=EntityType.SESSION,
+        payload={"method": method},
+    )
     logger.info(
         "Signed in",
         extra={
@@ -215,7 +226,9 @@ async def login(
             _refuse(request, outcome.reason, person_id=outcome.person_id)
         person = outcome
 
-    identity, _ = await _start_session(session, request, response, settings, person)
+    identity, _ = await _start_session(
+        session, request, response, settings, person, method="password"
+    )
     return identity
 
 
@@ -274,7 +287,9 @@ async def accept_invite(
     """
     _throttle(request, account=None)
     person = await people.accept_invite(session, body.token, body.password)
-    identity, principal = await _start_session(session, request, response, settings, person)
+    identity, principal = await _start_session(
+        session, request, response, settings, person, method="invite"
+    )
     await activity.record(
         session,
         principal,
@@ -325,7 +340,7 @@ async def change_password(
 
     await people.set_password(session, person, body.new_password)
     await tokens.revoke_for_person(session, person.id)
-    await _start_session(session, request, response, settings, person)
+    await _start_session(session, request, response, settings, person, method="password")
 
     # Recorded against the principal that made the request — the session just
     # revoked. That is the credential that actually did it, and saying so is

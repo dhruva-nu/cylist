@@ -15,17 +15,19 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { api } from '../api/client'
+import { api, passkeysSupported, wasCancelled } from '../api/client'
 import { queryKeys, useSetup } from '../api/queries'
 import { Button, ErrorNotice } from '../components/ui'
 import styles from './SignIn.module.css'
 import { handlesOwnErrors } from '../api/mutationErrors'
+import { Recovery } from './Recovery'
 
 export function SignIn() {
   const queryClient = useQueryClient()
   const setup = useSetup()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [recovering, setRecovering] = useState(false)
 
   // Assume accounts until told otherwise: the email form is right for every
   // deployment but a brand-new one, and a flash of the wrong form is better
@@ -42,10 +44,27 @@ export function SignIn() {
     },
   })
 
+  // The browser asks for the fingerprint (or face, or PIN) itself. Cancelling
+  // its prompt is a choice, not a failure, so it leaves no error behind.
+  const passkey = useMutation({
+    meta: handlesOwnErrors,
+    mutationFn: async () => {
+      try {
+        await api.signInWithPasskey()
+      } catch (error) {
+        if (wasCancelled(error)) return
+        throw error
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.identity })
+    },
+  })
+
   function submit(event: FormEvent) {
     event.preventDefault()
     signIn.mutate()
   }
+
+  if (recovering) return <Recovery onBack={() => setRecovering(false)} />
 
   const ready = password.length > 0 && (bootstrapping || email.trim().length > 0)
 
@@ -94,6 +113,19 @@ export function SignIn() {
         <Button variant="go" type="submit" disabled={signIn.isPending || !ready}>
           {signIn.isPending ? 'Signing in…' : 'Sign in'}
         </Button>
+        {!bootstrapping && passkeysSupported() ? (
+          <>
+            <ErrorNotice error={passkey.error} />
+            <Button onClick={() => passkey.mutate()} disabled={passkey.isPending}>
+              {passkey.isPending ? 'Waiting for your device…' : 'Sign in with fingerprint'}
+            </Button>
+          </>
+        ) : null}
+        {!bootstrapping ? (
+          <button type="button" className={styles.link} onClick={() => setRecovering(true)}>
+            Lost your passkey or password?
+          </button>
+        ) : null}
       </form>
     </div>
   )
