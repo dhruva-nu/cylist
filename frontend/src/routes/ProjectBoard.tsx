@@ -24,7 +24,7 @@
 
 import { closestCenter, DndContext, DragOverlay } from '@dnd-kit/core'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Board, BoardColumn, Goal, Person, Task, Template } from '../api/client'
 import { useIdentity, useLoadMoreCards, type ColumnCards } from '../api/queries'
 import { TaskDialog } from '../components/TaskDialog'
@@ -44,6 +44,8 @@ import {
 } from './board/boards'
 import { peopleFromSearch, rememberedPeopleKey, searchFromPeople } from './board/boardPeople'
 import { BoardToolbar, type ChosenFilters } from './board/BoardToolbar'
+import { BulkBar } from './board/BulkBar'
+import { summariseBulk, useBulkActions, type BulkOperation } from './board/bulkActions'
 import { CardActionsContext, type CardActions } from './board/cardActions'
 import { ColdStorageDialog } from './board/ColdStorageDialog'
 import type { ColumnMore } from './board/Column'
@@ -159,6 +161,10 @@ function LoadedBoard({
     live,
   )
   const loadMore = useLoadMoreCards(projectKey)
+  const bulk = useBulkActions(refresh)
+  /** Cards picked with shift-click (CYLIST-202), in the order they were picked. */
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkError, setBulkError] = useState<Error | null>(null)
   const boardRef = useRef<HTMLDivElement>(null)
   const [dialog, setDialog] = useState<BoardDialog | null>(null)
   /**
@@ -265,6 +271,14 @@ function LoadedBoard({
 
   // Memoised so every card is not handed a new context value on renders where
   // nothing it can do has changed. A mutation's `mutate` is stable.
+  const toggleSelected = useCallback(
+    (taskId: string) =>
+      setSelected((current) =>
+        current.includes(taskId) ? current.filter((id) => id !== taskId) : [...current, taskId],
+      ),
+    [],
+  )
+  const selectedSet = useMemo(() => new Set(selected), [selected])
   const { mutate: mutateSubStatus } = moveSubStatus
   const { mutate: mutateAssignee } = setAssignee
   const cardActions = useMemo<CardActions>(
@@ -274,11 +288,56 @@ function LoadedBoard({
       openTask: (taskId) => setDialog({ kind: 'task', taskId }),
       moveSubStatus: (taskId, index) => mutateSubStatus({ taskId, index }),
       setAssignee: (taskId, taskRef, assigneeId) => mutateAssignee({ taskId, taskRef, assigneeId }),
+      selected: selectedSet,
+      toggleSelected,
     }),
-    [projectKey, members, mutateSubStatus, mutateAssignee],
+    [projectKey, members, mutateSubStatus, mutateAssignee, selectedSet, toggleSelected],
   )
 
   const mayWriteCards = may('tasks')
+
+  // A card that has gone from the board — deleted, or taken elsewhere by
+  // someone else — is no longer a card the bar is about.
+  useEffect(() => {
+    const present = new Set(tasks.map((task) => task.id))
+    setSelected((current) =>
+      current.every((id) => present.has(id)) ? current : current.filter((id) => present.has(id)),
+    )
+  }, [tasks])
+
+  useEffect(() => {
+    if (!selected.length) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !document.querySelector('[role="dialog"]')) setSelected([])
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selected.length])
+
+  function runBulk(operation: BulkOperation) {
+    const picked = selected
+      .map((id) => tasks.find((task) => task.id === id))
+      .filter((task): task is Task => task !== undefined)
+    setBulkError(null)
+    bulk.mutate(
+      { tasks: picked, operation },
+      {
+        onSuccess: (result) => {
+          const said = summariseBulk(operation, result)
+          announce(said)
+          // Those the server refused stay picked, so they can be dealt with.
+          setSelected(
+            result.failed.length
+              ? picked
+                  .filter((task) => result.failed.some((f) => f.reference === task.reference))
+                  .map((task) => task.id)
+              : [],
+          )
+          if (result.failed.length) setBulkError(new Error(said))
+        },
+      },
+    )
+  }
 
   function toggleColumn(column: BoardColumn) {
     view.toggleColumn(column.id)
@@ -346,6 +405,7 @@ function LoadedBoard({
           keyboard's share of it is the part that is not self-evident, and that
           is spoken by SCREEN_READER_INSTRUCTIONS to the people it is for. */}
       <ErrorNotice error={moveTask.error} />
+      <ErrorNotice error={bulkError ?? bulk.error} />
 
       <BoardToolbar
         board={board}
@@ -431,6 +491,16 @@ function LoadedBoard({
           </DndContext>
         </CardActionsContext.Provider>
       </BoardAnnounce.Provider>
+
+      {mayWriteCards && selected.length ? (
+        <BulkBar
+          count={selected.length}
+          columns={board.columns}
+          busy={bulk.isPending}
+          onRun={runBulk}
+          onClear={() => setSelected([])}
+        />
+      ) : null}
 
       {drag.reopening ? (
         <ReopenDialog

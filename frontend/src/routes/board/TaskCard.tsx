@@ -59,7 +59,8 @@ function railStyle(task: Task): CSSProperties | undefined {
 }
 
 export function TaskCard({ task }: { task: Task }) {
-  const { members, openTask, moveSubStatus, setAssignee } = useCardActions()
+  const { members, openTask, moveSubStatus, setAssignee, selected, toggleSelected } =
+    useCardActions()
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id })
   const agent = useAgentIndicator(task.agent_session)
   // A question or permission waiting on this card opens a popover under it on
@@ -77,6 +78,7 @@ export function TaskCard({ task }: { task: Task }) {
   )
 
   const open = () => openTask(task.id)
+  const isSelected = selected.has(task.id)
 
   return (
     <>
@@ -85,7 +87,18 @@ export function TaskCard({ task }: { task: Task }) {
         {...attributes}
         {...listeners}
         {...popover.card}
-        onClick={open}
+        // Shift-click picks the card instead of opening it; once any card is
+        // picked a plain click does the same, so a selection is not lost to a
+        // slip of the finger (CYLIST-202).
+        onClick={(event) => {
+          if (event.shiftKey || selected.size > 0) toggleSelected(task.id)
+          else open()
+        }}
+        // Stops the browser selecting the text between two shift-clicked cards.
+        onMouseDown={(event) => {
+          if (event.shiftKey) event.preventDefault()
+        }}
+        aria-pressed={selected.size > 0 ? isSelected : undefined}
         onKeyDown={(event) => {
           // Enter belongs to the card, every other key to the drag sensor —
           // whose own onKeyDown this handler has just replaced, so it has to be
@@ -93,7 +106,8 @@ export function TaskCard({ task }: { task: Task }) {
           // though: opening a dialog over a drag in progress strands the drag.
           if (event.key === 'Enter' && !isDragging) {
             event.preventDefault()
-            open()
+            if (event.shiftKey || selected.size > 0) toggleSelected(task.id)
+            else open()
             return
           }
           listeners?.onKeyDown?.(event)
@@ -123,6 +137,7 @@ export function TaskCard({ task }: { task: Task }) {
           // card uses — the rail is already contested three ways.
           agent && styles[agent.className],
           isDragging && styles.dragging,
+          isSelected && styles.selected,
         )}
       >
         <TaskCardBody
