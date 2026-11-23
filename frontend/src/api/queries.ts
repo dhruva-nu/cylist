@@ -15,6 +15,8 @@ import { ApiError, api, type Task } from './client'
 
 export const queryKeys = {
   identity: ['me'],
+  passkeys: ['passkeys'],
+  recoveryClaim: (requestId: string | undefined) => ['recovery-claim', requestId],
   setup: ['setup'],
   projects: ['projects'],
   people: ['people'],
@@ -380,6 +382,15 @@ export function useGoals(projectKey: string) {
  * What a screen calls after a change: the change touched more than the one
  * list it was made from, and each reader of the others should see it too.
  */
+/** The signed-in person's passkeys. */
+export function usePasskeys(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.passkeys,
+    queryFn: ({ signal }) => api.passkeys(signal),
+    enabled,
+  })
+}
+
 export function useInvalidate() {
   const queryClient = useQueryClient()
   return useCallback(

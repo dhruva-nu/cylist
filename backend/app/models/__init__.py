@@ -27,6 +27,7 @@ from app.models.file import Blob, FileItem, Folder, ItemKind, ItemSource
 from app.models.goal import Goal, GoalStatus
 from app.models.hook import DeliveryState, Hook, HookDelivery
 from app.models.image import DescriptionImage
+from app.models.passkey import PasskeyChallenge, PersonCredential, RecoveryRequest
 from app.models.permission import (
     EVERYONE_ELSE,
     ProjectPermission,
@@ -86,13 +87,16 @@ __all__ = [
     "HookDelivery",
     "ItemKind",
     "ItemSource",
+    "PasskeyChallenge",
     "Person",
+    "PersonCredential",
     "PersonKind",
     "Project",
     "ProjectMember",
     "ProjectPermission",
     "ProjectRole",
     "PushDevice",
+    "RecoveryRequest",
     "RoleClearance",
     "RoleColumnRule",
     "SessionKey",

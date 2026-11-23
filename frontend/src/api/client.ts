@@ -19,6 +19,7 @@ import { docsApi } from './docs'
 import { filesApi } from './files'
 import { goalsApi } from './goals'
 import { imagesApi } from './images'
+import { passkeysApi } from './passkeys'
 import { peopleApi } from './people'
 import { projectsApi } from './projects'
 import { reportsApi } from './reports'
@@ -37,6 +38,7 @@ export * from './docs'
 export * from './files'
 export * from './goals'
 export * from './images'
+export * from './passkeys'
 export * from './people'
 export * from './projects'
 export * from './reports'
@@ -49,6 +51,7 @@ export * from './webhooks'
 
 export const api = {
   ...authApi,
+  ...passkeysApi,
   ...peopleApi,
   ...projectsApi,
   ...reportsApi,

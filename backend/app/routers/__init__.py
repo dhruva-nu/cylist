@@ -21,6 +21,7 @@ from app.routers import (
     health,
     hooks,
     images,
+    passkeys,
     people,
     permissions,
     projects,
@@ -38,6 +39,7 @@ api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(setup.router)
 api_router.include_router(auth.router)
+api_router.include_router(passkeys.router)
 api_router.include_router(tokens.router)
 api_router.include_router(devices.router)
 api_router.include_router(projects.router)

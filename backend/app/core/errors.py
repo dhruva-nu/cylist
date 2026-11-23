@@ -43,6 +43,8 @@ class Reason(StrEnum):
     COLUMN_NOT_EMPTY = "column_not_empty"
     LAST_ADMIN = "last_admin"
     LAST_SIGN_IN = "last_sign_in"
+    LAST_PASSKEY = "last_passkey"
+    PASSKEYS_NOT_CONFIGURED = "passkeys_not_configured"
     ROLE_PROTECTED = "role_protected"
     ROLE_IN_USE = "role_in_use"
     FOLDER_CYCLE = "folder_cycle"
@@ -353,3 +355,10 @@ def _log_app_error(request: Request, exc: AppError) -> None:
         )
     else:
         logger.info("Request refused: %s", exc.log_message, extra={"context": context})
+
+
+class ServiceUnavailableError(AppError):
+    """This deployment is not set up to do what was asked (CYLIST-204)."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"

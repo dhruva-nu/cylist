@@ -145,6 +145,17 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     can never be mistaken for a hash of the empty string.
     """
 
+    password_locked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    """Whether the password is switched off (CYLIST-204).
+
+    The operator's break-glass recovery sets it: the hash stays, so the row
+    is still an account and the bootstrap login stays shut, but no password
+    opens it until the person sets a new one. While it is on, a passkey is the
+    only way in, which is why the last passkey of such a person cannot be
+    removed."""
+
     invite_token_hash: Mapped[str | None] = mapped_column(String(64))
     """SHA-256 of the outstanding invitation's one-time token, if there is one.
 

@@ -88,6 +88,8 @@ class TestEveryList:
             "/api/v1/hooks/events",
             # At most ten: older sessions are ended as new ones are made.
             "/api/v1/me/sessions",
+            # At most ten: registering an eleventh is refused (CYLIST-204).
+            "/api/v1/me/passkeys",
         }
         bare = {
             path

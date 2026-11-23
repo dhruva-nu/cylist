@@ -103,6 +103,63 @@ that works:
 An agent that tidies your board wants `read` and `write` — and nothing else.
 It cannot mint itself a broader token, because that needs `admin`.
 
+### Passkeys and getting back in
+
+Besides the password, a person can sign in with a **passkey**: a key pair their
+device made and keeps behind a fingerprint, face or screen lock (WebAuthn,
+verified by `py_webauthn` on our own server; no hosted identity service). The
+server stores only the public key (`person_credential`); no biometric ever
+leaves the device.
+
+| Endpoint | |
+| --- | --- |
+| `POST /auth/passkeys/register/options`, `/register/verify` | Add a passkey. Needs a signed-in session. |
+| `POST /auth/passkeys/login/options`, `/login/verify` | Sign in; issues the same session cookie as `/auth/login`. |
+| `GET /me/passkeys`, `PATCH`/`DELETE /me/passkeys/{id}` | List, rename, remove. At most ten per person. |
+| `POST /auth/recovery/start`, `/{id}/claim`, `/approve`, `/redeem` | Getting back in; see below. |
+
+How it is held together:
+
+- **Challenges** live in `passkey_challenge`, expire in five minutes and are
+  deleted in a transaction of their own when presented, so a wrong answer burns
+  the challenge as surely as a right one. A replayed challenge is a 401.
+- **Sign-in is usernameless**: the device offers a discoverable credential and
+  the server finds the person by its id. There is no email lookup, so nothing
+  reveals whether an address has an account. Every refusal is one 401; the log
+  says why. User verification is required.
+- **Origin and RP ID** come from configuration, never the request (see
+  DEPLOY.md, *Passkeys*). The sign counter must increase; a counter that is
+  zero before and after (synced passkeys keep none) is accepted.
+- Attempts are throttled by `app/auth/throttle.py`, by address, and by account
+  where one is named. The audit trail records `passkey.registered`, `.renamed`,
+  `.deleted`, and every `session.started` carries `method`: `password`,
+  `invite`, `passkey` or `recovery`.
+- A person's **last passkey cannot be removed while their password is switched
+  off** (`person.password_locked`, set by the operator recovery below). While
+  the password works, it can.
+- After the first passkey the UI prompts for a second.
+
+There is no "forgot password" and nothing is emailed. Recovery is:
+
+1. **From a signed-in device.** The new device calls `POST /auth/recovery/start`
+   with an email and is shown an eight-character code (kept ten minutes). A
+   device still signed in as that person (web, Android app or a CLI token with
+   `write`) sends the code to `POST /auth/recovery/approve`; the new device,
+   polling `/auth/recovery/{id}/claim` with the secret it was given, is then
+   signed in, once. An unknown email gets an identical-looking response that can
+   never be approved. The code alone cannot claim; the secret is held by the
+   asking device only.
+2. **Operator break-glass**, from the server only (`python -m app.cli recover`,
+   see DEPLOY.md). Never reachable over HTTP and never by a project admin.
+
+Completing either **ends every other session and API token** of that person
+(including the approving device's) and writes `recovery.completed`.
+
+Tests use a software authenticator (`tests/webauthn_device.py`) so the real
+verification runs. Linux desktop browsers cannot use the fingerprint reader
+directly; to try it by hand from a laptop, choose "use a phone" in the browser's
+passkey dialog and scan the QR code.
+
 ### Roles
 
 Scopes say what a *credential* may do anywhere. A **role** says who somebody is
