@@ -22,6 +22,10 @@ export interface CardActions {
   moveSubStatus: (taskId: string, index: number) => void
   /** Hand a card to someone else, by their id, from the board itself. */
   setAssignee: (taskId: string, taskRef: string, assigneeId: string) => void
+  /** The ids of the cards picked with shift-click (CYLIST-202), for a bulk action. */
+  selected: ReadonlySet<string>
+  /** Adds the card to the selection, or takes it out. */
+  toggleSelected: (taskId: string) => void
 }
 
 export const CardActionsContext = createContext<CardActions | null>(null)

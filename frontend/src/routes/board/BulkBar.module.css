@@ -1,0 +1,45 @@
+.bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.16);
+}
+
+.count {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.move {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+}
+
+.why {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink-2);
+}
+
+.why textarea {
+  min-height: 72px;
+  background: var(--paper);
+}
+
+.confirm {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}

@@ -88,6 +88,13 @@
   opacity: 0.4;
 }
 
+/* Picked for a bulk action (CYLIST-202). A ring outside the card's own border,
+   which the agent channel owns. */
+.selected {
+  outline: 2px solid var(--ink-2);
+  outline-offset: 2px;
+}
+
 /* The overlay's copy: the same card, picked up. Full width of the overlay,
    which dnd-kit has already sized to the card this was lifted from, so it
    neither grows nor shrinks on the way out of the column. */
