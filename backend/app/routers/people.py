@@ -257,6 +257,48 @@ async def invite_person(
     )
 
 
+@router.post(
+    "/{person_id}/password-reset",
+    response_model=InviteIssued,
+    status_code=status.HTTP_201_CREATED,
+    summary="Issue a one-time link for somebody who lost their password",
+    responses={
+        409: {"description": "They have no account yet; invite them instead."},
+        422: {"description": "They are archived, are the agent, or are a client."},
+    },
+)
+async def issue_password_reset(
+    person_id: UUID,
+    request: Request,
+    principal: Principal = Depends(require(Scope.ADMIN)),
+    session: AsyncSession = SessionDependency,
+    settings: Settings = Depends(app_settings),
+) -> InviteIssued:
+    """Mint a reset link to pass on, so nobody but them ever knows the new password.
+
+    Cylist sends no email or SMS, so the link comes back here for you to hand
+    over in person or on a channel you trust. It is shown once, expires after
+    `reset_ttl_hours`, and asking again voids the previous one. Their current
+    password keeps working until they redeem it; redeeming signs out every
+    other session and revokes their API tokens.
+    """
+    person, token = await people.issue_reset(session, person_id, valid_for=settings.reset_ttl)
+    await activity.record(
+        session,
+        principal,
+        Verb.PERSON_PASSWORD_RESET_ISSUED,
+        entity_type=EntityType.PERSON,
+        entity_id=person.id,
+        payload={"name": person.name, "email": person.email},
+    )
+    return InviteIssued(
+        person=PersonRead.model_validate(person),
+        token=token,
+        url=f"{str(request.base_url).rstrip('/')}/invite/{token}",
+        expires_at=person.invite_expires_at,
+    )
+
+
 @router.put(
     "/{person_id}/account",
     response_model=PersonRead,

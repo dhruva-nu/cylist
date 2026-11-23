@@ -273,12 +273,15 @@ async def accept_invite(
     accepted twice at the same moment opens exactly one account.
     """
     _throttle(request, account=None)
-    person = await people.accept_invite(session, body.token, body.password)
+    person, was_reset = await people.accept_invite(session, body.token, body.password)
+    if was_reset:
+        # Whoever held the old password, or a session made with it, is out.
+        await tokens.revoke_for_person(session, person.id)
     identity, principal = await _start_session(session, request, response, settings, person)
     await activity.record(
         session,
         principal,
-        Verb.PERSON_ACCOUNT_OPENED,
+        Verb.PERSON_PASSWORD_RESET if was_reset else Verb.PERSON_ACCOUNT_OPENED,
         entity_type=EntityType.PERSON,
         entity_id=person.id,
         payload={"name": person.name},

@@ -37,6 +37,7 @@ class Reason(StrEnum):
     KEY_TAKEN = "key_taken"
     EMAIL_TAKEN = "email_taken"
     ALREADY_HAS_ACCOUNT = "already_has_account"
+    NO_ACCOUNT_TO_RESET = "no_account_to_reset"
     ALREADY_INVITED = "already_invited"
     COLUMN_LIMIT = "column_limit"
     COLUMN_MINIMUM = "column_minimum"

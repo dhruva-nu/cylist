@@ -456,6 +456,9 @@ _ELSEWHERE: dict[str, Callable[[dict[str, Any]], str]] = {
     Verb.PERSON_ACCOUNT_OPENED: lambda p: f"{p.get('name')} opened their account.",
     Verb.PERSON_PASSWORD_CHANGED: lambda p: f"{p.get('name')} changed their password.",
     Verb.PERSON_PASSWORD_RESET: lambda p: f"Reset {p.get('name')}'s password.",
+    Verb.PERSON_PASSWORD_RESET_ISSUED: lambda p: (
+        f"Issued a password-reset link for {p.get('name')}."
+    ),
     # --- Goals --------------------------------------------------------------
     Verb.GOAL_CREATED: lambda p: f"Added the goal {_quoted(p.get('name'))}.",
     Verb.GOAL_UPDATED: lambda p: (

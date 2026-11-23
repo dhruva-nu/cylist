@@ -118,6 +118,7 @@ class Verb(StrEnum):
     PERSON_INVITED = "person.invited"
     PERSON_PASSWORD_CHANGED = "person.password_changed"
     PERSON_PASSWORD_RESET = "person.password_reset"
+    PERSON_PASSWORD_RESET_ISSUED = "person.password_reset_issued"
     PERSON_RESTORED = "person.restored"
     PERSON_UPDATED = "person.updated"
 

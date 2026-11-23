@@ -200,6 +200,11 @@ class Settings(BaseSettings):
     """How often to go looking for sessions to end. Cheap — one indexed query
     over the open rows."""
 
+    reset_ttl_hours: int = Field(default=24, gt=0)
+    """How long a password-reset link stays valid. Shorter than an invitation:
+    it opens an account that already exists, and somebody who asked for one is
+    waiting on it."""
+
     invite_ttl_days: int = Field(default=7, gt=0)
     """How long an invitation link stays valid.
 
@@ -480,6 +485,10 @@ class Settings(BaseSettings):
     @property
     def agent_reap_every(self) -> timedelta:
         return timedelta(seconds=self.agent_reap_every_seconds)
+
+    @property
+    def reset_ttl(self) -> timedelta:
+        return timedelta(hours=self.reset_ttl_hours)
 
     @property
     def invite_ttl(self) -> timedelta:

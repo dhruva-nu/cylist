@@ -1002,3 +1002,57 @@ class TestAnAddressSomebodyElseWasGiven:
 
         assert response.status_code == 409
         assert "sign-in address" in response.json()["error"]["message"]
+
+
+class TestPasswordReset:
+    """A lost password is recovered with a link an admin hands over (CYLIST-203)."""
+
+    async def test_a_reset_link_sets_a_new_password_and_ends_old_sessions(
+        self,
+        signed_in: AsyncClient,
+        other_client: AsyncClient,
+        settings: Settings,
+        database: Database,
+    ) -> None:
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+
+        issued = await signed_in.post(f"/people/{person['id']}/password-reset")
+        assert issued.status_code == 201, issued.text
+        reset = issued.json()["token"]
+
+        # The old password and session keep working until the link is redeemed.
+        assert (await other_client.get("/me")).status_code == 200
+
+        async with client_for(settings, database) as fresh:
+            await _accept(fresh, reset, "a-brand-new-password")
+
+            assert (await other_client.get("/me")).status_code == 401
+            assert (await fresh.get("/me")).status_code == 200
+            old = await fresh.post(
+                "/auth/login", json={"email": ADITI_EMAIL, "password": INVITEE_PASSWORD}
+            )
+            assert old.status_code == 401
+
+    async def test_a_reset_link_is_single_use(
+        self, signed_in: AsyncClient, other_client: AsyncClient
+    ) -> None:
+        person, token = await open_account(signed_in, ADITI, ADITI_EMAIL)
+        await _accept(other_client, token)
+        reset = (await signed_in.post(f"/people/{person['id']}/password-reset")).json()["token"]
+        await _accept(other_client, reset, "a-brand-new-password")
+
+        again = await other_client.post(
+            "/auth/accept-invite", json={"token": reset, "password": "yet-another-password"}
+        )
+
+        assert again.status_code == 422
+
+    async def test_somebody_with_no_account_is_told_to_invite_instead(
+        self, signed_in: AsyncClient
+    ) -> None:
+        person = (await signed_in.post("/people", json={**ADITI, "email": ADITI_EMAIL})).json()
+
+        response = await signed_in.post(f"/people/{person['id']}/password-reset")
+
+        assert response.status_code == 409

@@ -389,6 +389,35 @@ async def invite(
     return person, plaintext
 
 
+async def issue_reset(
+    session: AsyncSession, person_id: UUID, *, valid_for: timedelta
+) -> tuple[Person, str]:
+    """Mint a one-time link for somebody who has lost their password.
+
+    The same token, columns and redemption as an invitation, so there is one
+    secret-handling path to get right. The difference is who it is for: they
+    already have a password, which keeps working until the link is redeemed.
+
+    Raises:
+        UnprocessableRequestError: if they are archived, the agent or a client.
+        ConflictError: if they have no password yet — that is an invitation.
+    """
+    person = await get(session, person_id)
+    _require_may_hold_account(person)
+    if person.password_hash is None:
+        raise ConflictError(
+            f"{person.name} has no account to reset. Invite them instead.",
+            details={"person_id": str(person.id)},
+            log_message=f"Person {person.id} has no account to reset.",
+            reason=Reason.NO_ACCOUNT_TO_RESET,
+        )
+    plaintext, digest = generate_invite()
+    person.invite_token_hash = digest
+    person.invite_expires_at = now() + valid_for
+    await session.flush()
+    return person, plaintext
+
+
 async def open_account(
     session: AsyncSession, person_id: UUID, email: str, password: str
 ) -> tuple[Person, bool]:
@@ -441,8 +470,11 @@ is a bare secret with no second factor, so what it is worth saying about one
 is whether it works, not why it does not."""
 
 
-async def accept_invite(session: AsyncSession, token: str, password: str) -> Person:
-    """Turn an invitation into a password, and return whose it was.
+async def accept_invite(
+    session: AsyncSession, token: str, password: str
+) -> tuple[Person, bool]:
+    """Turn an invitation or reset link into a password, and return whose it
+    was and whether they already had a password (a reset, not a first one).
 
     Clearing the digest is what makes the link single-use, and it is done in
     the one statement that sets the password: ``UPDATE … WHERE the invitation
@@ -465,6 +497,7 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
     if person is None or not person.invite_is_pending:
         raise UnprocessableRequestError(INVITE_NOT_VALID)
 
+    was_reset = person.password_hash is not None
     await _close_the_bootstrap_door(session)
     password_hash = await hash_password(password)
     consumed = await session.execute(
@@ -482,7 +515,7 @@ async def accept_invite(session: AsyncSession, token: str, password: str) -> Per
         raise UnprocessableRequestError(INVITE_NOT_VALID)
     # The row in hand still shows the invitation; the statement went past it.
     await session.refresh(person)
-    return person
+    return person, was_reset
 
 
 async def set_password(session: AsyncSession, person: Person, new_password: str) -> Person:
